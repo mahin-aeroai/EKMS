@@ -1,0 +1,226 @@
+@import "tailwindcss";
+
+/* ==========================================================================
+   MMDI ONE Design Tokens
+   Light theme = default (:root). Dark and Enterprise themes override via
+   [data-theme="dark"] / [data-theme="enterprise"] on <html>.
+   Components must reference these semantic tokens only — never raw hex.
+   ========================================================================== */
+
+:root {
+  /* Neutral scale */
+  --n-0: #ffffff;
+  --n-50: #f8f9fb;
+  --n-100: #f1f3f6;
+  --n-200: #e4e8ee;
+  --n-300: #cfd6e0;
+  --n-400: #a9b3c1;
+  --n-500: #7c8797;
+  --n-600: #5b6472;
+  --n-700: #3f4753;
+  --n-800: #262c35;
+  --n-900: #141821;
+
+  /* Brand */
+  --brand-navy: #1f3864;
+  --brand-steel: #2e5395;
+  --brand-steel-light: #dce6f1;
+
+  /* Surfaces */
+  --surface: var(--n-0);
+  --surface-raised: var(--n-0);
+  --surface-sunken: var(--n-50);
+  --surface-overlay: var(--n-0);
+  --line: var(--n-200);
+  --line-strong: var(--n-300);
+
+  /* Text (exposed as "ink" to avoid colliding with the brand "primary" color utility) */
+  --ink: var(--n-900);
+  --ink-secondary: var(--n-600);
+  --ink-muted: var(--n-500);
+  --on-brand: #ffffff;
+
+  /* Semantic roles */
+  --primary: var(--brand-steel);
+  --primary-hover: var(--brand-navy);
+  --primary-tint: var(--brand-steel-light);
+
+  --success: #1a7f45;
+  --success-tint: #e3f5e9;
+  --warning: #92660a;
+  --warning-tint: #fbf0d9;
+  --danger: #b3261e;
+  --danger-tint: #fbe6e4;
+  --info: #1a5fb4;
+  --info-tint: #e3edfb;
+  --ai: #6941c6;
+  --ai-tint: #f2ecfc;
+
+  /* Elevation (shadows) */
+  --shadow-1: 0 1px 2px rgba(20, 24, 33, 0.06), 0 1px 1px rgba(20, 24, 33, 0.04);
+  --shadow-2: 0 4px 8px rgba(20, 24, 33, 0.08), 0 1px 2px rgba(20, 24, 33, 0.05);
+  --shadow-3: 0 10px 24px rgba(20, 24, 33, 0.12), 0 2px 6px rgba(20, 24, 33, 0.06);
+  --shadow-4: 0 20px 48px rgba(20, 24, 33, 0.18), 0 4px 10px rgba(20, 24, 33, 0.08);
+
+  /* Radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 9999px;
+
+  /* Motion */
+  --dur-micro: 120ms;
+  --dur-standard: 220ms;
+  --dur-page: 340ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+[data-theme="dark"] {
+  --surface: var(--n-900);
+  --surface-raised: #1b2029;
+  --surface-sunken: #0f1218;
+  --surface-overlay: #1b2029;
+  --line: var(--n-800);
+  --line-strong: var(--n-700);
+
+  --ink: var(--n-100);
+  --ink-secondary: var(--n-400);
+  --ink-muted: var(--n-500);
+  --on-brand: #ffffff;
+
+  --primary: #6f97d6;
+  --primary-hover: #90b1e3;
+  --primary-tint: rgba(111, 151, 214, 0.16);
+
+  --success: #4ec97f;
+  --success-tint: rgba(78, 201, 127, 0.14);
+  --warning: #e0ab3d;
+  --warning-tint: rgba(224, 171, 61, 0.14);
+  --danger: #ea6b63;
+  --danger-tint: rgba(234, 107, 99, 0.14);
+  --info: #6ea6f2;
+  --info-tint: rgba(110, 166, 242, 0.14);
+  --ai: #b09aef;
+  --ai-tint: rgba(176, 154, 239, 0.16);
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 4px 10px rgba(0, 0, 0, 0.45);
+  --shadow-3: 0 10px 26px rgba(0, 0, 0, 0.5);
+  --shadow-4: 0 24px 56px rgba(0, 0, 0, 0.6);
+}
+
+[data-theme="enterprise"] {
+  /* High-contrast, larger-scale theme for Kiosk / Factory Display / Meeting Room Display */
+  --surface: #05070b;
+  --surface-raised: #0d1117;
+  --surface-sunken: #000000;
+  --surface-overlay: #0d1117;
+  --line: #2a323d;
+  --line-strong: #3d4753;
+
+  --ink: #ffffff;
+  --ink-secondary: #c7cfda;
+  --ink-muted: #8b96a5;
+  --on-brand: #ffffff;
+
+  --primary: #6f97d6;
+  --primary-hover: #90b1e3;
+  --primary-tint: rgba(111, 151, 214, 0.2);
+
+  --success: #35d97a;
+  --success-tint: rgba(53, 217, 122, 0.18);
+  --warning: #ffc247;
+  --warning-tint: rgba(255, 194, 71, 0.18);
+  --danger: #ff5c52;
+  --danger-tint: rgba(255, 92, 82, 0.18);
+  --info: #5aa7ff;
+  --info-tint: rgba(90, 167, 255, 0.18);
+  --ai: #c3aaff;
+  --ai-tint: rgba(195, 170, 255, 0.18);
+
+  --shadow-1: none;
+  --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.6);
+  --shadow-3: 0 8px 20px rgba(0, 0, 0, 0.65);
+  --shadow-4: 0 16px 40px rgba(0, 0, 0, 0.7);
+}
+
+@theme inline {
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-overlay: var(--surface-overlay);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+
+  --color-ink: var(--ink);
+  --color-ink-secondary: var(--ink-secondary);
+  --color-ink-muted: var(--ink-muted);
+  --color-on-brand: var(--on-brand);
+
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-tint: var(--primary-tint);
+
+  --color-success: var(--success);
+  --color-success-tint: var(--success-tint);
+  --color-warning: var(--warning);
+  --color-warning-tint: var(--warning-tint);
+  --color-danger: var(--danger);
+  --color-danger-tint: var(--danger-tint);
+  --color-info: var(--info);
+  --color-info-tint: var(--info-tint);
+  --color-ai: var(--ai);
+  --color-ai-tint: var(--ai-tint);
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-full: var(--radius-full);
+
+  --shadow-1: var(--shadow-1);
+  --shadow-2: var(--shadow-2);
+  --shadow-3: var(--shadow-3);
+  --shadow-4: var(--shadow-4);
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--surface-sunken);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+[data-theme="enterprise"] body {
+  font-size: 1.08rem;
+}
+
+* {
+  border-color: var(--line);
+}
+
+::selection {
+  background: var(--primary-tint);
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* Scrollbar (subtle, theme-aware) */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: var(--radius-full); }
+::-webkit-scrollbar-track { background: transparent; }
