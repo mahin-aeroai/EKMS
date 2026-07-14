@@ -1,5 +1,9 @@
 # MMDI ONE — Product Design System
 
+**Live demo: [ekms.vercel.app](https://ekms.vercel.app)**
+
+Repo: [github.com/mahin-aeroai/EKMS](https://github.com/mahin-aeroai/EKMS)
+
 The living component library behind MMDI ONE: 42 components implementing the MMDI ONE
 Product Design System (tokens, layout, navigation, the universal Workspace pattern, and
 the AI Interaction Model), built as a working style-guide app.
@@ -37,23 +41,21 @@ every screen re-renders live since nothing is hardcoded to a theme.
 `npm run build` and `npm run lint` both pass clean (all 12 routes prerender as static
 content, 0 lint errors).
 
-## Pushing to GitHub
+## Deployment
 
-This repo has been initialized locally with an initial commit but has **not** been pushed
-anywhere — no GitHub credentials were available to do that on your behalf. To push it to
-`github.com/mahin-aeroai`:
+Hosted on Vercel, auto-deploying from the `main` branch on every push. Production
+deployment: `ekms.vercel.app`.
 
-```bash
-# create the empty repo on GitHub first (via the web UI or `gh repo create`), then:
-git remote add origin git@github.com:mahin-aeroai/mmdi-one-design-system.git
-git branch -M main
-git push -u origin main
-```
+To deploy your own copy: import the repo at vercel.com → "Add New" → "Project" →
+select the repo. No configuration needed — Next.js is auto-detected.
 
-If you use HTTPS instead of SSH:
+## Contributing
 
 ```bash
-git remote add origin https://github.com/mahin-aeroai/mmdi-one-design-system.git
-git branch -M main
-git push -u origin main
+git clone https://github.com/mahin-aeroai/EKMS.git
+cd EKMS
+npm install
+npm run dev
 ```
+
+Push to `main` to trigger a redeploy, or open a PR for review first.
