@@ -14,6 +14,7 @@ import {
   Columns2,
   Home,
   Building2,
+  Wrench,
 } from "lucide-react";
 import { Sidebar, type SidebarSection } from "@/components/ui/Sidebar";
 import { TopNav } from "@/components/ui/TopNav";
@@ -48,7 +49,10 @@ const NAV: SidebarSection[] = [
   },
   {
     title: "Flagship Workspaces",
-    items: [{ id: "workspace-customer", label: "Customer Workspace", icon: <Building2 size={16} />, href: "/workspaces/customer" }],
+    items: [
+      { id: "workspace-customer", label: "Customer Workspace", icon: <Building2 size={16} />, href: "/workspaces/customer" },
+      { id: "workspace-machine", label: "Machine Workspace", icon: <Wrench size={16} />, href: "/workspaces/machine" },
+    ],
   },
 ];
 
