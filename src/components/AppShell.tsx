@@ -17,6 +17,26 @@ import {
   Wrench,
   Package,
   FolderKanban,
+  LayoutDashboard,
+  Bot,
+  BarChart3,
+  FileText,
+  FileSignature,
+  Factory,
+  ClipboardList,
+  Truck,
+  Boxes,
+  ShoppingCart,
+  Handshake,
+  Calculator,
+  PenTool,
+  ListChecks,
+  Lightbulb,
+  Share2,
+  UserRound,
+  Landmark,
+  ShieldCheck,
+  Settings,
 } from "lucide-react";
 import { Sidebar, type SidebarSection } from "@/components/ui/Sidebar";
 import { TopNav } from "@/components/ui/TopNav";
@@ -50,13 +70,67 @@ const NAV: SidebarSection[] = [
     ],
   },
   {
-    title: "Flagship Workspaces",
+    title: "Executive",
+    items: [
+      { id: "command-center", label: "Command Center", icon: <LayoutDashboard size={16} />, href: "/workspaces/command-center" },
+      { id: "ai-copilot", label: "AI Copilot", icon: <Bot size={16} />, href: "/workspaces/ai-copilot" },
+      { id: "analytics", label: "Analytics", icon: <BarChart3 size={16} />, href: "/workspaces/analytics" },
+    ],
+  },
+  {
+    title: "Customers",
     items: [
       { id: "workspace-customer", label: "Customer Workspace", icon: <Building2 size={16} />, href: "/workspaces/customer" },
-      { id: "workspace-machine", label: "Machine Workspace", icon: <Wrench size={16} />, href: "/workspaces/machine" },
-      { id: "workspace-raw-material", label: "Raw Material Workspace", icon: <Package size={16} />, href: "/workspaces/raw-material" },
-      { id: "workspace-project", label: "Project Workspace", icon: <FolderKanban size={16} />, href: "/workspaces/project" },
+      { id: "crm", label: "CRM", icon: <Users size={16} />, href: "/workspaces/crm" },
+      { id: "quotations", label: "Quotations", icon: <FileText size={16} />, href: "/workspaces/quotations" },
+      { id: "contracts", label: "Contracts", icon: <FileSignature size={16} />, href: "/workspaces/contracts" },
     ],
+  },
+  {
+    title: "Operations",
+    items: [
+      { id: "workspace-project", label: "Projects", icon: <FolderKanban size={16} />, href: "/workspaces/project" },
+      { id: "production", label: "Production", icon: <Factory size={16} />, href: "/workspaces/production" },
+      { id: "workspace-machine", label: "Machines", icon: <Wrench size={16} />, href: "/workspaces/machine" },
+      { id: "maintenance", label: "Maintenance", icon: <ClipboardList size={16} />, href: "/workspaces/maintenance" },
+      { id: "installation", label: "Installation", icon: <Truck size={16} />, href: "/workspaces/installation" },
+    ],
+  },
+  {
+    title: "Manufacturing",
+    items: [
+      { id: "workspace-raw-material", label: "Materials", icon: <Package size={16} />, href: "/workspaces/raw-material" },
+      { id: "inventory", label: "Inventory", icon: <Boxes size={16} />, href: "/workspaces/inventory" },
+      { id: "procurement", label: "Procurement", icon: <ShoppingCart size={16} />, href: "/workspaces/procurement" },
+      { id: "suppliers", label: "Suppliers", icon: <Handshake size={16} />, href: "/workspaces/suppliers" },
+      { id: "costing", label: "Costing", icon: <Calculator size={16} />, href: "/workspaces/costing" },
+    ],
+  },
+  {
+    title: "Knowledge",
+    items: [
+      { id: "documents", label: "Documents", icon: <FileStack size={16} />, href: "/workspaces/documents" },
+      { id: "drawings", label: "Drawings", icon: <PenTool size={16} />, href: "/workspaces/drawings" },
+      { id: "sops", label: "SOPs", icon: <ListChecks size={16} />, href: "/workspaces/sops" },
+      { id: "lessons-learned", label: "Lessons Learned", icon: <Lightbulb size={16} />, href: "/workspaces/lessons-learned" },
+      { id: "ai-knowledge", label: "AI Knowledge", icon: <Share2 size={16} />, href: "/workspaces/ai-knowledge" },
+    ],
+  },
+  {
+    title: "People",
+    items: [{ id: "people", label: "People", icon: <UserRound size={16} />, href: "/workspaces/people" }],
+  },
+  {
+    title: "Finance",
+    items: [{ id: "finance", label: "Finance", icon: <Landmark size={16} />, href: "/workspaces/finance" }],
+  },
+  {
+    title: "Compliance",
+    items: [{ id: "compliance", label: "Compliance", icon: <ShieldCheck size={16} />, href: "/workspaces/compliance" }],
+  },
+  {
+    title: "Administration",
+    items: [{ id: "administration", label: "Administration", icon: <Settings size={16} />, href: "/workspaces/administration" }],
   },
 ];
 
