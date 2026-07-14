@@ -13,6 +13,7 @@ import {
   FileStack,
   Columns2,
   Home,
+  Building2,
 } from "lucide-react";
 import { Sidebar, type SidebarSection } from "@/components/ui/Sidebar";
 import { TopNav } from "@/components/ui/TopNav";
@@ -44,6 +45,10 @@ const NAV: SidebarSection[] = [
       { id: "viewers", label: "Document & Media Viewers", icon: <FileStack size={16} />, href: "/components/viewers" },
       { id: "layout", label: "Layout Primitives", icon: <Columns2 size={16} />, href: "/components/layout" },
     ],
+  },
+  {
+    title: "Flagship Workspaces",
+    items: [{ id: "workspace-customer", label: "Customer Workspace", icon: <Building2 size={16} />, href: "/workspaces/customer" }],
   },
 ];
 
