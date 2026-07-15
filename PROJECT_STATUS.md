@@ -305,7 +305,8 @@ over what the code actually does again.
 - SQL files (all committed to the repo root, all idempotent, all validated
   against a real local Postgres instance via `@electric-sql/pglite` before
   being handed off — confirm each has actually been run in production
-  before trusting the workspace/data it backs):
+  before trusting the workspace/data it backs, except where marked
+  confirmed below):
   - Customer workspace schema (customer_contacts, customer_comments,
     customer_approvals, etc.) — run first, earliest phase. Live in production.
   - `supabase-remaining-modules-schema.sql` — the 16-table schema for the
@@ -322,10 +323,10 @@ over what the code actually does again.
   - `supabase-job-orders-schema.sql` — creates job_orders/job_order_comments/
     job_order_approvals with role-aware RLS baked in from the start (the
     first schema file written after the role migration existed — every
-    schema file before this one only had authenticated-only RLS).
+    schema file before this one only had authenticated-only RLS). **Confirmed
+    run in production.**
   - `import-job-orders.sql` — 2,072 job orders from Production Report
-    FY2026_Q1.xlsx. Depends on `supabase-job-orders-schema.sql` running
-    first.
+    FY2026_Q1.xlsx. **Confirmed run in production.**
 
 ## Working conventions established in this project
 
@@ -625,6 +626,7 @@ over what the code actually does again.
       order that isn't an internal "BASIL"/"CASH SALES" bucket (both show
       up misleadingly high in the raw value ranking) and has a confident
       customer link, for the fullest relationship-graph demo.
-    - Build and lint both clean. SQL files handed off to the user to run
-      in order: `supabase-job-orders-schema.sql` then
-      `import-job-orders.sql`.
+    - Build and lint both clean. **User confirmed both
+      `supabase-job-orders-schema.sql` and `import-job-orders.sql` were run
+      successfully in production** — Job Orders workspace is now genuinely
+      live, not just shipped.
