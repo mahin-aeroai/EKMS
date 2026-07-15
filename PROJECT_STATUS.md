@@ -205,9 +205,9 @@ over what the code actually does again.
 - No file upload / document storage wired (Documents, Drawings, SOPs pages
   read metadata rows from Supabase but don't handle actual file storage).
 - No tests.
-- No password reset entry point on `/login` (a user has to be sent a
-  recovery link from the Supabase dashboard — there's no "forgot password"
-  link on the sign-in form itself yet).
+- ~~No password reset entry point on `/login`~~ — closed: a "Forgot
+  password?" link now calls `supabase.auth.resetPasswordForEmail()`
+  directly from the sign-in form (see session history).
 
 ## Key files to know
 
@@ -292,8 +292,7 @@ over what the code actually does again.
    copy with actual model-generated insights, and give AI Copilot's chat
    real grounding (would need an LLM API call layer).
 5. **File storage** for Documents/Drawings/SOPs (Supabase Storage buckets).
-6. **Add a "forgot password" link on `/login`** — right now recovery emails
-   can only be triggered by an admin from the Supabase dashboard.
+6. ~~Add a "forgot password" link on `/login`~~ — done.
 7. **A real costing/finance ledger schema**, if MMDI wants the Costing and
    Finance dashboards to show actual revenue/margin/DSO/cost-variance numbers
    instead of the real-but-adjacent metrics (portfolio LTV, PO pipeline,
@@ -446,3 +445,13 @@ over what the code actually does again.
     `MC-HYD-001` (Vutek GS 3250 LX Pro, Unit 1, Hyderabad) and `RM-11001`
     (Frontlit Flex), matching the pattern already used for Customer
     (`C03739`). Project still has no data to point at.
+
+17. Added a "Forgot password?" link to `/login`'s sign-in form. Clicking it
+    swaps in an email-only form that calls
+    `supabase.auth.resetPasswordForEmail(email, { redirectTo: <origin>/login })`
+    and shows a generic "check your inbox" confirmation regardless of
+    whether the email matched an account (avoids leaking which emails have
+    accounts). The resulting recovery link lands back on `/login` and is
+    handled by the existing invite/recovery hash detection — no new
+    handling needed there. Closes the last item in "What's NOT done yet"
+    that didn't require new data or a scope decision.

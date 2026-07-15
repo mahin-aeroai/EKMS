@@ -34,6 +34,8 @@ function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [inviteEmail, setInviteEmail] = useState<string | null>(null);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
 
   // Invite/reset emails land here as
   // /login#access_token=...&type=invite (or type=recovery). `mode` above
@@ -94,6 +96,25 @@ function LoginForm() {
     router.refresh();
   }
 
+  async function handleForgotPassword(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/login`,
+    });
+
+    setLoading(false);
+
+    if (resetError) {
+      setError(resetError.message);
+      return;
+    }
+
+    setResetSent(true);
+  }
+
   async function handleSetPassword(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -135,7 +156,11 @@ function LoginForm() {
               ? inviteEmail
                 ? `Set a password for ${inviteEmail}`
                 : "Set your password"
-              : "Sign in to your workspace"}
+              : showForgotPassword
+                ? resetSent
+                  ? "Check your inbox"
+                  : "Reset your password"
+                : "Sign in to your workspace"}
           </p>
         </div>
 
@@ -183,6 +208,65 @@ function LoginForm() {
               Set password &amp; continue
             </Button>
           </form>
+        ) : showForgotPassword ? (
+          resetSent ? (
+            <div className="flex flex-col gap-4">
+              <p className="text-sm text-ink-secondary">
+                If an account exists for <span className="font-medium text-ink">{email}</span>,
+                we&apos;ve sent a password reset link to it. Follow that link to set a new
+                password.
+              </p>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setShowForgotPassword(false);
+                  setResetSent(false);
+                  setError(null);
+                }}
+              >
+                Back to sign in
+              </Button>
+            </div>
+          ) : (
+            <form onSubmit={handleForgotPassword} className="flex flex-col gap-4">
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="resetEmail" className="text-sm font-medium text-ink-secondary">
+                  Email
+                </label>
+                <input
+                  id="resetEmail"
+                  type="email"
+                  required
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
+                  placeholder="you@mmdi.in"
+                />
+              </div>
+
+              {error && (
+                <p className="rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
+                  {error}
+                </p>
+              )}
+
+              <Button type="submit" loading={loading} className="mt-2">
+                Send reset link
+              </Button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowForgotPassword(false);
+                  setError(null);
+                }}
+                className="text-center text-sm text-ink-muted hover:text-ink"
+              >
+                Back to sign in
+              </button>
+            </form>
+          )
         ) : (
           <form onSubmit={handleSignIn} className="flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
@@ -226,6 +310,16 @@ function LoginForm() {
             <Button type="submit" loading={loading} className="mt-2">
               Sign in
             </Button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowForgotPassword(true);
+                setError(null);
+              }}
+              className="text-center text-sm text-ink-muted hover:text-ink"
+            >
+              Forgot password?
+            </button>
           </form>
         )}
 
