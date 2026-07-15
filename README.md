@@ -1,14 +1,18 @@
-# MMDI ONE — Product Design System
+# MMDI ONE
 
 **Live demo: [ekms.vercel.app](https://ekms.vercel.app)**
 
 Repo: [github.com/mahin-aeroai/EKMS](https://github.com/mahin-aeroai/EKMS)
 
-The living component library behind MMDI ONE: 42 components implementing the MMDI ONE
-Product Design System (tokens, layout, navigation, the universal Workspace pattern, and
-the AI Interaction Model), built as a working style-guide app.
+An AI-native enterprise operating platform for MMDI, built on top of a 42-component
+design system: 26 Intelligent Workspace modules covering the full MDI-ONE navigation
+tree (Executive, Customers, Operations, Manufacturing, Knowledge, People, Finance,
+Compliance, Administration), 20 of which read/write real data from Supabase.
 
-Stack: Next.js 16 (App Router) + React 19 + TypeScript + Tailwind CSS v4.
+**For a full status report — what's built, what's wired to real data, known gaps,
+and suggested next steps — see [`PROJECT_STATUS.md`](./PROJECT_STATUS.md).**
+
+Stack: Next.js 16 (App Router) + React 19 + TypeScript + Tailwind CSS v4 + Supabase.
 
 ## Running locally
 
@@ -19,6 +23,9 @@ npm run dev
 
 Open http://localhost:3000. Switch themes (Light / Dark / Enterprise) from the top nav —
 every screen re-renders live since nothing is hardcoded to a theme.
+
+You'll need a `.env.local` with your Supabase URL and anon key for the workspace pages
+to load real data (see `src/lib/supabase.ts`).
 
 ## What's here
 
@@ -35,11 +42,20 @@ every screen re-renders live since nothing is hardcoded to a theme.
   every component live, grouped the same way as the Design System document
   (Inputs & Actions, Cards, Data & Structure, Navigation, Collaboration, Feedback &
   Overlays, AI-Native, Document & Media Viewers, Layout Primitives).
+- `src/app/workspaces/*` — 26 Intelligent Workspace modules. The four flagship ones
+  (`customer`, `machine`, `raw-material`, `project`) use the full 6-tab Universal
+  Workspace Pattern with a Server/Client component split; the rest are lighter
+  single-page modules. See `PROJECT_STATUS.md` for which are wired to Supabase vs
+  still sample data.
+- `src/lib/supabase.ts` — the shared Supabase client and every workspace row-type
+  definition.
 
 ## Verified
 
-`npm run build` and `npm run lint` both pass clean (all 12 routes prerender as static
-content, 0 lint errors).
+`npm run build` and `npm run lint` both pass clean, 0 lint errors. 36 routes total —
+static prerendering for the design-system pages and the lighter workspace modules,
+dynamic/force-rendered for the 4 flagship workspaces (which fetch live Supabase data
+server-side on every request).
 
 ## Deployment
 
