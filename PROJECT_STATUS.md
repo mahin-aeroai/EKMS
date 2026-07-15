@@ -127,16 +127,24 @@ over what the code actually does again.
    `supabase-auth-rls-migration.sql` (earlier this session) first replaced
    every table's wide-open `using (true)` policies with `TO authenticated`
    policies (any signed-in user, full access). Confirmed run in production.
-   `supabase-role-based-rls-migration.sql` (later, not yet confirmed run —
-   **check before assuming this is live**) supersedes those policies with
-   a real 3-tier role model:
+   `supabase-role-based-rls-migration.sql` (later, **confirmed run in
+   production on 15 July 2026**) supersedes those policies with a real
+   3-tier role model:
    - A `profiles` table (`id`/`email`/`role`, role = admin/editor/viewer,
      default 'viewer'), a `public.user_role()` security-definer function,
      an `auth.users` insert trigger that auto-creates a profile for every
      new user, a backfill for users created before the migration, and a
-     bootstrap step that sets `srinivas@mmdi.in` to admin (the account
-     this project is built for — **change that email in the file first if
-     that's wrong**).
+     bootstrap step. **Correction**: the file originally bootstrapped
+     `srinivas@mmdi.in` to admin, assuming that was the account signed
+     into the Supabase project — it wasn't (the real accounts are
+     `m.nandipa@icloud.com`, `mahin.nandipa@gmail.com`,
+     `nandipa@icloud.com`), so the bootstrap `UPDATE` matched zero rows
+     and nobody got promoted. Fixed by running the correct `UPDATE`
+     directly (`m.nandipa@icloud.com` → admin) and updating the file to
+     match. Confirmed via `select email, role, created_at from
+     public.profiles`: 3 real users, all with profile rows (the Supabase
+     dashboard's "10 users (estimated)" figure around the same time was
+     inaccurate — there was an active platform incident at the time).
    - Every table from the previous migration gets replaced policies:
      SELECT allowed for all 3 roles, INSERT/UPDATE for admin+editor only,
      DELETE for admin only.
@@ -206,13 +214,12 @@ over what the code actually does again.
 
 ## What's NOT done yet (known gaps)
 
-- ~~No role/permission granularity~~ — closed: `supabase-role-based-rls-migration.sql`
-  adds admin/editor/viewer roles (see item 6 above). **Confirm it's been
-  run in production** before assuming it's live — until then, every
-  signed-in user still has full access (the older authenticated-only
-  policies are what's actually enforced). No department/region scoping —
-  that was explicitly the option not chosen; a role is uniform across
-  every table.
+- ~~No role/permission granularity~~ — closed and confirmed live:
+  `supabase-role-based-rls-migration.sql` adds admin/editor/viewer roles
+  (see item 6 above; `m.nandipa@icloud.com` is the current admin). No
+  department/region scoping — that was explicitly the option not chosen;
+  a role is uniform across every table. No admin UI for managing roles yet
+  — promote/demote via the Supabase SQL editor.
 - **No real financial/costing data in the schema at all.** Quote/contract/
   CRM `value` fields are pre-formatted display strings, not numbers; the 16
   lighter-module tables have no timestamps. The Costing and Finance
@@ -519,3 +526,14 @@ over what the code actually does again.
     that before assuming role restrictions are actually live; until then
     the old authenticated-only policies still apply (harmless — code
     degrades gracefully either way).
+
+18. User ran `supabase-role-based-rls-migration.sql` in production.
+    Discovered the bootstrap step's assumption was wrong (see the
+    correction in item 6 of "Current state") via a screenshot of
+    Authentication → Users showing the real accounts, none of which was
+    `srinivas@mmdi.in`. Fixed by running the correct `UPDATE` directly and
+    updating the migration file to match, so a future fresh deployment
+    bootstraps the right person. Verified via `select email, role,
+    created_at from public.profiles` — all 3 real users have a role,
+    `m.nandipa@icloud.com` is admin, the other two are viewer. Role-based
+    access control is now genuinely live, not just shipped.

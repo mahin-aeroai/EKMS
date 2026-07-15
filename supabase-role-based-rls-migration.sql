@@ -24,13 +24,17 @@
 --    created — covers people invited after this migration runs.
 -- 4. A backfill for users who already exist (created before this
 --    migration) — inserted as 'viewer' by default.
--- 5. One explicit bootstrap: srinivas@mmdi.in (the account this project is
---    being built for) is set to 'admin' so there's at least one admin able
---    to promote everyone else via the SQL editor or (once built) an admin
---    UI. **If that's not the right person/email to be the first admin,
---    change the email in STEP 5 before running, or update it manually
---    afterwards**: `update public.profiles set role = 'admin' where email
---    = '<correct email>';`
+-- 5. One explicit bootstrap: m.nandipa@icloud.com is set to 'admin' so
+--    there's at least one admin able to promote everyone else via the SQL
+--    editor or (once built) an admin UI. (CONFIRMED RUN IN PRODUCTION on
+--    15 July 2026 — originally bootstrapped srinivas@mmdi.in, which turned
+--    out not to match any real Supabase Auth user, so nobody got promoted;
+--    corrected by running `update public.profiles set role = 'admin'
+--    where email = 'm.nandipa@icloud.com';` directly, and this file was
+--    updated afterwards to match reality.) **If that's not the right
+--    person/email to be the first admin, change the email in STEP 5
+--    before running, or update it manually afterwards**: `update
+--    public.profiles set role = 'admin' where email = '<correct email>';`
 -- 6. Every existing table's policies are replaced (drop + recreate, same
 --    idempotent pattern as the previous RLS migration) with role-aware
 --    versions: SELECT for any of the 3 roles, INSERT/UPDATE for
@@ -143,9 +147,9 @@ on conflict (id) do nothing;
 -- ============================================================
 -- STEP 5 — bootstrap the first admin
 -- ============================================================
--- Change this email first if srinivas@mmdi.in shouldn't be the initial admin.
+-- Change this email first if m.nandipa@icloud.com shouldn't be the initial admin.
 
-update public.profiles set role = 'admin' where email = 'srinivas@mmdi.in';
+update public.profiles set role = 'admin' where email = 'm.nandipa@icloud.com';
 
 -- ============================================================
 -- STEP 6 — role-aware policies on every existing table
