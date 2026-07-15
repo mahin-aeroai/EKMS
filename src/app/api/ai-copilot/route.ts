@@ -28,12 +28,14 @@ const MAX_TOOL_ITERATIONS = 5;
 
 const SYSTEM_PROMPT = `You are the AI Copilot inside MMDI ONE, an internal operating platform for MMDI, an Indian packaging/printing manufacturer. Answer questions about customers, job orders, machines, and raw materials using the tools available to you — never guess or invent data. If a tool returns no results, say so plainly rather than making something up. Keep answers concise (2-4 sentences unless the question calls for a list). When you reference a specific record, name it (e.g. "Job Order 7455" or "Apple India Pvt Ltd - Bangalore") so the person can look it up themselves.
 
-Formatting: the chat UI renders your reply as plain text only — no markdown. Never use markdown tables (| pipes |), headers (#), or bold (**). For lists, use a simple numbered or dashed list with one item per line, or short plain sentences. Keep it readable as plain prose.`;
+Formatting: the chat UI renders your reply as plain text only — no markdown. Never use markdown tables (| pipes |), headers (#), or bold (**). For lists, use a simple numbered or dashed list with one item per line, or short plain sentences. Keep it readable as plain prose.
+
+Totals: when search_customers or search_job_orders returns more matches than the detail list shows, use the tool's own total_* aggregate fields for any sum/total the person asks for — never add up just the visible detail rows yourself, since that list is capped and may exclude the largest matches (it's sorted by value, but a common search term can still match more records than fit in the list).`;
 
 const TOOLS: Tool[] = [
   {
     name: "search_customers",
-    description: "Search customers by name (partial match). Returns code, name, region, tier, account owner, lifetime value, and open orders for up to 20 matches, sorted by whatever the database returns first (not ranked by relevance) — if there might be more than 20, say so and suggest narrowing the search.",
+    description: "Search customers by name (partial match). Returns total_matches and a true aggregate sum (total_lifetime_value_across_all_matches, total_open_orders_across_all_matches) across EVERY match, not just the ones shown — always use these totals when asked for a sum/total, never add up the detail list yourself, since the detail list is capped. Also returns top_20_by_lifetime_value: the 20 highest-value matches for detail.",
     input_schema: {
       type: "object",
       properties: { query: { type: "string", description: "Text to search for in the customer name" } },
@@ -51,7 +53,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: "search_job_orders",
-    description: "Search job orders by customer name (partial match) or job order code. Returns up to 20 matches with status, dates, machine, and value.",
+    description: "Search job orders by customer name (partial match) or job order code. Returns total_matches and a true aggregate sum (total_value_across_all_matches, total_sqft_across_all_matches) across EVERY match, not just the ones shown — always use these totals when asked for a sum/total, never add up the detail list yourself, since the detail list is capped. Also returns top_20_by_value: the 20 highest-value matches for detail.",
     input_schema: {
       type: "object",
       properties: { query: { type: "string", description: "Customer name or job order code to search for" } },
@@ -107,13 +109,24 @@ async function executeToolCall(
   switch (name) {
     case "search_customers": {
       const query = String(input.query ?? "");
-      const { data, error } = await supabase
-        .from("customers")
-        .select("code, name, region, tier, account_owner, lifetime_value, open_orders")
-        .ilike("name", `%${query}%`)
-        .limit(20);
-      if (error) return { result: { error: error.message } };
-      return { result: data, citation: data?.length ? `Customer search: "${query}"` : undefined };
+      const [top, all] = await Promise.all([
+        supabase
+          .from("customers")
+          .select("code, name, region, tier, account_owner, lifetime_value, open_orders")
+          .ilike("name", `%${query}%`)
+          .order("lifetime_value", { ascending: false })
+          .limit(20),
+        supabase.from("customers").select("lifetime_value, open_orders").ilike("name", `%${query}%`),
+      ]);
+      if (top.error || all.error) return { result: { error: (top.error ?? all.error)?.message } };
+      const totalMatches = all.data?.length ?? 0;
+      const result = {
+        total_matches: totalMatches,
+        total_lifetime_value_across_all_matches: (all.data ?? []).reduce((sum, r) => sum + (r.lifetime_value ?? 0), 0),
+        total_open_orders_across_all_matches: (all.data ?? []).reduce((sum, r) => sum + (r.open_orders ?? 0), 0),
+        top_20_by_lifetime_value: top.data,
+      };
+      return { result, citation: totalMatches ? `Customer search: "${query}" (${totalMatches} matches)` : undefined };
     }
     case "get_customer": {
       const code = String(input.code ?? "");
@@ -128,13 +141,25 @@ async function executeToolCall(
     }
     case "search_job_orders": {
       const query = String(input.query ?? "");
-      const { data, error } = await supabase
-        .from("job_orders")
-        .select("code, name, customer_name, status, order_date, primary_machine, total_value, total_sqft")
-        .or(`customer_name.ilike.%${query}%,code.ilike.%${query}%`)
-        .limit(20);
-      if (error) return { result: { error: error.message } };
-      return { result: data, citation: data?.length ? `Job order search: "${query}"` : undefined };
+      const filter = `customer_name.ilike.%${query}%,code.ilike.%${query}%`;
+      const [top, all] = await Promise.all([
+        supabase
+          .from("job_orders")
+          .select("code, name, customer_name, status, order_date, primary_machine, total_value, total_sqft")
+          .or(filter)
+          .order("total_value", { ascending: false })
+          .limit(20),
+        supabase.from("job_orders").select("total_value, total_sqft").or(filter),
+      ]);
+      if (top.error || all.error) return { result: { error: (top.error ?? all.error)?.message } };
+      const totalMatches = all.data?.length ?? 0;
+      const result = {
+        total_matches: totalMatches,
+        total_value_across_all_matches: (all.data ?? []).reduce((sum, r) => sum + (r.total_value ?? 0), 0),
+        total_sqft_across_all_matches: (all.data ?? []).reduce((sum, r) => sum + (r.total_sqft ?? 0), 0),
+        top_20_by_value: top.data,
+      };
+      return { result, citation: totalMatches ? `Job order search: "${query}" (${totalMatches} matches)` : undefined };
     }
     case "get_job_order": {
       const code = String(input.code ?? "");
