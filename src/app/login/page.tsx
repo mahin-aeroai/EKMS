@@ -59,6 +59,22 @@ function LoginForm() {
     return () => sub.subscription.unsubscribe();
   }, [mode]);
 
+  // Nicety: if someone lands on a plain /login visit (no invite/recovery
+  // token) while already signed in, send them straight to the app instead
+  // of making them look at a sign-in form. Skipped entirely in
+  // "set-password" mode so it can never race with / discard an invite or
+  // recovery token — see the comment in supabase-middleware.ts for why this
+  // can't live server-side.
+  useEffect(() => {
+    if (mode !== "sign-in") return;
+
+    supabase.auth.getUser().then(({ data }) => {
+      if (data.user) {
+        router.replace(searchParams.get("redirectTo") || "/");
+      }
+    });
+  }, [mode, router, searchParams]);
+
   async function handleSignIn(e: FormEvent) {
     e.preventDefault();
     setError(null);

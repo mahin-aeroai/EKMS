@@ -53,12 +53,17 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  if (user && pathname === "/login") {
-    const homeUrl = request.nextUrl.clone();
-    homeUrl.pathname = "/";
-    homeUrl.search = "";
-    return NextResponse.redirect(homeUrl);
-  }
+  // Deliberately NOT redirecting already-signed-in users away from /login
+  // here. Invite and password-recovery emails link to /login with an
+  // access_token in the URL *hash*, which never reaches the server (hashes
+  // aren't sent over HTTP) — only client-side JS can read it. If this
+  // middleware bounced signed-in requests away from /login server-side,
+  // opening someone else's invite/recovery link in a browser that already
+  // has an active session (e.g. an admin testing it) would redirect straight
+  // into the app as the ALREADY-signed-in user, silently discarding the
+  // recovery token. The "skip /login if already signed in" nicety is instead
+  // handled client-side in src/app/login/page.tsx, where it can check
+  // whether an invite/recovery token is present before deciding to redirect.
 
   return response;
 }
