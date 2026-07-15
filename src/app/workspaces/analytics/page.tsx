@@ -1,15 +1,73 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { BarChart3 } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { Tag } from "@/components/ui/Tag";
 import { StatCard, AICard } from "@/components/ui/Card";
-import { LineChart, DonutChart, Heatmap } from "@/components/ui/Charts";
+import { BarChart, DonutChart } from "@/components/ui/Charts";
 import { useToast } from "@/components/ui/Notifications";
+import { supabase, type CustomerRow, type QuoteRow, type ContractRow } from "@/lib/supabase";
+import { getCount, groupCount, statusDonutData } from "@/lib/dashboard-queries";
+
+interface AnalyticsStats {
+  customerCount: number;
+  crmAccountCount: number;
+  quoteCount: number;
+  contractCount: number;
+  customersByTier: { label: string; value: number }[];
+  quotesByStatus: ReturnType<typeof statusDonutData>;
+  contractsByStatus: ReturnType<typeof statusDonutData>;
+  approvalsByStatus: { label: string; value: number }[];
+  topRegion: string | null;
+}
+
+async function loadStats(): Promise<AnalyticsStats> {
+  const [
+    customerCount,
+    crmAccountCount,
+    { data: customers },
+    { data: quotes },
+    { data: contracts },
+    { data: approvals },
+  ] = await Promise.all([
+    getCount("customers"),
+    getCount("crm_accounts"),
+    supabase.from("customers").select("*"),
+    supabase.from("quotes").select("*"),
+    supabase.from("contracts").select("*"),
+    supabase.from("customer_approvals").select("status"),
+  ]);
+
+  const customerRows = (customers ?? []) as CustomerRow[];
+  const quoteRows = (quotes ?? []) as QuoteRow[];
+  const contractRows = (contracts ?? []) as ContractRow[];
+  const byRegion = groupCount(customerRows, (c) => c.region);
+
+  return {
+    customerCount,
+    crmAccountCount,
+    quoteCount: quoteRows.length,
+    contractCount: contractRows.length,
+    customersByTier: groupCount(customerRows, (c) => c.tier),
+    quotesByStatus: statusDonutData(quoteRows),
+    contractsByStatus: statusDonutData(contractRows),
+    approvalsByStatus: groupCount((approvals ?? []) as { status: string }[], (a) => a.status),
+    topRegion: byRegion[0]?.label ?? null,
+  };
+}
 
 export default function AnalyticsPage() {
   const { toast } = useToast();
+  const [stats, setStats] = useState<AnalyticsStats | null>(null);
+
+  useEffect(() => {
+    loadStats()
+      .then(setStats)
+      .catch(() => toast("danger", "Couldn't load Analytics data from Supabase"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div>
@@ -23,53 +81,52 @@ export default function AnalyticsPage() {
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-xl font-semibold text-ink">Analytics</h1>
-              <Badge status="info">Rolling 6 months</Badge>
+              <Badge status="info">Live snapshot</Badge>
             </div>
-            <p className="mt-0.5 text-sm text-ink-secondary">Executive — company-wide trends across revenue, quality, and delivery</p>
+            <p className="mt-0.5 text-sm text-ink-secondary">Executive — company-wide portfolio breakdown, current snapshot</p>
             <div className="mt-2 flex flex-wrap gap-1.5">
-              <Tag>All regions</Tag>
-              <Tag aiSuggested>Margin compression detected in West region</Tag>
+              <Tag>Live from Supabase</Tag>
+              <Tag>No historical trend data yet — snapshot only</Tag>
             </div>
           </div>
         </div>
       </div>
 
       <div className="my-6 grid grid-cols-1 gap-4 sm:grid-cols-4">
-        <StatCard label="Revenue" value="₹28.4 Cr" trend="up" trendLabel="+11% YoY" />
-        <StatCard label="Gross Margin" value="34%" trend="down" trendLabel="-2 pts" />
-        <StatCard label="On-Time Delivery" value="93%" trend="up" trendLabel="+1 pt" />
-        <StatCard label="NPS" value="+42" trend="flat" trendLabel="No change" />
+        <StatCard label="Customers" value={stats ? String(stats.customerCount) : "—"} trend="flat" trendLabel="Live count" />
+        <StatCard label="CRM Accounts" value={stats ? String(stats.crmAccountCount) : "—"} trend="flat" trendLabel="Live count" />
+        <StatCard label="Quotes" value={stats ? String(stats.quoteCount) : "—"} trend="flat" trendLabel="Live count" />
+        <StatCard label="Contracts" value={stats ? String(stats.contractCount) : "—"} trend="flat" trendLabel="Live count" />
       </div>
 
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
         <div className="rounded-lg border border-line bg-surface p-4">
-          <h3 className="mb-3 text-sm font-semibold text-ink">Revenue trend — 6 months</h3>
-          <LineChart data={[{ label: "Feb", value: 3.8 }, { label: "Mar", value: 4.1 }, { label: "Apr", value: 4.0 }, { label: "May", value: 4.6 }, { label: "Jun", value: 4.9 }, { label: "Jul", value: 4.82 }]} />
+          <h3 className="mb-3 text-sm font-semibold text-ink">Customers by tier</h3>
+          {stats ? <BarChart data={stats.customersByTier} /> : <p className="py-6 text-center text-sm text-ink-muted">Loading…</p>}
         </div>
         <div className="rounded-lg border border-line bg-surface p-4">
-          <h3 className="mb-3 text-sm font-semibold text-ink">Revenue mix by segment</h3>
-          <DonutChart
-            data={[
-              { label: "Retail", value: 46, color: "primary" },
-              { label: "Furniture", value: 32, color: "info" },
-              { label: "Packaging", value: 14, color: "success" },
-              { label: "Other", value: 8, color: "warning" },
-            ]}
-          />
+          <h3 className="mb-3 text-sm font-semibold text-ink">Quotes by status</h3>
+          {stats ? <DonutChart data={stats.quotesByStatus} /> : <p className="py-6 text-center text-sm text-ink-muted">Loading…</p>}
         </div>
-        <div className="sm:col-span-2">
-          <h3 className="mb-3 text-sm font-semibold text-ink">Defect rate — line × shift</h3>
-          <Heatmap rows={["Line 1", "Line 2", "Line 3"]} cols={["Shift A", "Shift B", "Shift C"]} values={[[2, 4, 1], [6, 3, 5], [1, 2, 9]]} />
+        <div className="rounded-lg border border-line bg-surface p-4">
+          <h3 className="mb-3 text-sm font-semibold text-ink">Contracts by status</h3>
+          {stats ? <DonutChart data={stats.contractsByStatus} /> : <p className="py-6 text-center text-sm text-ink-muted">Loading…</p>}
+        </div>
+        <div className="rounded-lg border border-line bg-surface p-4">
+          <h3 className="mb-3 text-sm font-semibold text-ink">Customer approvals by status</h3>
+          {stats ? <BarChart data={stats.approvalsByStatus} /> : <p className="py-6 text-center text-sm text-ink-muted">Loading…</p>}
         </div>
         <div className="sm:col-span-2">
           <AICard
             variant="insight"
-            title="Margin compression concentrated in West region"
-            citation="Regional P&L, last 2 quarters"
+            title="Portfolio concentration"
+            citation="Live customer, quote, contract, and approval counts"
             onAccept={() => toast("success", "Added to leadership review agenda")}
             onDismiss={() => toast("info", "Dismissed")}
           >
-            West region gross margin has dropped 4 points over two quarters, driven by extended supplier lead times raising expedite freight costs — not by pricing.
+            {stats
+              ? `${stats.topRegion ?? "No region data"} has the largest customer concentration. Across the portfolio: ${stats.quoteCount} quotes and ${stats.contractCount} contracts are on record, spanning the statuses charted above.`
+              : "Loading…"}
           </AICard>
         </div>
       </div>

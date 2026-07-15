@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Share2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
@@ -9,27 +9,122 @@ import { StatCard, AICard } from "@/components/ui/Card";
 import { RelationshipGraph, type GraphNode, type GraphEdge } from "@/components/ui/RelationshipGraph";
 import { PromptInput } from "@/components/ui/PromptInput";
 import { useToast } from "@/components/ui/Notifications";
+import {
+  supabase,
+  type CustomerRow,
+  type CustomerContactRow,
+  type CustomerCommentRow,
+  type CustomerApprovalRow,
+} from "@/lib/supabase";
+import { getCount } from "@/lib/dashboard-queries";
 
-const NODES: GraphNode[] = [
-  { id: "center", label: "MMDI Knowledge Graph", type: "Graph Root" },
-  { id: "n1", label: "Reliance Retail Ltd", type: "Customer" },
-  { id: "n2", label: "Machine M-14", type: "Machine" },
-  { id: "n3", label: "RM-0231 — PVC-Free Vinyl", type: "Raw Material" },
-  { id: "n4", label: "IKEA Wardrobe Program", type: "Project" },
-  { id: "n5", label: "NCR-2025-0442", type: "Lesson Learned" },
+// Same demo customer the Customer workspace (src/app/workspaces/customer/page.tsx)
+// fetches — reused here so the knowledge graph shows genuine, live relationships
+// instead of a fictional sample graph.
+const DEMO_CUSTOMER_CODE = "CUST-MU-002104";
+
+const INDEXED_TABLES = [
+  "customers",
+  "customer_contacts",
+  "customer_comments",
+  "customer_approvals",
+  "crm_accounts",
+  "quotes",
+  "contracts",
+  "work_orders",
+  "maintenance_events",
+  "installation_sites",
+  "inventory_skus",
+  "purchase_orders",
+  "suppliers",
+  "documents",
+  "drawings",
+  "sops",
+  "lessons_learned",
+  "employees",
+  "compliance_findings",
+  "access_requests",
 ];
 
-const EDGES: GraphEdge[] = [
-  { from: "center", to: "n1", label: "indexes" },
-  { from: "center", to: "n2", label: "indexes" },
-  { from: "center", to: "n3", label: "indexes" },
-  { from: "center", to: "n4", label: "indexes" },
-  { from: "n2", to: "n5", label: "linked incident" },
-];
+interface KnowledgeStats {
+  indexedRecords: number;
+  recentActivity7d: number;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+async function loadStats(): Promise<KnowledgeStats> {
+  const [counts, { data: customer }] = await Promise.all([
+    Promise.all(INDEXED_TABLES.map((t) => getCount(t))),
+    supabase.from("customers").select("*").eq("code", DEMO_CUSTOMER_CODE).single(),
+  ]);
+
+  const indexedRecords = counts.reduce((sum, c) => sum + c, 0);
+
+  const nodes: GraphNode[] = [];
+  const edges: GraphEdge[] = [];
+  let recentActivity7d = 0;
+
+  if (customer) {
+    const customerRow = customer as CustomerRow;
+    nodes.push({ id: "center", label: customerRow.name, type: "Customer" });
+
+    const [{ data: contacts }, { data: comments }, { data: approvals }] = await Promise.all([
+      supabase.from("customer_contacts").select("*").eq("customer_id", customerRow.id).limit(3),
+      supabase
+        .from("customer_comments")
+        .select("*")
+        .eq("customer_id", customerRow.id)
+        .order("created_at", { ascending: false })
+        .limit(2),
+      supabase
+        .from("customer_approvals")
+        .select("*")
+        .eq("customer_id", customerRow.id)
+        .order("created_at", { ascending: false })
+        .limit(2),
+    ]);
+
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+
+    ((contacts ?? []) as CustomerContactRow[]).forEach((c, i) => {
+      const id = `contact-${i}`;
+      nodes.push({ id, label: c.name, type: "Contact" });
+      edges.push({ from: "center", to: id, label: c.role ?? "contact" });
+    });
+
+    ((comments ?? []) as CustomerCommentRow[]).forEach((c, i) => {
+      const id = `comment-${i}`;
+      nodes.push({ id, label: `${c.author}: ${c.content.slice(0, 28)}${c.content.length > 28 ? "…" : ""}`, type: "Comment" });
+      edges.push({ from: "center", to: id, label: "discussed in" });
+      if (new Date(c.created_at).getTime() >= sevenDaysAgo) recentActivity7d += 1;
+    });
+
+    ((approvals ?? []) as CustomerApprovalRow[]).forEach((a, i) => {
+      const id = `approval-${i}`;
+      nodes.push({ id, label: a.title, type: "Approval" });
+      edges.push({ from: "center", to: id, label: a.status });
+      if (new Date(a.created_at).getTime() >= sevenDaysAgo) recentActivity7d += 1;
+    });
+  }
+
+  return { indexedRecords, recentActivity7d, nodes, edges };
+}
 
 export default function AIKnowledgePage() {
   const { toast } = useToast();
-  const [center, setCenter] = useState(NODES[0]);
+  const [stats, setStats] = useState<KnowledgeStats | null>(null);
+  const [center, setCenter] = useState<GraphNode | null>(null);
+
+  useEffect(() => {
+    loadStats()
+      .then((s) => {
+        setStats(s);
+        setCenter(s.nodes[0] ?? null);
+      })
+      .catch(() => toast("danger", "Couldn't load AI Knowledge data from Supabase"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div>
@@ -45,38 +140,47 @@ export default function AIKnowledgePage() {
               <h1 className="text-xl font-semibold text-ink">AI Knowledge</h1>
               <Badge status="info">Live index</Badge>
             </div>
-            <p className="mt-0.5 text-sm text-ink-secondary">Knowledge — the enterprise knowledge graph every AI answer is grounded in</p>
+            <p className="mt-0.5 text-sm text-ink-secondary">Knowledge — the enterprise data every AI answer would be grounded in</p>
             <div className="mt-2 flex flex-wrap gap-1.5">
-              <Tag aiSuggested>4,200 new relationships indexed this week</Tag>
+              <Tag>Live from Supabase</Tag>
+              <Tag aiSuggested>Graph below is built from a real customer&apos;s contacts, comments, and approvals</Tag>
             </div>
           </div>
         </div>
       </div>
 
       <div className="my-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard label="Indexed Records" value="184,200" trend="up" trendLabel="+2,100 this week" />
-        <StatCard label="Graph Nodes" value="41,600" trend="up" trendLabel="+900 this week" />
-        <StatCard label="AI Queries Today" value="284" trend="up" trendLabel="+12% vs avg" />
+        <StatCard label="Indexed Records" value={stats ? stats.indexedRecords.toLocaleString() : "—"} trend="flat" trendLabel={`Across ${INDEXED_TABLES.length} tables`} />
+        <StatCard label="Connected Tables" value={String(INDEXED_TABLES.length)} trend="flat" trendLabel="Wired to Supabase" />
+        <StatCard label="Recent Activity (7d)" value={stats ? String(stats.recentActivity7d) : "—"} trend="flat" trendLabel="Comments + approvals" />
       </div>
 
       <div className="flex flex-col gap-6">
-        <AICard variant="summary" title="Graph coverage is growing fastest in Manufacturing" citation="Indexing log, last 7 days">
-          New relationships this week are concentrated in Machine and Raw Material records, largely from predictive maintenance telemetry being linked to historical NCRs.
+        <AICard variant="summary" title="What's actually indexed today" citation={`Live row counts across ${INDEXED_TABLES.length} Supabase tables`}>
+          {stats
+            ? `${stats.indexedRecords.toLocaleString()} records are live across ${INDEXED_TABLES.length} connected tables. The graph below traces real relationships for one customer — contacts, recent comments, and approvals — rather than a hardcoded sample.`
+            : "Loading…"}
         </AICard>
         <div className="rounded-lg border border-line bg-surface p-4">
           <h3 className="mb-3 text-sm font-semibold text-ink">Explore the graph</h3>
-          <RelationshipGraph
-            center={center}
-            nodes={NODES}
-            edges={EDGES}
-            onRecenter={(id) => {
-              const node = NODES.find((n) => n.id === id);
-              if (node) {
-                setCenter(node);
-                toast("ai", `Recentered on ${node.label}`);
-              }
-            }}
-          />
+          {!stats ? (
+            <p className="py-6 text-center text-sm text-ink-muted">Loading…</p>
+          ) : center && stats.nodes.length > 0 ? (
+            <RelationshipGraph
+              center={center}
+              nodes={stats.nodes}
+              edges={stats.edges}
+              onRecenter={(id) => {
+                const node = stats.nodes.find((n) => n.id === id);
+                if (node) {
+                  setCenter(node);
+                  toast("ai", `Recentered on ${node.label}`);
+                }
+              }}
+            />
+          ) : (
+            <p className="py-6 text-center text-sm text-ink-muted">No relationship data available yet.</p>
+          )}
         </div>
         <div className="rounded-lg border border-line bg-surface p-4">
           <h3 className="mb-3 text-sm font-semibold text-ink">Ask the knowledge graph</h3>

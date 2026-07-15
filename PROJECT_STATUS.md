@@ -1,6 +1,7 @@
 # MMDI ONE — Project Status
 
-Last updated: 15 July 2026 (session: added authentication)
+Last updated: 15 July 2026 (session: added authentication + wired the 6
+aggregation dashboards)
 
 This file exists so a new chat session (or a new contributor) can pick up this
 project without re-deriving context. Read this before making changes.
@@ -11,8 +12,10 @@ An AI-native enterprise operating platform for MMDI (a packaging/printing
 manufacturer). Built by Srinivas and his son Mahin as a knowledge-share
 project. Currently: a Next.js app implementing a full component design
 system plus 26 "Intelligent Workspace" modules covering the whole MDI-ONE
-navigation tree, now gated behind Supabase Auth, with 17 of those modules
-wired to a live Supabase backend.
+navigation tree, gated behind Supabase Auth, with 23 of those modules wired
+to a live Supabase backend in some form (17 straightforward + 6 aggregation
+dashboards rebuilt around real cross-table data — see below for what that
+means for each one).
 
 - Live demo: https://ekms.vercel.app
 - Repo: https://github.com/mahin-aeroai/EKMS (main branch, auto-deploys to Vercel)
@@ -72,51 +75,96 @@ Material/Project workspaces" as **not started**, not "done", going forward.
      Contracts, Production, Maintenance, Installation, Inventory, Procurement,
      Suppliers, Documents, Drawings, SOPs, Lessons Learned, People,
      Compliance, Administration.
-   - **6 remain sample/hardcoded data** (deliberately, since they're
-     cross-module aggregation/dashboard pages with no single natural backing
-     table): Command Center, AI Copilot, Analytics, Costing, AI Knowledge,
-     Finance.
+   - The 6 cross-module aggregation/dashboard pages (Command Center,
+     Analytics, Costing, AI Knowledge, Finance, AI Copilot) were also wired
+     this session — see item 8 below for what "wired" means for these
+     specifically, since none of them have a single natural backing table.
 5. **Backend**: Supabase project `mahin-aeroai's Project`
    (`https://vzyrvzgtjcodxkjydxxn.supabase.co`), free tier. Browser-safe
    client uses the anon/publishable key (safe to expose — protected by RLS,
    not a secret). All row-type TypeScript interfaces live in
    `src/lib/supabase.ts`.
-6. **RLS policies tightened this session** — a migration
-   (`supabase-auth-rls-migration.sql`, repo root, **not yet run against
-   production as of this handoff — confirm with Srinivas before assuming
-   it's live**) replaces every table's wide-open `using (true)` policies with
-   `TO authenticated` policies (select/insert/update/delete all require a
-   valid signed-in session; the anon key alone can no longer read or write
-   anything). No per-role distinctions yet — any signed-in user has full
-   access to every table (matches the "simple: authenticated-only" model
-   chosen for this phase, not a granular RBAC system).
+6. **RLS policies tightened this session and confirmed run in production**
+   — `supabase-auth-rls-migration.sql` (repo root) replaces every table's
+   wide-open `using (true)` policies with `TO authenticated` policies
+   (select/insert/update/delete all require a valid signed-in session; the
+   anon key alone can no longer read or write anything). No per-role
+   distinctions yet — any signed-in user has full access to every table
+   (matches the "simple: authenticated-only" model chosen for this phase,
+   not a granular RBAC system). User accounts exist in the Supabase
+   dashboard (Authentication → Users); confirmed live by visiting
+   ekms.vercel.app and observing the redirect to `/login`.
 7. Build and lint both verified clean on every change (`npm run build`,
    `npm run lint` — 0 errors). All routes render as expected (static for the
    22 lighter modules + `/login`, dynamic/force-rendered for
    `/workspaces/customer`).
+8. **6 aggregation dashboards wired this session** (Command Center,
+   Analytics, Costing, Finance, AI Knowledge, AI Copilot) — with an
+   important caveat: the schema has **no real financial/cost data anywhere**
+   (quote/contract/CRM `value` fields are pre-formatted display strings like
+   `"₹4.92 Cr"`, not numbers) and **no timestamps on the 16 lighter-module
+   tables** (only Customer's tables have `created_at`). So instead of
+   faking revenue/margin/DSO/cost-variance numbers, each dashboard was
+   rebuilt around what's genuinely real:
+   - **Command Center**: live counts (customers, pending approvals, open
+     compliance findings, pending access requests), customers-by-region bar
+     chart, avg on-time-delivery / avg health-score gauges (real numeric
+     columns on `customers`), and a real activity feed merged from
+     `customer_comments` + `customer_approvals` sorted by `created_at`.
+   - **Analytics**: live customer/CRM/quote/contract counts, customers-by-
+     tier, quotes-by-status, contracts-by-status, approvals-by-status — all
+     real distributions, explicitly labeled as a snapshot (no trend lines,
+     since there's no historical data to chart).
+   - **Costing**: reframed around what's real — supplier count, purchase
+     orders in progress, at-risk inventory SKUs, POs-by-stage,
+     suppliers-by-status. A visible `Tag` tells the user cost variance needs
+     a costing ledger schema that doesn't exist yet.
+   - **Finance**: real numbers this time — `customers.lifetime_value` and
+     `customers.open_orders` ARE numeric columns, so total portfolio LTV
+     (summed, formatted with the same `₹X.XX Cr` convention as the Customer
+     workspace), total open orders, active/expiring contract counts, and
+     lifetime-value-by-region are all genuinely computed. A `Tag` flags that
+     revenue/margin/DSO need a finance ledger that doesn't exist yet.
+   - **AI Knowledge**: `Indexed Records` is a real summed row count across
+     20 live tables; the relationship graph is no longer a hardcoded sample
+     — it's built from the same demo customer
+     (`CUST-MU-002104`) the Customer workspace uses, tracing their real
+     contacts/comments/approvals.
+   - **AI Copilot**: the chat itself is still an illustrative demo (real
+     LLM grounding is a separate, larger integration phase — out of scope
+     here), but its 3 stat cards now show real cross-table counts framed as
+     "context available to the assistant" rather than fabricated usage
+     metrics.
+   - New shared helper: `src/lib/dashboard-queries.ts` (`getCount`,
+     `getCountWhere`, `groupCount`, `groupSum`, `statusDonutData`,
+     `formatCrore`) — used by all 6 pages to avoid re-implementing the same
+     count/group-by logic six times.
 
 ## What's NOT done yet (known gaps)
 
-- **Confirm the RLS migration has actually been run** — `supabase-auth-rls-migration.sql`
-  was written and reviewed this session but the assistant couldn't reach the
-  Supabase API from its sandbox to execute it directly. Until it's run, the
-  tables are still wide open despite the app now requiring login.
 - **No role/permission granularity.** Every signed-in user can read/write
   every table. If MMDI wants viewer-vs-editor or department-scoped access
   later, that's a further RLS/`profiles` table phase.
 - **Machine, Raw Material, Project workspaces are not wired to Supabase**
   (see correction above) — this was previously miscategorized as done.
-- The 6 aggregation dashboards (Command Center, AI Copilot, Analytics,
-  Costing, AI Knowledge, Finance) are still hardcoded sample data.
+- **No real financial/costing data in the schema at all.** Quote/contract/
+  CRM `value` fields are pre-formatted display strings, not numbers; the 16
+  lighter-module tables have no timestamps. The Costing and Finance
+  dashboards were rebuilt around what's genuinely real (see item 8 above)
+  rather than faking revenue/margin/DSO/cost-variance — if MMDI wants those
+  numbers to be real, that needs an actual costing/finance ledger schema
+  first.
 - The 4 flagship workspaces' Insights/Timeline/Documents/Relationships tabs
   are sample content everywhere, including on the wired Customer workspace.
 - No real AI/LLM integration anywhere yet — all "AI insight" cards are
-  static copy, not generated by a model.
+  static or lightly-templated copy, not generated by a model. AI Copilot's
+  chat is still an illustrative demo.
 - No file upload / document storage wired (Documents, Drawings, SOPs pages
   read metadata rows from Supabase but don't handle actual file storage).
 - No tests.
-- No password reset flow on `/login` yet (only sign-in). Add if users
-  forget passwords rather than an admin resetting them from the dashboard.
+- No password reset entry point on `/login` (a user has to be sent a
+  recovery link from the Supabase dashboard — there's no "forgot password"
+  link on the sign-in form itself yet).
 
 ## Key files to know
 
@@ -135,8 +183,12 @@ Material/Project workspaces" as **not started**, not "done", going forward.
 - `src/app/workspaces/*/page.tsx` — one folder per module. Only `customer`
   delegates to a Server/Client split (`src/components/workspaces/*.tsx`); the
   other 25 are self-contained.
-- `supabase-auth-rls-migration.sql` — this session's RLS migration. Run in
-  the Supabase SQL editor; safe to re-run (idempotent).
+- `supabase-auth-rls-migration.sql` — this session's RLS migration, already
+  run in production. Safe to re-run (idempotent) if new tables get added
+  later and need the same treatment.
+- `src/lib/dashboard-queries.ts` — shared count/group-by helpers
+  (`getCount`, `getCountWhere`, `groupCount`, `groupSum`, `statusDonutData`,
+  `formatCrore`) used by all 6 aggregation dashboards.
 - SQL schema files (not committed to the repo, delivered separately to the
   user and already run against the live Supabase project):
   - Customer workspace schema (customer_contacts, customer_comments,
@@ -174,20 +226,23 @@ Material/Project workspaces" as **not started**, not "done", going forward.
 
 ## Natural next steps (not started, pick one)
 
-1. **Confirm `supabase-auth-rls-migration.sql` has been run** and create the
-   first real user account(s) in the Supabase dashboard, if not done already.
-2. **Add role/permission granularity** (a `profiles` table + role-scoped RLS)
-   if "any signed-in user can do anything" turns out to be too permissive.
-3. **Actually wire Machine, Raw Material, and Project workspaces** to
+1. **Actually wire Machine, Raw Material, and Project workspaces** to
    Supabase (this was previously thought done — it isn't). Follow the
    Customer workspace's Server/Client split pattern.
-4. **Wire the 6 remaining aggregation dashboards** to real cross-table
-   queries/views.
-5. **Wire the remaining 4 tabs per flagship workspace** (Insights, Timeline,
+2. **Add role/permission granularity** (a `profiles` table + role-scoped RLS)
+   if "any signed-in user can do anything" turns out to be too permissive.
+3. **Wire the remaining 4 tabs per flagship workspace** (Insights, Timeline,
    Documents, Relationships) to real data.
-6. **Real AI integration** — replace static "AI insight" card copy with
-   actual model-generated insights (would need an LLM API call layer).
-7. **File storage** for Documents/Drawings/SOPs (Supabase Storage buckets).
+4. **Real AI integration** — replace static/templated "AI insight" card
+   copy with actual model-generated insights, and give AI Copilot's chat
+   real grounding (would need an LLM API call layer).
+5. **File storage** for Documents/Drawings/SOPs (Supabase Storage buckets).
+6. **Add a "forgot password" link on `/login`** — right now recovery emails
+   can only be triggered by an admin from the Supabase dashboard.
+7. **A real costing/finance ledger schema**, if MMDI wants the Costing and
+   Finance dashboards to show actual revenue/margin/DSO/cost-variance numbers
+   instead of the real-but-adjacent metrics (portfolio LTV, PO pipeline,
+   supplier/SKU status) they show today.
 
 ## Session history (chronological, high level)
 
@@ -219,3 +274,33 @@ Material/Project workspaces" as **not started**, not "done", going forward.
    Supabase API, only GitHub — so both are handed off as manual steps.
 8. This update: corrected the Machine/Raw Material/Project wiring claim
    inherited from the previous version of this file.
+9. User ran `supabase-auth-rls-migration.sql` and created the first user
+   accounts via the Supabase dashboard (Authentication → Users). Confirmed
+   in production: visiting ekms.vercel.app now redirects to
+   `/login?redirectTo=%2F` instead of loading the app straight through.
+10. Found and fixed two bugs in the invite/password-recovery flow, both
+    surfaced by the user actually testing it end-to-end:
+    - The Supabase project's **Site URL** was still `localhost:3000`, so
+      every invite/recovery email linked to a dead address. Fixed by the
+      user in the Supabase dashboard (Authentication → URL Configuration →
+      Site URL = `https://ekms.vercel.app/login`, plus a
+      `https://ekms.vercel.app/**` entry in Redirect URLs).
+    - `/login` had no UI to handle the `#access_token=...&type=invite` (or
+      `type=recovery`) hash those emails link to — it just showed the
+      normal sign-in form with a raw token dangling in the URL. Added
+      invite/recovery detection + a "set your password" form to
+      `src/app/login/page.tsx`.
+    - Bigger bug: `middleware.ts` was redirecting any already-authenticated
+      request away from `/login` server-side — including one carrying a
+      fresh invite/recovery token, since URL hashes never reach the server.
+      Net effect: opening someone else's invite link in a browser that
+      still had your own session active silently dropped you into the app
+      as *yourself*, discarding their token with no error. Fixed by moving
+      the "already signed in → skip /login" nicety client-side (gated on
+      not being in the middle of an invite/recovery flow) — see
+      `src/lib/supabase-middleware.ts` for the full explanation left
+      in-code.
+11. Wired the 6 aggregation dashboards (Command Center, Analytics, Costing,
+    Finance, AI Knowledge, AI Copilot) — see item 8 in "Current state"
+    above for the full breakdown and the financial-data caveat that shaped
+    the approach.
