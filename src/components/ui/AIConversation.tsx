@@ -33,10 +33,13 @@ export function AIConversation({
   turns,
   onSend,
   contextLabel,
+  loading = false,
 }: {
   turns: ChatTurn[];
   onSend: (message: string) => void;
   contextLabel?: string;
+  /** Disables the input and shows a thinking indicator while a response is in flight. */
+  loading?: boolean;
 }) {
   return (
     <div className="flex h-full flex-col">
@@ -83,9 +86,18 @@ export function AIConversation({
             </div>
           </div>
         ))}
+        {loading && (
+          <div className="flex justify-start">
+            <div className="max-w-[85%] rounded-xl bg-surface-sunken px-4 py-2.5 text-sm text-ink-muted">
+              <span className="inline-flex items-center gap-1.5">
+                <Sparkles size={14} className="animate-pulse text-ai" /> Thinking…
+              </span>
+            </div>
+          </div>
+        )}
       </div>
       <div className="mt-3">
-        <PromptInput onSubmit={onSend} />
+        <PromptInput onSubmit={onSend} disabled={loading} />
       </div>
     </div>
   );

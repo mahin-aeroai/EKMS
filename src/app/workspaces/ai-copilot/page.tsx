@@ -19,16 +19,8 @@ interface CopilotContext {
 export default function AICopilotPage() {
   const { toast } = useToast();
   const [context, setContext] = useState<CopilotContext | null>(null);
-  const [turns, setTurns] = useState<ChatTurn[]>([
-    { id: "t1", role: "user", content: "What's blocking the IKEA Wardrobe Program right now?" },
-    {
-      id: "t2",
-      role: "assistant",
-      content: "The tooling vendor has requested a 1-week extension on the mold cavity revision. That shift would push the molding start into Machine M-14's predicted maintenance window — worth resolving the tooling timeline before locking the schedule.",
-      citations: ["Project Workspace — IKEA Wardrobe Program", "Machine M-14 maintenance forecast"],
-      confidence: "high",
-    },
-  ]);
+  const [turns, setTurns] = useState<ChatTurn[]>([]);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -43,17 +35,38 @@ export default function AICopilotPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function handleSend(message: string) {
-    setTurns((t) => [
-      ...t,
-      { id: crypto.randomUUID(), role: "user", content: message },
-      {
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: "This is a demo response — in production this answer would be grounded in live data across every connected module, with full citations.",
-        confidence: "low",
-      },
-    ]);
+  async function handleSend(message: string) {
+    const userTurn: ChatTurn = { id: crypto.randomUUID(), role: "user", content: message };
+    const history = [...turns, userTurn];
+    setTurns(history);
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/ai-copilot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: history.map((t) => ({ role: t.role, content: t.content })) }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        if (data.error === "not_configured") {
+          toast("warning", "AI Copilot isn't set up yet — add ANTHROPIC_API_KEY in Vercel to enable it.");
+        } else {
+          toast("danger", data.message ?? "The AI Copilot couldn't answer that — try again.");
+        }
+        return;
+      }
+
+      setTurns((t) => [
+        ...t,
+        { id: crypto.randomUUID(), role: "assistant", content: data.content, citations: data.citations },
+      ]);
+    } catch {
+      toast("danger", "Couldn't reach the AI Copilot — check your connection and try again.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -72,7 +85,7 @@ export default function AICopilotPage() {
             </div>
             <p className="mt-0.5 text-sm text-ink-secondary">Executive — the same assistant available from every workspace, with full company context</p>
             <div className="mt-2 flex flex-wrap gap-1.5">
-              <Tag aiSuggested>Conversation below is illustrative — real LLM grounding is a separate integration phase</Tag>
+              <Tag aiSuggested>Grounded in live Supabase data via Claude tool use — ask about a real customer, job order, machine, or material</Tag>
             </div>
           </div>
         </div>
@@ -85,7 +98,7 @@ export default function AICopilotPage() {
       </div>
 
       <div className="h-[520px] rounded-lg border border-line bg-surface p-2">
-        <AIConversation turns={turns} onSend={handleSend} contextLabel="Enterprise-wide" />
+        <AIConversation turns={turns} onSend={handleSend} contextLabel="Enterprise-wide" loading={loading} />
       </div>
     </div>
   );
