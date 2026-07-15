@@ -67,14 +67,21 @@ over what the code actually does again.
    uses the full 6-tab Universal Workspace Pattern (Overview / Insights /
    Timeline / Documents / Relationships / Activity), with a Server/Client
    split matching the Customer workspace's original pattern (see
-   `src/lib/supabase-server.ts`). **All 4 are now wired to Supabase** as of
-   this session (previously only Customer was — see correction above, which
-   is now resolved): the stat row, a real spec/info panel, and the Activity
-   tab (comments + approvals, writable) are real for all 4. Insights/
-   Timeline/Documents/Relationships remain illustrative sample content on
-   every one of them — deliberately out of scope, since there's no sensor
-   telemetry, consumption/downtime log, budget ledger, or document storage
-   backing those tabs.
+   `src/lib/supabase-server.ts`). **All 4 have wired *code* as of this
+   session** (previously only Customer did — see correction above): the
+   stat row, a real spec/info panel, and the Activity tab (comments +
+   approvals, writable) are real for all 4. **BUT** — the `machines`,
+   `raw_materials`, and `projects` tables themselves turned out not to
+   exist in production at all (confirmed by the user hitting
+   `relation "machines" does not exist`), so Machine/Raw Material/Project
+   were showing the graceful "couldn't load" error, not real data, until
+   `supabase-machine-rawmaterial-project-schema.sql` gets run — **check
+   it's actually been run before assuming these 3 workspaces show
+   anything.** Insights/Timeline/Documents/Relationships remain
+   illustrative sample content on every one of the 4 workspaces —
+   deliberately out of scope, since there's no sensor telemetry,
+   consumption/downtime log, budget ledger, or document storage backing
+   those tabs.
    - Server pages (`src/app/workspaces/{customer,machine,raw-material,project}/page.tsx`)
      fetch the most recently created row from `customers`/`machines`/
      `raw_materials`/`projects` (`order by created_at desc limit 1`) rather
@@ -216,13 +223,24 @@ over what the code actually does again.
   (`getCount`, `getCountWhere`, `groupCount`, `groupSum`, `statusDonutData`,
   `formatCrore`) used by all 6 aggregation dashboards.
 - SQL schema files (not committed to the repo, delivered separately to the
-  user and already run against the live Supabase project):
+  user):
   - Customer workspace schema (customer_contacts, customer_comments,
-    customer_approvals, etc.) — run first, earliest phase.
-  - Machine / Raw Material / Project workspace schemas — tables likely exist
-    (interfaces reference them) but nothing in the app queries them yet.
+    customer_approvals, etc.) — run first, earliest phase. Live in production.
   - `supabase-remaining-modules-schema.sql` — the 16-table schema for the
-    lighter modules listed above. Already run against production.
+    lighter modules listed above. Live in production.
+  - `supabase-machine-rawmaterial-project-schema.sql` — **the correction to
+    another wrong assumption.** The previous version of this file said the
+    Machine/Raw Material/Project tables "likely exist" — they did not.
+    Confirmed by the user hitting `ERROR: 42P01: relation "machines" does
+    not exist` when running `import-machines.sql`. This file creates all 9
+    tables (machines/raw_materials/projects + each one's
+    `_comments`/`_approvals` sub-tables) with authenticated-only RLS baked
+    in from the start (unlike the older tables, which started wide-open and
+    needed `supabase-auth-rls-migration.sql` as a second pass, auth already
+    existed by the time these were created). Validated against a real local
+    Postgres instance (idempotent re-run + a downstream import both
+    succeeded) before being handed to the user — **confirm it's actually
+    been run before trusting that these 3 workspaces load anything.**
 
 ## Working conventions established in this project
 
