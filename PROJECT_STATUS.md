@@ -687,3 +687,28 @@ over what the code actually does again.
       session; **the user should send a real test message once
       `ANTHROPIC_API_KEY` is set in Vercel and report back if anything
       looks wrong.**
+
+21. User's first real test of the AI Copilot surfaced a genuine bug: asked
+    for ITC Limited's sales figures, got Rs2.35L; the user's own Excel
+    said Rs72.63L. Investigated using the original source files still on
+    hand (Sales_day_book...xlsx) rather than guessing — confirmed the
+    underlying data was actually correct and complete (ITC's ~33
+    site-level accounts total ~Rs86L in Q1 revenue, matching both
+    `import-customers.sql` and `backfill-q1-revenue.sql` correctly). The
+    bug was entirely in the AI Copilot's `search_customers` tool: no
+    `ORDER BY` on a name search that can match dozens of rows (like
+    "ITC"), capped at a small limit, so it silently returned an arbitrary
+    low-value slice and Claude summed only what it saw. Also fixed in the
+    same pass: Claude was writing markdown tables the plain-text chat UI
+    can't render (system prompt now says so explicitly, and message
+    rendering got `whitespace-pre-line` so line breaks in lists actually
+    show). Real fix for the totals bug: `search_customers` and
+    `search_job_orders` now run two Supabase queries — one unlimited
+    aggregate (true SUM/COUNT across every match) and one value-sorted
+    top-20 for detail — and both the tool descriptions and system prompt
+    tell Claude to always use the aggregate fields for sum/total questions
+    rather than adding up the capped list itself. This is the first bug
+    caught in production this session by the user actually using a
+    feature rather than by validation before handoff — a good reminder
+    that PGlite/build/lint validation catches structural problems, not
+    "does this specific tool call return a materially misleading answer."
