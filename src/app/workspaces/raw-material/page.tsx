@@ -5,13 +5,15 @@ import { RawMaterialWorkspaceClient } from "@/components/workspaces/RawMaterialW
 // Always fetch fresh data from Supabase — this workspace is no longer a static demo.
 export const dynamic = "force-dynamic";
 
+const DEMO_MATERIAL_CODE = "RM-11001"; // Frontlit Flex, real imported raw material, core signage substrate
+
 export default async function RawMaterialWorkspacePage() {
   const supabase = await createServerSupabaseClient();
 
   const { data: rows, error: materialError } = await supabase
     .from("raw_materials")
     .select("*")
-    .order("created_at", { ascending: false })
+    .eq("code", DEMO_MATERIAL_CODE)
     .limit(1);
 
   const material = rows?.[0] as RawMaterialRow | undefined;

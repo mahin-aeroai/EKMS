@@ -5,13 +5,15 @@ import { MachineWorkspaceClient } from "@/components/workspaces/MachineWorkspace
 // Always fetch fresh data from Supabase — this workspace is no longer a static demo.
 export const dynamic = "force-dynamic";
 
+const DEMO_MACHINE_CODE = "MC-HYD-001"; // Vutek GS 3250 LX Pro, Unit 1 — Hyderabad, real imported machine
+
 export default async function MachineWorkspacePage() {
   const supabase = await createServerSupabaseClient();
 
   const { data: rows, error: machineError } = await supabase
     .from("machines")
     .select("*")
-    .order("created_at", { ascending: false })
+    .eq("code", DEMO_MACHINE_CODE)
     .limit(1);
 
   const machine = rows?.[0] as MachineRow | undefined;
