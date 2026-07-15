@@ -1,4 +1,5 @@
-import { supabase, type CustomerRow } from "@/lib/supabase";
+import { type CustomerRow } from "@/lib/supabase";
+import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { CustomerWorkspaceClient } from "@/components/workspaces/CustomerWorkspaceClient";
 
 // Always fetch fresh data from Supabase — this workspace is no longer a static demo.
@@ -7,6 +8,8 @@ export const dynamic = "force-dynamic";
 const DEMO_CUSTOMER_CODE = "CUST-MU-002104";
 
 export default async function CustomerWorkspacePage() {
+  const supabase = await createServerSupabaseClient();
+
   const { data: customer, error: customerError } = await supabase
     .from("customers")
     .select("*")

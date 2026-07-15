@@ -25,7 +25,9 @@ Open http://localhost:3000. Switch themes (Light / Dark / Enterprise) from the t
 every screen re-renders live since nothing is hardcoded to a theme.
 
 You'll need a `.env.local` with your Supabase URL and anon key for the workspace pages
-to load real data (see `src/lib/supabase.ts`).
+to load real data (see `src/lib/supabase.ts`). The app requires sign-in — visit
+`/login` and use an account created in the Supabase dashboard (Authentication →
+Users → Add user). There's no self-signup by design.
 
 ## What's here
 
@@ -47,8 +49,10 @@ to load real data (see `src/lib/supabase.ts`).
   Workspace Pattern with a Server/Client component split; the rest are lighter
   single-page modules. See `PROJECT_STATUS.md` for which are wired to Supabase vs
   still sample data.
-- `src/lib/supabase.ts` — the shared Supabase client and every workspace row-type
-  definition.
+- `src/lib/supabase.ts` — the shared browser Supabase client and every workspace
+  row-type definition. `src/lib/supabase-server.ts` is the equivalent for Server
+  Components; `middleware.ts` + `src/lib/supabase-middleware.ts` refresh the auth
+  session and redirect signed-out users to `/login`.
 
 ## Verified
 

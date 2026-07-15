@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createBrowserClient } from "@supabase/ssr";
 import type { BadgeStatus } from "@/components/ui/Badge";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -12,14 +12,19 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 /**
- * Single shared Supabase client. Safe to use in both Server Components (for
- * initial data fetches) and Client Components (for interactive writes —
- * comments, approvals, etc.) because this project has no auth system yet:
- * every table is protected by permissive RLS policies scoped to the anon key.
- * Tighten the RLS policies (and likely split this into a server-only client
- * using a service role key) once authentication is added.
+ * Shared browser-safe Supabase client — for Client Components ("use client")
+ * only. Built with createBrowserClient from @supabase/ssr so it automatically
+ * reads/writes the auth session cookie set by /login and refreshed by
+ * middleware.ts. Every read/write from this client runs as the signed-in
+ * user, which matters now that RLS policies require
+ * `auth.role() = 'authenticated'` instead of being wide open.
+ *
+ * Server Components must NOT import this — they need a per-request client
+ * that can see the incoming request's cookies. Use
+ * `createServerSupabaseClient()` from "@/lib/supabase-server" instead (see
+ * src/app/workspaces/customer/page.tsx for the pattern).
  */
-export const supabase = createClient(supabaseUrl ?? "", supabaseAnonKey ?? "");
+export const supabase = createBrowserClient(supabaseUrl ?? "", supabaseAnonKey ?? "");
 
 export interface CustomerRow {
   id: string;

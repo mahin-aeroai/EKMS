@@ -42,9 +42,10 @@ import { Sidebar, type SidebarSection } from "@/components/ui/Sidebar";
 import { TopNav } from "@/components/ui/TopNav";
 import { CommandPalette, type Command } from "@/components/ui/CommandPalette";
 import { useToast } from "@/components/ui/Notifications";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Drawer } from "@/components/ui/Drawer";
 import { AIConversation, type ChatTurn } from "@/components/ui/AIConversation";
+import { supabase } from "@/lib/supabase";
 
 const NAV: SidebarSection[] = [
   {
@@ -140,8 +141,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { toast } = useToast();
   const [aiOpen, setAiOpen] = useState(false);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setUserEmail(data.user?.email ?? null));
+    const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUserEmail(session?.user?.email ?? null);
+    });
+    return () => subscription.subscription.unsubscribe();
+  }, []);
+
+  async function handleSignOut() {
+    await supabase.auth.signOut();
+    router.push("/login");
+    router.refresh();
+  }
 
   const activeId = NAV.flatMap((s) => s.items).find((i) => i.href === pathname)?.id ?? "home";
+
+  // /login renders its own full-page layout — no sidebar/topnav chrome.
+  if (pathname === "/login") {
+    return <>{children}</>;
+  }
 
   const navigateCommands: Command[] = NAV.flatMap((s) =>
     s.items.map((item) => ({
@@ -179,7 +200,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen flex-col">
-      <TopNav onOpenAI={() => setAiOpen(true)} notificationCount={3} />
+      <TopNav onOpenAI={() => setAiOpen(true)} notificationCount={3} userEmail={userEmail} onSignOut={handleSignOut} />
       <div className="flex flex-1 overflow-hidden">
         <Sidebar sections={NAV} activeId={activeId} onNavigate={(id) => {
           const item = NAV.flatMap((s) => s.items).find((i) => i.id === id);
