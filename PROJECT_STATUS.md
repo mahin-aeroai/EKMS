@@ -1,7 +1,7 @@
 # MMDI ONE — Project Status
 
-Last updated: 15 July 2026 (session: added authentication + wired the 6
-aggregation dashboards)
+Last updated: 15 July 2026 (session: auth + all 6 dashboards + all 4
+flagship workspaces wired, plus real customer/revenue data imported)
 
 This file exists so a new chat session (or a new contributor) can pick up this
 project without re-deriving context. Read this before making changes.
@@ -12,28 +12,32 @@ An AI-native enterprise operating platform for MMDI (a packaging/printing
 manufacturer). Built by Srinivas and his son Mahin as a knowledge-share
 project. Currently: a Next.js app implementing a full component design
 system plus 26 "Intelligent Workspace" modules covering the whole MDI-ONE
-navigation tree, gated behind Supabase Auth, with 23 of those modules wired
-to a live Supabase backend in some form (17 straightforward + 6 aggregation
-dashboards rebuilt around real cross-table data — see below for what that
-means for each one).
+navigation tree, gated behind Supabase Auth, with 26 of those modules wired
+to a live Supabase backend in some form (16 straightforward + 6 aggregation
+dashboards rebuilt around real cross-table data + all 4 flagship workspaces
+— see below for what "wired" means for each). The `customers` table also
+holds 1,687 real MMDI accounts (imported from a Tally export + a Q1 sales
+register), not just seed/demo rows.
 
 - Live demo: https://ekms.vercel.app
 - Repo: https://github.com/mahin-aeroai/EKMS (main branch, auto-deploys to Vercel)
 - Stack: Next.js 16 (App Router) + React 19 + TypeScript + Tailwind CSS v4 + Supabase
 
-## Correction from the last handoff
+## Correction from an earlier handoff (now resolved)
 
-The previous version of this file claimed all 4 flagship workspaces (Customer,
-Machine, Raw Material, Project) were wired to Supabase. That was wrong — only
-**Customer** actually is. The commit that claimed to wire Machine/Raw
-Material/Project ("Connect Machine, Raw Material, and Project workspaces to
-Supabase", `4e1d876`) only touched `customer/page.tsx` and added the
-`CustomerWorkspaceClient.tsx` split; it also added the `MachineRow`,
-`RawMaterialRow`, `ProjectRow` (and their comment/approval) TypeScript
-interfaces to `src/lib/supabase.ts`, but the Machine/Raw Material/Project
-`page.tsx` files themselves are still 100% client-side sample data with no
-`supabase.from(...)` calls anywhere in them. Treat "wire Machine/Raw
-Material/Project workspaces" as **not started**, not "done", going forward.
+An earlier version of this file claimed all 4 flagship workspaces (Customer,
+Machine, Raw Material, Project) were wired to Supabase. That was wrong at the
+time — only **Customer** actually was. The commit that claimed to wire
+Machine/Raw Material/Project ("Connect Machine, Raw Material, and Project
+workspaces to Supabase", `4e1d876`) only touched `customer/page.tsx` and
+added the `CustomerWorkspaceClient.tsx` split; it also added the
+`MachineRow`, `RawMaterialRow`, `ProjectRow` (and their comment/approval)
+TypeScript interfaces to `src/lib/supabase.ts`, but the Machine/Raw
+Material/Project `page.tsx` files themselves stayed 100% client-side sample
+data with no `supabase.from(...)` calls anywhere in them for several
+sessions. **This is now actually fixed** — see item 3 in "Current state"
+below. Leaving this note here so nobody re-trusts a stale commit message
+over what the code actually does again.
 
 ## Current state (done, verified working)
 
@@ -60,11 +64,28 @@ Material/Project workspaces" as **not started**, not "done", going forward.
      `onAuthStateChange`), show their initials in the top-right avatar with a
      sign-out menu, and skip the sidebar/topnav chrome entirely on `/login`.
 3. **4 flagship workspaces** — Customer, Machine, Raw Material, Project — each
-   *designed* to use the full 6-tab Universal Workspace Pattern (Overview /
-   Insights / Timeline / Documents / Relationships / Activity), but **only
-   Customer is actually wired to Supabase** (Overview + Activity tabs; the
-   other 4 tabs are sample content there too). Machine/Raw Material/Project
-   are entirely sample data — see correction above.
+   uses the full 6-tab Universal Workspace Pattern (Overview / Insights /
+   Timeline / Documents / Relationships / Activity), with a Server/Client
+   split matching the Customer workspace's original pattern (see
+   `src/lib/supabase-server.ts`). **All 4 are now wired to Supabase** as of
+   this session (previously only Customer was — see correction above, which
+   is now resolved): the stat row, a real spec/info panel, and the Activity
+   tab (comments + approvals, writable) are real for all 4. Insights/
+   Timeline/Documents/Relationships remain illustrative sample content on
+   every one of them — deliberately out of scope, since there's no sensor
+   telemetry, consumption/downtime log, budget ledger, or document storage
+   backing those tabs.
+   - Server pages (`src/app/workspaces/{customer,machine,raw-material,project}/page.tsx`)
+     fetch the most recently created row from `customers`/`machines`/
+     `raw_materials`/`projects` (`order by created_at desc limit 1`) rather
+     than a hardcoded demo code — works regardless of what's actually
+     seeded, and shows a graceful error pointing at the schema file if the
+     table is empty or missing.
+   - Customer workspace specifically is pointed at a real imported customer
+     — `C03739` (Apple India Pvt Ltd - Bangalore, the real customer with the
+     highest Q1 revenue and a real contact on file) — not the original
+     fictional "Reliance Retail Ltd" demo record, which is still sitting in
+     the table under code `CUST-MU-002104` unused.
 4. **22 lighter workspace modules** covering the rest of the MDI-ONE IA
    (Executive, Customers, Operations, Manufacturing, Knowledge, People,
    Finance, Compliance, Administration groups in the sidebar nav). Pattern:
@@ -145,8 +166,6 @@ Material/Project workspaces" as **not started**, not "done", going forward.
 - **No role/permission granularity.** Every signed-in user can read/write
   every table. If MMDI wants viewer-vs-editor or department-scoped access
   later, that's a further RLS/`profiles` table phase.
-- **Machine, Raw Material, Project workspaces are not wired to Supabase**
-  (see correction above) — this was previously miscategorized as done.
 - **No real financial/costing data in the schema at all.** Quote/contract/
   CRM `value` fields are pre-formatted display strings, not numbers; the 16
   lighter-module tables have no timestamps. The Costing and Finance
@@ -155,7 +174,14 @@ Material/Project workspaces" as **not started**, not "done", going forward.
   numbers to be real, that needs an actual costing/finance ledger schema
   first.
 - The 4 flagship workspaces' Insights/Timeline/Documents/Relationships tabs
-  are sample content everywhere, including on the wired Customer workspace.
+  are sample content everywhere, on all 4 now-wired workspaces — there's no
+  telemetry/consumption/downtime/budget-ledger/document-storage schema to
+  back them with yet.
+- Machine, Raw Material, and Project workspaces are pointed at *whichever
+  row happens to be most recently created* in their table (no known real
+  demo record was picked, unlike Customer's `C03739`) — worth pointing them
+  at specific real records once you know which machine/material/project
+  should be the go-to demo one.
 - No real AI/LLM integration anywhere yet — all "AI insight" cards are
   static or lightly-templated copy, not generated by a model. AI Copilot's
   chat is still an illustrative demo.
@@ -226,13 +252,14 @@ Material/Project workspaces" as **not started**, not "done", going forward.
 
 ## Natural next steps (not started, pick one)
 
-1. **Actually wire Machine, Raw Material, and Project workspaces** to
-   Supabase (this was previously thought done — it isn't). Follow the
-   Customer workspace's Server/Client split pattern.
+1. **Point Machine/Raw Material/Project at specific real demo records**
+   (like Customer's `C03739`) once you know which ones should be the
+   go-to examples, instead of "whichever row is most recently created."
 2. **Add role/permission granularity** (a `profiles` table + role-scoped RLS)
    if "any signed-in user can do anything" turns out to be too permissive.
 3. **Wire the remaining 4 tabs per flagship workspace** (Insights, Timeline,
-   Documents, Relationships) to real data.
+   Documents, Relationships) to real data — needs telemetry/consumption/
+   downtime/budget-ledger/document-storage tables that don't exist yet.
 4. **Real AI integration** — replace static/templated "AI insight" card
    copy with actual model-generated insights, and give AI Copilot's chat
    real grounding (would need an LLM API call layer).
@@ -243,6 +270,11 @@ Material/Project workspaces" as **not started**, not "done", going forward.
    Finance dashboards to show actual revenue/margin/DSO/cost-variance numbers
    instead of the real-but-adjacent metrics (portfolio LTV, PO pipeline,
    supplier/SKU status) they show today.
+8. **Import more real data** (machines, raw materials, projects, quotes,
+   contracts, etc.) — the pattern from the Customer Master / sales register
+   import (generate SQL, validate against a real local Postgres instance
+   before handing it over, run in the Supabase SQL editor) extends to any
+   of these.
 
 ## Session history (chronological, high level)
 
@@ -304,3 +336,43 @@ Material/Project workspaces" as **not started**, not "done", going forward.
     Finance, AI Knowledge, AI Copilot) — see item 8 in "Current state"
     above for the full breakdown and the financial-data caveat that shaped
     the approach.
+12. Imported real customer data from two files the user uploaded:
+    - `Customer Master.xlsx` (a Tally export, 994 rows) → 991 real
+      customer/vendor accounts inserted into `customers` +  800 contacts
+      into `customer_contacts` (`import-customers.sql`). Excluded a
+      ledger-group header row, an accounting-adjustment row, and the Grand
+      Total footer. lifetime_value/open_orders/on_time_delivery/health_score
+      were left at 0 — nothing in this file backs them.
+    - `Sales_day_book from 1st Apr 2026 to 30th June 2026.xlsx` (Q1 FY26-27,
+      9,274 line items / 4,376 invoices) → backfilled `lifetime_value` with
+      real Q1 revenue (`backfill-q1-revenue.sql`). Important finding: only
+      154 of the 850 customers who actually transacted this quarter existed
+      in the Customer Master (77% of revenue, ₹21.1 Cr of ₹27.3 Cr, belonged
+      to real companies — Maruti Suzuki, Shoppers Stop, Godrej & Boyce, IKEA,
+      Decathlon, etc. — missing from that file entirely, not a matching
+      bug). Per the user's choice, created thinner records for all 696
+      rather than dropping their revenue. `customers` now has 1,687 rows
+      total. Both SQL files were generated then **actually executed against
+      a real local Postgres instance** (`@electric-sql/pglite`, no root/
+      Docker needed) to verify they run cleanly and produce the right row
+      counts/FK integrity before handing them to the user — worth doing
+      again for any future data import, it caught nothing this time but
+      it's cheap insurance the sandbox's lack of live Supabase access makes
+      otherwise impossible.
+13. Repointed the Customer workspace + AI Knowledge's relationship graph
+    from the fictional `CUST-MU-002104` demo record to a real imported
+    customer, `C03739` (Apple India Pvt Ltd - Bangalore — highest Q1
+    revenue among customers that also have a real contact on file). Fixed
+    the Relationships tab's graph, whose center node was hardcoded to
+    "Reliance Retail Ltd" regardless of which customer loaded. Note: this
+    customer has no seeded `customer_comments`/`customer_approvals`, so the
+    Activity tab's approval panel doesn't render and the comment thread
+    starts empty — expected now that it's real data, not a bug.
+14. Wired Machine, Raw Material, and Project workspaces to Supabase,
+    finally actually closing out the gap the "Correction" section at the
+    top of this file has been tracking — see item 3 in "Current state" for
+    the details. Each fetches whichever row was most recently created in
+    its table (no specific demo record was chosen, unlike Customer's
+    `C03739`) — a reasonable next step is picking real go-to examples for
+    these three too, once there's more than one row in each table to
+    choose from.
