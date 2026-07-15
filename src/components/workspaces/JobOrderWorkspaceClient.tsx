@@ -30,9 +30,20 @@ function toDisplayComment(row: JobOrderCommentRow): Comment {
   return { id: row.id, author: row.author, content: row.content, time: timeAgo(row.created_at), resolved: row.resolved };
 }
 
+const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// Deliberately not using toLocaleDateString: Node's ICU data (server render)
+// and the browser's (client hydration) can format the same date differently
+// depending on the runtime's ICU build, which produces a text mismatch
+// between server-rendered and client-rendered HTML and can break hydration
+// for the whole page. Parsing the "YYYY-MM-DD" string directly and
+// formatting by hand is deterministic across both environments.
 function formatDate(d: string | null) {
   if (!d) return "—";
-  return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  const [year, month, day] = d.slice(0, 10).split("-");
+  const monthIndex = Number(month) - 1;
+  if (!year || !MONTH_ABBR[monthIndex] || !day) return d;
+  return `${day} ${MONTH_ABBR[monthIndex]} ${year}`;
 }
 
 function buildGraph(jobOrder: JobOrderRow): { nodes: GraphNode[]; edges: GraphEdge[] } {
