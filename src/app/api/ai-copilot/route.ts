@@ -26,12 +26,14 @@ const MODEL = "claude-sonnet-5";
 const MAX_TOKENS = 1024;
 const MAX_TOOL_ITERATIONS = 5;
 
-const SYSTEM_PROMPT = `You are the AI Copilot inside MMDI ONE, an internal operating platform for MMDI, an Indian packaging/printing manufacturer. Answer questions about customers, job orders, machines, and raw materials using the tools available to you — never guess or invent data. If a tool returns no results, say so plainly rather than making something up. Keep answers concise (2-4 sentences unless the question calls for a list). When you reference a specific record, name it (e.g. "Job Order 7455" or "Apple India Pvt Ltd - Bangalore") so the person can look it up themselves.`;
+const SYSTEM_PROMPT = `You are the AI Copilot inside MMDI ONE, an internal operating platform for MMDI, an Indian packaging/printing manufacturer. Answer questions about customers, job orders, machines, and raw materials using the tools available to you — never guess or invent data. If a tool returns no results, say so plainly rather than making something up. Keep answers concise (2-4 sentences unless the question calls for a list). When you reference a specific record, name it (e.g. "Job Order 7455" or "Apple India Pvt Ltd - Bangalore") so the person can look it up themselves.
+
+Formatting: the chat UI renders your reply as plain text only — no markdown. Never use markdown tables (| pipes |), headers (#), or bold (**). For lists, use a simple numbered or dashed list with one item per line, or short plain sentences. Keep it readable as plain prose.`;
 
 const TOOLS: Tool[] = [
   {
     name: "search_customers",
-    description: "Search customers by name (partial match). Returns code, name, region, tier, account owner, lifetime value, and open orders for up to 10 matches.",
+    description: "Search customers by name (partial match). Returns code, name, region, tier, account owner, lifetime value, and open orders for up to 20 matches, sorted by whatever the database returns first (not ranked by relevance) — if there might be more than 20, say so and suggest narrowing the search.",
     input_schema: {
       type: "object",
       properties: { query: { type: "string", description: "Text to search for in the customer name" } },
@@ -49,7 +51,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: "search_job_orders",
-    description: "Search job orders by customer name (partial match) or job order code. Returns up to 10 matches with status, dates, machine, and value.",
+    description: "Search job orders by customer name (partial match) or job order code. Returns up to 20 matches with status, dates, machine, and value.",
     input_schema: {
       type: "object",
       properties: { query: { type: "string", description: "Customer name or job order code to search for" } },
@@ -67,7 +69,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: "search_machines",
-    description: "Search machines by name or code (partial match). Returns up to 10 matches with line, status, and OEE.",
+    description: "Search machines by name or code (partial match). Returns up to 20 matches with line, status, and OEE.",
     input_schema: {
       type: "object",
       properties: { query: { type: "string", description: "Text to search for in the machine name or code" } },
@@ -76,7 +78,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: "search_raw_materials",
-    description: "Search raw materials by name or category (partial match). Returns up to 10 matches with stock level, reorder point, and category.",
+    description: "Search raw materials by name or category (partial match). Returns up to 20 matches with stock level, reorder point, and category.",
     input_schema: {
       type: "object",
       properties: { query: { type: "string", description: "Text to search for in the material name or category" } },
@@ -109,7 +111,7 @@ async function executeToolCall(
         .from("customers")
         .select("code, name, region, tier, account_owner, lifetime_value, open_orders")
         .ilike("name", `%${query}%`)
-        .limit(10);
+        .limit(20);
       if (error) return { result: { error: error.message } };
       return { result: data, citation: data?.length ? `Customer search: "${query}"` : undefined };
     }
@@ -130,7 +132,7 @@ async function executeToolCall(
         .from("job_orders")
         .select("code, name, customer_name, status, order_date, primary_machine, total_value, total_sqft")
         .or(`customer_name.ilike.%${query}%,code.ilike.%${query}%`)
-        .limit(10);
+        .limit(20);
       if (error) return { result: { error: error.message } };
       return { result: data, citation: data?.length ? `Job order search: "${query}"` : undefined };
     }
@@ -150,7 +152,7 @@ async function executeToolCall(
         .from("machines")
         .select("code, name, line, status, oee, vendor, model")
         .or(`name.ilike.%${query}%,code.ilike.%${query}%`)
-        .limit(10);
+        .limit(20);
       if (error) return { result: { error: error.message } };
       return { result: data, citation: data?.length ? `Machine search: "${query}"` : undefined };
     }
@@ -160,7 +162,7 @@ async function executeToolCall(
         .from("raw_materials")
         .select("code, name, category, current_stock, reorder_point, unit_cost")
         .or(`name.ilike.%${query}%,category.ilike.%${query}%`)
-        .limit(10);
+        .limit(20);
       if (error) return { result: { error: error.message } };
       return { result: data, citation: data?.length ? `Raw material search: "${query}"` : undefined };
     }

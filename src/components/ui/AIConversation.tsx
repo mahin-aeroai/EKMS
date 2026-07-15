@@ -76,7 +76,7 @@ export function AIConversation({
               {t.role === "assistant" && t.confidence === "low" && (
                 <p className="mb-1 text-xs italic text-warning">I&apos;m not fully sure — here&apos;s my best read:</p>
               )}
-              <p>{t.content}</p>
+              <p className="whitespace-pre-line">{t.content}</p>
               {t.citations && t.citations.length > 0 && <CitationCard sources={t.citations} className="mt-2" />}
               {t.role === "assistant" && (
                 <div className="mt-2 flex justify-end">
