@@ -1,32 +1,20 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { ShieldCheck } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
-import { Badge, type BadgeStatus } from "@/components/ui/Badge";
+import { Badge } from "@/components/ui/Badge";
 import { Tag } from "@/components/ui/Tag";
 import { StatCard, AICard } from "@/components/ui/Card";
 import { Table, type TableColumn } from "@/components/ui/Table";
 import { TreeView, type TreeNode } from "@/components/ui/TreeView";
 import { useToast } from "@/components/ui/Notifications";
+import { supabase, type ComplianceFindingRow } from "@/lib/supabase";
 
-interface Finding {
-  id: string;
-  item: string;
-  area: string;
-  status: BadgeStatus;
-  statusLabel: string;
-}
-
-const FINDINGS: Finding[] = [
-  { id: "1", item: "FSC chain-of-custody renewal", area: "Manufacturing", status: "warning", statusLabel: "Due in 45 days" },
-  { id: "2", item: "ISO 9001 surveillance audit", area: "Quality", status: "success", statusLabel: "Closed" },
-  { id: "3", item: "Fire safety certification", area: "Facilities", status: "danger", statusLabel: "Overdue" },
-];
-
-const COLUMNS: TableColumn<Finding>[] = [
+const COLUMNS: TableColumn<ComplianceFindingRow>[] = [
   { key: "item", header: "Item", sortable: true },
   { key: "area", header: "Area", sortable: true },
-  { key: "status", header: "Status", render: (r) => <Badge status={r.status}>{r.statusLabel}</Badge> },
+  { key: "status", header: "Status", render: (r) => <Badge status={r.status}>{r.status_label}</Badge> },
 ];
 
 const TREE: TreeNode[] = [
@@ -39,6 +27,23 @@ const TREE: TreeNode[] = [
 
 export default function CompliancePage() {
   const { toast } = useToast();
+  const [findings, setFindings] = useState<ComplianceFindingRow[] | null>(null);
+
+  useEffect(() => {
+    supabase
+      .from("compliance_findings")
+      .select("*")
+      .then(({ data, error }) => {
+        if (error) {
+          toast("danger", "Couldn't load compliance findings from Supabase");
+          return;
+        }
+        setFindings(data ?? []);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const overdue = findings?.filter((f) => f.status === "danger").length ?? 0;
 
   return (
     <div>
@@ -52,7 +57,7 @@ export default function CompliancePage() {
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-xl font-semibold text-ink">Compliance</h1>
-              <Badge status="danger">1 overdue finding</Badge>
+              <Badge status="danger">{findings ? `${overdue} overdue finding${overdue === 1 ? "" : "s"}` : "Loading…"}</Badge>
             </div>
             <p className="mt-0.5 text-sm text-ink-secondary">Company-wide certifications, audits, and open findings</p>
             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -81,7 +86,11 @@ export default function CompliancePage() {
           </AICard>
           <div className="rounded-lg border border-line bg-surface p-4">
             <h3 className="mb-3 text-sm font-semibold text-ink">Open findings</h3>
-            <Table columns={COLUMNS} rows={FINDINGS} onRowClick={(r) => toast("info", `Opened ${r.item}`)} />
+            {findings === null ? (
+              <p className="py-6 text-center text-sm text-ink-muted">Loading findings…</p>
+            ) : (
+              <Table columns={COLUMNS} rows={findings} onRowClick={(r) => toast("info", `Opened ${r.item}`)} />
+            )}
           </div>
         </div>
         <div className="rounded-lg border border-line bg-surface p-4">

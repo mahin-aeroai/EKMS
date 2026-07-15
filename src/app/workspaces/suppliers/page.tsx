@@ -1,39 +1,42 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Handshake } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
-import { Badge, type BadgeStatus } from "@/components/ui/Badge";
+import { Badge } from "@/components/ui/Badge";
 import { Tag } from "@/components/ui/Tag";
 import { StatCard, AICard } from "@/components/ui/Card";
 import { Table, type TableColumn } from "@/components/ui/Table";
 import { DonutChart } from "@/components/ui/Charts";
 import { useToast } from "@/components/ui/Notifications";
+import { supabase, type SupplierRow } from "@/lib/supabase";
 
-interface Supplier {
-  id: string;
-  name: string;
-  category: string;
-  onTime: string;
-  status: BadgeStatus;
-  statusLabel: string;
-}
-
-const SUPPLIERS: Supplier[] = [
-  { id: "1", name: "Cosmo Films Ltd", category: "Vinyl / Film", onTime: "91%", status: "success", statusLabel: "Approved" },
-  { id: "2", name: "UFlex Ltd", category: "Vinyl / Film", onTime: "88%", status: "success", statusLabel: "Approved" },
-  { id: "3", name: "Sumitomo Demag", category: "Machinery", onTime: "96%", status: "success", statusLabel: "Approved" },
-  { id: "4", name: "Regional Hardware Co.", category: "Hardware", onTime: "72%", status: "danger", statusLabel: "At Risk" },
-];
-
-const COLUMNS: TableColumn<Supplier>[] = [
+const COLUMNS: TableColumn<SupplierRow>[] = [
   { key: "name", header: "Supplier", sortable: true },
   { key: "category", header: "Category", sortable: true },
-  { key: "onTime", header: "On-Time Delivery", sortable: true },
-  { key: "status", header: "Status", render: (r) => <Badge status={r.status}>{r.statusLabel}</Badge> },
+  { key: "on_time", header: "On-Time Delivery", sortable: true },
+  { key: "status", header: "Status", render: (r) => <Badge status={r.status}>{r.status_label}</Badge> },
 ];
 
 export default function SuppliersPage() {
   const { toast } = useToast();
+  const [suppliers, setSuppliers] = useState<SupplierRow[] | null>(null);
+
+  useEffect(() => {
+    supabase
+      .from("suppliers")
+      .select("*")
+      .then(({ data, error }) => {
+        if (error) {
+          toast("danger", "Couldn't load suppliers from Supabase");
+          return;
+        }
+        setSuppliers(data ?? []);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const atRisk = suppliers?.filter((s) => s.status === "danger").length ?? 0;
 
   return (
     <div>
@@ -47,7 +50,7 @@ export default function SuppliersPage() {
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-xl font-semibold text-ink">Suppliers</h1>
-              <Badge status="warning">1 at risk</Badge>
+              <Badge status="warning">{suppliers ? `${atRisk} at risk` : "Loading…"}</Badge>
             </div>
             <p className="mt-0.5 text-sm text-ink-secondary">Manufacturing — approved supplier scorecards</p>
             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -60,7 +63,7 @@ export default function SuppliersPage() {
       <div className="my-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard label="Approved Suppliers" value="18" trend="flat" trendLabel="No change" />
         <StatCard label="On-Time Delivery Avg" value="89%" trend="down" trendLabel="-2 pts" />
-        <StatCard label="At-Risk Suppliers" value="1" trend="up" trendLabel="+1 this quarter" />
+        <StatCard label="At-Risk Suppliers" value={String(atRisk)} trend="up" trendLabel="+1 this quarter" />
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -76,7 +79,11 @@ export default function SuppliersPage() {
           </AICard>
           <div className="rounded-lg border border-line bg-surface p-4">
             <h3 className="mb-3 text-sm font-semibold text-ink">Supplier scorecards</h3>
-            <Table columns={COLUMNS} rows={SUPPLIERS} onRowClick={(r) => toast("info", `Opened ${r.name}`)} />
+            {suppliers === null ? (
+              <p className="py-6 text-center text-sm text-ink-muted">Loading suppliers…</p>
+            ) : (
+              <Table columns={COLUMNS} rows={suppliers} onRowClick={(r) => toast("info", `Opened ${r.name}`)} />
+            )}
           </div>
         </div>
         <div className="rounded-lg border border-line bg-surface p-4">

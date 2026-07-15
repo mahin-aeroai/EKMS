@@ -1,36 +1,41 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Truck } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
-import { Badge, type BadgeStatus } from "@/components/ui/Badge";
+import { Badge } from "@/components/ui/Badge";
 import { Tag } from "@/components/ui/Tag";
 import { StatCard, AICard } from "@/components/ui/Card";
 import { Table, type TableColumn } from "@/components/ui/Table";
 import { WorkflowTimeline } from "@/components/ui/WorkflowTimeline";
 import { useToast } from "@/components/ui/Notifications";
+import { supabase, type InstallationSiteRow } from "@/lib/supabase";
 
-interface Site {
-  id: string;
-  site: string;
-  customer: string;
-  status: BadgeStatus;
-  statusLabel: string;
-}
-
-const SITES: Site[] = [
-  { id: "1", site: "Mumbai DC-4", customer: "Reliance Retail Ltd", status: "success", statusLabel: "On Track" },
-  { id: "2", site: "Pune Store #12", customer: "IKEA India", status: "warning", statusLabel: "Delayed 2 days" },
-  { id: "3", site: "Bengaluru Hub", customer: "Godrej Interio", status: "success", statusLabel: "On Track" },
-];
-
-const COLUMNS: TableColumn<Site>[] = [
+const COLUMNS: TableColumn<InstallationSiteRow>[] = [
   { key: "site", header: "Site", sortable: true },
   { key: "customer", header: "Customer", sortable: true },
-  { key: "status", header: "Status", render: (r) => <Badge status={r.status}>{r.statusLabel}</Badge> },
+  { key: "status", header: "Status", render: (r) => <Badge status={r.status}>{r.status_label}</Badge> },
 ];
 
 export default function InstallationPage() {
   const { toast } = useToast();
+  const [sites, setSites] = useState<InstallationSiteRow[] | null>(null);
+
+  useEffect(() => {
+    supabase
+      .from("installation_sites")
+      .select("*")
+      .then(({ data, error }) => {
+        if (error) {
+          toast("danger", "Couldn't load installation sites from Supabase");
+          return;
+        }
+        setSites(data ?? []);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const delayed = sites?.filter((s) => s.status === "warning").length ?? 0;
 
   return (
     <div>
@@ -44,7 +49,7 @@ export default function InstallationPage() {
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-xl font-semibold text-ink">Installation</h1>
-              <Badge status="warning">1 site delayed</Badge>
+              <Badge status="warning">{sites ? `${delayed} site${delayed === 1 ? "" : "s"} delayed` : "Loading…"}</Badge>
             </div>
             <p className="mt-0.5 text-sm text-ink-secondary">Operations — field installation status across active sites</p>
             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -73,7 +78,11 @@ export default function InstallationPage() {
           </AICard>
           <div className="rounded-lg border border-line bg-surface p-4">
             <h3 className="mb-3 text-sm font-semibold text-ink">Active sites</h3>
-            <Table columns={COLUMNS} rows={SITES} onRowClick={(r) => toast("info", `Opened ${r.site}`)} />
+            {sites === null ? (
+              <p className="py-6 text-center text-sm text-ink-muted">Loading sites…</p>
+            ) : (
+              <Table columns={COLUMNS} rows={sites} onRowClick={(r) => toast("info", `Opened ${r.site}`)} />
+            )}
           </div>
         </div>
         <div className="rounded-lg border border-line bg-surface p-4">

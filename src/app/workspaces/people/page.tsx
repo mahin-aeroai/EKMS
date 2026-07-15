@@ -1,38 +1,39 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { UserRound } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
-import { Badge, type BadgeStatus } from "@/components/ui/Badge";
+import { Badge } from "@/components/ui/Badge";
 import { Tag } from "@/components/ui/Tag";
 import { StatCard, AICard } from "@/components/ui/Card";
 import { Table, type TableColumn } from "@/components/ui/Table";
 import { useToast } from "@/components/ui/Notifications";
+import { supabase, type EmployeeRow } from "@/lib/supabase";
 
-interface Employee {
-  id: string;
-  name: string;
-  role: string;
-  department: string;
-  status: BadgeStatus;
-  statusLabel: string;
-}
-
-const EMPLOYEES: Employee[] = [
-  { id: "1", name: "Priya Nair", role: "Account Owner / PM", department: "Sales & Projects", status: "success", statusLabel: "Active" },
-  { id: "2", name: "Arjun Rao", role: "Maintenance Lead", department: "Operations", status: "success", statusLabel: "Active" },
-  { id: "3", name: "Meera Kapoor", role: "Procurement Lead", department: "Manufacturing", status: "success", statusLabel: "Active" },
-  { id: "4", name: "Sanjay Iyer", role: "Finance Contact", department: "Finance", status: "warning", statusLabel: "On Leave" },
-];
-
-const COLUMNS: TableColumn<Employee>[] = [
+const COLUMNS: TableColumn<EmployeeRow>[] = [
   { key: "name", header: "Name", sortable: true },
   { key: "role", header: "Role", sortable: true },
   { key: "department", header: "Department", sortable: true },
-  { key: "status", header: "Status", render: (r) => <Badge status={r.status}>{r.statusLabel}</Badge> },
+  { key: "status", header: "Status", render: (r) => <Badge status={r.status}>{r.status_label}</Badge> },
 ];
 
 export default function PeoplePage() {
   const { toast } = useToast();
+  const [employees, setEmployees] = useState<EmployeeRow[] | null>(null);
+
+  useEffect(() => {
+    supabase
+      .from("employees")
+      .select("*")
+      .then(({ data, error }) => {
+        if (error) {
+          toast("danger", "Couldn't load employees from Supabase");
+          return;
+        }
+        setEmployees(data ?? []);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div>
@@ -74,7 +75,11 @@ export default function PeoplePage() {
         </AICard>
         <div className="rounded-lg border border-line bg-surface p-4">
           <h3 className="mb-3 text-sm font-semibold text-ink">Key personnel</h3>
-          <Table columns={COLUMNS} rows={EMPLOYEES} onRowClick={(r) => toast("info", `Opened ${r.name}`)} />
+          {employees === null ? (
+            <p className="py-6 text-center text-sm text-ink-muted">Loading employees…</p>
+          ) : (
+            <Table columns={COLUMNS} rows={employees} onRowClick={(r) => toast("info", `Opened ${r.name}`)} />
+          )}
         </div>
       </div>
     </div>

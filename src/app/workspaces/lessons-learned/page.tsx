@@ -1,14 +1,31 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Lightbulb } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { Tag } from "@/components/ui/Tag";
 import { StatCard, AICard, KnowledgeCard } from "@/components/ui/Card";
 import { useToast } from "@/components/ui/Notifications";
+import { supabase, type LessonLearnedRow } from "@/lib/supabase";
 
 export default function LessonsLearnedPage() {
   const { toast } = useToast();
+  const [lessons, setLessons] = useState<LessonLearnedRow[] | null>(null);
+
+  useEffect(() => {
+    supabase
+      .from("lessons_learned")
+      .select("*")
+      .then(({ data, error }) => {
+        if (error) {
+          toast("danger", "Couldn't load lessons learned from Supabase");
+          return;
+        }
+        setLessons(data ?? []);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div>
@@ -48,17 +65,17 @@ export default function LessonsLearnedPage() {
         >
           The tie-bar bearing failure pattern from NCR-2025-0442 matches 84% of Machine M-14&apos;s current vibration signature — the lesson below is directly relevant to the active predictive alert.
         </AICard>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <KnowledgeCard type="Lesson Learned" title="Tooling misalignment on M-14" source="NCR-2025-0442">
-            Root cause was a worn locating pin, not the operator error initially logged — replace pins every 6 months on this machine model.
-          </KnowledgeCard>
-          <KnowledgeCard type="Lesson Learned" title="Single-supplier risk on vinyl substrates" source="Procurement retro, Jun 2026">
-            Qualifying a second supplier ahead of a lead-time spike, rather than after, avoided a production gap on a prior program.
-          </KnowledgeCard>
-          <KnowledgeCard type="Engineering Note" title="ICC profile mismatch on proofing" source="Print Ops, June 2026">
-            Always verify the customer&apos;s supplied ICC profile against press calibration before running IKEA jobs.
-          </KnowledgeCard>
-        </div>
+        {lessons === null ? (
+          <p className="py-6 text-center text-sm text-ink-muted">Loading lessons…</p>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            {lessons.map((l) => (
+              <KnowledgeCard key={l.id} type={l.type} title={l.title} source={l.source ?? undefined}>
+                {l.content}
+              </KnowledgeCard>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { FileStack } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
@@ -7,9 +8,25 @@ import { Tag } from "@/components/ui/Tag";
 import { StatCard, AICard } from "@/components/ui/Card";
 import { DocumentPreview } from "@/components/ui/Viewers";
 import { useToast } from "@/components/ui/Notifications";
+import { supabase, type DocumentRow } from "@/lib/supabase";
 
 export default function DocumentsPage() {
   const { toast } = useToast();
+  const [documents, setDocuments] = useState<DocumentRow[] | null>(null);
+
+  useEffect(() => {
+    supabase
+      .from("documents")
+      .select("*")
+      .then(({ data, error }) => {
+        if (error) {
+          toast("danger", "Couldn't load documents from Supabase");
+          return;
+        }
+        setDocuments(data ?? []);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div>
@@ -49,12 +66,15 @@ export default function DocumentsPage() {
         >
           v4 has been in review for 8 days — longer than the typical 3-day review cycle for Tier 1 documents.
         </AICard>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <DocumentPreview title="Quality Manual v4" summary="Pending approval — tolerance section updated per the latest SOP revision." tags={["Quality", "Under Review"]} />
-          <DocumentPreview title="Master Service Agreement — Reliance Retail" summary="Governs all supply terms, pricing tiers, and Net 45 payment terms." tags={["Contract", "Rev 2"]} />
-          <DocumentPreview title="SOP-0044 — Injection Molding Setup" summary="Standard operating procedure for machine setup prior to a production run." tags={["SOP", "Rev 4"]} />
-          <DocumentPreview title="Quality Manual v3" summary="Superseded by v4, pending approval." tags={["Quality"]} superseded />
-        </div>
+        {documents === null ? (
+          <p className="py-6 text-center text-sm text-ink-muted">Loading documents…</p>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {documents.map((d) => (
+              <DocumentPreview key={d.id} title={d.title} summary={d.summary ?? ""} tags={d.tags} superseded={d.superseded} />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

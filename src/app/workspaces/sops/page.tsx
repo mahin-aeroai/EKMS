@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { ListChecks } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
@@ -8,9 +9,25 @@ import { StatCard, AICard } from "@/components/ui/Card";
 import { DocumentPreview } from "@/components/ui/Viewers";
 import { Timeline } from "@/components/ui/Timeline";
 import { useToast } from "@/components/ui/Notifications";
+import { supabase, type SopRow } from "@/lib/supabase";
 
 export default function SOPsPage() {
   const { toast } = useToast();
+  const [sops, setSops] = useState<SopRow[] | null>(null);
+
+  useEffect(() => {
+    supabase
+      .from("sops")
+      .select("*")
+      .then(({ data, error }) => {
+        if (error) {
+          toast("danger", "Couldn't load SOPs from Supabase");
+          return;
+        }
+        setSops(data ?? []);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div>
@@ -51,10 +68,15 @@ export default function SOPsPage() {
           >
             This SOP is 14 days past its annual review date — it&apos;s referenced by every injection molding machine setup, so a lapse here has wide downstream impact.
           </AICard>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <DocumentPreview title="SOP-0044 — Injection Molding Setup" summary="Overdue for annual review — 14 days past due." tags={["SOP", "Overdue"]} />
-            <DocumentPreview title="SOP-0061 — Incoming Material Inspection" summary="Current, last reviewed 2 months ago." tags={["SOP", "Current"]} />
-          </div>
+          {sops === null ? (
+            <p className="py-6 text-center text-sm text-ink-muted">Loading SOPs…</p>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {sops.map((s) => (
+                <DocumentPreview key={s.id} title={s.title} summary={s.summary ?? ""} tags={s.tags} />
+              ))}
+            </div>
+          )}
         </div>
         <div className="rounded-lg border border-line bg-surface p-4">
           <h3 className="mb-3 text-sm font-semibold text-ink">Revision history — SOP-0044</h3>

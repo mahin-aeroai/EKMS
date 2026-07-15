@@ -1,39 +1,42 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Boxes } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
-import { Badge, type BadgeStatus } from "@/components/ui/Badge";
+import { Badge } from "@/components/ui/Badge";
 import { Tag } from "@/components/ui/Tag";
 import { StatCard, AICard } from "@/components/ui/Card";
 import { Table, type TableColumn } from "@/components/ui/Table";
 import { BarChart } from "@/components/ui/Charts";
 import { useToast } from "@/components/ui/Notifications";
+import { supabase, type InventorySkuRow } from "@/lib/supabase";
 
-interface SKU {
-  id: string;
-  code: string;
-  name: string;
-  stock: string;
-  status: BadgeStatus;
-  statusLabel: string;
-}
-
-const SKUS: SKU[] = [
-  { id: "1", code: "RM-0231", name: "PVC-Free Vinyl Sheet", stock: "1,240 kg", status: "danger", statusLabel: "Low Stock" },
-  { id: "2", code: "RM-0198", name: "BOPP Film 20µ", stock: "3,600 kg", status: "success", statusLabel: "Healthy" },
-  { id: "3", code: "RM-0304", name: "Hinge Assembly Set", stock: "820 units", status: "warning", statusLabel: "Watch" },
-  { id: "4", code: "RM-0112", name: "Corrugated Packaging", stock: "12,400 units", status: "success", statusLabel: "Healthy" },
-];
-
-const COLUMNS: TableColumn<SKU>[] = [
+const COLUMNS: TableColumn<InventorySkuRow>[] = [
   { key: "code", header: "SKU", sortable: true },
   { key: "name", header: "Description", sortable: true },
   { key: "stock", header: "On Hand", sortable: true },
-  { key: "status", header: "Status", render: (r) => <Badge status={r.status}>{r.statusLabel}</Badge> },
+  { key: "status", header: "Status", render: (r) => <Badge status={r.status}>{r.status_label}</Badge> },
 ];
 
 export default function InventoryPage() {
   const { toast } = useToast();
+  const [skus, setSkus] = useState<InventorySkuRow[] | null>(null);
+
+  useEffect(() => {
+    supabase
+      .from("inventory_skus")
+      .select("*")
+      .then(({ data, error }) => {
+        if (error) {
+          toast("danger", "Couldn't load inventory SKUs from Supabase");
+          return;
+        }
+        setSkus(data ?? []);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const lowStock = skus?.filter((s) => s.status === "danger").length ?? 0;
 
   return (
     <div>
@@ -47,7 +50,7 @@ export default function InventoryPage() {
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-xl font-semibold text-ink">Inventory</h1>
-              <Badge status="warning">1 low stock item</Badge>
+              <Badge status="warning">{skus ? `${lowStock} low stock item${lowStock === 1 ? "" : "s"}` : "Loading…"}</Badge>
             </div>
             <p className="mt-0.5 text-sm text-ink-secondary">Manufacturing — stock levels across all tracked raw materials and components</p>
             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -76,7 +79,11 @@ export default function InventoryPage() {
           </AICard>
           <div className="rounded-lg border border-line bg-surface p-4">
             <h3 className="mb-3 text-sm font-semibold text-ink">Tracked SKUs</h3>
-            <Table columns={COLUMNS} rows={SKUS} onRowClick={(r) => toast("info", `Opened ${r.code}`)} />
+            {skus === null ? (
+              <p className="py-6 text-center text-sm text-ink-muted">Loading SKUs…</p>
+            ) : (
+              <Table columns={COLUMNS} rows={skus} onRowClick={(r) => toast("info", `Opened ${r.code}`)} />
+            )}
           </div>
         </div>
         <div className="rounded-lg border border-line bg-surface p-4">

@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Factory } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
@@ -7,16 +8,38 @@ import { Tag } from "@/components/ui/Tag";
 import { StatCard, AICard } from "@/components/ui/Card";
 import { Kanban, type KanbanColumn } from "@/components/ui/Kanban";
 import { useToast } from "@/components/ui/Notifications";
+import { supabase, type WorkOrderRow } from "@/lib/supabase";
 
-const COLUMNS: KanbanColumn[] = [
-  { id: "queued", title: "Queued", cards: [{ id: "k1", title: "WO-2026-3311 — Urban Ladder panels", meta: "Line 1" }, { id: "k2", title: "WO-2026-3312 — Godrej hinges", meta: "Line 2" }] },
-  { id: "running", title: "Running", cards: [{ id: "k3", title: "WO-2026-3308 — IKEA wardrobe panels", meta: "Line 3, Machine M-14" }] },
-  { id: "qa", title: "QA Hold", cards: [{ id: "k4", title: "WO-2026-3305 — sample inspection", meta: "Line 3", aiSuggestedColumn: "complete" }] },
-  { id: "complete", title: "Complete", cards: [{ id: "k5", title: "WO-2026-3298 — Reliance retail order" }] },
-];
+const COLUMN_TITLES: Record<string, string> = { queued: "Queued", running: "Running", qa: "QA Hold", complete: "Complete" };
+const COLUMN_ORDER = ["queued", "running", "qa", "complete"];
+
+function toKanbanColumns(rows: WorkOrderRow[]): KanbanColumn[] {
+  return COLUMN_ORDER.map((id) => ({
+    id,
+    title: COLUMN_TITLES[id],
+    cards: rows
+      .filter((r) => r.column_id === id)
+      .map((r) => ({ id: r.id, title: r.title, meta: r.meta ?? undefined, aiSuggestedColumn: r.ai_suggested_column ?? undefined })),
+  }));
+}
 
 export default function ProductionPage() {
   const { toast } = useToast();
+  const [columns, setColumns] = useState<KanbanColumn[] | null>(null);
+
+  useEffect(() => {
+    supabase
+      .from("work_orders")
+      .select("*")
+      .then(({ data, error }) => {
+        if (error) {
+          toast("danger", "Couldn't load work orders from Supabase");
+          return;
+        }
+        setColumns(toKanbanColumns(data ?? []));
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div>
@@ -58,7 +81,11 @@ export default function ProductionPage() {
         </AICard>
         <div className="rounded-lg border border-line bg-surface p-4">
           <h3 className="mb-3 text-sm font-semibold text-ink">Work order board</h3>
-          <Kanban initialColumns={COLUMNS} />
+          {columns === null ? (
+            <p className="py-6 text-center text-sm text-ink-muted">Loading work orders…</p>
+          ) : (
+            <Kanban initialColumns={columns} />
+          )}
         </div>
       </div>
     </div>

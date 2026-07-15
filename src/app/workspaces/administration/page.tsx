@@ -1,32 +1,20 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Settings } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
-import { Badge, type BadgeStatus } from "@/components/ui/Badge";
+import { Badge } from "@/components/ui/Badge";
 import { Tag } from "@/components/ui/Tag";
 import { StatCard, AICard } from "@/components/ui/Card";
 import { Table, type TableColumn } from "@/components/ui/Table";
 import { TreeView, type TreeNode } from "@/components/ui/TreeView";
 import { useToast } from "@/components/ui/Notifications";
+import { supabase, type AccessRequestRow } from "@/lib/supabase";
 
-interface AccessRequest {
-  id: string;
-  user: string;
-  requested: string;
-  status: BadgeStatus;
-  statusLabel: string;
-}
-
-const REQUESTS: AccessRequest[] = [
-  { id: "1", user: "New hire — QA Inspector", requested: "Quality module, read/write", status: "warning", statusLabel: "Pending" },
-  { id: "2", user: "Contractor — Tooling Vendor", requested: "Drawings module, read-only", status: "warning", statusLabel: "Pending" },
-  { id: "3", user: "Meera Kapoor", requested: "Procurement approval role", status: "success", statusLabel: "Granted" },
-];
-
-const COLUMNS: TableColumn<AccessRequest>[] = [
-  { key: "user", header: "User", sortable: true },
+const COLUMNS: TableColumn<AccessRequestRow>[] = [
+  { key: "user_label", header: "User", sortable: true },
   { key: "requested", header: "Access Requested", sortable: true },
-  { key: "status", header: "Status", render: (r) => <Badge status={r.status}>{r.statusLabel}</Badge> },
+  { key: "status", header: "Status", render: (r) => <Badge status={r.status}>{r.status_label}</Badge> },
 ];
 
 const TREE: TreeNode[] = [
@@ -39,6 +27,23 @@ const TREE: TreeNode[] = [
 
 export default function AdministrationPage() {
   const { toast } = useToast();
+  const [requests, setRequests] = useState<AccessRequestRow[] | null>(null);
+
+  useEffect(() => {
+    supabase
+      .from("access_requests")
+      .select("*")
+      .then(({ data, error }) => {
+        if (error) {
+          toast("danger", "Couldn't load access requests from Supabase");
+          return;
+        }
+        setRequests(data ?? []);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const pending = requests?.filter((r) => r.status === "warning").length ?? 0;
 
   return (
     <div>
@@ -52,7 +57,7 @@ export default function AdministrationPage() {
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-xl font-semibold text-ink">Administration</h1>
-              <Badge status="warning">2 pending requests</Badge>
+              <Badge status="warning">{requests ? `${pending} pending request${pending === 1 ? "" : "s"}` : "Loading…"}</Badge>
             </div>
             <p className="mt-0.5 text-sm text-ink-secondary">User access, roles, and platform configuration</p>
             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -65,7 +70,7 @@ export default function AdministrationPage() {
       <div className="my-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard label="Active Users" value="248" trend="up" trendLabel="+4 this quarter" />
         <StatCard label="Roles Configured" value="16" trend="flat" trendLabel="No change" />
-        <StatCard label="Pending Access Requests" value="2" trend="up" trendLabel="+1 this week" />
+        <StatCard label="Pending Access Requests" value={String(pending)} trend="up" trendLabel="+1 this week" />
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -81,7 +86,11 @@ export default function AdministrationPage() {
           </AICard>
           <div className="rounded-lg border border-line bg-surface p-4">
             <h3 className="mb-3 text-sm font-semibold text-ink">Access requests</h3>
-            <Table columns={COLUMNS} rows={REQUESTS} onRowClick={(r) => toast("info", `Opened request from ${r.user}`)} />
+            {requests === null ? (
+              <p className="py-6 text-center text-sm text-ink-muted">Loading access requests…</p>
+            ) : (
+              <Table columns={COLUMNS} rows={requests} onRowClick={(r) => toast("info", `Opened request from ${r.user_label}`)} />
+            )}
           </div>
         </div>
         <div className="rounded-lg border border-line bg-surface p-4">

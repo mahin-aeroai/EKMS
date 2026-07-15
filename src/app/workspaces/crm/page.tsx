@@ -1,30 +1,16 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Users } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
-import { Badge, type BadgeStatus } from "@/components/ui/Badge";
+import { Badge } from "@/components/ui/Badge";
 import { Tag } from "@/components/ui/Tag";
 import { StatCard, AICard } from "@/components/ui/Card";
 import { Table, type TableColumn } from "@/components/ui/Table";
 import { useToast } from "@/components/ui/Notifications";
+import { supabase, type CrmAccountRow } from "@/lib/supabase";
 
-interface Account {
-  id: string;
-  name: string;
-  region: string;
-  owner: string;
-  value: string;
-  status: BadgeStatus;
-}
-
-const ACCOUNTS: Account[] = [
-  { id: "1", name: "Reliance Retail Ltd", region: "West", owner: "Priya Nair", value: "₹2.14 Cr", status: "success" },
-  { id: "2", name: "IKEA India", region: "West", owner: "Priya Nair", value: "₹1.86 Cr", status: "success" },
-  { id: "3", name: "Godrej Interio", region: "North", owner: "Arjun Rao", value: "₹64 L", status: "info" },
-  { id: "4", name: "Urban Ladder", region: "South", owner: "Meera Kapoor", value: "₹28 L", status: "warning" },
-];
-
-const COLUMNS: TableColumn<Account>[] = [
+const COLUMNS: TableColumn<CrmAccountRow>[] = [
   { key: "name", header: "Account", sortable: true },
   { key: "region", header: "Region", sortable: true },
   { key: "owner", header: "Owner", sortable: true },
@@ -34,6 +20,21 @@ const COLUMNS: TableColumn<Account>[] = [
 
 export default function CRMPage() {
   const { toast } = useToast();
+  const [accounts, setAccounts] = useState<CrmAccountRow[] | null>(null);
+
+  useEffect(() => {
+    supabase
+      .from("crm_accounts")
+      .select("*")
+      .then(({ data, error }) => {
+        if (error) {
+          toast("danger", "Couldn't load CRM accounts from Supabase");
+          return;
+        }
+        setAccounts(data ?? []);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div>
@@ -47,7 +48,7 @@ export default function CRMPage() {
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-xl font-semibold text-ink">CRM</h1>
-              <Badge status="info">4 accounts</Badge>
+              <Badge status="info">{accounts ? `${accounts.length} accounts` : "Loading…"}</Badge>
             </div>
             <p className="mt-0.5 text-sm text-ink-secondary">Customers — account portfolio across all regions</p>
             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -58,7 +59,7 @@ export default function CRMPage() {
       </div>
 
       <div className="my-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard label="Total Accounts" value="4" trend="flat" trendLabel="No change" />
+        <StatCard label="Total Accounts" value={accounts ? String(accounts.length) : "—"} trend="flat" trendLabel="No change" />
         <StatCard label="Pipeline Value" value="₹4.92 Cr" trend="up" trendLabel="+14% this quarter" />
         <StatCard label="Win Rate" value="61%" trend="up" trendLabel="+5 pts" />
       </div>
@@ -75,7 +76,11 @@ export default function CRMPage() {
         </AICard>
         <div className="rounded-lg border border-line bg-surface p-4">
           <h3 className="mb-3 text-sm font-semibold text-ink">Account portfolio</h3>
-          <Table columns={COLUMNS} rows={ACCOUNTS} onRowClick={(r) => toast("info", `Opened ${r.name}`)} />
+          {accounts === null ? (
+            <p className="py-6 text-center text-sm text-ink-muted">Loading accounts…</p>
+          ) : (
+            <Table columns={COLUMNS} rows={accounts} onRowClick={(r) => toast("info", `Opened ${r.name}`)} />
+          )}
         </div>
       </div>
     </div>

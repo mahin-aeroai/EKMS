@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { ShoppingCart } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
@@ -7,16 +8,38 @@ import { Tag } from "@/components/ui/Tag";
 import { StatCard, AICard } from "@/components/ui/Card";
 import { Kanban, type KanbanColumn } from "@/components/ui/Kanban";
 import { useToast } from "@/components/ui/Notifications";
+import { supabase, type PurchaseOrderRow } from "@/lib/supabase";
 
-const COLUMNS: KanbanColumn[] = [
-  { id: "draft", title: "Draft", cards: [{ id: "k1", title: "PO-MU-2026-004530 — Packaging", meta: "₹1.2L" }] },
-  { id: "approval", title: "Pending Approval", cards: [{ id: "k2", title: "PO-MU-2026-004528 — Cosmo Films", meta: "₹2,37,000", aiSuggestedColumn: "ordered" }] },
-  { id: "ordered", title: "Ordered", cards: [{ id: "k3", title: "PO-MU-2026-004521 — UFlex Ltd", meta: "₹1,84,000" }] },
-  { id: "received", title: "Received", cards: [{ id: "k4", title: "PO-MU-2026-004505 — Hardware Set" }] },
-];
+const COLUMN_TITLES: Record<string, string> = { draft: "Draft", approval: "Pending Approval", ordered: "Ordered", received: "Received" };
+const COLUMN_ORDER = ["draft", "approval", "ordered", "received"];
+
+function toKanbanColumns(rows: PurchaseOrderRow[]): KanbanColumn[] {
+  return COLUMN_ORDER.map((id) => ({
+    id,
+    title: COLUMN_TITLES[id],
+    cards: rows
+      .filter((r) => r.column_id === id)
+      .map((r) => ({ id: r.id, title: r.title, meta: r.meta ?? undefined, aiSuggestedColumn: r.ai_suggested_column ?? undefined })),
+  }));
+}
 
 export default function ProcurementPage() {
   const { toast } = useToast();
+  const [columns, setColumns] = useState<KanbanColumn[] | null>(null);
+
+  useEffect(() => {
+    supabase
+      .from("purchase_orders")
+      .select("*")
+      .then(({ data, error }) => {
+        if (error) {
+          toast("danger", "Couldn't load purchase orders from Supabase");
+          return;
+        }
+        setColumns(toKanbanColumns(data ?? []));
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div>
@@ -58,7 +81,11 @@ export default function ProcurementPage() {
         </AICard>
         <div className="rounded-lg border border-line bg-surface p-4">
           <h3 className="mb-3 text-sm font-semibold text-ink">Purchase order pipeline</h3>
-          <Kanban initialColumns={COLUMNS} />
+          {columns === null ? (
+            <p className="py-6 text-center text-sm text-ink-muted">Loading purchase orders…</p>
+          ) : (
+            <Kanban initialColumns={columns} />
+          )}
         </div>
       </div>
     </div>

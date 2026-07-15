@@ -1,38 +1,39 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { FileText } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
-import { Badge, type BadgeStatus } from "@/components/ui/Badge";
+import { Badge } from "@/components/ui/Badge";
 import { Tag } from "@/components/ui/Tag";
 import { StatCard, AICard } from "@/components/ui/Card";
 import { Table, type TableColumn } from "@/components/ui/Table";
 import { useToast } from "@/components/ui/Notifications";
+import { supabase, type QuoteRow } from "@/lib/supabase";
 
-interface Quote {
-  id: string;
-  number: string;
-  customer: string;
-  value: string;
-  status: BadgeStatus;
-  statusLabel: string;
-}
-
-const QUOTES: Quote[] = [
-  { id: "1", number: "QT-MU-2026-1142", customer: "Reliance Retail Ltd", value: "₹18,40,000", status: "info", statusLabel: "Sent" },
-  { id: "2", number: "QT-MU-2026-1141", customer: "IKEA India", value: "₹9,20,000", status: "warning", statusLabel: "Revising" },
-  { id: "3", number: "QT-MU-2026-1139", customer: "Godrej Interio", value: "₹4,10,000", status: "success", statusLabel: "Won" },
-  { id: "4", number: "QT-MU-2026-1135", customer: "Urban Ladder", value: "₹2,60,000", status: "danger", statusLabel: "Lost" },
-];
-
-const COLUMNS: TableColumn<Quote>[] = [
+const COLUMNS: TableColumn<QuoteRow>[] = [
   { key: "number", header: "Quote #", sortable: true },
   { key: "customer", header: "Customer", sortable: true },
   { key: "value", header: "Value", sortable: true },
-  { key: "status", header: "Status", render: (r) => <Badge status={r.status}>{r.statusLabel}</Badge> },
+  { key: "status", header: "Status", render: (r) => <Badge status={r.status}>{r.status_label}</Badge> },
 ];
 
 export default function QuotationsPage() {
   const { toast } = useToast();
+  const [quotes, setQuotes] = useState<QuoteRow[] | null>(null);
+
+  useEffect(() => {
+    supabase
+      .from("quotes")
+      .select("*")
+      .then(({ data, error }) => {
+        if (error) {
+          toast("danger", "Couldn't load quotes from Supabase");
+          return;
+        }
+        setQuotes(data ?? []);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div>
@@ -46,7 +47,7 @@ export default function QuotationsPage() {
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-xl font-semibold text-ink">Quotations</h1>
-              <Badge status="info">4 active</Badge>
+              <Badge status="info">{quotes ? `${quotes.length} active` : "Loading…"}</Badge>
             </div>
             <p className="mt-0.5 text-sm text-ink-secondary">Customers — quote pipeline across all accounts</p>
             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -74,7 +75,11 @@ export default function QuotationsPage() {
         </AICard>
         <div className="rounded-lg border border-line bg-surface p-4">
           <h3 className="mb-3 text-sm font-semibold text-ink">Quote pipeline</h3>
-          <Table columns={COLUMNS} rows={QUOTES} onRowClick={(r) => toast("info", `Opened ${r.number}`)} />
+          {quotes === null ? (
+            <p className="py-6 text-center text-sm text-ink-muted">Loading quotes…</p>
+          ) : (
+            <Table columns={COLUMNS} rows={quotes} onRowClick={(r) => toast("info", `Opened ${r.number}`)} />
+          )}
         </div>
       </div>
     </div>

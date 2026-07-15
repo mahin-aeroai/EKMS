@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { ClipboardList } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
@@ -7,16 +8,31 @@ import { Tag } from "@/components/ui/Tag";
 import { StatCard, AICard } from "@/components/ui/Card";
 import { Calendar, type CalendarEvent } from "@/components/ui/Calendar";
 import { useToast } from "@/components/ui/Notifications";
+import { supabase, type MaintenanceEventRow } from "@/lib/supabase";
 
-const EVENTS: CalendarEvent[] = [
-  { id: "e1", day: 3, title: "PM — Machine M-08", type: "pm" },
-  { id: "e2", day: 9, title: "PM — Machine M-14 (predicted, bring forward)", type: "pm" },
-  { id: "e3", day: 15, title: "PM — Machine M-21", type: "pm" },
-  { id: "e4", day: 22, title: "Two PMs overlap on Line 3", type: "conflict" },
-];
+function toCalendarEvent(row: MaintenanceEventRow): CalendarEvent {
+  return { id: row.id, day: row.day, title: row.title, type: row.type };
+}
 
 export default function MaintenancePage() {
   const { toast } = useToast();
+  const [events, setEvents] = useState<CalendarEvent[] | null>(null);
+
+  useEffect(() => {
+    supabase
+      .from("maintenance_events")
+      .select("*")
+      .then(({ data, error }) => {
+        if (error) {
+          toast("danger", "Couldn't load the PM schedule from Supabase");
+          return;
+        }
+        setEvents((data ?? []).map(toCalendarEvent));
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const conflicts = events?.filter((e) => e.type === "conflict").length ?? 0;
 
   return (
     <div>
@@ -30,7 +46,7 @@ export default function MaintenancePage() {
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-xl font-semibold text-ink">Maintenance</h1>
-              <Badge status="warning">1 schedule conflict</Badge>
+              <Badge status="warning">{events ? `${conflicts} schedule conflict${conflicts === 1 ? "" : "s"}` : "Loading…"}</Badge>
             </div>
             <p className="mt-0.5 text-sm text-ink-secondary">Operations — preventive maintenance schedule across all machines</p>
             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -58,7 +74,11 @@ export default function MaintenancePage() {
         </AICard>
         <div className="rounded-lg border border-line bg-surface p-4">
           <h3 className="mb-3 text-sm font-semibold text-ink">PM schedule</h3>
-          <Calendar daysInMonth={30} events={EVENTS} />
+          {events === null ? (
+            <p className="py-6 text-center text-sm text-ink-muted">Loading schedule…</p>
+          ) : (
+            <Calendar daysInMonth={30} events={events} />
+          )}
         </div>
       </div>
     </div>
