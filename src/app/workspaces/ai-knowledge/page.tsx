@@ -21,7 +21,7 @@ import { getCount } from "@/lib/dashboard-queries";
 // Same demo customer the Customer workspace (src/app/workspaces/customer/page.tsx)
 // fetches — reused here so the knowledge graph shows genuine, live relationships
 // instead of a fictional sample graph.
-const DEMO_CUSTOMER_CODE = "CUST-MU-002104";
+const DEMO_CUSTOMER_CODE = "C03739"; // Apple India Pvt Ltd - Bangalore, real customer, highest Q1 revenue with a real contact on file
 
 const INDEXED_TABLES = [
   "customers",

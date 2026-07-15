@@ -64,7 +64,11 @@ export function CustomerWorkspaceClient({
   const { toast } = useToast();
   const [comments, setComments] = useState<Comment[]>(initialComments.map(toDisplayComment));
   const [approval, setApproval] = useState(initialApproval);
-  const [center, setCenter] = useState(NODES[0]);
+  // The Relationships tab's sample graph is otherwise generic/illustrative,
+  // but its center node has to be this customer, not the "Reliance Retail
+  // Ltd" placeholder the graph was originally built around.
+  const nodes = NODES.map((n) => (n.id === "center" ? { ...n, label: customer.name } : n));
+  const [center, setCenter] = useState(nodes[0]);
 
   async function handleAddComment(text: string) {
     const optimistic: Comment = { id: crypto.randomUUID(), author: "You", content: text, time: "just now" };
@@ -272,10 +276,10 @@ export function CustomerWorkspaceClient({
               <div className="pt-5">
                 <RelationshipGraph
                   center={center}
-                  nodes={NODES}
+                  nodes={nodes}
                   edges={EDGES}
                   onRecenter={(id) => {
-                    const node = NODES.find((n) => n.id === id);
+                    const node = nodes.find((n) => n.id === id);
                     if (node) {
                       setCenter(node);
                       toast("ai", `Recentered on ${node.label}`);

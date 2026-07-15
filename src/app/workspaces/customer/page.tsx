@@ -5,7 +5,7 @@ import { CustomerWorkspaceClient } from "@/components/workspaces/CustomerWorkspa
 // Always fetch fresh data from Supabase — this workspace is no longer a static demo.
 export const dynamic = "force-dynamic";
 
-const DEMO_CUSTOMER_CODE = "CUST-MU-002104";
+const DEMO_CUSTOMER_CODE = "C03739"; // Apple India Pvt Ltd - Bangalore, real customer, highest Q1 revenue with a real contact on file
 
 export default async function CustomerWorkspacePage() {
   const supabase = await createServerSupabaseClient();
