@@ -187,6 +187,52 @@ export interface ProjectApprovalRow {
   created_at: string;
 }
 
+// Job Orders — replaces the "Projects" concept above, which never matched
+// how MMDI actually works (job orders, not sponsor/budget/schedule-health
+// projects). The projects/* tables and types above are kept for now (see
+// PROJECT_STATUS.md) but the workspace itself now points here.
+export interface JobOrderRow {
+  id: string;
+  code: string;
+  name: string;
+  customer_name: string;
+  customer_id: string | null;
+  location: string | null;
+  sales_person: string | null;
+  application: string | null;
+  status: string;
+  order_date: string | null;
+  production_start: string | null;
+  production_end: string | null;
+  primary_machine: string | null;
+  primary_machine_group: string | null;
+  line_item_count: number;
+  total_qty: number;
+  total_sqft: number;
+  total_value: number;
+  tags: string[];
+  created_at: string;
+}
+
+export interface JobOrderCommentRow {
+  id: string;
+  job_order_id: string;
+  author: string;
+  content: string;
+  resolved: boolean;
+  created_at: string;
+}
+
+export interface JobOrderApprovalRow {
+  id: string;
+  job_order_id: string;
+  title: string;
+  requested_by: string;
+  value: string;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+}
+
 export interface CrmAccountRow {
   id: string;
   name: string;

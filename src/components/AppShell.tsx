@@ -91,7 +91,7 @@ const NAV: SidebarSection[] = [
   {
     title: "Operations",
     items: [
-      { id: "workspace-project", label: "Projects", icon: <FolderKanban size={16} />, href: "/workspaces/project" },
+      { id: "workspace-job-orders", label: "Job Orders", icon: <FolderKanban size={16} />, href: "/workspaces/job-orders" },
       { id: "production", label: "Production", icon: <Factory size={16} />, href: "/workspaces/production" },
       { id: "workspace-machine", label: "Machines", icon: <Wrench size={16} />, href: "/workspaces/machine" },
       { id: "maintenance", label: "Maintenance", icon: <ClipboardList size={16} />, href: "/workspaces/maintenance" },

@@ -1,8 +1,9 @@
 # MMDI ONE — Project Status
 
-Last updated: 15 July 2026 (session: auth + all 6 dashboards + all 4
-flagship workspaces wired, plus real customer/revenue/machine/raw-material/
-finished-goods data imported)
+Last updated: 15 July 2026 (session: auth + role-based access control +
+all 6 dashboards + all 4 flagship workspaces wired, plus real customer/
+revenue/machine/raw-material/finished-goods/job-order data imported;
+"Projects" replaced with a real "Job Orders" workspace)
 
 This file exists so a new chat session (or a new contributor) can pick up this
 project without re-deriving context. Read this before making changes.
@@ -18,7 +19,10 @@ to a live Supabase backend in some form (16 straightforward + 6 aggregation
 dashboards rebuilt around real cross-table data + all 4 flagship workspaces
 — see below for what "wired" means for each). The `customers` table also
 holds 1,687 real MMDI accounts (imported from a Tally export + a Q1 sales
-register), not just seed/demo rows.
+register), not just seed/demo rows. The 4th flagship workspace is "Job
+Orders" (`/workspaces/job-orders`), not "Projects" — MMDI's real unit of
+work is a job order, and the workspace + schema were rebuilt around that
+partway through this session (2,072 real job orders imported).
 
 - Live demo: https://ekms.vercel.app
 - Repo: https://github.com/mahin-aeroai/EKMS (main branch, auto-deploys to Vercel)
@@ -64,46 +68,51 @@ over what the code actually does again.
      the signed-in user client-side (`supabase.auth.getUser()` +
      `onAuthStateChange`), show their initials in the top-right avatar with a
      sign-out menu, and skip the sidebar/topnav chrome entirely on `/login`.
-3. **4 flagship workspaces** — Customer, Machine, Raw Material, Project — each
-   uses the full 6-tab Universal Workspace Pattern (Overview / Insights /
-   Timeline / Documents / Relationships / Activity), with a Server/Client
-   split matching the Customer workspace's original pattern (see
-   `src/lib/supabase-server.ts`). **All 4 have wired *code* as of this
-   session** (previously only Customer did — see correction above): the
-   stat row, a real spec/info panel, and the Activity tab (comments +
-   approvals, writable) are real for all 4. **BUT** — the `machines`,
-   `raw_materials`, and `projects` tables themselves turned out not to
-   exist in production at all (confirmed by the user hitting
-   `relation "machines" does not exist`), so Machine/Raw Material/Project
-   were showing the graceful "couldn't load" error, not real data, until
-   `supabase-machine-rawmaterial-project-schema.sql` gets run — **check
-   it's actually been run before assuming these 3 workspaces show
-   anything.** Insights/Timeline/Documents/Relationships remain
-   illustrative sample content on every one of the 4 workspaces —
-   deliberately out of scope, since there's no sensor telemetry,
-   consumption/downtime log, budget ledger, or document storage backing
-   those tabs.
-   - Server pages (`src/app/workspaces/{customer,machine,raw-material,project}/page.tsx`)
-     fetch the most recently created row from `customers`/`machines`/
-     `raw_materials`/`projects` (`order by created_at desc limit 1`) rather
-     than a hardcoded demo code — works regardless of what's actually
-     seeded, and shows a graceful error pointing at the schema file if the
-     table is empty or missing. `machines` (73 rows) and `raw_materials`
-     (1,558 rows) now have real imported data, so those two workspaces load
-     real records once `import-machines.sql` / `import-raw-materials.sql`
-     have been run. `projects` still has zero rows — no project data has
-     been uploaded yet, so that workspace still shows the graceful error.
+3. **4 flagship workspaces** — Customer, Machine, Raw Material, Job Orders
+   (renamed from "Projects" this session — see below) — each uses the full
+   6-tab Universal Workspace Pattern (Overview / Insights / Timeline /
+   Documents / Relationships / Activity), with a Server/Client split
+   matching the Customer workspace's original pattern (see
+   `src/lib/supabase-server.ts`). The stat row, a real spec/info panel, and
+   the Activity tab (comments + approvals, writable) are real for all 4.
+   Insights/Timeline/Documents remain illustrative sample content on all 4
+   (no sensor telemetry, consumption/downtime log, budget ledger, or
+   document-storage schema exists to back them) — **except** Job Orders'
+   Timeline tab, which is real (order date / production start / production
+   end are genuine columns).
+   - **"Projects" → "Job Orders"**: the generic `projects` table
+     (sponsor/budget_utilization/schedule_health/open_risks) never matched
+     how MMDI actually works — the user clarified they run job orders, not
+     projects in that sense. Replaced with a purpose-built `job_orders`
+     table (customer, machine, substrate application, qty/sqft/value,
+     status, dates — see `supabase-job-orders-schema.sql`), imported from a
+     real production report (`import-job-orders.sql`, from "Production
+     Report FY2026_Q1.xlsx" — 2,072 job orders aggregated from 10,055
+     production line items, Hyderabad plant, Apr–Jun 2026). The route moved
+     from `/workspaces/project` to `/workspaces/job-orders`; the old route
+     now just redirects there (old links/bookmarks still work). The old
+     `projects`/`project_comments`/`project_approvals` tables and
+     `ProjectRow`/`ProjectCommentRow`/`ProjectApprovalRow` types are left in
+     place, unused, rather than dropped — `ProjectWorkspaceClient.tsx` was
+     deleted since nothing routes to it anymore.
+   - Server pages (`src/app/workspaces/{customer,machine,raw-material,job-orders}/page.tsx`)
+     fetch a specific real record by code (Customer/Machine/Raw
+     Material/Job Orders all now do this — see below) rather than "most
+     recently created row" everywhere.
+   - `machines` (73 rows) and `raw_materials` (1,558 rows) have real
+     imported data. `job_orders` has 2,072 rows (see above).
    - Customer workspace specifically is pointed at a real imported customer
      — `C03739` (Apple India Pvt Ltd - Bangalore, the real customer with the
      highest Q1 revenue and a real contact on file) — not the original
      fictional "Reliance Retail Ltd" demo record, which is still sitting in
      the table under code `CUST-MU-002104` unused.
-   - Machine and Raw Material workspaces are now also pointed at specific
-     real demo records (same pattern): `MC-HYD-001` (Vutek GS 3250 LX Pro,
-     Unit 1, Hyderabad) and `RM-11001` (Frontlit Flex, a core signage
-     substrate). Project workspace still falls back to "most recently
-     created row" since `projects` has zero rows — no project data exists
-     to point it at yet.
+   - Machine, Raw Material, and Job Orders workspaces are now also pointed
+     at specific real demo records (same pattern): `MC-HYD-001` (Vutek GS
+     3250 LX Pro, Unit 1, Hyderabad), `RM-11001` (Frontlit Flex, a core
+     signage substrate), and Job Order `7455` (Shark Shopfits Private
+     Limited, ₹14.7L — the highest-value job order that isn't an internal
+     "BASIL"/"CASH SALES" bucket and has a confident customer_id link, for
+     the fullest demo).
 4. **22 lighter workspace modules** covering the rest of the MDI-ONE IA
    (Executive, Customers, Operations, Manufacturing, Knowledge, People,
    Finance, Compliance, Administration groups in the sidebar nav). Pattern:
@@ -227,14 +236,27 @@ over what the code actually does again.
   rather than faking revenue/margin/DSO/cost-variance — if MMDI wants those
   numbers to be real, that needs an actual costing/finance ledger schema
   first.
-- The 4 flagship workspaces' Insights/Timeline/Documents/Relationships tabs
-  are sample content everywhere, on all 4 now-wired workspaces — there's no
-  telemetry/consumption/downtime/budget-ledger/document-storage schema to
-  back them with yet.
-- Project workspace still has zero rows to point at — no project data has
-  been uploaded yet, so it falls back to "most recently created row" (which
-  is empty). Machine and Raw Material are now pointed at specific real
-  records (`MC-HYD-001`, `RM-11001`), same as Customer.
+- The 4 flagship workspaces' Insights/Documents/Relationships tabs are
+  sample content everywhere — there's no telemetry/consumption/downtime/
+  budget-ledger/document-storage schema to back them with yet. (Job
+  Orders' Timeline tab is the one exception — it's real.)
+- Only 598 of 2,072 job orders (29%) are linked to a real `customers` row
+  via `customer_id` — the rest keep `customer_name` as text only. This
+  wasn't fuzzy-matched on purpose (branch-suffix and naming variants like
+  "Pvt Ltd" vs "PRIVATE LIMITED" made that too risky to guess at scale —
+  see `import-job-orders.sql`'s header comment). Revisit if MMDI wants a
+  cleaner match — likely needs either a real code-based join key from the
+  production system, or manual reconciliation of the ~187 distinct
+  unmatched customer names.
+- `job_orders.status` ('Completed' / 'In Progress') is inferred from the
+  source file's single-letter Job Status code ('C'/'I') — the column is
+  literally named "Job Status (Lost Hold transfer)", implying more codes
+  exist in other exports that don't appear in this one. Not confirmed with
+  the user.
+- Only Hyderabad plant data has been imported into `job_orders` (that's
+  all "Production Report FY2026_Q1.xlsx" covered) — other plant cities
+  (Chennai, Bangalore, Mumbai, Noida, Kochi, Vizag, Kolkata, per the
+  machines import) have no job order data yet.
 - No real AI/LLM integration anywhere yet — all "AI insight" cards are
   static or lightly-templated copy, not generated by a model. AI Copilot's
   chat is still an illustrative demo.
@@ -269,34 +291,41 @@ over what the code actually does again.
 - `src/components/AppShell.tsx` — top nav, sidebar (all IA groups), command
   palette, AI assistant drawer wrapper, now also the signed-in user's
   email/sign-out menu and the `/login` chrome bypass.
-- `src/app/workspaces/*/page.tsx` — one folder per module. Only `customer`
-  delegates to a Server/Client split (`src/components/workspaces/*.tsx`); the
-  other 25 are self-contained.
-- `supabase-auth-rls-migration.sql` — this session's RLS migration, already
-  run in production. Safe to re-run (idempotent) if new tables get added
-  later and need the same treatment.
+- `src/app/workspaces/*/page.tsx` — one folder per module. `customer`,
+  `machine`, `raw-material`, and `job-orders` delegate to a Server/Client
+  split (`src/components/workspaces/*.tsx`); the other 22 (+ `project`,
+  now just a redirect) are self-contained.
+- `supabase-auth-rls-migration.sql` — the first RLS migration (authenticated-
+  only), already run in production. Superseded by
+  `supabase-role-based-rls-migration.sql` for tables both files touch, but
+  still the only RLS ever applied to the original ~28 tables it lists.
 - `src/lib/dashboard-queries.ts` — shared count/group-by helpers
   (`getCount`, `getCountWhere`, `groupCount`, `groupSum`, `statusDonutData`,
   `formatCrore`) used by all 6 aggregation dashboards.
-- SQL schema files (not committed to the repo, delivered separately to the
-  user):
+- SQL files (all committed to the repo root, all idempotent, all validated
+  against a real local Postgres instance via `@electric-sql/pglite` before
+  being handed off — confirm each has actually been run in production
+  before trusting the workspace/data it backs):
   - Customer workspace schema (customer_contacts, customer_comments,
     customer_approvals, etc.) — run first, earliest phase. Live in production.
   - `supabase-remaining-modules-schema.sql` — the 16-table schema for the
     lighter modules listed above. Live in production.
-  - `supabase-machine-rawmaterial-project-schema.sql` — **the correction to
-    another wrong assumption.** The previous version of this file said the
-    Machine/Raw Material/Project tables "likely exist" — they did not.
-    Confirmed by the user hitting `ERROR: 42P01: relation "machines" does
-    not exist` when running `import-machines.sql`. This file creates all 9
-    tables (machines/raw_materials/projects + each one's
-    `_comments`/`_approvals` sub-tables) with authenticated-only RLS baked
-    in from the start (unlike the older tables, which started wide-open and
-    needed `supabase-auth-rls-migration.sql` as a second pass, auth already
-    existed by the time these were created). Validated against a real local
-    Postgres instance (idempotent re-run + a downstream import both
-    succeeded) before being handed to the user — **confirm it's actually
-    been run before trusting that these 3 workspaces load anything.**
+  - `supabase-machine-rawmaterial-project-schema.sql` — creates
+    machines/raw_materials/projects + each one's `_comments`/`_approvals`
+    sub-tables (9 tables), authenticated-only RLS (written before the role
+    migration existed). Live in production. `projects` etc. are unused now
+    (see Job Orders above) but left in place.
+  - `import-machines.sql` / `import-raw-materials.sql` /
+    `import-finished-goods.sql` — real data imports, all confirmed run.
+  - `supabase-role-based-rls-migration.sql` — role-based RLS (see item 6
+    above). Live in production, confirmed 15 July 2026.
+  - `supabase-job-orders-schema.sql` — creates job_orders/job_order_comments/
+    job_order_approvals with role-aware RLS baked in from the start (the
+    first schema file written after the role migration existed — every
+    schema file before this one only had authenticated-only RLS).
+  - `import-job-orders.sql` — 2,072 job orders from Production Report
+    FY2026_Q1.xlsx. Depends on `supabase-job-orders-schema.sql` running
+    first.
 
 ## Working conventions established in this project
 
@@ -326,9 +355,12 @@ over what the code actually does again.
 
 ## Natural next steps (not started, pick one)
 
-1. **Point Project at a specific real demo record** once project data
-   exists — Machine and Raw Material are now done (`MC-HYD-001`,
-   `RM-11001`), same pattern as Customer's `C03739`.
+1. ~~Point Machine/Raw Material/Job Orders at specific real demo
+   records~~ — done for all 4 flagship workspaces now (`C03739`,
+   `MC-HYD-001`, `RM-11001`, Job Order `7455`).
+   Possible follow-up: reconcile the 1,474 unmatched job-order customer
+   names against `customers` (see gap above) if MMDI wants that link
+   cleaner than "text-only, 29% linked.".
 2. ~~Add role/permission granularity~~ — done (see item 6 in "Current
    state"). Possible follow-up: a real admin UI for managing roles instead
    of the Supabase SQL editor, if that becomes a regular need.
@@ -537,3 +569,62 @@ over what the code actually does again.
     created_at from public.profiles` — all 3 real users have a role,
     `m.nandipa@icloud.com` is admin, the other two are viewer. Role-based
     access control is now genuinely live, not just shipped.
+
+19. User clarified: MMDI doesn't run "projects" — the actual unit of work
+    is a job order. Replaced the generic Projects workspace entirely:
+    - Uploaded `Production Report FY2026_Q1.xlsx`, a real Hyderabad-plant
+      job-order-level production log (10,055 line items, 2,072 distinct
+      job orders, Apr–Jun 2026, ~5 lines/job order on average, max 220).
+      Confirmed per-job-order fields (customer, application, sales person,
+      Job Status, location) are internally consistent across every line —
+      aggregation to one header row per job order was straightforward.
+    - Three genuine scope decisions surfaced via a clarifying question
+      before writing any code: (1) header-only aggregation vs. also
+      keeping all 10,055 line items — chose headers only; (2) how to
+      handle the ~71% of job orders whose customer name doesn't exactly
+      match an existing `customers` row (branch-suffix and "Pvt Ltd" vs.
+      "PRIVATE LIMITED" naming variants, some inconsistent even within
+      this one file) — chose to store the raw name as text always and
+      link `customer_id` only on confident exact (normalized) matches,
+      rather than fuzzy-match or fabricate new customer records; (3)
+      whether to force-fit this into the existing `projects` schema or
+      build a real one — chose a purpose-built `job_orders` table and
+      renamed the workspace.
+    - Also discovered mid-exploration: the source file explicitly told me
+      not to match on customer code, but it turned out to have a hidden,
+      fully-populated customer-code column (blank header, "Unnamed: 41" in
+      pandas) — flagged this to keep in mind, but respected the user's
+      explicit instruction to match on name only rather than overriding it.
+    - Built `supabase-job-orders-schema.sql` (job_orders +
+      job_order_comments + job_order_approvals, role-aware RLS baked in
+      from creation — the first schema file written after the role
+      migration existed) and `import-job-orders.sql` (2,072 rows,
+      total_value computed per line as Sqft×Rate or Qty×Rate depending on
+      the source's Price Type, status inferred from a 'C'/'I' code flagged
+      as unconfirmed). Validated end-to-end against a real local Postgres
+      instance — loaded the actual production customers data first (so
+      the customer_id foreign key exercises real matching UUIDs), ran the
+      role migration, then the new schema and import, confirmed exact row
+      counts (2,072 job orders, 598 linked to a customer), zero dangling
+      foreign keys, and idempotency on a second run.
+    - Built `JobOrderWorkspaceClient.tsx` (new) modeled on the old
+      `ProjectWorkspaceClient.tsx` but with real fields throughout:
+      Overview info panel, stat row (total value/sqft/qty/line items), and
+      — unlike every other flagship workspace — a genuinely real Timeline
+      tab (order date → production start → production end are real
+      columns, not sample data). Insights/Documents/Relationships stay
+      illustrative, same reasoning as the other 3 workspaces.
+    - Route moved from `/workspaces/project` to `/workspaces/job-orders`;
+      the old route now just `redirect()`s there rather than 404ing.
+      `ProjectWorkspaceClient.tsx` deleted (nothing referenced it anymore);
+      the old `projects`/`project_comments`/`project_approvals` tables and
+      TS types are left in place, unused, rather than dropped. Nav label
+      changed from "Projects" to "Job Orders" in `AppShell.tsx`.
+    - Pointed the workspace at Job Order `7455` (Shark Shopfits Private
+      Limited, ₹14.7L) as the demo record — the highest-value real job
+      order that isn't an internal "BASIL"/"CASH SALES" bucket (both show
+      up misleadingly high in the raw value ranking) and has a confident
+      customer link, for the fullest relationship-graph demo.
+    - Build and lint both clean. SQL files handed off to the user to run
+      in order: `supabase-job-orders-schema.sql` then
+      `import-job-orders.sql`.
