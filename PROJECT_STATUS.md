@@ -434,4 +434,5 @@ over what the code actually does again.
     - `raw_materials` now has 1,558 rows (workspace loads a real record,
       picking whichever was most recently inserted, same pattern as
       Machine); `inventory_skus` gains 785 more real SKUs alongside
-      whatever was there before.
+      whatever was there before. **User confirmed both files were run in
+      production successfully.**
