@@ -3,7 +3,20 @@
 import { useState } from "react";
 import { Bell, LogOut, Search, Sparkles } from "lucide-react";
 import { ThemeSwitcher } from "@/components/theme/ThemeSwitcher";
-import { Badge } from "./Badge";
+import { Badge, type BadgeStatus } from "./Badge";
+import { type UserRole } from "@/lib/supabase";
+
+const ROLE_BADGE_STATUS: Record<UserRole, BadgeStatus> = {
+  admin: "success",
+  editor: "info",
+  viewer: "neutral",
+};
+
+const ROLE_LABEL: Record<UserRole, string> = {
+  admin: "Admin",
+  editor: "Editor",
+  viewer: "Viewer",
+};
 
 function initialsFromEmail(email: string) {
   const local = email.split("@")[0] ?? "";
@@ -24,12 +37,14 @@ export function TopNav({
   onOpenAI,
   notificationCount = 0,
   userEmail,
+  userRole,
   onSignOut,
 }: {
   onOpenSearch?: () => void;
   onOpenAI?: () => void;
   notificationCount?: number;
   userEmail?: string | null;
+  userRole?: UserRole | null;
   onSignOut?: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -83,8 +98,11 @@ export function TopNav({
               <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
               <div className="absolute right-0 top-10 z-20 w-56 rounded-md border border-line bg-surface p-1 shadow-lg">
                 {userEmail && (
-                  <div className="truncate border-b border-line px-3 py-2 text-xs text-ink-muted">
-                    {userEmail}
+                  <div className="flex items-center justify-between gap-2 truncate border-b border-line px-3 py-2 text-xs text-ink-muted">
+                    <span className="truncate">{userEmail}</span>
+                    {userRole && (
+                      <Badge status={ROLE_BADGE_STATUS[userRole]}>{ROLE_LABEL[userRole]}</Badge>
+                    )}
                   </div>
                 )}
                 <button

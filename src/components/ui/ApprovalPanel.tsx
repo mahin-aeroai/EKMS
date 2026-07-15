@@ -23,6 +23,7 @@ export function ApprovalPanel({
   onApprove,
   onReject,
   onDelegate,
+  canDecide = true,
 }: {
   title: string;
   requestedBy: string;
@@ -32,6 +33,8 @@ export function ApprovalPanel({
   onApprove: () => void;
   onReject: () => void;
   onDelegate: () => void;
+  /** Set to false to hide the Approve/Reject/Delegate actions (e.g. for a Viewer-role user). Defaults to true. */
+  canDecide?: boolean;
 }) {
   return (
     <div className="flex flex-col gap-4 rounded-lg border border-line bg-surface p-4">
@@ -52,17 +55,21 @@ export function ApprovalPanel({
           {aiRecommendation}
         </div>
       )}
-      <div className="flex gap-2">
-        <Button size="sm" onClick={onApprove}>
-          Approve
-        </Button>
-        <Button size="sm" variant="destructive" onClick={onReject}>
-          Reject
-        </Button>
-        <Button size="sm" variant="secondary" onClick={onDelegate}>
-          Delegate
-        </Button>
-      </div>
+      {canDecide ? (
+        <div className="flex gap-2">
+          <Button size="sm" onClick={onApprove}>
+            Approve
+          </Button>
+          <Button size="sm" variant="destructive" onClick={onReject}>
+            Reject
+          </Button>
+          <Button size="sm" variant="secondary" onClick={onDelegate}>
+            Delegate
+          </Button>
+        </div>
+      ) : (
+        <p className="text-xs text-ink-muted">You have read-only access and can&apos;t decide on this approval.</p>
+      )}
     </div>
   );
 }

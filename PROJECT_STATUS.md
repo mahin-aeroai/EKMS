@@ -123,16 +123,41 @@ over what the code actually does again.
    client uses the anon/publishable key (safe to expose — protected by RLS,
    not a secret). All row-type TypeScript interfaces live in
    `src/lib/supabase.ts`.
-6. **RLS policies tightened this session and confirmed run in production**
-   — `supabase-auth-rls-migration.sql` (repo root) replaces every table's
-   wide-open `using (true)` policies with `TO authenticated` policies
-   (select/insert/update/delete all require a valid signed-in session; the
-   anon key alone can no longer read or write anything). No per-role
-   distinctions yet — any signed-in user has full access to every table
-   (matches the "simple: authenticated-only" model chosen for this phase,
-   not a granular RBAC system). User accounts exist in the Supabase
-   dashboard (Authentication → Users); confirmed live by visiting
-   ekms.vercel.app and observing the redirect to `/login`.
+6. **RLS**: two migrations, layered.
+   `supabase-auth-rls-migration.sql` (earlier this session) first replaced
+   every table's wide-open `using (true)` policies with `TO authenticated`
+   policies (any signed-in user, full access). Confirmed run in production.
+   `supabase-role-based-rls-migration.sql` (later, not yet confirmed run —
+   **check before assuming this is live**) supersedes those policies with
+   a real 3-tier role model:
+   - A `profiles` table (`id`/`email`/`role`, role = admin/editor/viewer,
+     default 'viewer'), a `public.user_role()` security-definer function,
+     an `auth.users` insert trigger that auto-creates a profile for every
+     new user, a backfill for users created before the migration, and a
+     bootstrap step that sets `srinivas@mmdi.in` to admin (the account
+     this project is built for — **change that email in the file first if
+     that's wrong**).
+   - Every table from the previous migration gets replaced policies:
+     SELECT allowed for all 3 roles, INSERT/UPDATE for admin+editor only,
+     DELETE for admin only.
+   - Validated against a real local Postgres instance with a stub
+     `auth.users`/`auth.uid()` before handoff — confirmed viewers can read
+     but not write, editors can read/write but not delete, admins can do
+     everything, a signed-in user with no profile row is locked out
+     everywhere (fail-closed), the auto-create trigger fires correctly,
+     and the whole file is idempotent.
+   - App code reads the current user's role client-side (tolerant fetch —
+     if `profiles` doesn't exist yet, or the row's missing, the UI just
+     doesn't restrict anything; the database RLS is the real boundary
+     either way) via `UserRoleContext` (`src/lib/UserRoleContext.tsx`),
+     provided by `AppShell`. `TopNav` shows a role badge next to the
+     signed-in user's email. The 4 flagship workspaces' Comment composer
+     and Approve/Reject/Delegate buttons are hidden for viewers (`canWrite`
+     prop on `Comments`, `canDecide` prop on `ApprovalPanel` — both default
+     `true`, so every other caller is unaffected).
+   User accounts exist in the Supabase dashboard (Authentication → Users);
+   confirmed live by visiting ekms.vercel.app and observing the redirect to
+   `/login`.
 7. Build and lint both verified clean on every change (`npm run build`,
    `npm run lint` — 0 errors). All routes render as expected (static for the
    22 lighter modules + `/login`, dynamic/force-rendered for
@@ -181,9 +206,13 @@ over what the code actually does again.
 
 ## What's NOT done yet (known gaps)
 
-- **No role/permission granularity.** Every signed-in user can read/write
-  every table. If MMDI wants viewer-vs-editor or department-scoped access
-  later, that's a further RLS/`profiles` table phase.
+- ~~No role/permission granularity~~ — closed: `supabase-role-based-rls-migration.sql`
+  adds admin/editor/viewer roles (see item 6 above). **Confirm it's been
+  run in production** before assuming it's live — until then, every
+  signed-in user still has full access (the older authenticated-only
+  policies are what's actually enforced). No department/region scoping —
+  that was explicitly the option not chosen; a role is uniform across
+  every table.
 - **No real financial/costing data in the schema at all.** Quote/contract/
   CRM `value` fields are pre-formatted display strings, not numbers; the 16
   lighter-module tables have no timestamps. The Costing and Finance
@@ -211,8 +240,18 @@ over what the code actually does again.
 
 ## Key files to know
 
-- `src/lib/supabase.ts` — browser Supabase client + every row-type interface.
-  Read this first before touching any workspace page.
+- `src/lib/supabase.ts` — browser Supabase client + every row-type interface,
+  including `UserRole`/`ProfileRow`. Read this first before touching any
+  workspace page.
+- `src/lib/UserRoleContext.tsx` — the current user's role (admin/editor/
+  viewer or `null` if unknown), provided by `AppShell`, consumed via
+  `useUserRole()`. Also exports `canWrite()`/`canDelete()` helpers (both
+  fail-open to `true` when role is `null`, since the UI must never be the
+  only thing standing between a user and a write — RLS is).
+- `supabase-role-based-rls-migration.sql` — the role-based RLS migration
+  (profiles table, security-definer function, auth trigger, backfill,
+  bootstrap, role-aware policies on every table). Safe to re-run
+  (idempotent).
 - `src/lib/supabase-server.ts` — Server Component Supabase client (only used
   by `customer/page.tsx` today; use this pattern for any new server-fetched
   workspace).
@@ -282,9 +321,10 @@ over what the code actually does again.
 
 1. **Point Project at a specific real demo record** once project data
    exists — Machine and Raw Material are now done (`MC-HYD-001`,
-   `RM-11001`), same pattern as Customer's `C03739`."
-2. **Add role/permission granularity** (a `profiles` table + role-scoped RLS)
-   if "any signed-in user can do anything" turns out to be too permissive.
+   `RM-11001`), same pattern as Customer's `C03739`.
+2. ~~Add role/permission granularity~~ — done (see item 6 in "Current
+   state"). Possible follow-up: a real admin UI for managing roles instead
+   of the Supabase SQL editor, if that becomes a regular need.
 3. **Wire the remaining 4 tabs per flagship workspace** (Insights, Timeline,
    Documents, Relationships) to real data — needs telemetry/consumption/
    downtime/budget-ledger/document-storage tables that don't exist yet.
@@ -455,3 +495,27 @@ over what the code actually does again.
     handled by the existing invite/recovery hash detection — no new
     handling needed there. Closes the last item in "What's NOT done yet"
     that didn't require new data or a scope decision.
+
+17. Built role-based access control: admin/editor/viewer roles instead of
+    the flat "any signed-in user can do anything" model. Chosen scope (via
+    a clarifying question, since this was a genuine decision only the user
+    could make): simple 3-tier roles, no department/region scoping;
+    enforced both at the database (RLS) and in the UI (hiding buttons a
+    denied write would otherwise fail against). `supabase-role-based-
+    rls-migration.sql` adds a `profiles` table, an `auth.users` trigger
+    that auto-creates a 'viewer' profile for every new user, a backfill
+    for existing users, and bootstraps `srinivas@mmdi.in` to admin.
+    Validated against a real local Postgres instance with a stub
+    `auth.users`/`auth.uid()` (the first time this session's PGlite
+    validation needed to simulate Supabase's actual role/session model,
+    not just run plain SQL) — confirmed the full permission matrix holds
+    (viewer read-only, editor no-delete, admin everything, no-profile
+    locked out) and the trigger + bootstrap + idempotency all work.
+    App-side: `UserRoleContext` (new) exposes the current role via
+    `useUserRole()`, fetched tolerantly in `AppShell` so nothing breaks if
+    the migration hasn't been run yet; `TopNav` shows a role badge; the 4
+    flagship workspaces' `Comments` composer and `ApprovalPanel` actions
+    are hidden for viewers. **Not yet confirmed run in production** — do
+    that before assuming role restrictions are actually live; until then
+    the old authenticated-only policies still apply (harmless — code
+    degrades gracefully either way).

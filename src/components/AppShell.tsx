@@ -45,7 +45,8 @@ import { useToast } from "@/components/ui/Notifications";
 import { useEffect, useState } from "react";
 import { Drawer } from "@/components/ui/Drawer";
 import { AIConversation, type ChatTurn } from "@/components/ui/AIConversation";
-import { supabase } from "@/lib/supabase";
+import { supabase, type UserRole } from "@/lib/supabase";
+import { UserRoleContext } from "@/lib/UserRoleContext";
 
 const NAV: SidebarSection[] = [
   {
@@ -142,11 +143,31 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [aiOpen, setAiOpen] = useState(false);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<UserRole | null>(null);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setUserEmail(data.user?.email ?? null));
+    async function loadRole(userId: string) {
+      // Tolerant fetch: the `profiles` table may not exist yet if
+      // supabase-role-based-rls-migration.sql hasn't been run in production
+      // yet. Any error or missing row just leaves userRole as null, which
+      // UserRoleContext's consumers treat as "don't restrict anything" —
+      // this must never break the app for people signed in before that
+      // migration runs.
+      const { data, error } = await supabase.from("profiles").select("role").eq("id", userId).maybeSingle();
+      if (!error && data) setUserRole(data.role as UserRole);
+    }
+
+    supabase.auth.getUser().then(({ data }) => {
+      setUserEmail(data.user?.email ?? null);
+      if (data.user) loadRole(data.user.id);
+    });
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
       setUserEmail(session?.user?.email ?? null);
+      if (session?.user) {
+        loadRole(session.user.id);
+      } else {
+        setUserRole(null);
+      }
     });
     return () => subscription.subscription.unsubscribe();
   }, []);
@@ -199,21 +220,29 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex h-screen flex-col">
-      <TopNav onOpenAI={() => setAiOpen(true)} notificationCount={3} userEmail={userEmail} onSignOut={handleSignOut} />
-      <div className="flex flex-1 overflow-hidden">
-        <Sidebar sections={NAV} activeId={activeId} onNavigate={(id) => {
-          const item = NAV.flatMap((s) => s.items).find((i) => i.id === id);
-          if (item) router.push(item.href);
-        }} />
-        <main className="flex-1 overflow-y-auto bg-surface-sunken p-6">
-          <div className="mx-auto max-w-6xl">{children}</div>
-        </main>
+    <UserRoleContext.Provider value={userRole}>
+      <div className="flex h-screen flex-col">
+        <TopNav
+          onOpenAI={() => setAiOpen(true)}
+          notificationCount={3}
+          userEmail={userEmail}
+          userRole={userRole}
+          onSignOut={handleSignOut}
+        />
+        <div className="flex flex-1 overflow-hidden">
+          <Sidebar sections={NAV} activeId={activeId} onNavigate={(id) => {
+            const item = NAV.flatMap((s) => s.items).find((i) => i.id === id);
+            if (item) router.push(item.href);
+          }} />
+          <main className="flex-1 overflow-y-auto bg-surface-sunken p-6">
+            <div className="mx-auto max-w-6xl">{children}</div>
+          </main>
+        </div>
+        <CommandPalette commands={commands} onAskAI={(q) => { setAiOpen(true); if (q) handleSend(q); }} />
+        <Drawer open={aiOpen} onClose={() => setAiOpen(false)} title="AI Assistant" wide>
+          <AIConversation turns={turns} onSend={handleSend} />
+        </Drawer>
       </div>
-      <CommandPalette commands={commands} onAskAI={(q) => { setAiOpen(true); if (q) handleSend(q); }} />
-      <Drawer open={aiOpen} onClose={() => setAiOpen(false)} title="AI Assistant" wide>
-        <AIConversation turns={turns} onSend={handleSend} />
-      </Drawer>
-    </div>
+    </UserRoleContext.Provider>
   );
 }

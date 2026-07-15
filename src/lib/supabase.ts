@@ -318,3 +318,12 @@ export interface AccessRequestRow {
   status: BadgeStatus;
   status_label: string | null;
 }
+
+export type UserRole = "admin" | "editor" | "viewer";
+
+export interface ProfileRow {
+  id: string;
+  email: string;
+  role: UserRole;
+  created_at: string;
+}

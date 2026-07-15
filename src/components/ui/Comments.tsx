@@ -20,7 +20,16 @@ export interface Comment {
  * per-module feature.
  * AI Integration: AI can summarize a long thread or suggest a reply.
  */
-export function Comments({ comments, onAdd }: { comments: Comment[]; onAdd: (text: string) => void }) {
+export function Comments({
+  comments,
+  onAdd,
+  canWrite = true,
+}: {
+  comments: Comment[];
+  onAdd: (text: string) => void;
+  /** Set to false to hide the composer (e.g. for a Viewer-role user). Defaults to true. */
+  canWrite?: boolean;
+}) {
   const [draft, setDraft] = useState("");
 
   return (
@@ -51,25 +60,29 @@ export function Comments({ comments, onAdd }: { comments: Comment[]; onAdd: (tex
           </li>
         ))}
       </ul>
-      <div className="flex gap-2">
-        <input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder="Add a comment… use @ to mention someone"
-          className="flex-1 rounded-md border border-line-strong bg-surface px-3 py-2 text-sm outline-none focus:border-primary"
-        />
-        <Button
-          size="sm"
-          onClick={() => {
-            if (draft.trim()) {
-              onAdd(draft.trim());
-              setDraft("");
-            }
-          }}
-        >
-          Post
-        </Button>
-      </div>
+      {canWrite ? (
+        <div className="flex gap-2">
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="Add a comment… use @ to mention someone"
+            className="flex-1 rounded-md border border-line-strong bg-surface px-3 py-2 text-sm outline-none focus:border-primary"
+          />
+          <Button
+            size="sm"
+            onClick={() => {
+              if (draft.trim()) {
+                onAdd(draft.trim());
+                setDraft("");
+              }
+            }}
+          >
+            Post
+          </Button>
+        </div>
+      ) : (
+        <p className="text-xs text-ink-muted">You have read-only access and can&apos;t post comments.</p>
+      )}
     </div>
   );
 }

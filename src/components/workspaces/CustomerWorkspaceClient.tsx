@@ -15,6 +15,7 @@ import { BarChart, DonutChart, GaugeChart } from "@/components/ui/Charts";
 import { DocumentPreview } from "@/components/ui/Viewers";
 import { Comments, type Comment } from "@/components/ui/Comments";
 import { ApprovalPanel } from "@/components/ui/ApprovalPanel";
+import { useUserRole, canWrite } from "@/lib/UserRoleContext";
 import { RelationshipGraph, type GraphNode, type GraphEdge } from "@/components/ui/RelationshipGraph";
 import { PromptInput } from "@/components/ui/PromptInput";
 import { useToast } from "@/components/ui/Notifications";
@@ -62,6 +63,7 @@ export function CustomerWorkspaceClient({
   initialApproval: CustomerApprovalRow | null;
 }) {
   const { toast } = useToast();
+  const role = useUserRole();
   const [comments, setComments] = useState<Comment[]>(initialComments.map(toDisplayComment));
   const [approval, setApproval] = useState(initialApproval);
   // The Relationships tab's sample graph is otherwise generic/illustrative,
@@ -316,9 +318,10 @@ export function CustomerWorkspaceClient({
                     onApprove={() => handleDecision("approved", `${approval.title} approved`)}
                     onReject={() => handleDecision("rejected", `${approval.title} rejected`)}
                     onDelegate={() => toast("info", "Delegated to Finance Director")}
+                    canDecide={canWrite(role)}
                   />
                 )}
-                <Comments comments={comments} onAdd={handleAddComment} />
+                <Comments comments={comments} onAdd={handleAddComment} canWrite={canWrite(role)} />
               </div>
             ),
           },

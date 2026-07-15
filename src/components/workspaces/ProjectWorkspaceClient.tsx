@@ -15,6 +15,7 @@ import { LineChart, BarChart } from "@/components/ui/Charts";
 import { DocumentPreview, PDFViewer } from "@/components/ui/Viewers";
 import { Comments, type Comment } from "@/components/ui/Comments";
 import { ApprovalPanel } from "@/components/ui/ApprovalPanel";
+import { useUserRole, canWrite } from "@/lib/UserRoleContext";
 import { RelationshipGraph, type GraphNode, type GraphEdge } from "@/components/ui/RelationshipGraph";
 import { PromptInput } from "@/components/ui/PromptInput";
 import { useToast } from "@/components/ui/Notifications";
@@ -69,6 +70,7 @@ export function ProjectWorkspaceClient({
   initialApproval: ProjectApprovalRow | null;
 }) {
   const { toast } = useToast();
+  const role = useUserRole();
   const [comments, setComments] = useState<Comment[]>(initialComments.map(toDisplayComment));
   const [approval, setApproval] = useState(initialApproval);
   const nodes = NODES.map((n) => (n.id === "center" ? { ...n, label: project.name } : n));
@@ -293,9 +295,10 @@ export function ProjectWorkspaceClient({
                     onApprove={() => handleDecision("approved", `${approval.title} approved`)}
                     onReject={() => handleDecision("rejected", `${approval.title} rejected`)}
                     onDelegate={() => toast("info", "Delegated to Program Sponsor")}
+                    canDecide={canWrite(role)}
                   />
                 )}
-                <Comments comments={comments} onAdd={handleAddComment} />
+                <Comments comments={comments} onAdd={handleAddComment} canWrite={canWrite(role)} />
               </div>
             ),
           },
