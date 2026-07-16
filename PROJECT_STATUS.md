@@ -1479,3 +1479,35 @@ over what the code actually does again.
     access) — user should open the new page, pick a sales person, run the
     report, and confirm the customer breakdown and CSV export both work.
     **Not yet run in production.**
+45. Added group_by='item' to sales_summary and purchase_summary
+    (src/app/api/ai-copilot/route.ts), after the user tested "clean, precise
+    list of products for Apple India Pvt Ltd - Bangalore" and got a partial,
+    arbitrary "representative sample" (8 rows out of 184 real sale line
+    items) instead of the complete distinct-product list they actually
+    wanted. Root cause: the AI Copilot had no way to ask for "one row per
+    distinct product" — only raw transaction search (capped/sampled per the
+    earlier max_tokens fix) or category-level rollups. Fix adds a new
+    group_by option, 'item', to both sales_summary and purchase_summary that
+    groups by item_code + item_description/item_name instead of
+    product_category or a time bucket — combined with customer_filter or
+    supplier_filter this returns exactly one row per distinct product (e.g.
+    Apple India Pvt Ltd - Bangalore's 184 line items collapse to ~36 distinct
+    products), which is short enough to list in full instead of sampling.
+    Also added per-group rate statistics (average_rate, min_rate, max_rate)
+    to every group in both tools' output (not just group_by='item') — this
+    directly fixes the "wide-ranging average rate, skewed by a few large
+    installation-charge line items" problem from the same test, since rate
+    stats are now computed per product/group rather than blended across a
+    customer's entire product mix. SYSTEM_PROMPT updated with explicit
+    guidance distinguishing "give me the full/clean list of products" (use
+    group_by='item', raise top_n to ~100) from "list every transaction" (use
+    search_sale_items/search_purchase_items raw rows) — these were being
+    conflated before, which is why the model defaulted to an arbitrary
+    partial sample.
+    Verified via a clean `npx tsc --noEmit`, `npx eslint`, and `next build`
+    (all routes unaffected, no errors). Could not test against live
+    Supabase from this sandbox — user should re-ask the AI Copilot for
+    Apple India Pvt Ltd - Bangalore's full product list (or any
+    customer/supplier with many line items) and confirm it now returns a
+    complete per-product breakdown instead of a partial sample.
+    **Not yet run in production.**

@@ -59,6 +59,8 @@ Genuinely wanting the ENTIRE purchase ledger itemized (all 9,528 rows, not a fil
 
 Sales by rep, with all their customers, for a period: there's now a dedicated workspace page for exactly this (/workspaces/sales-by-rep, under the Customers nav section) — pick a sales person and an optional date range, see every customer they sold to with totals, and export it as CSV. Chat can still answer a single instance of this fine (sales_summary with sales_manager_filter + group_by='customer' + date_from/date_to), but if someone wants this as a reusable, exportable report rather than a one-off chat answer, point them to that page directly.
 
+"Give me the full/clean/precise list of products for customer X" (or supplier X): this is NOT the same request as "list every transaction" -- a customer can have hundreds of raw sale line items but only a few dozen distinct products, and dumping a "representative sample" of 8-10 rows out of 184 is a bad answer when the person wants ALL of their distinct products, not a sample. Use sales_summary (or purchase_summary) with customer_filter (or supplier_filter) and group_by='item', with top_n raised well above the default 20 (e.g. top_n=100) -- this returns exactly one row per distinct item_code/description, each with its own transaction_count, total_taxable_value, and average_rate/min_rate/max_rate, which is almost always short enough to list in full (e.g. Apple India Pvt Ltd - Bangalore has 184 sale line items but only ~36 distinct products -- group_by='item' surfaces all ~36 cleanly instead of an arbitrary partial sample of raw transactions). Only fall back to search_sale_items/search_purchase_items (raw transaction rows) when the person explicitly wants transaction-level detail -- individual sale/purchase events, dates, and one-off amounts -- rather than a per-product summary.
+
 Formatting: the chat UI renders your reply as plain text only — no markdown. Never use markdown tables (| pipes |), headers (#), or bold (**). For lists, use a simple numbered or dashed list with one item per line, or short plain sentences. Keep it readable as plain prose.
 
 Totals: when search_customers or search_job_orders returns more matches than the detail list shows, use the tool's own total_* aggregate fields for any sum/total the person asks for — never add up just the visible detail rows yourself, since that list is capped and may exclude the largest matches (it's sorted by value, but a common search term can still match more records than fit in the list).`;
@@ -136,8 +138,8 @@ const TOOLS: Tool[] = [
       properties: {
         group_by: {
           type: "string",
-          enum: ["product_category", "sales_manager", "customer", "location", "fiscal_year", "fiscal_quarter", "month", "week", "day"],
-          description: "How to break down the sales figures. 'product_category' is the closest match to 'material category' or 'product group'; 'sales_manager' is the closest match to 'sales person'; 'location' is the closest match to 'branch' or 'sales office' (MMDI's 9 branches: Hyderabad, Noida, Mumbai, Bangalore, Chennai, Kolkata, Kochi, Visakhapatnam, Pune); 'fiscal_year'/'fiscal_quarter' bucket by MMDI's Apr-Mar financial year (e.g. 'FY26-27', 'FY26-27 Q1') rather than calendar month/week.",
+          enum: ["product_category", "item", "sales_manager", "customer", "location", "fiscal_year", "fiscal_quarter", "month", "week", "day"],
+          description: "How to break down the sales figures. 'product_category' is the closest match to 'material category' or 'product group'; 'item' groups by the exact product/item line (item_code + description) instead of its broader category -- combine with customer_filter when someone wants a clean, COMPLETE per-product breakdown for one customer rather than a raw transaction-by-transaction list or a partial sample, since a customer can have hundreds of line items but only a few dozen distinct products (raise top_n above the default 20 when that's likely, e.g. top_n=100); 'sales_manager' is the closest match to 'sales person'; 'location' is the closest match to 'branch' or 'sales office' (MMDI's 9 branches: Hyderabad, Noida, Mumbai, Bangalore, Chennai, Kolkata, Kochi, Visakhapatnam, Pune); 'fiscal_year'/'fiscal_quarter' bucket by MMDI's Apr-Mar financial year (e.g. 'FY26-27', 'FY26-27 Q1') rather than calendar month/week. Every returned group also includes average_rate/min_rate/max_rate across its own rows, not the whole filtered set.",
         },
         sales_manager_filter: { type: "string", description: "Optional: restrict to this sales person (partial match) before grouping — use when the question names a specific sales person AND asks for a different breakdown (e.g. their customers, their category mix)" },
         customer_filter: { type: "string", description: "Optional: restrict to this customer name (partial match) before grouping" },
@@ -170,8 +172,8 @@ const TOOLS: Tool[] = [
       properties: {
         group_by: {
           type: "string",
-          enum: ["product_category", "supplier", "location", "item_type", "fiscal_year", "fiscal_quarter", "month", "week", "day"],
-          description: "How to break down the purchase figures. 'product_category' is the closest match to 'material category'; 'supplier' is the closest match to 'vendor'; 'location' is the closest match to 'branch' (MMDI's 9 branches: Hyderabad, Noida, Mumbai, Bangalore, Chennai, Kolkata, Kochi, Visakhapatnam, Pune); 'item_type' is the broad purchase class (Raw material / Finished goods / Service / Intermediate item / Non stock item) — use this for 'raw materials vs capital goods vs services' type questions, not product_category; 'fiscal_year'/'fiscal_quarter' bucket by MMDI's Apr-Mar financial year (e.g. 'FY26-27', 'FY25-26 Q4') rather than calendar month/week — the purchase ledger spans FY25-26 Q4 and FY26-27 Q1, so this is the only tool where a fiscal-year comparison spans a real boundary in the data.",
+          enum: ["product_category", "item", "supplier", "location", "item_type", "fiscal_year", "fiscal_quarter", "month", "week", "day"],
+          description: "How to break down the purchase figures. 'product_category' is the closest match to 'material category'; 'item' groups by the exact item/product line (item_code + name) instead of its broader category -- combine with supplier_filter when someone wants a clean, COMPLETE per-product breakdown for one supplier rather than a raw transaction-by-transaction list or a partial sample, since a supplier can have hundreds of line items but only a few dozen distinct products (raise top_n above the default 20 when that's likely, e.g. top_n=100); 'supplier' is the closest match to 'vendor'; 'location' is the closest match to 'branch' (MMDI's 9 branches: Hyderabad, Noida, Mumbai, Bangalore, Chennai, Kolkata, Kochi, Visakhapatnam, Pune); 'item_type' is the broad purchase class (Raw material / Finished goods / Service / Intermediate item / Non stock item) — use this for 'raw materials vs capital goods vs services' type questions, not product_category; 'fiscal_year'/'fiscal_quarter' bucket by MMDI's Apr-Mar financial year (e.g. 'FY26-27', 'FY25-26 Q4') rather than calendar month/week — the purchase ledger spans FY25-26 Q4 and FY26-27 Q1, so this is the only tool where a fiscal-year comparison spans a real boundary in the data. Every returned group also includes average_rate/min_rate/max_rate across its own rows, not the whole filtered set.",
         },
         supplier_filter: { type: "string", description: "Optional: restrict to this supplier name (partial match) before grouping" },
         product_category_filter: { type: "string", description: "Optional: restrict to this product/material category (partial match) before grouping" },
@@ -384,7 +386,7 @@ async function executeToolCall(
       const { rows, error } = await fetchAllRows((from, to) => {
         let q = supabase
           .from("sales_transactions")
-          .select("product_category, sales_manager, customer_name, location, invoice_date, taxable_value")
+          .select("product_category, item_code, item_description, sales_manager, customer_name, location, invoice_date, taxable_value, rate")
           .range(from, to);
         if (dateFrom) q = q.gte("invoice_date", dateFrom);
         if (dateTo) q = q.lte("invoice_date", dateTo);
@@ -407,6 +409,8 @@ async function executeToolCall(
 
       function labelFor(row: (typeof rows)[number]): string {
         switch (groupBy) {
+          case "item":
+            return row.item_code ? `${row.item_code} — ${row.item_description ?? "Unknown"}` : (row.item_description ?? "Unknown");
           case "sales_manager":
             return row.sales_manager ?? "Unknown";
           case "customer":
@@ -429,17 +433,34 @@ async function executeToolCall(
         }
       }
 
-      const groups = new Map<string, { total: number; count: number }>();
+      const groups = new Map<string, { total: number; count: number; rateSum: number; rateCount: number; minRate: number; maxRate: number }>();
       for (const row of rows) {
         const label = labelFor(row);
-        const g = groups.get(label) ?? { total: 0, count: 0 };
+        const g = groups.get(label) ?? { total: 0, count: 0, rateSum: 0, rateCount: 0, minRate: Infinity, maxRate: -Infinity };
         g.total += row.taxable_value ?? 0;
         g.count += 1;
+        if (typeof row.rate === "number") {
+          g.rateSum += row.rate;
+          g.rateCount += 1;
+          g.minRate = Math.min(g.minRate, row.rate);
+          g.maxRate = Math.max(g.maxRate, row.rate);
+        }
         groups.set(label, g);
       }
 
+      // average_rate/min_rate/max_rate are computed PER GROUP -- this is what fixes the
+      // "wide-ranging average rate, skewed by a few large installation-charge line items"
+      // problem: grouping by 'item' isolates each distinct product's own rate range instead
+      // of blending a customer's whole product mix into one misleading average.
       const sortedGroups = [...groups.entries()]
-        .map(([label, g]) => ({ label, total_taxable_value: g.total, transaction_count: g.count }))
+        .map(([label, g]) => ({
+          label,
+          total_taxable_value: g.total,
+          transaction_count: g.count,
+          average_rate: g.rateCount ? g.rateSum / g.rateCount : null,
+          min_rate: g.rateCount ? g.minRate : null,
+          max_rate: g.rateCount ? g.maxRate : null,
+        }))
         .sort((a, b) => b.total_taxable_value - a.total_taxable_value)
         .slice(0, topN);
 
@@ -509,7 +530,7 @@ async function executeToolCall(
       const { rows, error } = await fetchAllRows((from, to) => {
         let q = supabase
           .from("purchase_transactions")
-          .select("product_category, supplier_name, location, item_type, grn_date, taxable_value")
+          .select("product_category, item_code, item_name, supplier_name, location, item_type, grn_date, taxable_value, rate")
           .range(from, to);
         if (dateFrom) q = q.gte("grn_date", dateFrom);
         if (dateTo) q = q.lte("grn_date", dateTo);
@@ -532,6 +553,8 @@ async function executeToolCall(
 
       function labelFor(row: (typeof rows)[number]): string {
         switch (groupBy) {
+          case "item":
+            return row.item_code ? `${row.item_code} — ${row.item_name ?? "Unknown"}` : (row.item_name ?? "Unknown");
           case "supplier":
             return row.supplier_name ?? "Unknown";
           case "location":
@@ -554,17 +577,34 @@ async function executeToolCall(
         }
       }
 
-      const groups = new Map<string, { total: number; count: number }>();
+      const groups = new Map<string, { total: number; count: number; rateSum: number; rateCount: number; minRate: number; maxRate: number }>();
       for (const row of rows) {
         const label = labelFor(row);
-        const g = groups.get(label) ?? { total: 0, count: 0 };
+        const g = groups.get(label) ?? { total: 0, count: 0, rateSum: 0, rateCount: 0, minRate: Infinity, maxRate: -Infinity };
         g.total += row.taxable_value ?? 0;
         g.count += 1;
+        if (typeof row.rate === "number") {
+          g.rateSum += row.rate;
+          g.rateCount += 1;
+          g.minRate = Math.min(g.minRate, row.rate);
+          g.maxRate = Math.max(g.maxRate, row.rate);
+        }
         groups.set(label, g);
       }
 
+      // average_rate/min_rate/max_rate are computed PER GROUP -- this is what fixes the
+      // "wide-ranging average rate, skewed by a few large installation-charge line items"
+      // problem: grouping by 'item' isolates each distinct product's own rate range instead
+      // of blending a customer's whole product mix into one misleading average.
       const sortedGroups = [...groups.entries()]
-        .map(([label, g]) => ({ label, total_taxable_value: g.total, transaction_count: g.count }))
+        .map(([label, g]) => ({
+          label,
+          total_taxable_value: g.total,
+          transaction_count: g.count,
+          average_rate: g.rateCount ? g.rateSum / g.rateCount : null,
+          min_rate: g.rateCount ? g.minRate : null,
+          max_rate: g.rateCount ? g.maxRate : null,
+        }))
         .sort((a, b) => b.total_taxable_value - a.total_taxable_value)
         .slice(0, topN);
 
