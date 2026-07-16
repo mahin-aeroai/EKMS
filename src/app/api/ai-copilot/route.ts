@@ -26,9 +26,11 @@ const MODEL = "claude-sonnet-5";
 const MAX_TOKENS = 1024;
 const MAX_TOOL_ITERATIONS = 5;
 
-const SYSTEM_PROMPT = `You are the AI Copilot inside MMDI ONE, an internal operating platform for MMDI, an Indian packaging/printing manufacturer. Answer questions about customers, job orders, machines, raw materials, and sales using the tools available to you — never guess or invent data. If a tool returns no results, say so plainly rather than making something up. Keep answers concise (2-4 sentences unless the question calls for a list). When you reference a specific record, name it (e.g. "Job Order 7455" or "Apple India Pvt Ltd - Bangalore") so the person can look it up themselves.
+const SYSTEM_PROMPT = `You are the AI Copilot inside MMDI ONE, an internal operating platform for MMDI, an Indian packaging/printing manufacturer. Answer questions about customers, job orders, machines, raw materials, sales, and purchases using the tools available to you — never guess or invent data. If a tool returns no results, say so plainly rather than making something up. Keep answers concise (2-4 sentences unless the question calls for a list). When you reference a specific record, name it (e.g. "Job Order 7455" or "Apple India Pvt Ltd - Bangalore") so the person can look it up themselves.
 
 Sales questions: use sales_summary for anything about sales broken down by material/product category, sales person, customer, or a time period (day/week/month) — it covers all of those via its group_by parameter, plus always returns a grand total for the filtered range even when grouped. Use search_sale_items for questions about a specific item's price/rate. "Sales" always means Taxable Value (pre-tax) from sales_transactions, never Voucher amount (GST-inclusive) — the tools already return the right figure, just don't relabel it as something else.
+
+Purchase/spend questions: use purchase_summary for anything about what MMDI bought/spent — broken down by supplier, material/product category, or a time period (day/week/month) — same group_by pattern as sales_summary, and it also supports combining a filter with a different group_by. Use search_purchase_items for a specific item's buy price/rate. "Purchases"/"spend" always means Taxable Value (pre-tax) from purchase_transactions, covering Jan-Jun 2026 (a different, wider date range than sales' Apr-Jun 2026 — don't assume they cover the same period). Some purchase line items have no product_category (the item wasn't in the item master) — these show as "Uncategorized", which is a real, if imprecise, answer, not an error.
 
 Formatting: the chat UI renders your reply as plain text only — no markdown. Never use markdown tables (| pipes |), headers (#), or bold (**). For lists, use a simple numbered or dashed list with one item per line, or short plain sentences. Keep it readable as plain prose.
 
@@ -126,6 +128,35 @@ const TOOLS: Tool[] = [
     input_schema: {
       type: "object",
       properties: { query: { type: "string", description: "Text to search for in the item code, item description, or product category" } },
+      required: ["query"],
+    },
+  },
+  {
+    name: "purchase_summary",
+    description: "Real purchase/spend figures (Taxable Value, not GST-inclusive) from the full Jan-Jun 2026 purchase ledger (9,528 line items, sourced from goods-receipt/MRN records), grouped by whichever dimension answers the question: supplier, material/product category, or time period (day/week/month). Always returns a grand total for the filtered range in addition to the grouped breakdown, so it also answers plain 'total spend'/'total purchases' questions. Supports combining a filter with a different group_by — e.g. 'what categories did we buy from Dovetail Furniture' is supplier_filter='Dovetail Furniture', group_by='product_category', NOT a separate lookup.",
+    input_schema: {
+      type: "object",
+      properties: {
+        group_by: {
+          type: "string",
+          enum: ["product_category", "supplier", "month", "week", "day"],
+          description: "How to break down the purchase figures. 'product_category' is the closest match to 'material category'; 'supplier' is the closest match to 'vendor'.",
+        },
+        supplier_filter: { type: "string", description: "Optional: restrict to this supplier name (partial match) before grouping" },
+        product_category_filter: { type: "string", description: "Optional: restrict to this product/material category (partial match) before grouping" },
+        date_from: { type: "string", description: "Optional start date (YYYY-MM-DD), inclusive" },
+        date_to: { type: "string", description: "Optional end date (YYYY-MM-DD), inclusive" },
+        top_n: { type: "number", description: "Max number of groups to return in detail, sorted by total value descending (default 20)" },
+      },
+      required: ["group_by"],
+    },
+  },
+  {
+    name: "search_purchase_items",
+    description: "Search individual purchase line items by item code, item name, or product category (partial match) — use for 'what do we pay for X' / 'buy price of X' questions. Returns matching line items (with per-unit rate, quantity, taxable value, and supplier) plus an aggregate (average rate, total taxable value) across all matches.",
+    input_schema: {
+      type: "object",
+      properties: { query: { type: "string", description: "Text to search for in the item code, item name, or product category" } },
       required: ["query"],
     },
   },
@@ -392,6 +423,114 @@ async function executeToolCall(
         most_recent_20: top.data,
       };
       return { result, citation: totalMatches ? `Sale item search: "${query}" (${totalMatches} matches)` : undefined };
+    }
+    case "purchase_summary": {
+      const groupBy = String(input.group_by ?? "product_category");
+      const dateFrom = input.date_from ? String(input.date_from) : null;
+      const dateTo = input.date_to ? String(input.date_to) : null;
+      const topN = typeof input.top_n === "number" ? input.top_n : 20;
+      const supplierFilter = input.supplier_filter ? String(input.supplier_filter) : null;
+      const productCategoryFilter = input.product_category_filter ? String(input.product_category_filter) : null;
+
+      // Paginated (see fetchAllRows comment above) -- purchase_transactions is
+      // 9,528 rows, well past the point a bare .limit() would be trustworthy.
+      const { rows, error } = await fetchAllRows((from, to) => {
+        let q = supabase
+          .from("purchase_transactions")
+          .select("product_category, supplier_name, grn_date, taxable_value")
+          .range(from, to);
+        if (dateFrom) q = q.gte("grn_date", dateFrom);
+        if (dateTo) q = q.lte("grn_date", dateTo);
+        if (supplierFilter) q = q.ilike("supplier_name", `%${supplierFilter}%`);
+        if (productCategoryFilter) q = q.ilike("product_category", `%${productCategoryFilter}%`);
+        return q;
+      });
+      if (error) return { result: { error } };
+      const grandTotal = rows.reduce((sum, r) => sum + (r.taxable_value ?? 0), 0);
+
+      // Monday-starting week bucket, labeled by that Monday's date.
+      function weekLabel(dateStr: string): string {
+        const d = new Date(dateStr + "T00:00:00Z");
+        const dayOffset = (d.getUTCDay() + 6) % 7; // 0 = Monday
+        d.setUTCDate(d.getUTCDate() - dayOffset);
+        return `week of ${d.toISOString().slice(0, 10)}`;
+      }
+
+      function labelFor(row: (typeof rows)[number]): string {
+        switch (groupBy) {
+          case "supplier":
+            return row.supplier_name ?? "Unknown";
+          case "month":
+            return row.grn_date ? row.grn_date.slice(0, 7) : "Unknown";
+          case "week":
+            return row.grn_date ? weekLabel(row.grn_date) : "Unknown";
+          case "day":
+            return row.grn_date ?? "Unknown";
+          case "product_category":
+          default:
+            return row.product_category ?? "Uncategorized"; // ~9.7% of rows have no item-master match, see schema notes
+        }
+      }
+
+      const groups = new Map<string, { total: number; count: number }>();
+      for (const row of rows) {
+        const label = labelFor(row);
+        const g = groups.get(label) ?? { total: 0, count: 0 };
+        g.total += row.taxable_value ?? 0;
+        g.count += 1;
+        groups.set(label, g);
+      }
+
+      const sortedGroups = [...groups.entries()]
+        .map(([label, g]) => ({ label, total_taxable_value: g.total, transaction_count: g.count }))
+        .sort((a, b) => b.total_taxable_value - a.total_taxable_value)
+        .slice(0, topN);
+
+      const filtersApplied = {
+        supplier: supplierFilter,
+        product_category: productCategoryFilter,
+      };
+      const result = {
+        group_by: groupBy,
+        filters_applied: filtersApplied,
+        date_range: dateFrom || dateTo ? { from: dateFrom, to: dateTo } : null,
+        grand_total_taxable_value: grandTotal,
+        grand_total_transactions: rows.length,
+        groups: sortedGroups,
+      };
+      const filterLabel = [supplierFilter && `supplier "${supplierFilter}"`, productCategoryFilter && `category "${productCategoryFilter}"`]
+        .filter(Boolean)
+        .join(", ");
+      return {
+        result,
+        citation: `Purchase summary grouped by ${groupBy}${filterLabel ? `, filtered to ${filterLabel}` : ""}${dateFrom || dateTo ? ` (${dateFrom ?? "…"} to ${dateTo ?? "…"})` : ""}`,
+      };
+    }
+    case "search_purchase_items": {
+      const query = String(input.query ?? "");
+      const filter = `item_code.ilike.%${query}%,item_name.ilike.%${query}%,product_category.ilike.%${query}%`;
+      const [top, allResult] = await Promise.all([
+        supabase
+          .from("purchase_transactions")
+          .select("item_code, item_name, product_category, rate, quantity, taxable_value, grn_date, supplier_name")
+          .or(filter)
+          .order("grn_date", { ascending: false })
+          .limit(20),
+        fetchAllRows((from, to) =>
+          supabase.from("purchase_transactions").select("rate, taxable_value").or(filter).range(from, to)
+        ),
+      ]);
+      if (top.error || allResult.error) return { result: { error: (top.error ?? { message: allResult.error })?.message } };
+      const matches = allResult.rows;
+      const totalMatches = matches.length;
+      const avgRate = totalMatches ? matches.reduce((sum, r) => sum + (r.rate ?? 0), 0) / totalMatches : 0;
+      const result = {
+        total_matches: totalMatches,
+        average_rate_across_all_matches: avgRate,
+        total_taxable_value_across_all_matches: matches.reduce((sum, r) => sum + (r.taxable_value ?? 0), 0),
+        most_recent_20: top.data,
+      };
+      return { result, citation: totalMatches ? `Purchase item search: "${query}" (${totalMatches} matches)` : undefined };
     }
     default:
       return { result: { error: `Unknown tool: ${name}` } };

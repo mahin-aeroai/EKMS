@@ -26,6 +26,31 @@ if (!supabaseUrl || !supabaseAnonKey) {
  */
 export const supabase = createBrowserClient(supabaseUrl ?? "", supabaseAnonKey ?? "");
 
+export interface PurchaseTransactionRow {
+  id: string;
+  grn_no: string;
+  grn_date: string | null;
+  location: string | null;
+  po_no: string | null;
+  po_date: string | null;
+  bill_no: string | null;
+  bill_date: string | null;
+  supplier_name: string;
+  item_name: string;
+  item_code: string | null;
+  item_type: string | null;
+  product_category: string | null;
+  raw_material_id: string | null;
+  quantity: number | null;
+  rate: number | null;
+  taxable_value: number;
+  cgst: number | null;
+  sgst: number | null;
+  igst: number | null;
+  net_amount_line: number | null;
+  created_at: string;
+}
+
 export interface CustomerRow {
   id: string;
   code: string;

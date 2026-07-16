@@ -37,6 +37,7 @@ import {
   Landmark,
   ShieldCheck,
   Settings,
+  Receipt,
 } from "lucide-react";
 import { Sidebar, type SidebarSection } from "@/components/ui/Sidebar";
 import { TopNav } from "@/components/ui/TopNav";
@@ -120,6 +121,7 @@ const NAV: SidebarSection[] = [
       { id: "workspace-raw-material", label: "Materials", icon: <Package size={16} />, href: "/workspaces/raw-material" },
       { id: "inventory", label: "Inventory", icon: <Boxes size={16} />, href: "/workspaces/inventory" },
       { id: "procurement", label: "Procurement", icon: <ShoppingCart size={16} />, href: "/workspaces/procurement" },
+      { id: "purchase-register", label: "Purchase Register", icon: <Receipt size={16} />, href: "/workspaces/purchase-register" },
       { id: "suppliers", label: "Suppliers", icon: <Handshake size={16} />, href: "/workspaces/suppliers" },
       { id: "costing", label: "Costing", icon: <Calculator size={16} />, href: "/workspaces/costing" },
     ],
