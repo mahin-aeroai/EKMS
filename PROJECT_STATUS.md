@@ -1553,3 +1553,28 @@ over what the code actually does again.
     upload — will need a different approach (document storage/reference
     rather than a structured table) since the user wants to "see the PDF
     as it is", not have its contents parsed into fields.**
+47. Fixed search_lfg_sites returning no dimension detail
+    (src/app/api/ai-copilot/route.ts), after the user asked for "iStation @
+    Kompally size and specifications" and the Copilot replied it didn't have
+    width/height/bleed data — which was wrong: apple_lfg_sites has always
+    stored width_mm/height_mm/bleed_mm/width_inches/height_inches (see item
+    46's schema), but search_lfg_sites' select() only ever asked for
+    sheet_name/program/apple_store_id/store_name/city/material/site_status/
+    no_of_sites/sqft/rate/total_printing_amount/installation_team/address —
+    the dimension columns were never in the query, so the tool genuinely
+    never returned them to the model regardless of what data existed.
+    Fixed by adding width_mm, height_mm, bleed_mm, width_inches,
+    height_inches, amount, packing_forwarding, total, gst_amount, and
+    remarks to the select — the tool's detail rows now carry the same full
+    row the schema always supported. Also updated the tool's own
+    description to state plainly it does NOT carry an installation-method
+    field (e.g. scaffolding), which the user separately confirmed lives in
+    a different (not-yet-uploaded) cost sheet — heading off the same "does
+    this need scaffolding" question next time before the model has to
+    guess or search a "scaffold" keyword that will never match anything in
+    this data.
+    Verified via a clean `npx tsc --noEmit`, `npx eslint`, and `next build`.
+    Could not test against live Supabase from this sandbox — user should
+    re-ask for iStation @ Kompally (or any LFG site) and confirm width/
+    height/bleed now come back in the answer.
+    **Not yet run in production.**

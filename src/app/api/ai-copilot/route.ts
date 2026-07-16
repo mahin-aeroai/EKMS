@@ -202,7 +202,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: "search_lfg_sites",
-    description: "Search Apple's LFG (large-format graphics) site catalog -- one row per physical retail site with the exact material/size/rate specified for that site, the installation team, and the site address. Use for questions about a specific Apple store's spec/rate (e.g. 'what material is used at iPlanet Bhanshankari', 'what's the rate for the Aptronix Chennai site'), or for listing sites by city or material. Matches store name, city, material, Apple store ID, or installation team (partial match). Returns matching sites plus an aggregate (total_matches, total_printing_amount across ALL matches) regardless of limit.",
+    description: "Search Apple's LFG (large-format graphics) site catalog -- one row per physical retail site with its full size spec (width/height in both mm and inches, PLUS bleed allowance in mm), material, rate, packing & forwarding, GST, total printing amount, installation team, and site address. Use for questions about a specific Apple store's spec/rate/dimensions (e.g. 'what material and size is specified at iPlanet Bhanshankari', 'what's the bleed for the Aptronix Chennai site'), or for listing sites by city or material. Matches store name, city, material, Apple store ID, or installation team (partial match). Returns matching sites plus an aggregate (total_matches, total_printing_amount across ALL matches) regardless of limit. Does NOT include an installation-method field (e.g. scaffolding) -- that level of detail isn't in this data.",
     input_schema: {
       type: "object",
       properties: {
@@ -704,7 +704,7 @@ async function executeToolCall(
       const [top, allResult] = await Promise.all([
         supabase
           .from("apple_lfg_sites")
-          .select("sheet_name, program, apple_store_id, store_name, city, material, site_status, no_of_sites, sqft, rate, total_printing_amount, installation_team, address")
+          .select("sheet_name, program, apple_store_id, store_name, city, material, site_status, no_of_sites, width_mm, height_mm, bleed_mm, width_inches, height_inches, sqft, rate, amount, packing_forwarding, total, gst_amount, total_printing_amount, installation_team, address, remarks")
           .or(filter)
           .order("total_printing_amount", { ascending: false })
           .limit(detailLimit),
