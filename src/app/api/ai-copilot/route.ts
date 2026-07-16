@@ -32,6 +32,8 @@ Sales questions: use sales_summary for anything about sales broken down by mater
 
 Purchase/spend questions: use purchase_summary for anything about what MMDI bought/spent — broken down by supplier, material/product category, or a time period (day/week/month) — same group_by pattern as sales_summary, and it also supports combining a filter with a different group_by. Use search_purchase_items for a specific item's buy price/rate. "Purchases"/"spend" always means Taxable Value (pre-tax) from purchase_transactions, covering Jan-Jun 2026 (a different, wider date range than sales' Apr-Jun 2026 — don't assume they cover the same period). Some purchase line items have no product_category (the item wasn't in the item master) — these show as "Uncategorized", which is a real, if imprecise, answer, not an error.
 
+Branch/office questions: MMDI operates through 9 branches — Hyderabad, Noida, Mumbai, Bangalore, Chennai, Kolkata, Kochi, Visakhapatnam, and Pune. Both sales_summary and purchase_summary support group_by='location' and a location_filter for "which branch" / "sales at the Hyderabad office" type questions — use group_by='location', not customer/supplier, when the question names a city/branch rather than a company. Two things worth knowing: the data spells it "Vishakapatnam" (one fewer syllable than the standard spelling), and a handful of rows use "Chandanvelly" or "Head Office" instead of a branch name — these are real values in the source data (a plant/godown location and central office respectively, not one of the 9 sales branches), not errors — report them as-is rather than folding them into the nearest branch.
+
 Formatting: the chat UI renders your reply as plain text only — no markdown. Never use markdown tables (| pipes |), headers (#), or bold (**). For lists, use a simple numbered or dashed list with one item per line, or short plain sentences. Keep it readable as plain prose.
 
 Totals: when search_customers or search_job_orders returns more matches than the detail list shows, use the tool's own total_* aggregate fields for any sum/total the person asks for — never add up just the visible detail rows yourself, since that list is capped and may exclude the largest matches (it's sorted by value, but a common search term can still match more records than fit in the list).`;
@@ -109,12 +111,13 @@ const TOOLS: Tool[] = [
       properties: {
         group_by: {
           type: "string",
-          enum: ["product_category", "sales_manager", "customer", "month", "week", "day"],
-          description: "How to break down the sales figures. 'product_category' is the closest match to 'material category' or 'product group'; 'sales_manager' is the closest match to 'sales person'.",
+          enum: ["product_category", "sales_manager", "customer", "location", "month", "week", "day"],
+          description: "How to break down the sales figures. 'product_category' is the closest match to 'material category' or 'product group'; 'sales_manager' is the closest match to 'sales person'; 'location' is the closest match to 'branch' or 'sales office' (MMDI's 9 branches: Hyderabad, Noida, Mumbai, Bangalore, Chennai, Kolkata, Kochi, Visakhapatnam, Pune).",
         },
         sales_manager_filter: { type: "string", description: "Optional: restrict to this sales person (partial match) before grouping — use when the question names a specific sales person AND asks for a different breakdown (e.g. their customers, their category mix)" },
         customer_filter: { type: "string", description: "Optional: restrict to this customer name (partial match) before grouping" },
         product_category_filter: { type: "string", description: "Optional: restrict to this product/material category (partial match) before grouping" },
+        location_filter: { type: "string", description: "Optional: restrict to this branch/location (partial match) before grouping — e.g. 'Hyderabad', 'Bangalore'" },
         date_from: { type: "string", description: "Optional start date (YYYY-MM-DD), inclusive" },
         date_to: { type: "string", description: "Optional end date (YYYY-MM-DD), inclusive" },
         top_n: { type: "number", description: "Max number of groups to return in detail, sorted by total value descending (default 20)" },
@@ -139,11 +142,12 @@ const TOOLS: Tool[] = [
       properties: {
         group_by: {
           type: "string",
-          enum: ["product_category", "supplier", "month", "week", "day"],
-          description: "How to break down the purchase figures. 'product_category' is the closest match to 'material category'; 'supplier' is the closest match to 'vendor'.",
+          enum: ["product_category", "supplier", "location", "month", "week", "day"],
+          description: "How to break down the purchase figures. 'product_category' is the closest match to 'material category'; 'supplier' is the closest match to 'vendor'; 'location' is the closest match to 'branch' (MMDI's 9 branches: Hyderabad, Noida, Mumbai, Bangalore, Chennai, Kolkata, Kochi, Visakhapatnam, Pune).",
         },
         supplier_filter: { type: "string", description: "Optional: restrict to this supplier name (partial match) before grouping" },
         product_category_filter: { type: "string", description: "Optional: restrict to this product/material category (partial match) before grouping" },
+        location_filter: { type: "string", description: "Optional: restrict to this branch/location (partial match) before grouping — e.g. 'Hyderabad', 'Bangalore'" },
         date_from: { type: "string", description: "Optional start date (YYYY-MM-DD), inclusive" },
         date_to: { type: "string", description: "Optional end date (YYYY-MM-DD), inclusive" },
         top_n: { type: "number", description: "Max number of groups to return in detail, sorted by total value descending (default 20)" },
@@ -318,6 +322,7 @@ async function executeToolCall(
       const salesManagerFilter = input.sales_manager_filter ? String(input.sales_manager_filter) : null;
       const customerFilter = input.customer_filter ? String(input.customer_filter) : null;
       const productCategoryFilter = input.product_category_filter ? String(input.product_category_filter) : null;
+      const locationFilter = input.location_filter ? String(input.location_filter) : null;
 
       // Paginated, not a bare .limit(): Supabase/PostgREST's server-side max-rows
       // setting clamps any single request (even .limit(20000)) to its own cap
@@ -325,13 +330,14 @@ async function executeToolCall(
       const { rows, error } = await fetchAllRows((from, to) => {
         let q = supabase
           .from("sales_transactions")
-          .select("product_category, sales_manager, customer_name, invoice_date, taxable_value")
+          .select("product_category, sales_manager, customer_name, location, invoice_date, taxable_value")
           .range(from, to);
         if (dateFrom) q = q.gte("invoice_date", dateFrom);
         if (dateTo) q = q.lte("invoice_date", dateTo);
         if (salesManagerFilter) q = q.ilike("sales_manager", `%${salesManagerFilter}%`);
         if (customerFilter) q = q.ilike("customer_name", `%${customerFilter}%`);
         if (productCategoryFilter) q = q.ilike("product_category", `%${productCategoryFilter}%`);
+        if (locationFilter) q = q.ilike("location", `%${locationFilter}%`);
         return q;
       });
       if (error) return { result: { error } };
@@ -351,6 +357,8 @@ async function executeToolCall(
             return row.sales_manager ?? "Unknown";
           case "customer":
             return row.customer_name ?? "Unknown";
+          case "location":
+            return row.location ?? "Unknown";
           case "month":
             return row.invoice_date ? row.invoice_date.slice(0, 7) : "Unknown";
           case "week":
@@ -381,6 +389,7 @@ async function executeToolCall(
         sales_manager: salesManagerFilter,
         customer: customerFilter,
         product_category: productCategoryFilter,
+        location: locationFilter,
       };
       const result = {
         group_by: groupBy,
@@ -390,7 +399,7 @@ async function executeToolCall(
         grand_total_transactions: rows.length,
         groups: sortedGroups,
       };
-      const filterLabel = [salesManagerFilter && `sales person "${salesManagerFilter}"`, customerFilter && `customer "${customerFilter}"`, productCategoryFilter && `category "${productCategoryFilter}"`]
+      const filterLabel = [salesManagerFilter && `sales person "${salesManagerFilter}"`, customerFilter && `customer "${customerFilter}"`, productCategoryFilter && `category "${productCategoryFilter}"`, locationFilter && `branch "${locationFilter}"`]
         .filter(Boolean)
         .join(", ");
       return {
@@ -431,18 +440,20 @@ async function executeToolCall(
       const topN = typeof input.top_n === "number" ? input.top_n : 20;
       const supplierFilter = input.supplier_filter ? String(input.supplier_filter) : null;
       const productCategoryFilter = input.product_category_filter ? String(input.product_category_filter) : null;
+      const locationFilter = input.location_filter ? String(input.location_filter) : null;
 
       // Paginated (see fetchAllRows comment above) -- purchase_transactions is
       // 9,528 rows, well past the point a bare .limit() would be trustworthy.
       const { rows, error } = await fetchAllRows((from, to) => {
         let q = supabase
           .from("purchase_transactions")
-          .select("product_category, supplier_name, grn_date, taxable_value")
+          .select("product_category, supplier_name, location, grn_date, taxable_value")
           .range(from, to);
         if (dateFrom) q = q.gte("grn_date", dateFrom);
         if (dateTo) q = q.lte("grn_date", dateTo);
         if (supplierFilter) q = q.ilike("supplier_name", `%${supplierFilter}%`);
         if (productCategoryFilter) q = q.ilike("product_category", `%${productCategoryFilter}%`);
+        if (locationFilter) q = q.ilike("location", `%${locationFilter}%`);
         return q;
       });
       if (error) return { result: { error } };
@@ -460,6 +471,8 @@ async function executeToolCall(
         switch (groupBy) {
           case "supplier":
             return row.supplier_name ?? "Unknown";
+          case "location":
+            return row.location ?? "Unknown";
           case "month":
             return row.grn_date ? row.grn_date.slice(0, 7) : "Unknown";
           case "week":
@@ -489,6 +502,7 @@ async function executeToolCall(
       const filtersApplied = {
         supplier: supplierFilter,
         product_category: productCategoryFilter,
+        location: locationFilter,
       };
       const result = {
         group_by: groupBy,
@@ -498,7 +512,7 @@ async function executeToolCall(
         grand_total_transactions: rows.length,
         groups: sortedGroups,
       };
-      const filterLabel = [supplierFilter && `supplier "${supplierFilter}"`, productCategoryFilter && `category "${productCategoryFilter}"`]
+      const filterLabel = [supplierFilter && `supplier "${supplierFilter}"`, productCategoryFilter && `category "${productCategoryFilter}"`, locationFilter && `branch "${locationFilter}"`]
         .filter(Boolean)
         .join(", ");
       return {

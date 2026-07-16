@@ -1187,3 +1187,27 @@ over what the code actually does again.
     Supabase-SQL-Editor-size-cap workaround as the sales import), then push
     the code changes (route.ts, AppShell.tsx, supabase.ts, new
     purchase-register/page.tsx). **Not yet run in production.**
+34. User clarified MMDI's 9 branches (Hyderabad, Noida, Mumbai, Bangalore,
+    Chennai, Kolkata, Kochi, Visakhapatnam, Pune) after the AI Copilot itself
+    correctly explained it couldn't do a clean branch-wise breakdown yet
+    (sales_summary/purchase_summary only grouped by
+    product_category/sales_manager/customer/supplier/time period, no
+    location dimension). Checked the source files directly: the Sales Day
+    Book has BOTH a "Location" column (clean branch names) and a "Sales
+    Office" column (mixes actual branch names with non-branch entities like
+    "Head Office", "Indura", "EGD", "Gurugram", "Subsidiary Companies",
+    "OMC" — NOT usable as a clean branch field) — confirmed `location` on
+    sales_transactions/purchase_transactions (sourced from "Location"/
+    "Location.Name") is the right field, not a new column.
+    Added group_by='location' + location_filter to both sales_summary and
+    purchase_summary (same combined filter+group pattern as every other
+    dimension). Documented two real data quirks in the system prompt rather
+    than silently normalizing them: the data spells it "Vishakapatnam" (not
+    the standard "Visakhapatnam"), and some rows use "Chandanvelly" (a
+    plant/godown location) or "Head Office" instead of one of the 9 branches
+    — both are real, both should be reported as-is.
+    Verified via a clean `npx tsc --noEmit`, `next lint`, and `next build`.
+    Could not test against live Supabase from this sandbox (no network
+    access) — user should re-ask a branch-wise question (e.g. "sales by
+    branch" or "Hyderabad branch spend") once deployed. **Not yet run in
+    production.**
