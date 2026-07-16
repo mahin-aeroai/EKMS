@@ -1244,3 +1244,32 @@ over what the code actually does again.
     access) — user should re-ask their original failed question ("raw
     material purchases only, excluding capital goods") once deployed.
     **Not yet run in production.**
+36. User confirmed MMDI's financial year runs 1 Apr - 31 Mar and asked to
+    "restrict FY" after I flagged (in response to "do we have financial year
+    in ur records?") that no fiscal_year column exists anywhere — only raw
+    calendar dates — and that the purchase ledger (Jan-Jun 2026) actually
+    straddles two financial years (FY25-26 Q4 = Jan-Mar, FY26-27 Q1 =
+    Apr-Jun) while the sales ledger (Apr-Jun 2026 only) sits entirely in
+    FY26-27 Q1.
+    Rather than add a stored fiscal_year column (unnecessary — it's a pure
+    function of the date, and a stored/denormalized version would risk
+    drifting out of sync), added two shared helper functions to
+    src/app/api/ai-copilot/route.ts: fiscalYearLabel() and
+    fiscalQuarterLabel(), both computing MMDI's Apr-Mar FY from a plain
+    YYYY-MM-DD string (verified by hand: 2026-01-15/2026-03-31 -> FY25-26
+    Q4, 2026-04-01/2026-06-30 -> FY26-27 Q1, 2026-12-25 -> FY26-27 Q3,
+    2027-03-01 -> FY26-27 Q4). Added group_by='fiscal_year' and
+    'fiscal_quarter' to both sales_summary and purchase_summary (same
+    pattern as every other dimension), and added a new "Financial year"
+    paragraph to SYSTEM_PROMPT explaining the Apr-Mar rule so the model can
+    correctly compute date_from/date_to itself for "FY26-27" / "FY25-26 Q4"
+    type questions (there's no fiscal_year_filter param — date_from/date_to
+    already cover arbitrary ranges once the model knows the conversion
+    rule), plus a reminder that the two ledgers' FY coverage differs (sales
+    = all FY26-27 Q1; purchases = FY25-26 Q4 + FY26-27 Q1).
+    Verified via a clean `npx tsc --noEmit`, `next lint`, `next build`, and
+    a standalone node script confirming the FY/quarter math above.
+    Could not test against live Supabase from this sandbox (no network
+    access) — user should re-ask a fiscal-year-scoped question (e.g. "FY26-27
+    Q1 sales" or "compare FY25-26 Q4 vs FY26-27 Q1 purchases") once deployed.
+    **Not yet run in production.**

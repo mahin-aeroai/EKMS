@@ -36,6 +36,8 @@ Raw materials vs. capital goods vs. services: purchase_transactions has a real i
 
 Branch/office questions: MMDI operates through 9 branches — Hyderabad, Noida, Mumbai, Bangalore, Chennai, Kolkata, Kochi, Visakhapatnam, and Pune. Both sales_summary and purchase_summary support group_by='location' and a location_filter for "which branch" / "sales at the Hyderabad office" type questions — use group_by='location', not customer/supplier, when the question names a city/branch rather than a company. Two things worth knowing: the data spells it "Vishakapatnam" (one fewer syllable than the standard spelling), and a handful of rows use "Chandanvelly" or "Head Office" instead of a branch name — these are real values in the source data (a plant/godown location and central office respectively, not one of the 9 sales branches), not errors — report them as-is rather than folding them into the nearest branch.
 
+Financial year: MMDI's financial year runs 1 April to 31 March, e.g. FY26-27 = 1 Apr 2026 to 31 Mar 2027, and FY26-27 Q1 = Apr-Jun 2026, Q2 = Jul-Sep 2026, Q3 = Oct-Dec 2026, Q4 = Jan-Mar 2027 (note Q4 of an FY falls in the NEXT calendar year). There is no fiscal_year column in the data — only raw calendar dates — so for a question about a specific FY or FY quarter, compute date_from/date_to yourself using this rule and pass them to sales_summary/purchase_summary (e.g. "FY26-27 Q4 purchases" -> date_from='2027-01-01', date_to='2027-03-31'). Both tools also support group_by='fiscal_year' and group_by='fiscal_quarter' for breaking a wider range down BY financial year/quarter in one call (e.g. "compare purchases across FY25-26 Q4 and FY26-27 Q1" -> one purchase_summary call with group_by='fiscal_quarter', date_from='2026-01-01', date_to='2026-06-30', no need for two separate calls). Remember the underlying date ranges differ: sales_transactions only covers Apr-Jun 2026 (all FY26-27 Q1), while purchase_transactions covers Jan-Jun 2026 (spanning FY25-26 Q4 AND FY26-27 Q1) — don't assume a "total" on one ledger reflects the same financial-year scope as the other.
+
 Formatting: the chat UI renders your reply as plain text only — no markdown. Never use markdown tables (| pipes |), headers (#), or bold (**). For lists, use a simple numbered or dashed list with one item per line, or short plain sentences. Keep it readable as plain prose.
 
 Totals: when search_customers or search_job_orders returns more matches than the detail list shows, use the tool's own total_* aggregate fields for any sum/total the person asks for — never add up just the visible detail rows yourself, since that list is capped and may exclude the largest matches (it's sorted by value, but a common search term can still match more records than fit in the list).`;
@@ -113,8 +115,8 @@ const TOOLS: Tool[] = [
       properties: {
         group_by: {
           type: "string",
-          enum: ["product_category", "sales_manager", "customer", "location", "month", "week", "day"],
-          description: "How to break down the sales figures. 'product_category' is the closest match to 'material category' or 'product group'; 'sales_manager' is the closest match to 'sales person'; 'location' is the closest match to 'branch' or 'sales office' (MMDI's 9 branches: Hyderabad, Noida, Mumbai, Bangalore, Chennai, Kolkata, Kochi, Visakhapatnam, Pune).",
+          enum: ["product_category", "sales_manager", "customer", "location", "fiscal_year", "fiscal_quarter", "month", "week", "day"],
+          description: "How to break down the sales figures. 'product_category' is the closest match to 'material category' or 'product group'; 'sales_manager' is the closest match to 'sales person'; 'location' is the closest match to 'branch' or 'sales office' (MMDI's 9 branches: Hyderabad, Noida, Mumbai, Bangalore, Chennai, Kolkata, Kochi, Visakhapatnam, Pune); 'fiscal_year'/'fiscal_quarter' bucket by MMDI's Apr-Mar financial year (e.g. 'FY26-27', 'FY26-27 Q1') rather than calendar month/week.",
         },
         sales_manager_filter: { type: "string", description: "Optional: restrict to this sales person (partial match) before grouping — use when the question names a specific sales person AND asks for a different breakdown (e.g. their customers, their category mix)" },
         customer_filter: { type: "string", description: "Optional: restrict to this customer name (partial match) before grouping" },
@@ -144,8 +146,8 @@ const TOOLS: Tool[] = [
       properties: {
         group_by: {
           type: "string",
-          enum: ["product_category", "supplier", "location", "item_type", "month", "week", "day"],
-          description: "How to break down the purchase figures. 'product_category' is the closest match to 'material category'; 'supplier' is the closest match to 'vendor'; 'location' is the closest match to 'branch' (MMDI's 9 branches: Hyderabad, Noida, Mumbai, Bangalore, Chennai, Kolkata, Kochi, Visakhapatnam, Pune); 'item_type' is the broad purchase class (Raw material / Finished goods / Service / Intermediate item / Non stock item) — use this for 'raw materials vs capital goods vs services' type questions, not product_category.",
+          enum: ["product_category", "supplier", "location", "item_type", "fiscal_year", "fiscal_quarter", "month", "week", "day"],
+          description: "How to break down the purchase figures. 'product_category' is the closest match to 'material category'; 'supplier' is the closest match to 'vendor'; 'location' is the closest match to 'branch' (MMDI's 9 branches: Hyderabad, Noida, Mumbai, Bangalore, Chennai, Kolkata, Kochi, Visakhapatnam, Pune); 'item_type' is the broad purchase class (Raw material / Finished goods / Service / Intermediate item / Non stock item) — use this for 'raw materials vs capital goods vs services' type questions, not product_category; 'fiscal_year'/'fiscal_quarter' bucket by MMDI's Apr-Mar financial year (e.g. 'FY26-27', 'FY25-26 Q4') rather than calendar month/week — the purchase ledger spans FY25-26 Q4 and FY26-27 Q1, so this is the only tool where a fiscal-year comparison spans a real boundary in the data.",
         },
         supplier_filter: { type: "string", description: "Optional: restrict to this supplier name (partial match) before grouping" },
         product_category_filter: { type: "string", description: "Optional: restrict to this product/material category (partial match) before grouping" },
@@ -199,6 +201,28 @@ async function fetchAllRows<T>(
     from += pageSize;
   }
   return { rows };
+}
+
+// MMDI's financial year runs 1 April - 31 March, e.g. FY26-27 = 1 Apr 2026 to
+// 31 Mar 2027. There's no fiscal_year column in either ledger -- only raw
+// calendar dates -- so this derives the FY label from a plain YYYY-MM-DD
+// string. Shared by sales_summary and purchase_summary's group_by='fiscal_year'
+// / 'fiscal_quarter' (see SYSTEM_PROMPT for why this matters: the purchase
+// ledger spans FY25-26 Q4 and FY26-27 Q1, a real boundary the sales ledger
+// never crosses).
+function fiscalYearLabel(dateStr: string): string {
+  const d = new Date(dateStr + "T00:00:00Z");
+  const month = d.getUTCMonth() + 1; // 1-12
+  const startYear = month >= 4 ? d.getUTCFullYear() : d.getUTCFullYear() - 1;
+  const yy = (n: number) => String(n % 100).padStart(2, "0");
+  return `FY${yy(startYear)}-${yy(startYear + 1)}`;
+}
+
+function fiscalQuarterLabel(dateStr: string): string {
+  const d = new Date(dateStr + "T00:00:00Z");
+  const month = d.getUTCMonth() + 1; // 1-12
+  const quarter = month >= 4 && month <= 6 ? 1 : month >= 7 && month <= 9 ? 2 : month >= 10 && month <= 12 ? 3 : 4;
+  return `${fiscalYearLabel(dateStr)} Q${quarter}`;
 }
 
 async function executeToolCall(
@@ -362,6 +386,10 @@ async function executeToolCall(
             return row.customer_name ?? "Unknown";
           case "location":
             return row.location ?? "Unknown";
+          case "fiscal_year":
+            return row.invoice_date ? fiscalYearLabel(row.invoice_date) : "Unknown";
+          case "fiscal_quarter":
+            return row.invoice_date ? fiscalQuarterLabel(row.invoice_date) : "Unknown";
           case "month":
             return row.invoice_date ? row.invoice_date.slice(0, 7) : "Unknown";
           case "week":
@@ -480,6 +508,10 @@ async function executeToolCall(
             return row.location ?? "Unknown";
           case "item_type":
             return row.item_type ?? "Uncategorized";
+          case "fiscal_year":
+            return row.grn_date ? fiscalYearLabel(row.grn_date) : "Unknown";
+          case "fiscal_quarter":
+            return row.grn_date ? fiscalQuarterLabel(row.grn_date) : "Unknown";
           case "month":
             return row.grn_date ? row.grn_date.slice(0, 7) : "Unknown";
           case "week":
