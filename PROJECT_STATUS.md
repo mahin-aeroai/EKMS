@@ -1378,3 +1378,28 @@ over what the code actually does again.
     access) — user should re-ask for the full Arrow Digital transaction list
     once deployed and confirm all 347 rows come back in one call.
     **Not yet run in production.**
+41. Added a real CSV export to the Purchase Register workspace page
+    (src/app/workspaces/purchase-register/page.tsx), after the user asked
+    the AI Copilot for "branch, purchase type, supplier, goods name, rate,
+    value for all purchases" and the Copilot correctly explained it can't
+    dump 9,528 rows as chat text and suggested a direct export was the right
+    tool instead — confirmed via AskUserQuestion that the user wanted
+    exactly that built.
+    New "Export all to CSV" button (top-right of the page, next to the
+    title) fetches every purchase_transactions row via the same paginated
+    .range() loop pattern used everywhere else in this app to avoid
+    Supabase/PostgREST's server-side max-rows clamp (see items 31/32's
+    history — a single .select() would silently truncate well short of
+    9,528), builds a CSV client-side (proper quote/comma/newline escaping),
+    and triggers a browser download named
+    purchase-register-YYYY-MM-DD.csv. Shows live progress ("Exporting…
+    N") via the button's loading state while paginating, since 9,528 rows
+    across ~10 requests takes a few seconds. Columns: Date, GRN No.,
+    Branch, Purchase Type (item_type — the closest concept this schema has
+    to what was asked as "purchase type"), Category, Supplier, Goods Name,
+    Item Code, Quantity, Rate, Taxable Value.
+    Verified via a clean `npx tsc --noEmit`, `next lint`, `next build`.
+    Could not test the actual download against live Supabase from this
+    sandbox (no network access) — user should click "Export all to CSV" on
+    the deployed Purchase Register page and confirm the download completes
+    with 9,528 data rows. **Not yet run in production.**
