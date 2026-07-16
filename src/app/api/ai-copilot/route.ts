@@ -148,7 +148,7 @@ async function executeToolCall(
           .ilike("name", `%${query}%`)
           .order("lifetime_value", { ascending: false })
           .limit(20),
-        supabase.from("customers").select("lifetime_value, open_orders").ilike("name", `%${query}%`),
+        supabase.from("customers").select("lifetime_value, open_orders").ilike("name", `%${query}%`).limit(5000),
       ]);
       if (top.error || all.error) return { result: { error: (top.error ?? all.error)?.message } };
       const totalMatches = all.data?.length ?? 0;
@@ -181,7 +181,7 @@ async function executeToolCall(
           .or(filter)
           .order("total_value", { ascending: false })
           .limit(20),
-        supabase.from("job_orders").select("total_value, total_sqft").or(filter),
+        supabase.from("job_orders").select("total_value, total_sqft").or(filter).limit(5000),
       ]);
       if (top.error || all.error) return { result: { error: (top.error ?? all.error)?.message } };
       const totalMatches = all.data?.length ?? 0;
@@ -254,7 +254,10 @@ async function executeToolCall(
 
       let query = supabase
         .from("sales_transactions")
-        .select("product_category, sales_manager, customer_name, invoice_date, taxable_value");
+        .select("product_category, sales_manager, customer_name, invoice_date, taxable_value")
+        .limit(20000); // whole table is 9,274 rows -- without an explicit limit, Supabase's
+                        // default per-request row cap silently truncates an unfiltered query
+                        // well below that, which is exactly the bug this fixes (see PROJECT_STATUS.md).
       if (dateFrom) query = query.gte("invoice_date", dateFrom);
       if (dateTo) query = query.lte("invoice_date", dateTo);
       if (salesManagerFilter) query = query.ilike("sales_manager", `%${salesManagerFilter}%`);
@@ -338,7 +341,7 @@ async function executeToolCall(
           .or(filter)
           .order("invoice_date", { ascending: false })
           .limit(20),
-        supabase.from("sales_transactions").select("rate, taxable_value").or(filter),
+        supabase.from("sales_transactions").select("rate, taxable_value").or(filter).limit(20000),
       ]);
       if (top.error || all.error) return { result: { error: (top.error ?? all.error)?.message } };
       const matches = all.data ?? [];
