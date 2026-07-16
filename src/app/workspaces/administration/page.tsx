@@ -1,15 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Settings } from "lucide-react";
+import { Settings, ShieldAlert } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { Tag } from "@/components/ui/Tag";
 import { StatCard, AICard } from "@/components/ui/Card";
 import { Table, type TableColumn } from "@/components/ui/Table";
 import { TreeView, type TreeNode } from "@/components/ui/TreeView";
+import { Dialog } from "@/components/ui/Dialog";
 import { useToast } from "@/components/ui/Notifications";
-import { supabase, type AccessRequestRow } from "@/lib/supabase";
+import { useUserRole } from "@/lib/UserRoleContext";
+import { supabase, type AccessRequestRow, type ProfileRow, type UserRole } from "@/lib/supabase";
+import { timeAgo } from "@/lib/timeAgo";
 
 const COLUMNS: TableColumn<AccessRequestRow>[] = [
   { key: "user_label", header: "User", sortable: true },
@@ -25,9 +28,21 @@ const TREE: TreeNode[] = [
   ]},
 ];
 
+const ROLE_BADGE_STATUS: Record<UserRole, "success" | "info" | "neutral"> = {
+  admin: "success",
+  editor: "info",
+  viewer: "neutral",
+};
+
+const ROLE_OPTIONS: UserRole[] = ["admin", "editor", "viewer"];
+
 export default function AdministrationPage() {
   const { toast } = useToast();
+  const userRole = useUserRole();
   const [requests, setRequests] = useState<AccessRequestRow[] | null>(null);
+  const [profiles, setProfiles] = useState<ProfileRow[] | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [pendingChange, setPendingChange] = useState<{ profile: ProfileRow; newRole: UserRole } | null>(null);
 
   useEffect(() => {
     supabase
@@ -40,10 +55,82 @@ export default function AdministrationPage() {
         }
         setRequests(data ?? []);
       });
+
+    supabase.auth.getUser().then(({ data }) => {
+      if (data.user) setCurrentUserId(data.user.id);
+    });
+
+    // Row visibility here is enforced by RLS, not this query: admins get
+    // every profile back, everyone else only ever gets their own row (see
+    // profiles_select_own_or_admin in supabase-role-based-rls-migration.sql)
+    // — so a non-admin viewing this page naturally sees just themselves,
+    // no client-side filtering needed.
+    supabase
+      .from("profiles")
+      .select("*")
+      .order("created_at", { ascending: true })
+      .then(({ data, error }) => {
+        if (error) {
+          toast("danger", "Couldn't load user profiles from Supabase");
+          return;
+        }
+        setProfiles((data as ProfileRow[]) ?? []);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const pending = requests?.filter((r) => r.status === "warning").length ?? 0;
+  const isAdmin = userRole === "admin";
+
+  function requestRoleChange(profile: ProfileRow, newRole: UserRole) {
+    if (newRole === profile.role) return;
+    // Guard the one genuinely dangerous case: an admin demoting themselves.
+    // Nothing stops this at the database level (RLS just checks the CURRENT
+    // role at time of write), but if this admin is the only one, doing it
+    // by accident locks everyone out of this page until someone runs the
+    // promote-back UPDATE directly in the Supabase SQL editor.
+    if (profile.id === currentUserId && profile.role === "admin" && newRole !== "admin") {
+      setPendingChange({ profile, newRole });
+      return;
+    }
+    applyRoleChange(profile, newRole);
+  }
+
+  async function applyRoleChange(profile: ProfileRow, newRole: UserRole) {
+    const { error } = await supabase.from("profiles").update({ role: newRole }).eq("id", profile.id);
+    if (error) {
+      toast("danger", `Couldn't update ${profile.email}'s role: ${error.message}`);
+      return;
+    }
+    setProfiles((prev) => prev?.map((p) => (p.id === profile.id ? { ...p, role: newRole } : p)) ?? prev);
+    toast("success", `${profile.email} is now ${newRole}`);
+  }
+
+  const PROFILE_COLUMNS: TableColumn<ProfileRow>[] = [
+    { key: "email", header: "User", sortable: true },
+    {
+      key: "role",
+      header: "Role",
+      sortable: true,
+      render: (p) =>
+        isAdmin ? (
+          <select
+            value={p.role}
+            onChange={(e) => requestRoleChange(p, e.target.value as UserRole)}
+            className="h-8 rounded-md border border-line-strong bg-surface px-2 text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            {ROLE_OPTIONS.map((r) => (
+              <option key={r} value={r}>
+                {r.charAt(0).toUpperCase() + r.slice(1)}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <Badge status={ROLE_BADGE_STATUS[p.role]}>{p.role.charAt(0).toUpperCase() + p.role.slice(1)}</Badge>
+        ),
+    },
+    { key: "created_at", header: "Joined", sortable: true, render: (p) => timeAgo(p.created_at) },
+  ];
 
   return (
     <div>
@@ -68,8 +155,8 @@ export default function AdministrationPage() {
       </div>
 
       <div className="my-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard label="Active Users" value="248" trend="up" trendLabel="+4 this quarter" />
-        <StatCard label="Roles Configured" value="16" trend="flat" trendLabel="No change" />
+        <StatCard label="User Accounts" value={profiles ? String(profiles.length) : "…"} trend="flat" trendLabel="Admin / Editor / Viewer" />
+        <StatCard label="Roles Configured" value="3" trend="flat" trendLabel="Admin, Editor, Viewer" />
         <StatCard label="Pending Access Requests" value={String(pending)} trend="up" trendLabel="+1 this week" />
       </div>
 
@@ -92,12 +179,47 @@ export default function AdministrationPage() {
               <Table columns={COLUMNS} rows={requests} onRowClick={(r) => toast("info", `Opened request from ${r.user_label}`)} />
             )}
           </div>
+          <div className="rounded-lg border border-line bg-surface p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-ink">Users &amp; roles</h3>
+              {!isAdmin && userRole && (
+                <span className="flex items-center gap-1.5 text-xs text-ink-muted">
+                  <ShieldAlert size={13} />
+                  Only admins can view and change other users&apos; roles
+                </span>
+              )}
+            </div>
+            {profiles === null ? (
+              <p className="py-6 text-center text-sm text-ink-muted">Loading users…</p>
+            ) : profiles.length === 0 ? (
+              <p className="py-6 text-center text-sm text-ink-muted">No profile rows found.</p>
+            ) : (
+              <Table columns={PROFILE_COLUMNS} rows={profiles} />
+            )}
+          </div>
         </div>
         <div className="rounded-lg border border-line bg-surface p-4">
           <h3 className="mb-3 text-sm font-semibold text-ink">Role hierarchy</h3>
           <TreeView nodes={TREE} />
         </div>
       </div>
+
+      <Dialog
+        open={pendingChange !== null}
+        onClose={() => setPendingChange(null)}
+        title="Remove your own admin access?"
+        variant="confirm"
+        destructive
+        confirmLabel="Remove my admin access"
+        onConfirm={() => {
+          if (pendingChange) applyRoleChange(pendingChange.profile, pendingChange.newRole);
+          setPendingChange(null);
+        }}
+      >
+        You&apos;re about to change your own role from Admin to {pendingChange ? pendingChange.newRole : ""}. If you&apos;re
+        the only admin, no one will be able to manage roles from this page afterward — you&apos;d need to run an UPDATE
+        directly in the Supabase SQL editor to undo it. Continue?
+      </Dialog>
     </div>
   );
 }
