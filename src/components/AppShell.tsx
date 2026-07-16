@@ -158,6 +158,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { toast } = useToast();
   const [aiOpen, setAiOpen] = useState(false);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
+  const [aiLoading, setAiLoading] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<UserRole | null>(null);
   const [allowedGroups, setAllowedGroups] = useState<string[] | null>(null);
@@ -240,18 +241,43 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     },
   ]);
 
-  function handleSend(message: string) {
-    setTurns((t) => [
-      ...t,
-      { id: crypto.randomUUID(), role: "user", content: message },
-      {
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content:
-          "This is a demo response showing the AI Conversation component's shape — citations, confidence and feedback controls all render exactly as they would against live data.",
-        citations: ["Customer Master — Reliance Retail", "Sales Order SO-MU-2026-007812"],
-      },
-    ]);
+  // Same backend as the dedicated AI Copilot workspace (src/app/workspaces/ai-copilot/page.tsx)
+  // — this drawer is meant to be "the same assistant available from every workspace" (see
+  // that page's own subtitle), so it hits the same /api/ai-copilot route instead of a
+  // separate, disconnected demo response. Conversation history/loading state live here in
+  // AppShell rather than that page specifically, since this drawer persists across navigation.
+  async function handleSend(message: string) {
+    const userTurn: ChatTurn = { id: crypto.randomUUID(), role: "user", content: message };
+    const history = [...turns, userTurn];
+    setTurns(history);
+    setAiLoading(true);
+
+    try {
+      const res = await fetch("/api/ai-copilot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: history.map((t) => ({ role: t.role, content: t.content })) }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        if (data.error === "not_configured") {
+          toast("warning", "AI Copilot isn't set up yet — add ANTHROPIC_API_KEY in Vercel to enable it.");
+        } else {
+          toast("danger", data.message ?? "The AI Copilot couldn't answer that — try again.");
+        }
+        return;
+      }
+
+      setTurns((t) => [
+        ...t,
+        { id: crypto.randomUUID(), role: "assistant", content: data.content, citations: data.citations },
+      ]);
+    } catch {
+      toast("danger", "Couldn't reach the AI Copilot — check your connection and try again.");
+    } finally {
+      setAiLoading(false);
+    }
   }
 
   return (
@@ -276,7 +302,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
         <CommandPalette commands={commands} onAskAI={(q) => { setAiOpen(true); if (q) handleSend(q); }} />
         <Drawer open={aiOpen} onClose={() => setAiOpen(false)} title="AI Assistant" wide>
-          <AIConversation turns={turns} onSend={handleSend} />
+          <AIConversation turns={turns} onSend={handleSend} loading={aiLoading} />
         </Drawer>
       </div>
     </UserGroupsContext.Provider>
