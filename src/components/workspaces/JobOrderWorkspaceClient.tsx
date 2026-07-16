@@ -17,6 +17,7 @@ import { ApprovalPanel } from "@/components/ui/ApprovalPanel";
 import { useUserRole, canWrite } from "@/lib/UserRoleContext";
 import { RelationshipGraph, type GraphNode, type GraphEdge } from "@/components/ui/RelationshipGraph";
 import { PromptInput } from "@/components/ui/PromptInput";
+import { useRecordCopilot } from "@/lib/useRecordCopilot";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase, type JobOrderRow, type JobOrderCommentRow, type JobOrderApprovalRow } from "@/lib/supabase";
 import { timeAgo } from "@/lib/timeAgo";
@@ -87,6 +88,7 @@ export function JobOrderWorkspaceClient({
   initialApproval: JobOrderApprovalRow | null;
 }) {
   const { toast } = useToast();
+  const { ask, answer, loading } = useRecordCopilot();
   const role = useUserRole();
   const [comments, setComments] = useState<Comment[]>(initialComments.map(toDisplayComment));
   const [approval, setApproval] = useState(initialApproval);
@@ -196,8 +198,18 @@ export function JobOrderWorkspaceClient({
                     <h3 className="mb-3 text-sm font-semibold text-ink">Ask about this job order</h3>
                     <PromptInput
                       placeholder='e.g. "Which substrates were used on this job order?"'
-                      onSubmit={(v) => toast("ai", `AI Assistant is looking into: "${v}"`)}
+                      onSubmit={(v) => ask(`The user is viewing Job Order ${jobOrder.code} (${jobOrder.name}) in MMDI ONE, an internal operating platform for MMDI.`, v)}
+                      disabled={loading}
                     />
+                    {loading && <p className="mt-2 text-xs text-ink-muted">AI Copilot is looking into it…</p>}
+                    {answer && (
+                      <div className="mt-2 rounded-lg border border-line bg-surface-sunken p-3 text-sm text-ink">
+                        <p className="whitespace-pre-line">{answer.content}</p>
+                        {answer.citations && answer.citations.length > 0 && (
+                          <p className="mt-2 text-xs text-ink-muted">{answer.citations.join(" \u00b7 ")}</p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="flex flex-col gap-4">
