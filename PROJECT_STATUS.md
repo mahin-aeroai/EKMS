@@ -1578,3 +1578,161 @@ over what the code actually does again.
     re-ask for iStation @ Kompally (or any LFG site) and confirm width/
     height/bleed now come back in the answer.
     **Not yet run in production.**
+48. Replaced apple_lfg_sites with the fuller "LFG Active Sites_Master List.xlsx"
+    (852 rows, up from 184), adding real scaffolding/installation cost data —
+    after the user asked whether iStation @ Kompally needs scaffolding, the
+    Copilot correctly said that data wasn't in what it had, and the user
+    then confirmed installation costs live in "a different cost sheet."
+    Connecting the LFG site survey PDF folder surfaced that exact sheet
+    sitting alongside the PDFs. Compared to the original 5-sheet, 184-row
+    import, the master list adds: Scaffolding (Yes/No), Scaffolding Size/
+    Rate/Amount, Installation Rate/Amount, Installation Travelling, a
+    separate Installation GST + final Total Installation Amount, a Budget/
+    quarter label, AND three entire site chains not previously imported at
+    all (Reliance, Vijay Sales, Wireless Chain) plus a larger Croma count
+    (now split Croma / Croma (Hold) tabs, 255 + 197 rows) — confirmed via
+    AskUserQuestion this was wanted before touching anything.
+    Migration approach: ADD COLUMN IF NOT EXISTS for the 13 new fields
+    (supabase-apple-lfg-sites-scaffolding-migration.sql), then TRUNCATE +
+    reimport all 852 rows (import-apple-lfg-sites-master-list-part{1,2}-of-2.sql,
+    split in two to stay under the ~270KB per-paste threshold learned from
+    the purchase_transactions import). Three distinct source column layouts
+    had to be handled: the "standard" 37-column layout (APP/APR/Mono AAR/
+    Multi AAR/Vijay Sales/Wireless Chain/Croma (Hold)), Reliance's layout
+    (has a stray near-always-blank extra "Remarks" column before Address),
+    and Croma's minimal 24-column layout (no address/installation/
+    scaffolding data at all, and a blank column shifting everything after
+    Apple ID by one position) — verified real column offsets against the
+    actual header row of every sheet before writing the extraction script,
+    not assumed from one sheet's layout.
+    Validated via PGlite: confirmed the OLD 184-row import loads first, then
+    the migration + reimport correctly truncates and replaces it with all
+    852 new rows (not appending/duplicating), confirmed the exact site the
+    user asked about (iStation @ Kompally, Apple ID 1697010) now shows
+    scaffolding='Yes', scaffolding_size=1200, scaffolding_amount=24000,
+    scaffolding_plus_travelling=27000 for one of its two site entries, and
+    re-confirmed RLS group-scoping (customers/finance) still holds after
+    the ALTER TABLE.
+    Updated search_lfg_sites' select + tool description + SYSTEM_PROMPT
+    (src/app/api/ai-copilot/route.ts) to surface the new fields and
+    explicitly tell the model to check scaffolding/installation_amount
+    directly instead of guessing, and to treat Croma's NULLs as "not
+    recorded" rather than "No". Verified via a clean `npx tsc --noEmit`,
+    `npx eslint`, and `next build`.
+    Could not test against live Supabase from this sandbox — user should
+    re-ask about iStation @ Kompally's scaffolding requirement and confirm
+    the Copilot now answers directly from real data instead of saying it
+    isn't available.
+    **Not yet run in production. PDF storage/linkage for the 333 site
+    survey PDFs (5.7GB) is a separate, still-pending piece of work.**
+49. Built PDF storage + viewer for the 333 LFG site survey reports (5.7GB),
+    completing the "can we do lfg pdf files now" request from earlier —
+    connected the user's local folder to inspect it first (never assume
+    naming/structure sight-unseen): 333 PDFs, 88KB-229MB each, organized by
+    chain (APP, APR, Mono AAR, Multi AAR, Croma with I&S/MMDI install-team
+    subfolders, Tribe by Croma, Vijay Sales, WIRELESS CHAIN with its own
+    PDF/Hold/OLD subfolders), most filenames embedding the site's Apple ID
+    (confirmed 311/333 = 93% via a dry-run against the real folder; the
+    other 22 are NSO/TBC/no-ID/version-suffixed filenames and get
+    apple_store_id = NULL, which is correct, not a bug).
+    5.7GB cannot move through chat or the SQL Editor, so this splits into:
+    - apple_lfg_site_surveys table (chain, relative_path [unique, doubles
+      as the Storage object path so the two can't drift], file_name,
+      best-effort apple_store_id/store_name parsed from the filename,
+      file_size_bytes) + a private `lfg-site-surveys` Storage bucket, RLS
+      matching apple_lfg_sites (customers/finance groups). No insert policy
+      for `authenticated` on purpose — only the upload script's service-role
+      key writes rows, matching how the file is only ever bulk-loaded, not
+      uploaded through the app itself yet.
+    - upload-lfg-site-surveys.mjs — a LOCAL Node script the user runs on
+      their own Mac (not something this sandbox can run — no access to the
+      user's 6GB local folder from here at bulk-transfer scale, and no
+      Supabase service role key). Walks the folder, skips junk (.DS_Store,
+      Thumbs.db, .cdr, .zip, the Master List .xlsx itself), uploads each PDF,
+      and inserts its linkage row. Idempotent (skips files already recorded,
+      so an interrupted run can just be restarted) and logs failures to
+      upload-failures.log rather than dying silently — flagged explicitly
+      that Supabase Storage's default per-file size limit may be under our
+      229MB largest file and may need raising first.
+    - /api/lfg-surveys/signed-url — server route that mints a 60-second
+      signed URL for one object, gated by the request's own session (so
+      Storage's RLS policy is actually enforced, not bypassed).
+    - /workspaces/site-surveys — new page (Customers nav section): search by
+      store/chain/Apple ID, "View PDF" opens the real, unmodified PDF via
+      the signed URL in a new tab. Deliberately NOT a table of
+      extracted/parsed fields — the user explicitly wants to see the PDF
+      "as it is".
+    - find_site_survey AI Copilot tool — confirms whether a survey exists
+      for a site and gives its file name, but is explicit in its own
+      description and the SYSTEM_PROMPT that it cannot show/read the PDF's
+      contents (chat is text-only) — points to the new page instead.
+    Along the way, connecting the folder also surfaced "LFG Active Sites_
+    Master List.xlsx" sitting alongside the PDFs — see item 48 for that
+    separate (larger) piece of work, done first since it directly answered
+    the scaffolding question from earlier in the same conversation.
+    Validated the table/bucket/RLS via PGlite (with a minimal storage.
+    buckets/storage.objects stand-in, since PGlite doesn't model Supabase's
+    real Storage service) — bucket registered exactly once, private,
+    relative_path unique constraint enforced, RLS group-scoping holds.
+    Verified the upload script's file-walk + regex parsing against the
+    REAL connected folder (not synthetic data): found exactly 333 PDFs,
+    correct per-chain counts, correct 311/22 ID-parse split, syntax-checked
+    with `node --check`. Verified the Next.js side via a clean
+    `npx tsc --noEmit`, `npx eslint`, and `next build` (both
+    /api/lfg-surveys/signed-url and /workspaces/site-surveys appear in the
+    route list).
+    Could not run the actual upload from this sandbox (no access to the
+    user's local 6GB folder at that scale, no Supabase service role key) —
+    that step is entirely on the user, following the instructions at the
+    top of upload-lfg-site-surveys.mjs. Everything downstream (the page,
+    the signed-url route, the Copilot tool) depends on that upload having
+    run first.
+    **Not yet run in production.**
+50. Switched LFG site survey PDF storage from Supabase Storage to Cloudflare
+    R2, after the first upload attempt failed ("fetch failed") and the user
+    clarified they're on Supabase's free tier — which caps Storage at 1GB,
+    well under the real 5.7GB dataset, so it would have failed partway
+    through regardless of the connectivity issue. Confirmed via
+    AskUserQuestion the user wants to keep the PDFs on separate storage
+    (not upgrade Supabase's plan), specifically Cloudflare R2 (free tier:
+    10GB storage, zero egress fees, S3-compatible).
+    Changes: supabase-apple-lfg-site-surveys-schema.sql no longer registers
+    a Supabase Storage bucket or its RLS policy — apple_lfg_site_surveys
+    stays exactly as before (same table, same RLS), just with
+    relative_path now understood as an R2 object key rather than a Supabase
+    Storage path. upload-lfg-site-surveys.mjs now uses @aws-sdk/client-s3
+    pointed at R2's S3-compatible endpoint
+    (https://<ACCOUNT_ID>.r2.cloudflarestorage.com) for the actual file
+    upload, while still using the Supabase service role key for the
+    linkage-table insert (that data is tiny, stays in Postgres). The new
+    /api/lfg-surveys/signed-url route now mints an R2 presigned URL via
+    @aws-sdk/s3-request-presigner instead of Supabase's createSignedUrl.
+    Important architectural note: R2 has no equivalent of Postgres RLS, so
+    the role/group access check (admin bypasses; otherwise role must be
+    admin/editor/viewer AND allowed_groups is null or includes customers/
+    finance) that used to live in a Postgres policy is now manually
+    replicated in this route's TypeScript, querying the profiles table
+    directly. Flagged explicitly in the route's own comment that this is
+    NOT automatically kept in sync with supabase-module-access-migration.sql
+    the way a real RLS policy would be — if that migration's logic changes,
+    this route needs a matching manual update.
+    New required Vercel environment variables: R2_ACCOUNT_ID,
+    R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME (server-side
+    only, no NEXT_PUBLIC_ prefix — same pattern as ANTHROPIC_API_KEY).
+    Validated the revised table/RLS via PGlite (same assertions as before,
+    minus the now-removed storage-bucket checks). Verified
+    @aws-sdk/client-s3 and @aws-sdk/s3-request-presigner install and
+    type-check cleanly, confirmed via `npx tsc --noEmit`, `npx eslint`, and
+    `next build` (both /api/lfg-surveys/signed-url and /workspaces/
+    site-surveys still appear in the build output, unaffected by the
+    storage-backend swap). Re-syntax-checked and re-tested the upload
+    script's file-walk/parsing logic (unchanged from item 49, still 333
+    files / correct chain counts) — only the actual upload call changed.
+    Could not run the real upload from this sandbox (needs the user's local
+    6GB folder + their own R2 and Supabase credentials) — that remains
+    entirely on the user, following the setup steps at the top of
+    upload-lfg-site-surveys.mjs (create the R2 bucket + API token first).
+    **Not yet run in production. package.json/package-lock.json now include
+    @aws-sdk/client-s3 and @aws-sdk/s3-request-presigner as real
+    dependencies — make sure `npm install` runs (or let Vercel do it on
+    deploy) before/after this push.**
