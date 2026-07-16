@@ -30,7 +30,9 @@ const SYSTEM_PROMPT = `You are the AI Copilot inside MMDI ONE, an internal opera
 
 Sales questions: use sales_summary for anything about sales broken down by material/product category, sales person, customer, or a time period (day/week/month) — it covers all of those via its group_by parameter, plus always returns a grand total for the filtered range even when grouped. Use search_sale_items for questions about a specific item's price/rate. "Sales" always means Taxable Value (pre-tax) from sales_transactions, never Voucher amount (GST-inclusive) — the tools already return the right figure, just don't relabel it as something else.
 
-Purchase/spend questions: use purchase_summary for anything about what MMDI bought/spent — broken down by supplier, material/product category, or a time period (day/week/month) — same group_by pattern as sales_summary, and it also supports combining a filter with a different group_by. Use search_purchase_items for a specific item's buy price/rate. "Purchases"/"spend" always means Taxable Value (pre-tax) from purchase_transactions, covering Jan-Jun 2026 (a different, wider date range than sales' Apr-Jun 2026 — don't assume they cover the same period). Some purchase line items have no product_category (the item wasn't in the item master) — these show as "Uncategorized", which is a real, if imprecise, answer, not an error.
+Purchase/spend questions: use purchase_summary for anything about what MMDI bought/spent — broken down by supplier, material/product category, item_type, or a time period (day/week/month) — same group_by pattern as sales_summary, and it also supports combining a filter with a different group_by. Use search_purchase_items for a specific item's buy price/rate. "Purchases"/"spend" always means Taxable Value (pre-tax) from purchase_transactions, covering Jan-Jun 2026 (a different, wider date range than sales' Apr-Jun 2026 — don't assume they cover the same period). Some purchase line items have no product_category (the item wasn't in the item master) — these show as "Uncategorized", which is a real, if imprecise, answer, not an error.
+
+Raw materials vs. capital goods vs. services: purchase_transactions has a real item_type field (Raw material / Finished goods / Service / Intermediate item / Non stock item) — use group_by='item_type' or item_type_filter='Raw material' whenever a question wants "raw materials only" or wants capital equipment/capital goods excluded, NOT product_category_filter (product_category is a finer material grouping within item_type, not a substitute for it). Important gotcha: capital equipment purchases (product_category='FIXED ASSETS', a meaningful ~₹3 Cr) are classified as item_type='Intermediate item' in the source item master, not their own type — so item_type_filter='Raw material' already correctly excludes them, but item_type_filter='Intermediate item' would NOT be "everything except raw materials and capital goods," it still includes FIXED ASSETS. sales_transactions has no item_type field at all (it was never enriched against the item master) — a "raw materials only" filter is only possible on the purchase side.
 
 Branch/office questions: MMDI operates through 9 branches — Hyderabad, Noida, Mumbai, Bangalore, Chennai, Kolkata, Kochi, Visakhapatnam, and Pune. Both sales_summary and purchase_summary support group_by='location' and a location_filter for "which branch" / "sales at the Hyderabad office" type questions — use group_by='location', not customer/supplier, when the question names a city/branch rather than a company. Two things worth knowing: the data spells it "Vishakapatnam" (one fewer syllable than the standard spelling), and a handful of rows use "Chandanvelly" or "Head Office" instead of a branch name — these are real values in the source data (a plant/godown location and central office respectively, not one of the 9 sales branches), not errors — report them as-is rather than folding them into the nearest branch.
 
@@ -142,12 +144,13 @@ const TOOLS: Tool[] = [
       properties: {
         group_by: {
           type: "string",
-          enum: ["product_category", "supplier", "location", "month", "week", "day"],
-          description: "How to break down the purchase figures. 'product_category' is the closest match to 'material category'; 'supplier' is the closest match to 'vendor'; 'location' is the closest match to 'branch' (MMDI's 9 branches: Hyderabad, Noida, Mumbai, Bangalore, Chennai, Kolkata, Kochi, Visakhapatnam, Pune).",
+          enum: ["product_category", "supplier", "location", "item_type", "month", "week", "day"],
+          description: "How to break down the purchase figures. 'product_category' is the closest match to 'material category'; 'supplier' is the closest match to 'vendor'; 'location' is the closest match to 'branch' (MMDI's 9 branches: Hyderabad, Noida, Mumbai, Bangalore, Chennai, Kolkata, Kochi, Visakhapatnam, Pune); 'item_type' is the broad purchase class (Raw material / Finished goods / Service / Intermediate item / Non stock item) — use this for 'raw materials vs capital goods vs services' type questions, not product_category.",
         },
         supplier_filter: { type: "string", description: "Optional: restrict to this supplier name (partial match) before grouping" },
         product_category_filter: { type: "string", description: "Optional: restrict to this product/material category (partial match) before grouping" },
         location_filter: { type: "string", description: "Optional: restrict to this branch/location (partial match) before grouping — e.g. 'Hyderabad', 'Bangalore'" },
+        item_type_filter: { type: "string", description: "Optional: restrict to this item type (partial match) before grouping — one of 'Raw material', 'Finished goods', 'Service', 'Intermediate item', 'Non stock item'. Use item_type_filter='Raw material' whenever the question says 'raw materials only' or asks to exclude capital equipment/capital goods — capital equipment purchases (the 'FIXED ASSETS' product_category) fall under item_type='Intermediate item' in the source data, NOT its own type, so excluding by item_type='Raw material' is the correct way to isolate true raw-material spend." },
         date_from: { type: "string", description: "Optional start date (YYYY-MM-DD), inclusive" },
         date_to: { type: "string", description: "Optional end date (YYYY-MM-DD), inclusive" },
         top_n: { type: "number", description: "Max number of groups to return in detail, sorted by total value descending (default 20)" },
@@ -441,19 +444,21 @@ async function executeToolCall(
       const supplierFilter = input.supplier_filter ? String(input.supplier_filter) : null;
       const productCategoryFilter = input.product_category_filter ? String(input.product_category_filter) : null;
       const locationFilter = input.location_filter ? String(input.location_filter) : null;
+      const itemTypeFilter = input.item_type_filter ? String(input.item_type_filter) : null;
 
       // Paginated (see fetchAllRows comment above) -- purchase_transactions is
       // 9,528 rows, well past the point a bare .limit() would be trustworthy.
       const { rows, error } = await fetchAllRows((from, to) => {
         let q = supabase
           .from("purchase_transactions")
-          .select("product_category, supplier_name, location, grn_date, taxable_value")
+          .select("product_category, supplier_name, location, item_type, grn_date, taxable_value")
           .range(from, to);
         if (dateFrom) q = q.gte("grn_date", dateFrom);
         if (dateTo) q = q.lte("grn_date", dateTo);
         if (supplierFilter) q = q.ilike("supplier_name", `%${supplierFilter}%`);
         if (productCategoryFilter) q = q.ilike("product_category", `%${productCategoryFilter}%`);
         if (locationFilter) q = q.ilike("location", `%${locationFilter}%`);
+        if (itemTypeFilter) q = q.ilike("item_type", `%${itemTypeFilter}%`);
         return q;
       });
       if (error) return { result: { error } };
@@ -473,6 +478,8 @@ async function executeToolCall(
             return row.supplier_name ?? "Unknown";
           case "location":
             return row.location ?? "Unknown";
+          case "item_type":
+            return row.item_type ?? "Uncategorized";
           case "month":
             return row.grn_date ? row.grn_date.slice(0, 7) : "Unknown";
           case "week":
@@ -503,6 +510,7 @@ async function executeToolCall(
         supplier: supplierFilter,
         product_category: productCategoryFilter,
         location: locationFilter,
+        item_type: itemTypeFilter,
       };
       const result = {
         group_by: groupBy,
@@ -512,7 +520,7 @@ async function executeToolCall(
         grand_total_transactions: rows.length,
         groups: sortedGroups,
       };
-      const filterLabel = [supplierFilter && `supplier "${supplierFilter}"`, productCategoryFilter && `category "${productCategoryFilter}"`, locationFilter && `branch "${locationFilter}"`]
+      const filterLabel = [supplierFilter && `supplier "${supplierFilter}"`, productCategoryFilter && `category "${productCategoryFilter}"`, locationFilter && `branch "${locationFilter}"`, itemTypeFilter && `item type "${itemTypeFilter}"`]
         .filter(Boolean)
         .join(", ");
       return {

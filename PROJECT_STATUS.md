@@ -1211,3 +1211,36 @@ over what the code actually does again.
     access) — user should re-ask a branch-wise question (e.g. "sales by
     branch" or "Hyderabad branch spend") once deployed. **Not yet run in
     production.**
+35. User asked "do we have purchase category like capital equipment and raw
+    materials etc.?" after a failed live query ("restrict to raw materials
+    for sales comparison do not include capital goods purchases" returned
+    "I couldn't find a clear answer to that"). Root cause: purchase_summary
+    only exposed product_category_filter (fuzzy text on the item master's
+    "Parent Name", e.g. "RM - ADHESIVE MATERIALS") — it never exposed the
+    cleaner item_type field (Raw material/Finished goods/Service/
+    Intermediate item/Non stock item) that was already imported alongside
+    it. Checked the actual breakdown by re-deriving item_type from Item
+    List.xlsx against the MRN Register: Raw material ₹18.64 Cr (3,355 rows),
+    Intermediate item ₹6.26 Cr (3,225 rows), Finished goods ₹3.35 Cr (878),
+    uncategorized ₹3.27 Cr (925, no item-master match), Service ₹60.4 L
+    (767), Non stock item ₹25.9 L (378). Found a real gotcha worth flagging
+    rather than hiding: capital equipment purchases (product_category=
+    'FIXED ASSETS', ~₹3.01 Cr) are classified as item_type='Intermediate
+    item' in the source item master, NOT their own type — so "raw materials
+    only" needs item_type_filter='Raw material' specifically (which already
+    correctly excludes FIXED ASSETS), while item_type_filter='Intermediate
+    item' would NOT mean "everything except raw materials and capital
+    goods" the way someone might assume.
+    Added group_by='item_type' and item_type_filter to purchase_summary
+    (same combined filter+group pattern as every other dimension), and
+    documented the FIXED ASSETS gotcha directly in both the tool schema and
+    the system prompt so the model filters correctly rather than guessing.
+    Also noted in the system prompt that sales_transactions has no
+    item_type field at all (it was never enriched against the item master
+    the way purchase_transactions was) — a "raw materials only" filter is
+    only possible on the purchase side, not sales.
+    Verified via a clean `npx tsc --noEmit`, `next lint`, and `next build`.
+    Could not test against live Supabase from this sandbox (no network
+    access) — user should re-ask their original failed question ("raw
+    material purchases only, excluding capital goods") once deployed.
+    **Not yet run in production.**
