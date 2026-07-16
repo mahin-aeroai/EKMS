@@ -26,7 +26,9 @@ const MODEL = "claude-sonnet-5";
 const MAX_TOKENS = 1024;
 const MAX_TOOL_ITERATIONS = 5;
 
-const SYSTEM_PROMPT = `You are the AI Copilot inside MMDI ONE, an internal operating platform for MMDI, an Indian packaging/printing manufacturer. Answer questions about customers, job orders, machines, and raw materials using the tools available to you — never guess or invent data. If a tool returns no results, say so plainly rather than making something up. Keep answers concise (2-4 sentences unless the question calls for a list). When you reference a specific record, name it (e.g. "Job Order 7455" or "Apple India Pvt Ltd - Bangalore") so the person can look it up themselves.
+const SYSTEM_PROMPT = `You are the AI Copilot inside MMDI ONE, an internal operating platform for MMDI, an Indian packaging/printing manufacturer. Answer questions about customers, job orders, machines, raw materials, and sales using the tools available to you — never guess or invent data. If a tool returns no results, say so plainly rather than making something up. Keep answers concise (2-4 sentences unless the question calls for a list). When you reference a specific record, name it (e.g. "Job Order 7455" or "Apple India Pvt Ltd - Bangalore") so the person can look it up themselves.
+
+Sales questions: use sales_summary for anything about sales broken down by material/product category, sales person, customer, or a time period (day/week/month) — it covers all of those via its group_by parameter, plus always returns a grand total for the filtered range even when grouped. Use search_sale_items for questions about a specific item's price/rate. "Sales" always means Taxable Value (pre-tax) from sales_transactions, never Voucher amount (GST-inclusive) — the tools already return the right figure, just don't relabel it as something else.
 
 Formatting: the chat UI renders your reply as plain text only — no markdown. Never use markdown tables (| pipes |), headers (#), or bold (**). For lists, use a simple numbered or dashed list with one item per line, or short plain sentences. Keep it readable as plain prose.
 
@@ -96,6 +98,33 @@ const TOOLS: Tool[] = [
     name: "get_compliance_findings",
     description: "List compliance findings on record.",
     input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "sales_summary",
+    description: "Real sales figures (Taxable Value, not Voucher amount) from the full Q1 FY26-27 sales ledger (9,274 line items), grouped by whichever dimension answers the question: material/product category, sales person, customer, or time period (day/week/month). Always returns a grand total for the filtered date range in addition to the grouped breakdown, so it also answers plain 'total sales' questions (just don't pass a narrow date range, or omit dates entirely for the whole quarter).",
+    input_schema: {
+      type: "object",
+      properties: {
+        group_by: {
+          type: "string",
+          enum: ["product_category", "sales_manager", "customer", "month", "week", "day"],
+          description: "How to break down the sales figures. 'product_category' is the closest match to 'material category' or 'product group'; 'sales_manager' is the closest match to 'sales person'.",
+        },
+        date_from: { type: "string", description: "Optional start date (YYYY-MM-DD), inclusive" },
+        date_to: { type: "string", description: "Optional end date (YYYY-MM-DD), inclusive" },
+        top_n: { type: "number", description: "Max number of groups to return in detail, sorted by total value descending (default 20)" },
+      },
+      required: ["group_by"],
+    },
+  },
+  {
+    name: "search_sale_items",
+    description: "Search individual sale line items by item code, item description, or product category (partial match) — use for 'price details' / 'what's the rate for X' questions. Returns matching line items (with per-unit rate, quantity, and taxable value) plus an aggregate (average rate, total taxable value) across all matches.",
+    input_schema: {
+      type: "object",
+      properties: { query: { type: "string", description: "Text to search for in the item code, item description, or product category" } },
+      required: ["query"],
+    },
   },
 ];
 
@@ -210,6 +239,100 @@ async function executeToolCall(
       const { data, error } = await supabase.from("compliance_findings").select("item, area, status, status_label");
       if (error) return { result: { error: error.message } };
       return { result: data, citation: "Compliance findings" };
+    }
+    case "sales_summary": {
+      const groupBy = String(input.group_by ?? "product_category");
+      const dateFrom = input.date_from ? String(input.date_from) : null;
+      const dateTo = input.date_to ? String(input.date_to) : null;
+      const topN = typeof input.top_n === "number" ? input.top_n : 20;
+
+      let query = supabase
+        .from("sales_transactions")
+        .select("product_category, sales_manager, customer_name, invoice_date, taxable_value");
+      if (dateFrom) query = query.gte("invoice_date", dateFrom);
+      if (dateTo) query = query.lte("invoice_date", dateTo);
+
+      const { data, error } = await query;
+      if (error) return { result: { error: error.message } };
+
+      const rows = data ?? [];
+      const grandTotal = rows.reduce((sum, r) => sum + (r.taxable_value ?? 0), 0);
+
+      // Monday-starting week bucket, labeled by that Monday's date.
+      function weekLabel(dateStr: string): string {
+        const d = new Date(dateStr + "T00:00:00Z");
+        const dayOffset = (d.getUTCDay() + 6) % 7; // 0 = Monday
+        d.setUTCDate(d.getUTCDate() - dayOffset);
+        return `week of ${d.toISOString().slice(0, 10)}`;
+      }
+
+      function labelFor(row: (typeof rows)[number]): string {
+        switch (groupBy) {
+          case "sales_manager":
+            return row.sales_manager ?? "Unknown";
+          case "customer":
+            return row.customer_name ?? "Unknown";
+          case "month":
+            return row.invoice_date ? row.invoice_date.slice(0, 7) : "Unknown";
+          case "week":
+            return row.invoice_date ? weekLabel(row.invoice_date) : "Unknown";
+          case "day":
+            return row.invoice_date ?? "Unknown";
+          case "product_category":
+          default:
+            return row.product_category ?? "Unknown";
+        }
+      }
+
+      const groups = new Map<string, { total: number; count: number }>();
+      for (const row of rows) {
+        const label = labelFor(row);
+        const g = groups.get(label) ?? { total: 0, count: 0 };
+        g.total += row.taxable_value ?? 0;
+        g.count += 1;
+        groups.set(label, g);
+      }
+
+      const sortedGroups = [...groups.entries()]
+        .map(([label, g]) => ({ label, total_taxable_value: g.total, transaction_count: g.count }))
+        .sort((a, b) => b.total_taxable_value - a.total_taxable_value)
+        .slice(0, topN);
+
+      const result = {
+        group_by: groupBy,
+        date_range: dateFrom || dateTo ? { from: dateFrom, to: dateTo } : null,
+        grand_total_taxable_value: grandTotal,
+        grand_total_transactions: rows.length,
+        groups: sortedGroups,
+      };
+      return {
+        result,
+        citation: `Sales summary grouped by ${groupBy}${dateFrom || dateTo ? ` (${dateFrom ?? "…"} to ${dateTo ?? "…"})` : ""}`,
+      };
+    }
+    case "search_sale_items": {
+      const query = String(input.query ?? "");
+      const filter = `item_code.ilike.%${query}%,item_description.ilike.%${query}%,product_category.ilike.%${query}%`;
+      const [top, all] = await Promise.all([
+        supabase
+          .from("sales_transactions")
+          .select("item_code, item_description, product_category, rate, quantity, taxable_value, invoice_date, customer_name")
+          .or(filter)
+          .order("invoice_date", { ascending: false })
+          .limit(20),
+        supabase.from("sales_transactions").select("rate, taxable_value").or(filter),
+      ]);
+      if (top.error || all.error) return { result: { error: (top.error ?? all.error)?.message } };
+      const matches = all.data ?? [];
+      const totalMatches = matches.length;
+      const avgRate = totalMatches ? matches.reduce((sum, r) => sum + (r.rate ?? 0), 0) / totalMatches : 0;
+      const result = {
+        total_matches: totalMatches,
+        average_rate_across_all_matches: avgRate,
+        total_taxable_value_across_all_matches: matches.reduce((sum, r) => sum + (r.taxable_value ?? 0), 0),
+        most_recent_20: top.data,
+      };
+      return { result, citation: totalMatches ? `Sale item search: "${query}" (${totalMatches} matches)` : undefined };
     }
     default:
       return { result: { error: `Unknown tool: ${name}` } };
