@@ -1358,3 +1358,23 @@ over what the code actually does again.
     access) — user should re-search "Arrow Digital" via search_purchase_items
     once deployed and confirm it now returns the ₹2.1 Cr transaction
     directly. **Not yet run in production.**
+40. User's Arrow Digital search returned 347 matches — over the 150-row cap
+    set two commits ago, so it couldn't be listed in full in one call.
+    Checked real transaction-count distributions before picking a new
+    number rather than guessing: top single supplier (Vijaya Display
+    Systems) has 477 transactions, top single customer (I And S Communique
+    Pvt Ltd) has 454 — so 150 was too conservative for the realistic
+    "everything from one company" case this tool exists to serve. Raised
+    the max limit from 150 to 500 in both search_sale_items and
+    search_purchase_items (the clamp, both tool descriptions, both `limit`
+    param descriptions, and the SYSTEM_PROMPT paragraph, kept consistent
+    across all six spots). 500 comfortably covers the largest real
+    single-entity case (477) with headroom, while still bounding response
+    size for genuinely broad category-wide searches (which should keep
+    using product_category_filter + summary tools' aggregates, not a raw
+    line-item dump, anyway).
+    Verified via a clean `npx tsc --noEmit`, `next lint`, `next build`.
+    Could not test against live Supabase from this sandbox (no network
+    access) — user should re-ask for the full Arrow Digital transaction list
+    once deployed and confirm all 347 rows come back in one call.
+    **Not yet run in production.**

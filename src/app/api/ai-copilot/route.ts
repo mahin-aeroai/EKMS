@@ -40,7 +40,7 @@ Branch/office questions: MMDI operates through 9 branches — Hyderabad, Noida, 
 
 Financial year: MMDI's financial year runs 1 April to 31 March, e.g. FY26-27 = 1 Apr 2026 to 31 Mar 2027, and FY26-27 Q1 = Apr-Jun 2026, Q2 = Jul-Sep 2026, Q3 = Oct-Dec 2026, Q4 = Jan-Mar 2027 (note Q4 of an FY falls in the NEXT calendar year). There is no fiscal_year column in the data — only raw calendar dates — so for a question about a specific FY or FY quarter, compute date_from/date_to yourself using this rule and pass them to sales_summary/purchase_summary (e.g. "FY26-27 Q4 purchases" -> date_from='2027-01-01', date_to='2027-03-31'). Both tools also support group_by='fiscal_year' and group_by='fiscal_quarter' for breaking a wider range down BY financial year/quarter in one call (e.g. "compare purchases across FY25-26 Q4 and FY26-27 Q1" -> one purchase_summary call with group_by='fiscal_quarter', date_from='2026-01-01', date_to='2026-06-30', no need for two separate calls). Remember the underlying date ranges differ: sales_transactions only covers Apr-Jun 2026 (all FY26-27 Q1), while purchase_transactions covers Jan-Jun 2026 (spanning FY25-26 Q4 AND FY26-27 Q1) — don't assume a "total" on one ledger reflects the same financial-year scope as the other.
 
-Listing every matching transaction (not just a summary): search_sale_items and search_purchase_items both accept an optional limit parameter (default 20, max 150) and both return total_matches plus detail_rows_are_complete. When someone wants a full itemized list (e.g. "list all the capital goods purchases with vendor and value"), first check total_matches from a normal call — if it's small (roughly under 150), call the same tool again with limit set to total_matches to get every row in ONE additional call, rather than manually slicing the request by month/branch/supplier yourself. Only fall back to slicing (e.g. one month at a time) if total_matches is too large even for limit=150. Each detail row already includes branch/location, supplier or customer, item name, rate, and taxable value — present them as a plain numbered list (no markdown tables, see Formatting below), one transaction per line.
+Listing every matching transaction (not just a summary): search_sale_items and search_purchase_items both accept an optional limit parameter (default 20, max 500) and both return total_matches plus detail_rows_are_complete. When someone wants a full itemized list (e.g. "list all the capital goods purchases with vendor and value", or "every transaction with Arrow Digital"), first check total_matches from a normal call — if it's small (roughly under 500 — a single supplier or customer can run into the several hundreds), call the same tool again with limit set to total_matches to get every row in ONE additional call, rather than manually slicing the request by month/branch/supplier yourself. Only fall back to slicing (e.g. one month or one branch at a time) if total_matches is too large even for limit=500. Each detail row already includes branch/location, supplier or customer, item name, rate, and taxable value — present them as a plain numbered list (no markdown tables, see Formatting below), one transaction per line.
 
 Formatting: the chat UI renders your reply as plain text only — no markdown. Never use markdown tables (| pipes |), headers (#), or bold (**). For lists, use a simple numbered or dashed list with one item per line, or short plain sentences. Keep it readable as plain prose.
 
@@ -135,12 +135,12 @@ const TOOLS: Tool[] = [
   },
   {
     name: "search_sale_items",
-    description: "Search individual sale line items by item code, item description, product category, OR customer name (partial match) — use for 'price details' / 'what's the rate for X' questions, for finding every line item tied to a specific customer, or to list out every matching transaction. Returns matching line items (with per-unit rate, quantity, taxable value, and branch/location) plus an aggregate (total_matches, average rate, total taxable value) across ALL matches regardless of limit. The detail list defaults to 20 rows — if total_matches from an initial call is small (roughly under 150) and the person wants the full list, call again with a higher `limit` (e.g. limit=total_matches) to return every row in one shot instead of splitting the request into slices yourself.",
+    description: "Search individual sale line items by item code, item description, product category, OR customer name (partial match) — use for 'price details' / 'what's the rate for X' questions, for finding every line item tied to a specific customer, or to list out every matching transaction. Returns matching line items (with per-unit rate, quantity, taxable value, and branch/location) plus an aggregate (total_matches, average rate, total taxable value) across ALL matches regardless of limit. The detail list defaults to 20 rows — if total_matches from an initial call is small (roughly under 500 — a single customer can have several hundred transactions) and the person wants the full list, call again with a higher `limit` (e.g. limit=total_matches) to return every row in one shot instead of splitting the request into slices yourself.",
     input_schema: {
       type: "object",
       properties: {
         query: { type: "string", description: "Text to search for in the item code, item description, or product category" },
-        limit: { type: "number", description: "Max number of detail rows to return, sorted by most recent first (default 20, max 150). Raise this when total_matches is small and the person wants every row listed." },
+        limit: { type: "number", description: "Max number of detail rows to return, sorted by most recent first (default 20, max 500). Raise this when total_matches is small and the person wants every row listed -- a single supplier/customer can have up to ~500 transactions, so 500 comfortably covers essentially any single-entity breakdown in one call." },
       },
       required: ["query"],
     },
@@ -169,12 +169,12 @@ const TOOLS: Tool[] = [
   },
   {
     name: "search_purchase_items",
-    description: "Search individual purchase line items by item code, item name, product category, OR supplier name (partial match) — use for 'what do we pay for X' / 'buy price of X' questions, for finding every line item bought from a specific supplier (e.g. 'Arrow Digital'), or to list out every matching transaction (e.g. all capital goods purchases with vendor/branch/value). Returns matching line items (with per-unit rate, quantity, taxable value, supplier, and branch/location) plus an aggregate (total_matches, average rate, total taxable value) across ALL matches regardless of limit. The detail list defaults to 20 rows — if total_matches from an initial call is small (roughly under 150) and the person wants the full list, call again with a higher `limit` (e.g. limit=total_matches) to return every row in one shot instead of splitting the request into month-by-month or other slices yourself.",
+    description: "Search individual purchase line items by item code, item name, product category, OR supplier name (partial match) — use for 'what do we pay for X' / 'buy price of X' questions, for finding every line item bought from a specific supplier (e.g. 'Arrow Digital'), or to list out every matching transaction (e.g. all capital goods purchases with vendor/branch/value). Returns matching line items (with per-unit rate, quantity, taxable value, supplier, and branch/location) plus an aggregate (total_matches, average rate, total taxable value) across ALL matches regardless of limit. The detail list defaults to 20 rows — if total_matches from an initial call is small (roughly under 500 — a single supplier can have several hundred transactions) and the person wants the full list, call again with a higher `limit` (e.g. limit=total_matches) to return every row in one shot instead of splitting the request into month-by-month or other slices yourself.",
     input_schema: {
       type: "object",
       properties: {
         query: { type: "string", description: "Text to search for in the item code, item name, or product category" },
-        limit: { type: "number", description: "Max number of detail rows to return, sorted by most recent first (default 20, max 150). Raise this when total_matches is small and the person wants every row listed." },
+        limit: { type: "number", description: "Max number of detail rows to return, sorted by most recent first (default 20, max 500). Raise this when total_matches is small and the person wants every row listed -- a single supplier/customer can have up to ~500 transactions, so 500 comfortably covers essentially any single-entity breakdown in one call." },
       },
       required: ["query"],
     },
@@ -450,7 +450,7 @@ async function executeToolCall(
     }
     case "search_sale_items": {
       const query = String(input.query ?? "");
-      const detailLimit = Math.min(Math.max(typeof input.limit === "number" ? Math.floor(input.limit) : 20, 1), 150);
+      const detailLimit = Math.min(Math.max(typeof input.limit === "number" ? Math.floor(input.limit) : 20, 1), 500);
       const filter = `item_code.ilike.%${query}%,item_description.ilike.%${query}%,product_category.ilike.%${query}%,customer_name.ilike.%${query}%`;
       const [top, allResult] = await Promise.all([
         supabase
@@ -575,7 +575,7 @@ async function executeToolCall(
     }
     case "search_purchase_items": {
       const query = String(input.query ?? "");
-      const detailLimit = Math.min(Math.max(typeof input.limit === "number" ? Math.floor(input.limit) : 20, 1), 150);
+      const detailLimit = Math.min(Math.max(typeof input.limit === "number" ? Math.floor(input.limit) : 20, 1), 500);
       const filter = `item_code.ilike.%${query}%,item_name.ilike.%${query}%,product_category.ilike.%${query}%,supplier_name.ilike.%${query}%`;
       const [top, allResult] = await Promise.all([
         supabase
