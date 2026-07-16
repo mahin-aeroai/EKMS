@@ -135,7 +135,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: "search_sale_items",
-    description: "Search individual sale line items by item code, item description, or product category (partial match) — use for 'price details' / 'what's the rate for X' questions, or to list out every matching transaction. Returns matching line items (with per-unit rate, quantity, taxable value, and branch/location) plus an aggregate (total_matches, average rate, total taxable value) across ALL matches regardless of limit. The detail list defaults to 20 rows — if total_matches from an initial call is small (roughly under 150) and the person wants the full list, call again with a higher `limit` (e.g. limit=total_matches) to return every row in one shot instead of splitting the request into slices yourself.",
+    description: "Search individual sale line items by item code, item description, product category, OR customer name (partial match) — use for 'price details' / 'what's the rate for X' questions, for finding every line item tied to a specific customer, or to list out every matching transaction. Returns matching line items (with per-unit rate, quantity, taxable value, and branch/location) plus an aggregate (total_matches, average rate, total taxable value) across ALL matches regardless of limit. The detail list defaults to 20 rows — if total_matches from an initial call is small (roughly under 150) and the person wants the full list, call again with a higher `limit` (e.g. limit=total_matches) to return every row in one shot instead of splitting the request into slices yourself.",
     input_schema: {
       type: "object",
       properties: {
@@ -169,7 +169,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: "search_purchase_items",
-    description: "Search individual purchase line items by item code, item name, or product category (partial match) — use for 'what do we pay for X' / 'buy price of X' questions, or to list out every matching transaction (e.g. all capital goods purchases with vendor/branch/value). Returns matching line items (with per-unit rate, quantity, taxable value, supplier, and branch/location) plus an aggregate (total_matches, average rate, total taxable value) across ALL matches regardless of limit. The detail list defaults to 20 rows — if total_matches from an initial call is small (roughly under 150) and the person wants the full list, call again with a higher `limit` (e.g. limit=total_matches) to return every row in one shot instead of splitting the request into month-by-month or other slices yourself.",
+    description: "Search individual purchase line items by item code, item name, product category, OR supplier name (partial match) — use for 'what do we pay for X' / 'buy price of X' questions, for finding every line item bought from a specific supplier (e.g. 'Arrow Digital'), or to list out every matching transaction (e.g. all capital goods purchases with vendor/branch/value). Returns matching line items (with per-unit rate, quantity, taxable value, supplier, and branch/location) plus an aggregate (total_matches, average rate, total taxable value) across ALL matches regardless of limit. The detail list defaults to 20 rows — if total_matches from an initial call is small (roughly under 150) and the person wants the full list, call again with a higher `limit` (e.g. limit=total_matches) to return every row in one shot instead of splitting the request into month-by-month or other slices yourself.",
     input_schema: {
       type: "object",
       properties: {
@@ -451,7 +451,7 @@ async function executeToolCall(
     case "search_sale_items": {
       const query = String(input.query ?? "");
       const detailLimit = Math.min(Math.max(typeof input.limit === "number" ? Math.floor(input.limit) : 20, 1), 150);
-      const filter = `item_code.ilike.%${query}%,item_description.ilike.%${query}%,product_category.ilike.%${query}%`;
+      const filter = `item_code.ilike.%${query}%,item_description.ilike.%${query}%,product_category.ilike.%${query}%,customer_name.ilike.%${query}%`;
       const [top, allResult] = await Promise.all([
         supabase
           .from("sales_transactions")
@@ -576,7 +576,7 @@ async function executeToolCall(
     case "search_purchase_items": {
       const query = String(input.query ?? "");
       const detailLimit = Math.min(Math.max(typeof input.limit === "number" ? Math.floor(input.limit) : 20, 1), 150);
-      const filter = `item_code.ilike.%${query}%,item_name.ilike.%${query}%,product_category.ilike.%${query}%`;
+      const filter = `item_code.ilike.%${query}%,item_name.ilike.%${query}%,product_category.ilike.%${query}%,supplier_name.ilike.%${query}%`;
       const [top, allResult] = await Promise.all([
         supabase
           .from("purchase_transactions")

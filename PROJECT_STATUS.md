@@ -1332,3 +1332,29 @@ over what the code actually does again.
     access) — user should re-ask for the full FIXED ASSETS list once
     deployed and confirm all 43 rows come back with branch included.
     **Not yet run in production.**
+39. User caught another real gap while reviewing the full FIXED ASSETS list:
+    "i dont see noida machine purchase from arrow" — the ₹2.1 Cr Arrow
+    Digital transaction (the single largest capital-goods purchase in the
+    whole dataset) was genuinely in the list under its item name (EFI VUTEK
+    H3 PRINTER), but searching "Arrow Digital" directly via
+    search_purchase_items returned zero hits, because that tool's filter
+    only matched item_code/item_name/product_category — never
+    supplier_name. Same gap existed in search_sale_items (no customer_name
+    match). The Copilot correctly self-diagnosed this live and explained it
+    accurately, but the underlying gap needed a real fix, not just an
+    explanation.
+    Added supplier_name.ilike to search_purchase_items' filter and
+    customer_name.ilike to search_sale_items' filter (both already selected
+    those columns for display — they just weren't part of the match
+    condition). Updated both tool descriptions to state they now match on
+    supplier/customer name too, so the model knows to reach for these tools
+    directly for "what did we buy from X supplier" / "what did we sell to Y
+    customer" line-item questions instead of assuming it needs
+    purchase_summary/sales_summary's supplier_filter/customer_filter (which
+    only return aggregates, not the individual line items someone might
+    want listed).
+    Verified via a clean `npx tsc --noEmit`, `next lint`, `next build`.
+    Could not test against live Supabase from this sandbox (no network
+    access) — user should re-search "Arrow Digital" via search_purchase_items
+    once deployed and confirm it now returns the ₹2.1 Cr transaction
+    directly. **Not yet run in production.**
