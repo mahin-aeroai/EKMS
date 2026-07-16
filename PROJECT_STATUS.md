@@ -1403,3 +1403,18 @@ over what the code actually does again.
     sandbox (no network access) — user should click "Export all to CSV" on
     the deployed Purchase Register page and confirm the download completes
     with 9,528 data rows. **Not yet run in production.**
+42. User re-asked "all purchases" itemized right after the CSV export
+    feature (item 41) was deployed, and the Copilot still only offered
+    chat-based slicing/summaries — it had no way to know the export button
+    now exists, since that's a UI feature with nothing in
+    src/app/api/ai-copilot/route.ts pointing to it. Added a new SYSTEM_PROMPT
+    paragraph telling the model directly: when someone wants the entire
+    9,528-row purchase ledger itemized with no narrowing filter, tell them
+    about the Purchase Register page's "Export all to CSV" button as the
+    right tool for that, in addition to (not instead of) offering to drill
+    into a narrower slice in-chat.
+    Verified via a clean `npx tsc --noEmit`, `next lint`, `next build`.
+    Could not test against live Supabase from this sandbox (no network
+    access) — user should re-ask "all purchases" itemized once deployed and
+    confirm the Copilot now mentions the CSV export button. **Not yet run in
+    production.**
