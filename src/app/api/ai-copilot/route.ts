@@ -133,6 +133,36 @@ const TOOLS: Tool[] = [
 
 type Supabase = Awaited<ReturnType<typeof createServerSupabaseClient>>;
 
+// IMPORTANT: Supabase/PostgREST enforces its own server-side "max rows" setting
+// (project default: 1000) that silently clamps a response to that many rows
+// regardless of what .limit() a client requests -- a .limit(20000) call can still
+// come back with exactly 1000 rows if the project's cap is 1000. This bit us twice:
+// once via a missing .limit() (undercounted well below even 1000 in some cases),
+// and again via a .limit(20000) "fix" that was still clamped to 1000 server-side
+// (confirmed live: grand_total_transactions read exactly 1000 against a 9,274-row
+// table). The only reliable fix is pagination with .range(), fetching page after
+// page until one comes back shorter than requested -- that works no matter what
+// the project's max-rows setting is. Every "fetch everything to aggregate" query
+// in this file must use this helper now, not a bare .limit().
+async function fetchAllRows<T>(
+  buildPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+  pageSize = 1000,
+  hardCap = 50000
+): Promise<{ rows: T[]; error?: string }> {
+  let rows: T[] = [];
+  let from = 0;
+  while (rows.length < hardCap) {
+    const to = from + pageSize - 1;
+    const { data, error } = await buildPage(from, to);
+    if (error) return { rows, error: error.message };
+    const batch = data ?? [];
+    rows = rows.concat(batch);
+    if (batch.length < pageSize) break;
+    from += pageSize;
+  }
+  return { rows };
+}
+
 async function executeToolCall(
   name: string,
   input: Record<string, unknown>,
@@ -141,21 +171,24 @@ async function executeToolCall(
   switch (name) {
     case "search_customers": {
       const query = String(input.query ?? "");
-      const [top, all] = await Promise.all([
+      const [top, allResult] = await Promise.all([
         supabase
           .from("customers")
           .select("code, name, region, tier, account_owner, lifetime_value, open_orders")
           .ilike("name", `%${query}%`)
           .order("lifetime_value", { ascending: false })
           .limit(20),
-        supabase.from("customers").select("lifetime_value, open_orders").ilike("name", `%${query}%`).limit(5000),
+        fetchAllRows((from, to) =>
+          supabase.from("customers").select("lifetime_value, open_orders").ilike("name", `%${query}%`).range(from, to)
+        ),
       ]);
-      if (top.error || all.error) return { result: { error: (top.error ?? all.error)?.message } };
-      const totalMatches = all.data?.length ?? 0;
+      if (top.error || allResult.error) return { result: { error: (top.error ?? { message: allResult.error })?.message } };
+      const allRows = allResult.rows;
+      const totalMatches = allRows.length;
       const result = {
         total_matches: totalMatches,
-        total_lifetime_value_across_all_matches: (all.data ?? []).reduce((sum, r) => sum + (r.lifetime_value ?? 0), 0),
-        total_open_orders_across_all_matches: (all.data ?? []).reduce((sum, r) => sum + (r.open_orders ?? 0), 0),
+        total_lifetime_value_across_all_matches: allRows.reduce((sum, r) => sum + (r.lifetime_value ?? 0), 0),
+        total_open_orders_across_all_matches: allRows.reduce((sum, r) => sum + (r.open_orders ?? 0), 0),
         top_20_by_lifetime_value: top.data,
       };
       return { result, citation: totalMatches ? `Customer search: "${query}" (${totalMatches} matches)` : undefined };
@@ -174,21 +207,24 @@ async function executeToolCall(
     case "search_job_orders": {
       const query = String(input.query ?? "");
       const filter = `customer_name.ilike.%${query}%,code.ilike.%${query}%`;
-      const [top, all] = await Promise.all([
+      const [top, allResult] = await Promise.all([
         supabase
           .from("job_orders")
           .select("code, name, customer_name, status, order_date, primary_machine, total_value, total_sqft")
           .or(filter)
           .order("total_value", { ascending: false })
           .limit(20),
-        supabase.from("job_orders").select("total_value, total_sqft").or(filter).limit(5000),
+        fetchAllRows((from, to) =>
+          supabase.from("job_orders").select("total_value, total_sqft").or(filter).range(from, to)
+        ),
       ]);
-      if (top.error || all.error) return { result: { error: (top.error ?? all.error)?.message } };
-      const totalMatches = all.data?.length ?? 0;
+      if (top.error || allResult.error) return { result: { error: (top.error ?? { message: allResult.error })?.message } };
+      const allRows = allResult.rows;
+      const totalMatches = allRows.length;
       const result = {
         total_matches: totalMatches,
-        total_value_across_all_matches: (all.data ?? []).reduce((sum, r) => sum + (r.total_value ?? 0), 0),
-        total_sqft_across_all_matches: (all.data ?? []).reduce((sum, r) => sum + (r.total_sqft ?? 0), 0),
+        total_value_across_all_matches: allRows.reduce((sum, r) => sum + (r.total_value ?? 0), 0),
+        total_sqft_across_all_matches: allRows.reduce((sum, r) => sum + (r.total_sqft ?? 0), 0),
         top_20_by_value: top.data,
       };
       return { result, citation: totalMatches ? `Job order search: "${query}" (${totalMatches} matches)` : undefined };
@@ -252,22 +288,22 @@ async function executeToolCall(
       const customerFilter = input.customer_filter ? String(input.customer_filter) : null;
       const productCategoryFilter = input.product_category_filter ? String(input.product_category_filter) : null;
 
-      let query = supabase
-        .from("sales_transactions")
-        .select("product_category, sales_manager, customer_name, invoice_date, taxable_value")
-        .limit(20000); // whole table is 9,274 rows -- without an explicit limit, Supabase's
-                        // default per-request row cap silently truncates an unfiltered query
-                        // well below that, which is exactly the bug this fixes (see PROJECT_STATUS.md).
-      if (dateFrom) query = query.gte("invoice_date", dateFrom);
-      if (dateTo) query = query.lte("invoice_date", dateTo);
-      if (salesManagerFilter) query = query.ilike("sales_manager", `%${salesManagerFilter}%`);
-      if (customerFilter) query = query.ilike("customer_name", `%${customerFilter}%`);
-      if (productCategoryFilter) query = query.ilike("product_category", `%${productCategoryFilter}%`);
-
-      const { data, error } = await query;
-      if (error) return { result: { error: error.message } };
-
-      const rows = data ?? [];
+      // Paginated, not a bare .limit(): Supabase/PostgREST's server-side max-rows
+      // setting clamps any single request (even .limit(20000)) to its own cap
+      // (project default 1000) -- see fetchAllRows' comment above for the full story.
+      const { rows, error } = await fetchAllRows((from, to) => {
+        let q = supabase
+          .from("sales_transactions")
+          .select("product_category, sales_manager, customer_name, invoice_date, taxable_value")
+          .range(from, to);
+        if (dateFrom) q = q.gte("invoice_date", dateFrom);
+        if (dateTo) q = q.lte("invoice_date", dateTo);
+        if (salesManagerFilter) q = q.ilike("sales_manager", `%${salesManagerFilter}%`);
+        if (customerFilter) q = q.ilike("customer_name", `%${customerFilter}%`);
+        if (productCategoryFilter) q = q.ilike("product_category", `%${productCategoryFilter}%`);
+        return q;
+      });
+      if (error) return { result: { error } };
       const grandTotal = rows.reduce((sum, r) => sum + (r.taxable_value ?? 0), 0);
 
       // Monday-starting week bucket, labeled by that Monday's date.
@@ -334,17 +370,19 @@ async function executeToolCall(
     case "search_sale_items": {
       const query = String(input.query ?? "");
       const filter = `item_code.ilike.%${query}%,item_description.ilike.%${query}%,product_category.ilike.%${query}%`;
-      const [top, all] = await Promise.all([
+      const [top, allResult] = await Promise.all([
         supabase
           .from("sales_transactions")
           .select("item_code, item_description, product_category, rate, quantity, taxable_value, invoice_date, customer_name")
           .or(filter)
           .order("invoice_date", { ascending: false })
           .limit(20),
-        supabase.from("sales_transactions").select("rate, taxable_value").or(filter).limit(20000),
+        fetchAllRows((from, to) =>
+          supabase.from("sales_transactions").select("rate, taxable_value").or(filter).range(from, to)
+        ),
       ]);
-      if (top.error || all.error) return { result: { error: (top.error ?? all.error)?.message } };
-      const matches = all.data ?? [];
+      if (top.error || allResult.error) return { result: { error: (top.error ?? { message: allResult.error })?.message } };
+      const matches = allResult.rows;
       const totalMatches = matches.length;
       const avgRate = totalMatches ? matches.reduce((sum, r) => sum + (r.rate ?? 0), 0) / totalMatches : 0;
       const result = {
