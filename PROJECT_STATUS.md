@@ -1273,3 +1273,30 @@ over what the code actually does again.
     access) — user should re-ask a fiscal-year-scoped question (e.g. "FY26-27
     Q1 sales" or "compare FY25-26 Q4 vs FY26-27 Q1 purchases") once deployed.
     **Not yet run in production.**
+37. Caught a real AI Copilot accuracy bug via the user sharing a live
+    conversation transcript (not a code bug — a prompting/reasoning gap).
+    Asked "did we purchase any capital investment goods," the model answered
+    by SUBTRACTING a raw-material-filtered total from the unfiltered total
+    (₹1,25,25,043 across 15 transactions) instead of directly filtering to
+    product_category='FIXED ASSETS' — that gap also swept in Service,
+    Finished goods, Non stock item, and Uncategorized spend, not just
+    capital goods. The model caught its own mistake one turn later when
+    asked to itemize ("list the purchases with vendor details and value"),
+    at which point it ran the real filtered query and got the true number:
+    ₹16,73,000 across 4 transactions for June 2026 — roughly a 7.5x
+    overstatement in the first answer. Model self-corrected honestly and
+    named its own error, which is the right behavior once it happens, but
+    the goal is to not make the mistake in the first place.
+    Added an explicit new paragraph to SYSTEM_PROMPT naming this exact
+    failure mode and instructing the model to always call
+    purchase_summary/search_purchase_items with
+    product_category_filter='FIXED ASSETS' directly for any capital-goods/
+    capital-equipment/capital-investment question, never by inferring from
+    a gap between two other totals — cited the real ₹1,25,25,043 vs
+    ₹16,73,000 discrepancy in the prompt itself as a concrete anchor.
+    Verified via a clean `npx tsc --noEmit`, `next lint`, `next build`.
+    Could not test against live Supabase from this sandbox (no network
+    access) — user should re-ask a capital-goods question fresh (new
+    conversation, so there's no prior "gap" reasoning already in context)
+    once deployed and confirm it goes straight to the ₹16.73L-style direct
+    figure. **Not yet run in production.**
