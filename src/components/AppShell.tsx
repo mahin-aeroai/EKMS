@@ -47,6 +47,22 @@ import { Drawer } from "@/components/ui/Drawer";
 import { AIConversation, type ChatTurn } from "@/components/ui/AIConversation";
 import { supabase, type UserRole } from "@/lib/supabase";
 import { UserRoleContext } from "@/lib/UserRoleContext";
+import { UserGroupsContext, canAccessGroup } from "@/lib/UserGroupsContext";
+
+// Maps a NAV section's title to the group id used in profiles.allowed_groups
+// (supabase-module-access-migration.sql). Sections not listed here (Overview,
+// Foundations, Components, Executive) are never restricted -- see that
+// migration's header comment for why Executive specifically stays ungated.
+const SECTION_GROUP: Record<string, string> = {
+  Customers: "customers",
+  Operations: "operations",
+  Manufacturing: "manufacturing",
+  Knowledge: "knowledge",
+  People: "people",
+  Finance: "finance",
+  Compliance: "compliance",
+  Administration: "administration",
+};
 
 const NAV: SidebarSection[] = [
   {
@@ -144,17 +160,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<UserRole | null>(null);
+  const [allowedGroups, setAllowedGroups] = useState<string[] | null>(null);
 
   useEffect(() => {
     async function loadRole(userId: string) {
-      // Tolerant fetch: the `profiles` table may not exist yet if
-      // supabase-role-based-rls-migration.sql hasn't been run in production
-      // yet. Any error or missing row just leaves userRole as null, which
-      // UserRoleContext's consumers treat as "don't restrict anything" —
-      // this must never break the app for people signed in before that
-      // migration runs.
-      const { data, error } = await supabase.from("profiles").select("role").eq("id", userId).maybeSingle();
-      if (!error && data) setUserRole(data.role as UserRole);
+      // Tolerant fetch: the `profiles` table (or its allowed_groups column)
+      // may not exist yet if the relevant migration hasn't been run in
+      // production yet. Any error or missing row/column just leaves both
+      // userRole and allowedGroups at their fail-open defaults (null),
+      // which every consumer treats as "don't restrict anything" — this
+      // must never break the app for people signed in before a migration
+      // runs.
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("role, allowed_groups")
+        .eq("id", userId)
+        .maybeSingle();
+      if (!error && data) {
+        setUserRole(data.role as UserRole);
+        setAllowedGroups((data as { allowed_groups?: string[] | null }).allowed_groups ?? null);
+      }
     }
 
     supabase.auth.getUser().then(({ data }) => {
@@ -167,6 +192,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         loadRole(session.user.id);
       } else {
         setUserRole(null);
+        setAllowedGroups(null);
       }
     });
     return () => subscription.subscription.unsubscribe();
@@ -185,7 +211,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
-  const navigateCommands: Command[] = NAV.flatMap((s) =>
+  // Filter out sidebar sections the current user isn't scoped into. Admins
+  // and unrestricted users (allowedGroups === null) see every section,
+  // unchanged from before this feature existed.
+  const visibleNav = NAV.filter((section) => {
+    const group = SECTION_GROUP[section.title];
+    if (!group) return true;
+    return canAccessGroup(userRole, allowedGroups, group);
+  });
+
+  const navigateCommands: Command[] = visibleNav.flatMap((s) =>
     s.items.map((item) => ({
       id: item.id,
       label: `Go to ${item.label}`,
@@ -221,6 +256,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <UserRoleContext.Provider value={userRole}>
+    <UserGroupsContext.Provider value={allowedGroups}>
       <div className="flex h-screen flex-col">
         <TopNav
           onOpenAI={() => setAiOpen(true)}
@@ -230,7 +266,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           onSignOut={handleSignOut}
         />
         <div className="flex flex-1 overflow-hidden">
-          <Sidebar sections={NAV} activeId={activeId} onNavigate={(id) => {
+          <Sidebar sections={visibleNav} activeId={activeId} onNavigate={(id) => {
             const item = NAV.flatMap((s) => s.items).find((i) => i.id === id);
             if (item) router.push(item.href);
           }} />
@@ -243,6 +279,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <AIConversation turns={turns} onSend={handleSend} />
         </Drawer>
       </div>
+    </UserGroupsContext.Provider>
     </UserRoleContext.Provider>
   );
 }

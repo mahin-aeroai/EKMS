@@ -372,4 +372,7 @@ export interface ProfileRow {
   email: string;
   role: UserRole;
   created_at: string;
+  // NULL = unrestricted (sees every module). See
+  // supabase-module-access-migration.sql and src/lib/UserGroupsContext.tsx.
+  allowed_groups: string[] | null;
 }
