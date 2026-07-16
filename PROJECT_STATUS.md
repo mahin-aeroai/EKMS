@@ -1300,3 +1300,35 @@ over what the code actually does again.
     conversation, so there's no prior "gap" reasoning already in context)
     once deployed and confirm it goes straight to the ₹16.73L-style direct
     figure. **Not yet run in production.**
+38. User asked for a full itemized table of all 43 FIXED ASSETS purchases
+    (branch, supplier, item, rate, value) and the Copilot could only return
+    20 rows (search_purchase_items' detail list was hard-capped) and
+    admitted location/branch wasn't even selected per-row in that tool at
+    all — its own proposed fix (month-by-month slicing) would have worked
+    but was clunky for a 43-row result that should fit in one call.
+    Added an optional `limit` input (default 20, max 150, clamped) to both
+    search_sale_items and search_purchase_items, added `location` to both
+    tools' per-row select (branch now shows up in detail rows, which it
+    never did before), and renamed the fixed "most_recent_20" result field
+    to "most_recent" plus added detail_rows_shown/detail_rows_are_complete
+    so the model can tell, from the response itself, whether it got
+    everything or needs to ask for more.
+    Added a new SYSTEM_PROMPT paragraph instructing the model to check
+    total_matches from a normal call first, then re-call with limit set to
+    total_matches (a single extra call) to get full coverage when the
+    result set is small (~under 150), rather than manually slicing the
+    request by month/branch/supplier -- only falling back to slicing when
+    even limit=150 isn't enough.
+    Hit and fixed a self-inflicted bug while writing this: used backticks
+    around the word "limit" for emphasis inside the new SYSTEM_PROMPT
+    paragraph, not realizing SYSTEM_PROMPT itself is a backtick template
+    literal in this file -- that prematurely closed the string and broke
+    the build (`tsc` caught it immediately: "',' expected"). Removed the
+    inner backticks; the two tool *description* strings (line 138, 172)
+    still safely contain literal backticks since those are double-quoted
+    string literals, not template literals.
+    Verified via a clean `npx tsc --noEmit`, `next lint`, `next build`.
+    Could not test against live Supabase from this sandbox (no network
+    access) — user should re-ask for the full FIXED ASSETS list once
+    deployed and confirm all 43 rows come back with branch included.
+    **Not yet run in production.**
