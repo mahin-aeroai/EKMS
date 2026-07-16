@@ -23,7 +23,18 @@ export const dynamic = "force-dynamic";
 // actual table.
 
 const MODEL = "claude-sonnet-5";
-const MAX_TOKENS = 1024;
+// Was 1024 -- far too small once search_sale_items/search_purchase_items started
+// returning up to 500 detail rows per call (see the row-cap-raise commit). A
+// real failure this caused: "list the prices we are selling to IKEA" (282
+// matches) fetched all 282 rows correctly, but the model's attempt to render
+// them as text ran out of tokens mid-response, leaving response.content with
+// NO text block at all -- which the old fallback then misreported as "I
+// couldn't find a clear answer to that" (implying no data existed, when the
+// real problem was the answer being too long for the token budget). Raised to
+// give genuinely large listings real room, paired with a distinct
+// max_tokens-specific fallback message below and system-prompt guidance to
+// summarize instead of enumerating hundreds of rows in the first place.
+const MAX_TOKENS = 4096;
 const MAX_TOOL_ITERATIONS = 5;
 
 const SYSTEM_PROMPT = `You are the AI Copilot inside MMDI ONE, an internal operating platform for MMDI, an Indian packaging/printing manufacturer. Answer questions about customers, job orders, machines, raw materials, sales, and purchases using the tools available to you — never guess or invent data. If a tool returns no results, say so plainly rather than making something up. Keep answers concise (2-4 sentences unless the question calls for a list). When you reference a specific record, name it (e.g. "Job Order 7455" or "Apple India Pvt Ltd - Bangalore") so the person can look it up themselves.
@@ -41,6 +52,8 @@ Branch/office questions: MMDI operates through 9 branches — Hyderabad, Noida, 
 Financial year: MMDI's financial year runs 1 April to 31 March, e.g. FY26-27 = 1 Apr 2026 to 31 Mar 2027, and FY26-27 Q1 = Apr-Jun 2026, Q2 = Jul-Sep 2026, Q3 = Oct-Dec 2026, Q4 = Jan-Mar 2027 (note Q4 of an FY falls in the NEXT calendar year). There is no fiscal_year column in the data — only raw calendar dates — so for a question about a specific FY or FY quarter, compute date_from/date_to yourself using this rule and pass them to sales_summary/purchase_summary (e.g. "FY26-27 Q4 purchases" -> date_from='2027-01-01', date_to='2027-03-31'). Both tools also support group_by='fiscal_year' and group_by='fiscal_quarter' for breaking a wider range down BY financial year/quarter in one call (e.g. "compare purchases across FY25-26 Q4 and FY26-27 Q1" -> one purchase_summary call with group_by='fiscal_quarter', date_from='2026-01-01', date_to='2026-06-30', no need for two separate calls). Remember the underlying date ranges differ: sales_transactions only covers Apr-Jun 2026 (all FY26-27 Q1), while purchase_transactions covers Jan-Jun 2026 (spanning FY25-26 Q4 AND FY26-27 Q1) — don't assume a "total" on one ledger reflects the same financial-year scope as the other.
 
 Listing every matching transaction (not just a summary): search_sale_items and search_purchase_items both accept an optional limit parameter (default 20, max 500) and both return total_matches plus detail_rows_are_complete. When someone wants a full itemized list (e.g. "list all the capital goods purchases with vendor and value", or "every transaction with Arrow Digital"), first check total_matches from a normal call — if it's small (roughly under 500 — a single supplier or customer can run into the several hundreds), call the same tool again with limit set to total_matches to get every row in ONE additional call, rather than manually slicing the request by month/branch/supplier yourself. Only fall back to slicing (e.g. one month or one branch at a time) if total_matches is too large even for limit=500. Each detail row already includes branch/location, supplier or customer, item name, rate, and taxable value — present them as a plain numbered list (no markdown tables, see Formatting below), one transaction per line.
+
+IMPORTANT — fetching all the rows from a tool is NOT the same as it being wise to print all of them as chat text: your reply has a hard token budget, and trying to enumerate more than ~50-60 individual rows as a numbered list risks the response being cut off mid-answer with nothing useful shown at all (this has actually happened — "list the prices we are selling to IKEA," 282 matches, produced a completely empty/failed reply because the full listing didn't fit). So: fetch the full set when useful for accurate totals/aggregation, but when total_matches is large (roughly over 50-60) and the person asked to "list"/"show" every row, don't dump them all as text — instead give a short summary (price/rate range, average, min, max, a representative sample of ~10-15 rows spanning different customers/suppliers/branches) and say how many total matches exist, then offer to narrow further (by customer, branch, month, or item variant) for a fuller itemized view of a smaller slice. Only attempt a full row-by-row listing in text when total_matches is small enough to comfortably fit (roughly under 50-60) or the person explicitly confirms they want the long version anyway. For purchases specifically, you can also point to the Purchase Register page's CSV export (see below) as the way to get a genuine full row-by-row list beyond what chat text can hold; there is currently no equivalent CSV export for sales data.
 
 Genuinely wanting the ENTIRE purchase ledger itemized (all 9,528 rows, not a filtered slice): this chat cannot output that many rows as text no matter how the request is sliced, and it would be a poor experience even if it could. The Purchase Register workspace page (/workspaces/purchase-register) has a real "Export all to CSV" button that downloads every row — branch, purchase type, supplier, goods name, item code, quantity, rate, and taxable value — as a spreadsheet in one click. When someone asks for "all purchases" itemized with no narrowing filter, tell them about that button directly as the right tool for the job, in addition to (not instead of) offering a narrower in-chat slice if they'd rather drill into something specific first.
 
@@ -660,10 +673,21 @@ export async function POST(request: Request) {
           .map((block) => block.text)
           .join("\n")
           .trim();
-        return NextResponse.json({
-          content: text || "I couldn't find a clear answer to that.",
-          citations: Array.from(citations),
-        });
+        // Distinguish "the model genuinely had nothing to say" from "the answer
+        // got cut off because it was too long for the token budget" -- these
+        // need different messages. The old code collapsed both into the same
+        // misleading "couldn't find a clear answer," which is wrong when the
+        // real issue is answer LENGTH, not data availability (see MAX_TOKENS
+        // comment above for the exact failure this caused).
+        if (!text) {
+          const content =
+            response.stop_reason === "max_tokens"
+              ? "That answer would have been too long to fit in one reply. Try asking for a summary (price range/average) instead of every row, or narrow the request to one branch, month, category, or customer."
+              : "I couldn't find a clear answer to that.";
+          return NextResponse.json({ content, citations: Array.from(citations) });
+        }
+        const content = response.stop_reason === "max_tokens" ? `${text}\n\n(This answer was cut short — ask for a narrower breakdown to see the rest.)` : text;
+        return NextResponse.json({ content, citations: Array.from(citations) });
       }
 
       const toolResults: ToolResultBlockParam[] = [];

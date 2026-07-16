@@ -1418,3 +1418,36 @@ over what the code actually does again.
     access) — user should re-ask "all purchases" itemized once deployed and
     confirm the Copilot now mentions the CSV export button. **Not yet run in
     production.**
+43. Found and fixed a serious, self-inflicted regression from raising the
+    search tools' row cap to 500 (item 40): "list the prices we are selling
+    to IKEA" (282 sale item matches) returned "I couldn't find a clear
+    answer to that." — the citations proved the tool DID fetch all 282 rows
+    correctly (showing 20 then re-called and showing 282, exactly per the
+    new guidance), but the model's attempt to render 282 rows as chat text
+    ran out of MAX_TOKENS (1024, unchanged since the route was first built)
+    partway through, leaving response.content with no text block at all.
+    The old code's fallback couldn't tell "genuinely no answer" apart from
+    "answer too long," so it always showed the same misleading message —
+    implying no matching data existed when the real problem was output
+    length.
+    Fixed three ways: (1) raised MAX_TOKENS from 1024 to 4096, giving
+    legitimate longer listings real room; (2) split the empty-text fallback
+    into two distinct messages based on response.stop_reason — "too long to
+    fit, try a summary or narrower request" when stop_reason is
+    'max_tokens', vs. the original "couldn't find a clear answer" only when
+    the model genuinely had nothing (also appends a "cut short" note when
+    stop_reason is 'max_tokens' but SOME text did make it through, so a
+    truncated answer never looks like a complete one); (3) added a new
+    SYSTEM_PROMPT paragraph instructing the model NOT to enumerate more than
+    ~50-60 rows as text even when it has fetched the full set — summarize
+    (range/average/min/max + a representative ~10-15 row sample) and offer
+    to narrow down instead, reserving full raw dumps for when total_matches
+    is small enough to comfortably fit or the person explicitly insists.
+    Also noted there's no CSV export for sales data yet (only Purchase
+    Register has one, per item 41) — a natural next step, pending user
+    input on scope.
+    Verified via a clean `npx tsc --noEmit`, `next lint`, `next build`.
+    Could not test against live Supabase from this sandbox (no network
+    access) — user should re-ask "list the prices we are selling to IKEA"
+    once deployed and confirm it now returns a real summary (not a failure)
+    instead of silently failing. **Not yet run in production.**
