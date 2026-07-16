@@ -97,7 +97,11 @@ export default function AICopilotPage() {
         <StatCard label="Compliance Findings on Record" value={context ? String(context.openComplianceFindings) : "—"} trend="flat" trendLabel="Live count" />
       </div>
 
-      <div className="h-[520px] rounded-lg border border-line bg-surface p-2">
+      {/* Fills most of the viewport instead of a fixed 520px -- a 20-item
+          sales breakdown answer needs a lot more room to read comfortably
+          than a couple of short turns did. min-h keeps it usable on short
+          viewports too. */}
+      <div className="h-[calc(100vh-260px)] min-h-[420px] rounded-lg border border-line bg-surface p-2">
         <AIConversation turns={turns} onSend={handleSend} contextLabel="Enterprise-wide" loading={loading} />
       </div>
     </div>
