@@ -101,7 +101,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: "sales_summary",
-    description: "Real sales figures (Taxable Value, not Voucher amount) from the full Q1 FY26-27 sales ledger (9,274 line items), grouped by whichever dimension answers the question: material/product category, sales person, customer, or time period (day/week/month). Always returns a grand total for the filtered date range in addition to the grouped breakdown, so it also answers plain 'total sales' questions (just don't pass a narrow date range, or omit dates entirely for the whole quarter).",
+    description: "Real sales figures (Taxable Value, not Voucher amount) from the full Q1 FY26-27 sales ledger (9,274 line items), grouped by whichever dimension answers the question: material/product category, sales person, customer, or time period (day/week/month). Always returns a grand total for the filtered range in addition to the grouped breakdown, so it also answers plain 'total sales' questions. Supports combining a filter with a different group_by — e.g. 'which customers did Jayaraj sell to in June' is sales_manager_filter='Jayaraj', group_by='customer', date_from/date_to for June, NOT a separate lookup.",
     input_schema: {
       type: "object",
       properties: {
@@ -110,6 +110,9 @@ const TOOLS: Tool[] = [
           enum: ["product_category", "sales_manager", "customer", "month", "week", "day"],
           description: "How to break down the sales figures. 'product_category' is the closest match to 'material category' or 'product group'; 'sales_manager' is the closest match to 'sales person'.",
         },
+        sales_manager_filter: { type: "string", description: "Optional: restrict to this sales person (partial match) before grouping — use when the question names a specific sales person AND asks for a different breakdown (e.g. their customers, their category mix)" },
+        customer_filter: { type: "string", description: "Optional: restrict to this customer name (partial match) before grouping" },
+        product_category_filter: { type: "string", description: "Optional: restrict to this product/material category (partial match) before grouping" },
         date_from: { type: "string", description: "Optional start date (YYYY-MM-DD), inclusive" },
         date_to: { type: "string", description: "Optional end date (YYYY-MM-DD), inclusive" },
         top_n: { type: "number", description: "Max number of groups to return in detail, sorted by total value descending (default 20)" },
@@ -245,12 +248,18 @@ async function executeToolCall(
       const dateFrom = input.date_from ? String(input.date_from) : null;
       const dateTo = input.date_to ? String(input.date_to) : null;
       const topN = typeof input.top_n === "number" ? input.top_n : 20;
+      const salesManagerFilter = input.sales_manager_filter ? String(input.sales_manager_filter) : null;
+      const customerFilter = input.customer_filter ? String(input.customer_filter) : null;
+      const productCategoryFilter = input.product_category_filter ? String(input.product_category_filter) : null;
 
       let query = supabase
         .from("sales_transactions")
         .select("product_category, sales_manager, customer_name, invoice_date, taxable_value");
       if (dateFrom) query = query.gte("invoice_date", dateFrom);
       if (dateTo) query = query.lte("invoice_date", dateTo);
+      if (salesManagerFilter) query = query.ilike("sales_manager", `%${salesManagerFilter}%`);
+      if (customerFilter) query = query.ilike("customer_name", `%${customerFilter}%`);
+      if (productCategoryFilter) query = query.ilike("product_category", `%${productCategoryFilter}%`);
 
       const { data, error } = await query;
       if (error) return { result: { error: error.message } };
@@ -298,16 +307,25 @@ async function executeToolCall(
         .sort((a, b) => b.total_taxable_value - a.total_taxable_value)
         .slice(0, topN);
 
+      const filtersApplied = {
+        sales_manager: salesManagerFilter,
+        customer: customerFilter,
+        product_category: productCategoryFilter,
+      };
       const result = {
         group_by: groupBy,
+        filters_applied: filtersApplied,
         date_range: dateFrom || dateTo ? { from: dateFrom, to: dateTo } : null,
         grand_total_taxable_value: grandTotal,
         grand_total_transactions: rows.length,
         groups: sortedGroups,
       };
+      const filterLabel = [salesManagerFilter && `sales person "${salesManagerFilter}"`, customerFilter && `customer "${customerFilter}"`, productCategoryFilter && `category "${productCategoryFilter}"`]
+        .filter(Boolean)
+        .join(", ");
       return {
         result,
-        citation: `Sales summary grouped by ${groupBy}${dateFrom || dateTo ? ` (${dateFrom ?? "…"} to ${dateTo ?? "…"})` : ""}`,
+        citation: `Sales summary grouped by ${groupBy}${filterLabel ? `, filtered to ${filterLabel}` : ""}${dateFrom || dateTo ? ` (${dateFrom ?? "…"} to ${dateTo ?? "…"})` : ""}`,
       };
     }
     case "search_sale_items": {
