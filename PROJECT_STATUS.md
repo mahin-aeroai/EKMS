@@ -1451,3 +1451,31 @@ over what the code actually does again.
     access) — user should re-ask "list the prices we are selling to IKEA"
     once deployed and confirm it now returns a real summary (not a failure)
     instead of silently failing. **Not yet run in production.**
+44. Built a real "Sales by Rep" report page
+    (src/app/workspaces/sales-by-rep/page.tsx, new nav item under Customers,
+    Target icon), after the user asked for "sales report by sales person
+    with all his customers for a period" and confirmed via AskUserQuestion
+    they wanted a reusable in-app page (not a one-off file, not just chat).
+    Pick a sales person (dropdown populated from real distinct sales_manager
+    values in sales_transactions, not hardcoded) and an optional from/to
+    date range, click "Run report," and see every customer that rep sold to
+    — transaction count and total taxable value each — sorted by value
+    descending, with stat cards for total sales/customers/transactions.
+    "Export to CSV" downloads the current breakdown once a report has run.
+    Every fetch (distinct sales-person list, the actual report query) uses
+    the same paginated .range() loop pattern as everywhere else in this app
+    — no bare .select()/.limit(), per the now-well-established
+    Supabase/PostgREST max-rows clamp lesson (items 31/32/40 etc.).
+    Table rows needed a synthetic `id` field added (customer_name, since
+    grouping already guarantees uniqueness) — the shared Table component's
+    generic type requires `{ id: string }`, caught immediately by `tsc`.
+    Also added a new SYSTEM_PROMPT paragraph telling the AI Copilot this
+    page exists, so if someone asks in chat for a rep's full customer
+    breakdown as a reusable/exportable report (not a one-off answer), it
+    can point them to /workspaces/sales-by-rep directly.
+    Verified via a clean `npx tsc --noEmit`, `next lint`, `next build` (new
+    /workspaces/sales-by-rep route confirmed in the build output).
+    Could not test against live Supabase from this sandbox (no network
+    access) — user should open the new page, pick a sales person, run the
+    report, and confirm the customer breakdown and CSV export both work.
+    **Not yet run in production.**
