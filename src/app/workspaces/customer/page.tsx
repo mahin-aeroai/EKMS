@@ -1,46 +1,108 @@
-import { type CustomerRow } from "@/lib/supabase";
-import { createServerSupabaseClient } from "@/lib/supabase-server";
-import { CustomerWorkspaceClient } from "@/components/workspaces/CustomerWorkspaceClient";
+"use client";
 
-// Always fetch fresh data from Supabase — this workspace is no longer a static demo.
-export const dynamic = "force-dynamic";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Building2, Search } from "lucide-react";
+import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
+import { Badge } from "@/components/ui/Badge";
+import { StatCard } from "@/components/ui/Card";
+import { Table, type TableColumn } from "@/components/ui/Table";
+import { useToast } from "@/components/ui/Notifications";
+import { supabase, type CustomerRow } from "@/lib/supabase";
+import { formatCrore } from "@/lib/dashboard-queries";
 
-const DEMO_CUSTOMER_CODE = "C03739"; // Apple India Pvt Ltd - Bangalore, real customer, highest Q1 revenue with a real contact on file
+// Real, searchable customer list — replaces what used to be a single
+// hardcoded demo record (C03739, Apple India Pvt Ltd - Bangalore) with no
+// way to see or open any other customer. Clicking a row opens the same
+// full workspace view (Overview/Insights/Timeline/Documents/Relationships/
+// Activity, real AI Copilot box, etc.) at /workspaces/customer/[code],
+// which used to be the only thing this route rendered.
+export default function CustomerListPage() {
+  const router = useRouter();
+  const { toast } = useToast();
+  const [query, setQuery] = useState("");
+  const [rows, setRows] = useState<CustomerRow[] | null>(null);
+  const [totalCount, setTotalCount] = useState<number | null>(null);
 
-export default async function CustomerWorkspacePage() {
-  const supabase = await createServerSupabaseClient();
+  useEffect(() => {
+    supabase
+      .from("customers")
+      .select("*", { count: "exact", head: true })
+      .then(({ count }) => setTotalCount(count ?? 0));
+  }, []);
 
-  const { data: customer, error: customerError } = await supabase
-    .from("customers")
-    .select("*")
-    .eq("code", DEMO_CUSTOMER_CODE)
-    .single();
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      const q = supabase
+        .from("customers")
+        .select("*")
+        .order("lifetime_value", { ascending: false })
+        .limit(50);
 
-  if (customerError || !customer) {
-    return (
-      <div className="rounded-lg border border-danger/30 bg-danger-tint p-6 text-sm text-danger">
-        Couldn&apos;t load this customer from Supabase. Confirm the schema has been run (see
-        supabase-customer-schema.sql) and that NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY
-        are set.
-        {customerError && <pre className="mt-2 whitespace-pre-wrap text-xs">{customerError.message}</pre>}
-      </div>
-    );
-  }
+      (query.trim() ? q.or(`name.ilike.%${query.trim()}%,code.ilike.%${query.trim()}%`) : q).then(
+        ({ data, error }) => {
+          if (error) {
+            toast("danger", "Couldn't load customers from Supabase");
+            return;
+          }
+          setRows((data as CustomerRow[]) ?? []);
+        }
+      );
+    }, 250);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query]);
 
-  const customerId = (customer as CustomerRow).id;
-
-  const [{ data: contacts }, { data: comments }, { data: approvals }] = await Promise.all([
-    supabase.from("customer_contacts").select("*").eq("customer_id", customerId),
-    supabase.from("customer_comments").select("*").eq("customer_id", customerId).order("created_at", { ascending: true }),
-    supabase.from("customer_approvals").select("*").eq("customer_id", customerId).order("created_at", { ascending: false }),
-  ]);
+  const COLUMNS: TableColumn<CustomerRow>[] = [
+    { key: "code", header: "Code", sortable: true },
+    { key: "name", header: "Name", sortable: true },
+    { key: "region", header: "Region", sortable: true, render: (r) => r.region ?? "—" },
+    { key: "tier", header: "Tier", sortable: true, render: (r) => (r.tier ? <Badge status="info">{r.tier}</Badge> : "—") },
+    { key: "lifetime_value", header: "Lifetime Value", sortable: true, render: (r) => formatCrore(r.lifetime_value) },
+    { key: "account_owner", header: "Account Owner", sortable: true, render: (r) => r.account_owner ?? "—" },
+  ];
 
   return (
-    <CustomerWorkspaceClient
-      customer={customer as CustomerRow}
-      contacts={contacts ?? []}
-      initialComments={comments ?? []}
-      initialApproval={approvals?.[0] ?? null}
-    />
+    <div>
+      <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "Customers" }]} />
+
+      <div className="mt-4 flex flex-col gap-4 border-b border-line pb-6 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-start gap-4">
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary-tint text-primary">
+            <Building2 size={22} />
+          </span>
+          <div>
+            <h1 className="text-xl font-semibold text-ink">Customers</h1>
+            <p className="mt-0.5 text-sm text-ink-secondary">Search or browse every real customer account, then open its full workspace</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="my-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <StatCard label="Total Customers" value={totalCount === null ? "…" : String(totalCount)} trend="flat" trendLabel="Live count" />
+        <StatCard label="Showing" value={rows === null ? "…" : String(rows.length)} trend="flat" trendLabel={query.trim() ? `Matching "${query.trim()}"` : "Top 50 by lifetime value"} />
+        <StatCard label="Combined Lifetime Value (shown)" value={rows === null ? "…" : formatCrore(rows.reduce((sum, r) => sum + r.lifetime_value, 0))} trend="flat" trendLabel="Of rows currently shown" />
+      </div>
+
+      <div className="mb-4 flex items-center gap-2 rounded-md border border-line-strong bg-surface px-3 py-2">
+        <Search size={16} className="text-ink-muted" />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder='Search by name or code — e.g. "IKEA" or "C03739"'
+          className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-ink-muted"
+        />
+      </div>
+
+      <div className="rounded-lg border border-line bg-surface p-4">
+        {rows === null ? (
+          <p className="py-6 text-center text-sm text-ink-muted">Loading customers…</p>
+        ) : rows.length === 0 ? (
+          <p className="py-6 text-center text-sm text-ink-muted">No customers match &quot;{query}&quot;.</p>
+        ) : (
+          <Table columns={COLUMNS} rows={rows} onRowClick={(r) => router.push(`/workspaces/customer/${r.code}`)} />
+        )}
+      </div>
+    </div>
   );
 }
