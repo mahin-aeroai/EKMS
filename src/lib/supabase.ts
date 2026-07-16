@@ -412,3 +412,132 @@ export interface ProfileRow {
   // supabase-module-access-migration.sql and src/lib/UserGroupsContext.tsx.
   allowed_groups: string[] | null;
 }
+
+// ── Sign Estimator (React rewrite of SignERP_v2.html) ──────────────────────
+// See supabase-sign-estimator-schema.sql for the table definitions + RLS.
+// Field names mirror the DB columns (snake_case) rather than the original
+// tool's camelCase localStorage fields, kept consistent with every other
+// row type in this file.
+
+export interface SignProfileRow {
+  id: string;
+  name: string;
+  category: "nonlit" | "seg-indoor" | "seg-outdoor";
+  width: number | null;
+  depth: number | null;
+  stock_len: number;
+  usage: string | null;
+  cost: number;
+  sku: string | null;
+  supplier: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SignLedModuleRow {
+  id: string;
+  name: string;
+  mod_w: number;
+  mod_h: number;
+  h_gap: number;
+  v_gap: number;
+  watt: number;
+  ip: string | null;
+  usage: string | null;
+  cost: number;
+  sku: string | null;
+  supplier: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SignLedBarRow {
+  id: string;
+  name: string;
+  bar_len: number;
+  bar_width: number;
+  watt: number;
+  ip: string | null;
+  usage: string | null;
+  cost: number;
+  sku: string | null;
+  supplier: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SignLedDriverRow {
+  id: string;
+  watt: number;
+  brand: string | null;
+  volt: number;
+  cost: number;
+  sku: string | null;
+  supplier: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SignSheetRow {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  thickness: number | null;
+  cost_per_sheet: number;
+  wastage: number;
+  sku: string | null;
+  supplier: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SignPrintingMediaRow {
+  id: string;
+  name: string;
+  print_types: string[];
+  cost_per_sqft: number;
+  wastage: number;
+  sku: string | null;
+  supplier: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SignAccessoryRow {
+  id: string;
+  name: string;
+  unit: string;
+  mandatory: boolean;
+  unit_cost: number;
+  sku: string | null;
+  supplier: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SignEstimateRow {
+  id: string;
+  ref: string;
+  client: string | null;
+  category: string | null;
+  dim_w: number | null;
+  dim_h: number | null;
+  dim_unit: string | null;
+  width_mm: number;
+  height_mm: number;
+  qty: number;
+  sell: number;
+  final_amount: number;
+  margin: number;
+  calc: Record<string, unknown>;
+  created_by: string | null;
+  created_at: string;
+}

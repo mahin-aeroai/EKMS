@@ -39,6 +39,7 @@ import {
   Settings,
   Receipt,
   Target,
+  Ruler,
 } from "lucide-react";
 import { Sidebar, type SidebarSection } from "@/components/ui/Sidebar";
 import { TopNav } from "@/components/ui/TopNav";
@@ -105,6 +106,7 @@ const NAV: SidebarSection[] = [
       { id: "site-surveys", label: "Site Surveys", icon: <FileText size={16} />, href: "/workspaces/site-surveys" },
       { id: "crm", label: "CRM", icon: <Users size={16} />, href: "/workspaces/crm" },
       { id: "quotations", label: "Quotations", icon: <FileText size={16} />, href: "/workspaces/quotations" },
+      { id: "sign-estimator", label: "Sign Estimator", icon: <Ruler size={16} />, href: "/workspaces/sign-estimator" },
       { id: "contracts", label: "Contracts", icon: <FileSignature size={16} />, href: "/workspaces/contracts" },
     ],
   },

@@ -1736,3 +1736,98 @@ over what the code actually does again.
     @aws-sdk/client-s3 and @aws-sdk/s3-request-presigner as real
     dependencies — make sure `npm install` runs (or let Vercel do it on
     deploy) before/after this push.**
+    6GB folder + their own R2 and Supabase credentials) — that remains
+    entirely on the user, following the setup steps at the top of
+    upload-lfg-site-surveys.mjs (create the R2 bucket + API token first).
+    **Not yet run in production. package.json/package-lock.json now include
+    @aws-sdk/client-s3 and @aws-sdk/s3-request-presigner as real
+    dependencies — make sure `npm install` runs (or let Vercel do it on
+    deploy) before/after this push.**
+
+51. Rebuilt SignERP_v2.html (the user's standalone soft-signage costing tool)
+    as a native MMDI ONE workspace: Sign Estimator.
+    Context: the user uploaded a 2637-line, self-contained vanilla-JS/HTML
+    tool they'd built previously (localStorage-only persistence) and asked
+    for it to be "incorporated within EKMS MMDI ONE to create estimates...
+    in one single screen if possible." Offered two lower-risk defaults
+    (embed as-is via iframe; keep localStorage for now) and the user
+    explicitly chose the harder path both times: a full React rewrite
+    matching MMDI ONE's design system, plus a full migration of all master
+    data to real Supabase tables immediately (not localStorage).
+    Read the entire original file end-to-end before writing anything, to
+    capture every calculation rule faithfully: CutOpt (First-Fit-Decreasing
+    bin-packing for aluminium profile cuts — replaces a naive
+    ceil(side/stock) per side that wastes material), SheetCalc (charges
+    actual sq.ft consumed + wastage%, not full sheets), LEDCalc (grid
+    placement for modules; LED bars always placed VERTICALLY for drainage/
+    wiring reasons, never horizontal), DriverOpt (smallest single driver
+    meeting both a safety-buffer wattage and a max-load-% capacity
+    threshold, falling back to multiples of the largest driver), and the
+    full pricing rollup (overhead/labour/install/markup/discount/GST/
+    margin).
+    New Supabase tables (supabase-sign-estimator-schema.sql): 7 master
+    tables (sign_profiles, sign_led_modules, sign_led_bars,
+    sign_led_drivers, sign_sheets, sign_printing_media, sign_accessories)
+    seeded with the original tool's default catalogue (sku is the
+    idempotency key via a partial unique index — ON CONFLICT needed an
+    explicit `WHERE sku IS NOT NULL` to match it, first PGlite run caught
+    this), plus sign_estimates (one row per generated cost sheet/quote,
+    storing a full JSON snapshot of the cost breakdown so a past quote's
+    cost sheet always re-renders exactly as quoted even if master prices
+    later change). RLS gated to the 'customers' group (same as Quotations/
+    Site Surveys — same business domain), reusing user_role()/
+    user_has_group_access() from the already-live
+    supabase-module-access-migration.sql. Validated via PGlite
+    (test-sign-estimator.mjs): seed idempotency, category check constraint,
+    sku uniqueness with multi-NULL allowed, print_types array round-trip,
+    and RLS admit/deny for customers-group vs operations-group users —
+    all passed.
+    New code: src/lib/sign-estimator/calc.ts (pure, framework-free port of
+    every calculator above plus computePrint/computePricing — zero DOM/
+    React/Supabase dependencies, so it's independently testable), and
+    src/app/workspaces/sign-estimator/ containing page.tsx (hand-rolled,
+    externally-controllable tab switcher — NOT the shared <Tabs>
+    component, because generating a cost sheet needs to programmatically
+    jump the user to the Cost Sheet tab, which <Tabs>'s self-contained
+    state doesn't support), EstimatorTab.tsx (the 6-step wizard), 
+    MastersTab.tsx + masterConfig.ts (one generic config-driven CRUD
+    screen covering all 7 master types, mirroring the original tool's own
+    MOD_CFG pattern instead of duplicating 7 near-identical screens),
+    CostSheetTab.tsx (re-renders a saved estimate's stored JSON snapshot,
+    print button), DashboardTab.tsx, HistoryTab.tsx (+ CSV export), and
+    types.ts (the EstimateSnapshot shape stored in sign_estimates.calc).
+    Added SignProfileRow/SignLedModuleRow/SignLedBarRow/SignLedDriverRow/
+    SignSheetRow/SignPrintingMediaRow/SignAccessoryRow/SignEstimateRow to
+    src/lib/supabase.ts, and a "Sign Estimator" nav entry (Customers
+    section, after Quotations) to src/components/AppShell.tsx.
+    "One single screen" interpreted as: ONE route/nav entry
+    (/workspaces/sign-estimator) with internal tab navigation between
+    Estimator / Masters / Cost Sheet / Dashboard / History, mirroring the
+    original single-file tool's own single-page structure, rather than 5
+    separate top-level nav items.
+    Known simplification vs. the original: the bin-packing and LED-bar
+    layout are shown as clear data tables instead of the original's custom
+    SVG diagrams — same underlying numbers, less illustrative artwork.
+    Flagged to the user as a deliberate scope trade-off, not an oversight.
+    Also fixed two React-hooks-lint violations mid-build (set-state-in-
+    effect): accessory line quantities are now derived via useMemo from
+    overrides+custom-rows state instead of synced into state via a
+    useEffect, and CostSheetTab's loading flag only flips inside the
+    fetch's .then callback, not synchronously in the effect body.
+    Verified clean via `npx tsc --noEmit`, `npx eslint` (zero errors/
+    warnings on all new files), and `next build` (/workspaces/sign-
+    estimator appears in the static route list, compiles successfully).
+    The known small bug the user mentioned ("it got small error that we
+    will fix it later") was never described further and didn't surface
+    during the full read-through or the rewrite — if it resurfaces, it's
+    likely specific to a workflow not yet exercised.
+    **Not yet run in production.** The user needs to: (1) run
+    supabase-sign-estimator-schema.sql in the Supabase SQL Editor (after
+    confirming supabase-role-based-rls-migration.sql and
+    supabase-module-access-migration.sql are already live, which they are),
+    (2) copy the new files into ~/Documents/EKMS per the usual handoff
+    pattern, (3) commit and push. No data migration script was needed here
+    (the original tool's data was only ever in the user's own browser's
+    localStorage, not a file that could be exported) — the 7 master tables
+    ship pre-seeded with the same default catalogue the original tool
+    shipped with, ready to edit via the new Masters tab.
