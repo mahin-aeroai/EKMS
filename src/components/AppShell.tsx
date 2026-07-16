@@ -102,6 +102,7 @@ const NAV: SidebarSection[] = [
     items: [
       { id: "workspace-customer", label: "Customer Workspace", icon: <Building2 size={16} />, href: "/workspaces/customer" },
       { id: "sales-by-rep", label: "Sales by Rep", icon: <Target size={16} />, href: "/workspaces/sales-by-rep" },
+      { id: "site-surveys", label: "Site Surveys", icon: <FileText size={16} />, href: "/workspaces/site-surveys" },
       { id: "crm", label: "CRM", icon: <Users size={16} />, href: "/workspaces/crm" },
       { id: "quotations", label: "Quotations", icon: <FileText size={16} />, href: "/workspaces/quotations" },
       { id: "contracts", label: "Contracts", icon: <FileSignature size={16} />, href: "/workspaces/contracts" },

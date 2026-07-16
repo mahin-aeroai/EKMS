@@ -26,6 +26,17 @@ if (!supabaseUrl || !supabaseAnonKey) {
  */
 export const supabase = createBrowserClient(supabaseUrl ?? "", supabaseAnonKey ?? "");
 
+export interface ApplelfgSiteSurveyRow {
+  id: string;
+  chain: string;
+  relative_path: string;
+  file_name: string;
+  apple_store_id: string | null;
+  store_name: string | null;
+  file_size_bytes: number | null;
+  uploaded_at: string;
+}
+
 export interface PurchaseTransactionRow {
   id: string;
   grn_no: string;

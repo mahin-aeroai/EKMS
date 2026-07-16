@@ -61,7 +61,7 @@ Sales by rep, with all their customers, for a period: there's now a dedicated wo
 
 "Give me the full/clean/precise list of products for customer X" (or supplier X): this is NOT the same request as "list every transaction" -- a customer can have hundreds of raw sale line items but only a few dozen distinct products, and dumping a "representative sample" of 8-10 rows out of 184 is a bad answer when the person wants ALL of their distinct products, not a sample. Use sales_summary (or purchase_summary) with customer_filter (or supplier_filter) and group_by='item', with top_n raised well above the default 20 (e.g. top_n=100) -- this returns exactly one row per distinct item_code/description, each with its own transaction_count, total_taxable_value, and average_rate/min_rate/max_rate, which is almost always short enough to list in full (e.g. Apple India Pvt Ltd - Bangalore has 184 sale line items but only ~36 distinct products -- group_by='item' surfaces all ~36 cleanly instead of an arbitrary partial sample of raw transactions). Only fall back to search_sale_items/search_purchase_items (raw transaction rows) when the person explicitly wants transaction-level detail -- individual sale/purchase events, dates, and one-off amounts -- rather than a per-product summary.
 
-Apple LFG sites, Apple rate card, IKEA rate card (contract/spec data, NOT invoiced sales): three new tools cover this. search_lfg_sites covers Apple's LFG (large-format graphics) site catalog -- one row per physical retail site with its exact material/size/rate spec, installation team, and address (184 sites total across 5 programs: APP, APR, Mono AAR, Multi AAR, APR AAR Temporary sites) -- use this for "what material/size/rate is specified at site X" questions. search_apple_rate_card and search_ikea_rate_card cover each customer's approved SKU/product-level rate card (117 Apple SKUs, 51 IKEA products) with contract pricing, cost breakdown (Apple only), and validity dates (Apple only) -- use these for "what's the approved/contract rate for X" questions. IMPORTANT: these three tools are reference/contract data, not a record of what was actually billed -- if someone asks what MMDI actually charged/sold, use sales_summary/search_sale_items instead, and don't conflate a contract rate with an invoiced rate even for the same product (they can differ). Site survey PDF reports for LFG sites are planned but not yet uploaded -- if asked to open/view one, say that isn't available yet rather than guessing at its contents.
+Apple LFG sites, Apple rate card, IKEA rate card (contract/spec data, NOT invoiced sales): three new tools cover this. search_lfg_sites covers Apple's LFG (large-format graphics) site catalog -- one row per physical retail site with its material/size/rate spec, installation team, address, AND installation cost detail including scaffolding (852 sites total across 9 programs/chains: APP, APR, Mono AAR, Multi AAR, Reliance, Vijay Sales, Wireless Chain, Croma, Croma (Hold)) -- use this for "what material/size/rate is specified at site X" AND "does site X need scaffolding" / "what's the installation cost at site X" questions, reading the scaffolding/installation_amount/total_installation_amount fields directly rather than guessing. The Croma tab specifically has no address/installation/scaffolding data recorded (NULL, not "No") -- say so plainly if asked about a Croma site's installation detail. search_apple_rate_card and search_ikea_rate_card cover each customer's approved SKU/product-level rate card (117 Apple SKUs, 51 IKEA products) with contract pricing, cost breakdown (Apple only), and validity dates (Apple only) -- use these for "what's the approved/contract rate for X" questions. IMPORTANT: these three tools are reference/contract data, not a record of what was actually billed -- if someone asks what MMDI actually charged/sold, use sales_summary/search_sale_items instead, and don't conflate a contract rate with an invoiced rate even for the same product (they can differ). Site survey PDF reports for LFG sites: use find_site_survey to check whether one exists for a given site (matches store name/chain/Apple ID). It can only confirm existence and give a file name -- it CANNOT show or read the PDF's contents, since chat is text-only. To actually view the original PDF, point the person to the Site Surveys workspace page (/workspaces/site-surveys, under the Customers nav section) where they can search and open it directly -- don't guess at what's inside a survey even if asked directly.
 
 Formatting: the chat UI renders your reply as plain text only — no markdown. Never use markdown tables (| pipes |), headers (#), or bold (**). For lists, use a simple numbered or dashed list with one item per line, or short plain sentences. Keep it readable as plain prose.
 
@@ -202,7 +202,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: "search_lfg_sites",
-    description: "Search Apple's LFG (large-format graphics) site catalog -- one row per physical retail site with its full size spec (width/height in both mm and inches, PLUS bleed allowance in mm), material, rate, packing & forwarding, GST, total printing amount, installation team, and site address. Use for questions about a specific Apple store's spec/rate/dimensions (e.g. 'what material and size is specified at iPlanet Bhanshankari', 'what's the bleed for the Aptronix Chennai site'), or for listing sites by city or material. Matches store name, city, material, Apple store ID, or installation team (partial match). Returns matching sites plus an aggregate (total_matches, total_printing_amount across ALL matches) regardless of limit. Does NOT include an installation-method field (e.g. scaffolding) -- that level of detail isn't in this data.",
+    description: "Search Apple's LFG (large-format graphics) site catalog (852 sites across 9 programs/chains: APP, APR, Mono AAR, Multi AAR, Reliance, Vijay Sales, Wireless Chain, Croma, Croma (Hold)) -- one row per physical retail site with its full size spec (width/height in mm and inches, bleed allowance), material, printing rate/amount/GST/total, AND separately the installation cost breakdown: installation_rate/installation_amount, whether scaffolding was required for that site (scaffolding = 'Yes'/'No'/NULL if not recorded for that chain) plus scaffolding_size/rate/amount, installation_travelling, and a final total_installation_amount (GST-inclusive). Use for spec/rate/dimension questions (e.g. 'what material and size at iPlanet Bhanshankari') AND for 'does this site need scaffolding' / 'what's the installation cost' questions -- check the scaffolding field directly rather than guessing. NOTE: the Croma tab specifically has no address/installation/scaffolding data at all (NULL) -- say so rather than treating NULL as 'No'. Matches store name, city, material, Apple store ID, or installation team (partial match). Returns matching sites plus an aggregate (total_matches, total_printing_amount across ALL matches) regardless of limit.",
     input_schema: {
       type: "object",
       properties: {
@@ -232,6 +232,17 @@ const TOOLS: Tool[] = [
       properties: {
         query: { type: "string", description: "Text to search for in product name, description, material category, or scope" },
         limit: { type: "number", description: "Max number of detail rows to return (default 20, max 60 -- the whole rate card is only 51 products, so 60 always covers a full listing in one call)" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "find_site_survey",
+    description: "Look up whether a site survey PDF report exists for an Apple LFG site -- matches store name, chain (APP/APR/Mono AAR/Multi AAR/Reliance/Vijay Sales/Wireless Chain/Croma/Tribe by Croma), or Apple store ID (partial match). This CANNOT show or read the PDF's contents in chat -- chat is text-only. It only confirms a survey exists and gives its file name; to actually view the original PDF, point the person to the Site Surveys workspace page (/workspaces/site-surveys, under the Customers nav section), where they can search and open it directly.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Text to search for in store name, chain, or Apple store ID" },
       },
       required: ["query"],
     },
@@ -704,7 +715,7 @@ async function executeToolCall(
       const [top, allResult] = await Promise.all([
         supabase
           .from("apple_lfg_sites")
-          .select("sheet_name, program, apple_store_id, store_name, city, material, site_status, no_of_sites, width_mm, height_mm, bleed_mm, width_inches, height_inches, sqft, rate, amount, packing_forwarding, total, gst_amount, total_printing_amount, installation_team, address, remarks")
+          .select("sheet_name, program, apple_store_id, store_name, city, material, site_status, no_of_sites, width_mm, height_mm, bleed_mm, width_inches, height_inches, sqft, rate, amount, packing_forwarding, total, gst_amount, total_printing_amount, installation_team, address, remarks, sqm, installation_rate, installation_amount, scaffolding, scaffolding_size, scaffolding_rate, scaffolding_amount, installation_travelling, scaffolding_plus_travelling, installation_subtotal, installation_gst_amount, total_installation_amount, budget")
           .or(filter)
           .order("total_printing_amount", { ascending: false })
           .limit(detailLimit),
@@ -753,6 +764,22 @@ async function executeToolCall(
       if (error) return { result: { error: error.message } };
       const result = { total_matches: data?.length ?? 0, rate_card_rows: data };
       return { result, citation: data?.length ? `IKEA rate card search: "${query}" (${data.length} matches)` : undefined };
+    }
+    case "find_site_survey": {
+      const query = String(input.query ?? "");
+      const filter = `store_name.ilike.%${query}%,chain.ilike.%${query}%,apple_store_id.ilike.%${query}%,file_name.ilike.%${query}%`;
+      const { data, error } = await supabase
+        .from("apple_lfg_site_surveys")
+        .select("chain, store_name, apple_store_id, file_name, uploaded_at")
+        .or(filter)
+        .limit(20);
+      if (error) return { result: { error: error.message } };
+      const result = {
+        total_matches: data?.length ?? 0,
+        surveys: data,
+        note: "This tool only confirms a survey PDF exists -- it cannot display or read the PDF's contents. Direct the person to /workspaces/site-surveys to actually view it.",
+      };
+      return { result, citation: data?.length ? `Site survey search: "${query}" (${data.length} matches)` : undefined };
     }
     default:
       return { result: { error: `Unknown tool: ${name}` } };
