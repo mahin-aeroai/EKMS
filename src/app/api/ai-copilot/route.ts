@@ -61,6 +61,8 @@ Sales by rep, with all their customers, for a period: there's now a dedicated wo
 
 "Give me the full/clean/precise list of products for customer X" (or supplier X): this is NOT the same request as "list every transaction" -- a customer can have hundreds of raw sale line items but only a few dozen distinct products, and dumping a "representative sample" of 8-10 rows out of 184 is a bad answer when the person wants ALL of their distinct products, not a sample. Use sales_summary (or purchase_summary) with customer_filter (or supplier_filter) and group_by='item', with top_n raised well above the default 20 (e.g. top_n=100) -- this returns exactly one row per distinct item_code/description, each with its own transaction_count, total_taxable_value, and average_rate/min_rate/max_rate, which is almost always short enough to list in full (e.g. Apple India Pvt Ltd - Bangalore has 184 sale line items but only ~36 distinct products -- group_by='item' surfaces all ~36 cleanly instead of an arbitrary partial sample of raw transactions). Only fall back to search_sale_items/search_purchase_items (raw transaction rows) when the person explicitly wants transaction-level detail -- individual sale/purchase events, dates, and one-off amounts -- rather than a per-product summary.
 
+Apple LFG sites, Apple rate card, IKEA rate card (contract/spec data, NOT invoiced sales): three new tools cover this. search_lfg_sites covers Apple's LFG (large-format graphics) site catalog -- one row per physical retail site with its exact material/size/rate spec, installation team, and address (184 sites total across 5 programs: APP, APR, Mono AAR, Multi AAR, APR AAR Temporary sites) -- use this for "what material/size/rate is specified at site X" questions. search_apple_rate_card and search_ikea_rate_card cover each customer's approved SKU/product-level rate card (117 Apple SKUs, 51 IKEA products) with contract pricing, cost breakdown (Apple only), and validity dates (Apple only) -- use these for "what's the approved/contract rate for X" questions. IMPORTANT: these three tools are reference/contract data, not a record of what was actually billed -- if someone asks what MMDI actually charged/sold, use sales_summary/search_sale_items instead, and don't conflate a contract rate with an invoiced rate even for the same product (they can differ). Site survey PDF reports for LFG sites are planned but not yet uploaded -- if asked to open/view one, say that isn't available yet rather than guessing at its contents.
+
 Formatting: the chat UI renders your reply as plain text only — no markdown. Never use markdown tables (| pipes |), headers (#), or bold (**). For lists, use a simple numbered or dashed list with one item per line, or short plain sentences. Keep it readable as plain prose.
 
 Totals: when search_customers or search_job_orders returns more matches than the detail list shows, use the tool's own total_* aggregate fields for any sum/total the person asks for — never add up just the visible detail rows yourself, since that list is capped and may exclude the largest matches (it's sorted by value, but a common search term can still match more records than fit in the list).`;
@@ -194,6 +196,42 @@ const TOOLS: Tool[] = [
       properties: {
         query: { type: "string", description: "Text to search for in the item code, item name, or product category" },
         limit: { type: "number", description: "Max number of detail rows to return, sorted by most recent first (default 20, max 500). Raise this when total_matches is small and the person wants every row listed -- a single supplier/customer can have up to ~500 transactions, so 500 comfortably covers essentially any single-entity breakdown in one call." },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "search_lfg_sites",
+    description: "Search Apple's LFG (large-format graphics) site catalog -- one row per physical retail site with the exact material/size/rate specified for that site, the installation team, and the site address. Use for questions about a specific Apple store's spec/rate (e.g. 'what material is used at iPlanet Bhanshankari', 'what's the rate for the Aptronix Chennai site'), or for listing sites by city or material. Matches store name, city, material, Apple store ID, or installation team (partial match). Returns matching sites plus an aggregate (total_matches, total_printing_amount across ALL matches) regardless of limit.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Text to search for in store name, city, material, Apple store ID, or installation team" },
+        limit: { type: "number", description: "Max number of detail rows to return (default 20, max 200 -- the whole catalog is only 184 sites, so 200 always covers a full listing in one call)" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "search_apple_rate_card",
+    description: "Search Apple's approved SKU-level rate card (117 SKUs) -- one row per SKU with its bill rate, program, substrate, dimensions, contract validity window (start/end date), and a full cost breakdown (materials/printing/process/QC/labour/overheads/profit). Use for 'what's the approved/contract rate for Apple SKU X' or 'is the Apple rate for GPF71 still valid' type questions -- this is CONTRACT pricing, not an actual invoiced sale (use sales_summary/search_sale_items for what was actually billed). Matches SKU ID, SKU description, category, program, or substrate (partial match).",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Text to search for in SKU ID, SKU description, category, program, or substrate" },
+        limit: { type: "number", description: "Max number of detail rows to return (default 20, max 150 -- the whole rate card is only 117 SKUs, so 150 always covers a full listing in one call)" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "search_ikea_rate_card",
+    description: "Search IKEA's rate card (51 products) -- one row per product with its scope (SITC = supply+install+test+commission, or Material Supply only), material category, UOM, and revised rate. Use for 'what's the IKEA rate for X' type questions -- this is CONTRACT pricing, not an actual invoiced sale (use sales_summary/search_sale_items for what was actually billed). Matches product name, description, material category, or scope (partial match).",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Text to search for in product name, description, material category, or scope" },
+        limit: { type: "number", description: "Max number of detail rows to return (default 20, max 60 -- the whole rate card is only 51 products, so 60 always covers a full listing in one call)" },
       },
       required: ["query"],
     },
@@ -658,6 +696,63 @@ async function executeToolCall(
         most_recent: top.data,
       };
       return { result, citation: totalMatches ? `Purchase item search: "${query}" (${totalMatches} matches, showing ${result.detail_rows_shown})` : undefined };
+    }
+    case "search_lfg_sites": {
+      const query = String(input.query ?? "");
+      const detailLimit = Math.min(Math.max(typeof input.limit === "number" ? Math.floor(input.limit) : 20, 1), 200);
+      const filter = `store_name.ilike.%${query}%,city.ilike.%${query}%,material.ilike.%${query}%,apple_store_id.ilike.%${query}%,installation_team.ilike.%${query}%`;
+      const [top, allResult] = await Promise.all([
+        supabase
+          .from("apple_lfg_sites")
+          .select("sheet_name, program, apple_store_id, store_name, city, material, site_status, no_of_sites, sqft, rate, total_printing_amount, installation_team, address")
+          .or(filter)
+          .order("total_printing_amount", { ascending: false })
+          .limit(detailLimit),
+        fetchAllRows((from, to) =>
+          supabase.from("apple_lfg_sites").select("rate, total_printing_amount").or(filter).range(from, to)
+        ),
+      ]);
+      if (top.error || allResult.error) return { result: { error: (top.error ?? { message: allResult.error })?.message } };
+      const matches = allResult.rows;
+      const totalMatches = matches.length;
+      const avgRate = totalMatches ? matches.reduce((sum, r) => sum + (r.rate ?? 0), 0) / totalMatches : 0;
+      const result = {
+        total_matches: totalMatches,
+        average_rate_across_all_matches: avgRate,
+        total_printing_amount_across_all_matches: matches.reduce((sum, r) => sum + (r.total_printing_amount ?? 0), 0),
+        detail_rows_shown: top.data?.length ?? 0,
+        detail_rows_are_complete: (top.data?.length ?? 0) >= totalMatches,
+        sites: top.data,
+      };
+      return { result, citation: totalMatches ? `LFG site search: "${query}" (${totalMatches} matches, showing ${result.detail_rows_shown})` : undefined };
+    }
+    case "search_apple_rate_card": {
+      const query = String(input.query ?? "");
+      const detailLimit = Math.min(Math.max(typeof input.limit === "number" ? Math.floor(input.limit) : 20, 1), 150);
+      const filter = `sku_id.ilike.%${query}%,sku_description.ilike.%${query}%,category.ilike.%${query}%,program.ilike.%${query}%,substrate.ilike.%${query}%`;
+      const { data, error } = await supabase
+        .from("apple_rate_card")
+        .select("sku_id, sku_description, category, program, substrate, unit, bill_rate, rate_inr_each, start_date, end_date, sqft")
+        .or(filter)
+        .order("bill_rate", { ascending: false })
+        .limit(detailLimit);
+      if (error) return { result: { error: error.message } };
+      const result = { total_matches: data?.length ?? 0, rate_card_rows: data };
+      return { result, citation: data?.length ? `Apple rate card search: "${query}" (${data.length} matches)` : undefined };
+    }
+    case "search_ikea_rate_card": {
+      const query = String(input.query ?? "");
+      const detailLimit = Math.min(Math.max(typeof input.limit === "number" ? Math.floor(input.limit) : 20, 1), 60);
+      const filter = `product.ilike.%${query}%,description.ilike.%${query}%,material_category.ilike.%${query}%,scope.ilike.%${query}%`;
+      const { data, error } = await supabase
+        .from("ikea_rate_card")
+        .select("scope, material_category, product, description, uom, revised_rate, remarks")
+        .or(filter)
+        .order("revised_rate", { ascending: false })
+        .limit(detailLimit);
+      if (error) return { result: { error: error.message } };
+      const result = { total_matches: data?.length ?? 0, rate_card_rows: data };
+      return { result, citation: data?.length ? `IKEA rate card search: "${query}" (${data.length} matches)` : undefined };
     }
     default:
       return { result: { error: `Unknown tool: ${name}` } };

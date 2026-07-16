@@ -1511,3 +1511,45 @@ over what the code actually does again.
     customer/supplier with many line items) and confirm it now returns a
     complete per-product breakdown instead of a partial sample.
     **Not yet run in production.**
+46. Added Apple/IKEA contract & spec data (three new tables) + AI Copilot
+    tools, after the user uploaded three real spreadsheets and asked "can we
+    upload for copilot" — clarified via AskUserQuestion that these were
+    Excel files and the goal was answering questions about terms/values
+    (not just document lookup).
+    - apple_lfg_sites (184 rows): Apple's LFG (large-format graphics) site
+      catalog from "Apple LFG Sites Data sheet with prices.xlsx" — one row
+      per physical retail site across 5 program tabs (APP, APR, Mono AAR,
+      Multi AAR, APR AAR Temporary sites), each with its exact material/
+      size/rate spec, installation team, and site address. The user
+      flagged this specifically as "really important specification we will
+      ask copilot".
+    - apple_rate_card (117 rows): Apple's approved SKU-level rate card from
+      "Apple Rate Card.xlsx" — one row per SKU with bill rate, program,
+      substrate, dimensions, a full cost breakdown (materials/printing/
+      process/QC/labour/overheads/profit), and a contract validity window
+      (start/end date).
+    - ikea_rate_card (51 rows): IKEA's rate card from "MMDI IKEA Rate Card
+      2026.xlsx" — one row per product with scope (SITC vs Material
+      Supply), material category, UOM, and revised rate.
+    All three are reference/contract data (RLS granted to ['customers',
+    'finance'], same groups as sales_transactions) — deliberately kept
+    separate from sales_transactions/purchase_transactions since they carry
+    no transaction-level keys, just site/SKU-level specs and rates. Schema
+    + import validated together via PGlite (row counts, spot-checked real
+    values against the source files, and RLS group-scoping all passing —
+    see test-contracts-rate-cards.mjs).
+    Added three new AI Copilot tools (search_lfg_sites, search_apple_rate_card,
+    search_ikea_rate_card) with a new SYSTEM_PROMPT paragraph explicitly
+    distinguishing this CONTRACT/spec data from actually-invoiced sales
+    (sales_summary/search_sale_items) — the two can differ for the same
+    product, so the model is told not to conflate them. Also noted that
+    Apple LFG site survey PDF reports are planned but not yet uploaded, so
+    the Copilot says so rather than guessing if asked to open one.
+    Verified via a clean `npx tsc --noEmit`, `npx eslint`, and `next build`.
+    Could not test against live Supabase from this sandbox — user should
+    re-ask the AI Copilot a spec/rate question for an Apple LFG site or a
+    rate-card SKU/product and confirm it answers from real data.
+    **Not yet run in production. Site survey PDFs to follow in a later
+    upload — will need a different approach (document storage/reference
+    rather than a structured table) since the user wants to "see the PDF
+    as it is", not have its contents parsed into fields.**
