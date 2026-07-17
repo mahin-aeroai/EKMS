@@ -7,6 +7,7 @@ import * as pdfjsLib from "pdfjs-dist";
 import {
   PDFDocument,
   type PDFPage,
+  type Color,
   degrees,
   rgb,
   pushGraphicsState,
@@ -16,11 +17,19 @@ import {
   closePath,
   stroke,
   setLineWidth,
+  setLineJoin,
+  LineJoinStyle,
   setStrokingColor,
   setDashPattern,
 } from "pdf-lib";
 import { mmToPt, ptToMm, rotatePolygon, type Point, type DotSpec } from "./geometry";
 import type { NestPlacement } from "./nesting";
+
+export interface RgbColor {
+  r: number;
+  g: number;
+  b: number;
+}
 
 /**
  * Draws a closed polygon as a thin stroked vector line — the actual cut
@@ -38,6 +47,33 @@ function drawCutPath(page: PDFPage, outlineMm: Point[], color = rgb(1, 0, 1), li
     pushGraphicsState(),
     setStrokingColor(color),
     setLineWidth(mmToPt(lineWidthMm)),
+    setDashPattern([], 0),
+    moveTo(mmToPt(outlineMm[0].x), mmToPt(outlineMm[0].y)),
+    ...outlineMm.slice(1).map((p) => lineTo(mmToPt(p.x), mmToPt(p.y))),
+    closePath(),
+    stroke(),
+    popGraphicsState()
+  );
+}
+
+/**
+ * Draws a thick colored stroke straddling the cut path, matching the
+ * traced shape's own sampled fill color — a "choke/trap" so that if the
+ * physical cutter wanders a fraction of a mm off the vector line, what's
+ * exposed at the edge is still that same color, not a sliver of the
+ * background or bare substrate. Drawn AFTER the embedded design page (so
+ * it paints over a thin band straddling the edge) and BEFORE the dots (so
+ * the registration marks stay crisp on top). Round joins approximate a
+ * true polygon offset well enough at this scale — a full geometric
+ * offset isn't attempted here.
+ */
+function drawColorBleedStroke(page: PDFPage, outlineMm: Point[], color: Color, bleedMm: number) {
+  if (outlineMm.length < 2 || bleedMm <= 0) return;
+  page.pushOperators(
+    pushGraphicsState(),
+    setStrokingColor(color),
+    setLineWidth(mmToPt(bleedMm * 2)),
+    setLineJoin(LineJoinStyle.Round),
     setDashPattern([], 0),
     moveTo(mmToPt(outlineMm[0].x), mmToPt(outlineMm[0].y)),
     ...outlineMm.slice(1).map((p) => lineTo(mmToPt(p.x), mmToPt(p.y))),
@@ -131,6 +167,8 @@ export async function buildDotPlacementPdf(opts: {
   dotDiameterMm: number;
   dotHaloMm?: number; // white halo width around each black dot, default 2mm
   outline?: Point[]; // optional cut-contour, in the same canvas-local mm frame as `dots`
+  bleedColorRgb?: RgbColor; // sampled fill color from auto-trace, for the color-bleed stroke below
+  colorBleedMm?: number; // width of that stroke straddling the cut path
 }): Promise<Blob> {
   const { originalBytes, canvasWidthMm, canvasHeightMm, contentOffsetMm, dots, dotDiameterMm, outline } = opts;
   const haloMm = opts.dotHaloMm ?? 2;
@@ -143,6 +181,10 @@ export async function buildDotPlacementPdf(opts: {
     x: mmToPt(contentOffsetMm),
     y: mmToPt(contentOffsetMm),
   });
+
+  if (outline && outline.length >= 3 && opts.bleedColorRgb && (opts.colorBleedMm ?? 0) > 0) {
+    drawColorBleedStroke(page, outline, rgb(opts.bleedColorRgb.r, opts.bleedColorRgb.g, opts.bleedColorRgb.b), opts.colorBleedMm as number);
+  }
 
   for (const dot of dots) {
     drawDot(page, dot.x, dot.y, dotDiameterMm, haloMm);
@@ -171,6 +213,8 @@ export interface NestSourceFile {
   dots: DotSpec[]; // in the same canvas-local frame
   dotDiameterMm: number;
   dotHaloMm?: number;
+  bleedColorRgb?: RgbColor; // sampled fill color from auto-trace, for the color-bleed stroke (print file only)
+  colorBleedMm?: number;
 }
 
 /**
@@ -235,6 +279,9 @@ async function buildNestedSheetPdfInternal(opts: {
           y: mmToPt(designPos.y),
           rotate: degrees(rot),
         });
+      }
+      if (src.bleedColorRgb && (src.colorBleedMm ?? 0) > 0) {
+        drawColorBleedStroke(page, placement.outline, rgb(src.bleedColorRgb.r, src.bleedColorRgb.g, src.bleedColorRgb.b), src.colorBleedMm as number);
       }
     }
 

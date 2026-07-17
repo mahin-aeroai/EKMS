@@ -1,13 +1,22 @@
 // Auto-traces a cut-contour polygon from a design's actual silhouette,
-// instead of requiring the operator to place every vertex by hand. Works
-// by rendering the PDF page onto a transparent canvas (no background
-// fill) and tracing the boundary of whatever pixels came out non-
-// transparent. This only works for artwork that actually has a
-// transparent background in the source PDF (a shape like a star with
-// nothing behind it) — production art that bleeds a solid background to
-// the edge has no transparency to trace, and this returns
-// `hadTransparency: false` so the caller can tell the operator to edit
-// the outline by hand instead.
+// instead of requiring the operator to place every vertex by hand. Renders
+// the PDF page onto a transparent canvas (no background fill first) and
+// tries two ways to find the shape:
+//
+// 1. Alpha: if the PDF itself has a transparent background, whatever
+//    rendered non-transparent IS the shape.
+// 2. Color difference: most real production art (like a star sitting on a
+//    solid-color background rectangle that fills the whole page) has no
+//    transparency at all — everything renders opaque. In that case, sample
+//    the four corners as the presumed background color and trace whatever
+//    differs from it by more than a threshold. This is the common case in
+//    practice and was previously unsupported (traces would just fail on
+//    any file with a solid background fill, which is most of them).
+//
+// If neither approach finds a clear foreground/background split (e.g. a
+// genuinely solid, single-color page, or a busy photographic design with
+// no distinct edge), `outline` comes back empty and the caller should tell
+// the operator to reshape the outline by hand.
 "use client";
 
 import * as pdfjsLib from "pdfjs-dist";
@@ -15,8 +24,12 @@ import type { Point } from "./geometry";
 
 export interface TraceResult {
   outline: Point[]; // canvas-local mm polygon, bottom-left origin, sized to contentWidthMm x contentHeightMm
-  hadTransparency: boolean;
+  method: "alpha" | "color-diff" | "none";
+  /** Average fill color of the traced shape, 0-1 per channel — used to draw a matching color-bleed stroke on export. Only set when method !== "none". */
+  fillColorRgb?: { r: number; g: number; b: number };
 }
+
+const COLOR_DIFF_THRESHOLD = 28; // roughly-perceptible RGB distance; tuned to ignore antialiasing, catch real edges
 
 export async function traceOutlineFromPdf(
   bytes: ArrayBuffer,
@@ -42,24 +55,46 @@ export async function traceOutlineFromPdf(
 
   const { width, height } = canvas;
   const img = ctx.getImageData(0, 0, width, height).data;
-  const mask = new Uint8Array(width * height);
-  const ALPHA_THRESHOLD = 16;
+
+  const alphaMask = new Uint8Array(width * height);
   let opaqueCount = 0;
   for (let i = 0; i < width * height; i++) {
-    if (img[i * 4 + 3] >= ALPHA_THRESHOLD) {
-      mask[i] = 1;
+    if (img[i * 4 + 3] >= 16) {
+      alphaMask[i] = 1;
       opaqueCount++;
     }
   }
 
-  if (opaqueCount === 0 || opaqueCount >= width * height - 4) {
-    // Nothing rendered, or the page is fully opaque (no transparency to trace).
-    return { outline: [], hadTransparency: false };
+  const hasTransparency = opaqueCount > 0 && opaqueCount < width * height - 4;
+  let mask: Uint8Array;
+  let method: TraceResult["method"];
+
+  if (hasTransparency) {
+    mask = alphaMask;
+    method = "alpha";
+  } else {
+    const bg = sampleBackgroundColor(img, width, height);
+    mask = new Uint8Array(width * height);
+    let diffCount = 0;
+    for (let i = 0; i < width * height; i++) {
+      const o = i * 4;
+      if (colorDistance(img[o], img[o + 1], img[o + 2], bg) > COLOR_DIFF_THRESHOLD) {
+        mask[i] = 1;
+        diffCount++;
+      }
+    }
+    // No clear split: either a flat solid page, or a design with no
+    // distinct edge against its own corners (busy photo, gradient, etc).
+    if (diffCount === 0 || diffCount >= width * height * 0.97) {
+      return { outline: [], method: "none" };
+    }
+    method = "color-diff";
   }
 
   keepLargestComponent(mask, width, height);
+  const fillColorRgb = averageMaskedColor(img, mask);
   const contour = traceBoundary(mask, width, height);
-  if (!contour || contour.length < 3) return { outline: [], hadTransparency: false };
+  if (!contour || contour.length < 3) return { outline: [], method: "none" };
 
   const simplified = simplifyPolygon(contour, Math.max(width, height) * 0.0025);
 
@@ -70,7 +105,44 @@ export async function traceOutlineFromPdf(
     y: opts.contentHeightMm - p.y * mmPerPxY, // pixel rows go top-down; mm frame is bottom-left origin
   }));
 
-  return { outline, hadTransparency: true };
+  return { outline, method, fillColorRgb };
+}
+
+function sampleBackgroundColor(img: Uint8ClampedArray, width: number, height: number): [number, number, number] {
+  const pts: [number, number][] = [
+    [1, 1],
+    [width - 2, 1],
+    [1, height - 2],
+    [width - 2, height - 2],
+  ];
+  let r = 0, g = 0, b = 0;
+  for (const [x, y] of pts) {
+    const i = (y * width + x) * 4;
+    r += img[i];
+    g += img[i + 1];
+    b += img[i + 2];
+  }
+  return [r / pts.length, g / pts.length, b / pts.length];
+}
+
+function colorDistance(r: number, g: number, b: number, ref: [number, number, number]): number {
+  return Math.hypot(r - ref[0], g - ref[1], b - ref[2]);
+}
+
+/** Average color of masked (foreground) pixels, subsampled for speed on large canvases. Returned 0-1 per channel for pdf-lib's rgb(). */
+function averageMaskedColor(img: Uint8ClampedArray, mask: Uint8Array): { r: number; g: number; b: number } | undefined {
+  let r = 0, g = 0, b = 0, n = 0;
+  const step = mask.length > 200_000 ? 7 : 1;
+  for (let i = 0; i < mask.length; i += step) {
+    if (!mask[i]) continue;
+    const o = i * 4;
+    r += img[o];
+    g += img[o + 1];
+    b += img[o + 2];
+    n++;
+  }
+  if (n === 0) return undefined;
+  return { r: r / n / 255, g: g / n / 255, b: b / n / 255 };
 }
 
 /** Zeros out every connected foreground component except the largest one (4-connected flood fill), to ignore anti-aliasing specks/noise. */

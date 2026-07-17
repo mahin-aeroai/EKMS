@@ -11,7 +11,7 @@ import { DotCanvas } from "@/components/cutfile/DotCanvas";
 import { OutlineCanvas } from "@/components/cutfile/OutlineCanvas";
 import { NestPreview } from "@/components/cutfile/NestPreview";
 import { computeDotLayout, rectPolygon, type DotSpec, type Point } from "@/lib/cutfile/geometry";
-import { loadPdf, buildDotPlacementPdf, buildNestedPrintPdf, buildNestedCutPdf, downloadBlob } from "@/lib/cutfile/pdfIO";
+import { loadPdf, buildDotPlacementPdf, buildNestedPrintPdf, buildNestedCutPdf, downloadBlob, type RgbColor } from "@/lib/cutfile/pdfIO";
 import { traceOutlineFromPdf } from "@/lib/cutfile/trace";
 import { nestPieces, suggestSheetHeight, type NestResult } from "@/lib/cutfile/nesting";
 
@@ -60,9 +60,16 @@ interface UploadedPiece {
   // layout parameters change, until the operator manually reshapes it.
   outline: Point[];
   outlineIsDefault: boolean;
+  // Set when the outline came from auto-trace: the shape's own sampled fill
+  // color, used to paint a color-bleed stroke straddling the cut path on
+  // export so minor cutter misalignment doesn't expose bare background.
+  traceFillColorRgb: RgbColor | null;
+  colorBleedMm: number;
   quantity: number;
   rotations: number[];
 }
+
+const DEFAULT_COLOR_BLEED_MM = 1.5;
 
 function recomputeLayout(widthMm: number, heightMm: number, params: DotParams) {
   return computeDotLayout({
@@ -143,6 +150,8 @@ export default function CutFileToolClient() {
           contentOffsetMm: layout.contentOffsetMm,
           outline: rectPolygon(layout.canvasWidthMm, layout.canvasHeightMm),
           outlineIsDefault: true,
+          traceFillColorRgb: null,
+          colorBleedMm: DEFAULT_COLOR_BLEED_MM,
           quantity: 1,
           rotations: [0, 90, 180, 270],
         };
@@ -188,6 +197,8 @@ export default function CutFileToolClient() {
         dotDiameterMm: piece.dotParams.dotDiameterMm,
         dotHaloMm: piece.dotParams.dotHaloMm,
         outline: piece.outline,
+        bleedColorRgb: piece.traceFillColorRgb ?? undefined,
+        colorBleedMm: piece.colorBleedMm,
       });
       downloadBlob(blob, piece.fileName.replace(/\.pdf$/i, "") + "_bleed_dots.pdf");
       toast("success", "Exported — download started");
@@ -245,6 +256,8 @@ export default function CutFileToolClient() {
       dots: p.dots,
       dotDiameterMm: p.dotParams.dotDiameterMm,
       dotHaloMm: p.dotParams.dotHaloMm,
+      bleedColorRgb: p.traceFillColorRgb ?? undefined,
+      colorBleedMm: p.colorBleedMm,
     }));
   }
 
@@ -323,10 +336,10 @@ export default function CutFileToolClient() {
         contentWidthMm: piece.widthMm,
         contentHeightMm: piece.heightMm,
       });
-      if (!result.hadTransparency || result.outline.length < 3) {
+      if (result.method === "none" || result.outline.length < 3) {
         toast(
           "warning",
-          "This page has no transparent background to trace (it's likely a solid bleed fill) — reshape the outline by hand below instead."
+          "Couldn't find a distinct shape to trace — no transparency, and no clear color break from the corners (a solid page, gradient, or photo). Reshape the outline by hand below instead."
         );
         return;
       }
@@ -334,10 +347,15 @@ export default function CutFileToolClient() {
       // the design's own corner) — shift it into the piece's canvas-local
       // frame the same way the design itself sits there, via contentOffsetMm.
       const shifted = result.outline.map((pt) => ({ x: pt.x + piece.contentOffsetMm, y: pt.y + piece.contentOffsetMm }));
-      updatePiece(piece.id, { outline: shifted, outlineIsDefault: false });
+      updatePiece(piece.id, {
+        outline: shifted,
+        outlineIsDefault: false,
+        traceFillColorRgb: result.fillColorRgb ?? null,
+      });
+      const via = result.method === "alpha" ? "the page's transparency" : "a color match against its background";
       toast(
         "success",
-        `Traced ${shifted.length}-point outline from the artwork. This is tight to the shape — dots/margin sit outside it, so increase nesting spacing to keep them clear of neighboring pieces.`
+        `Traced ${shifted.length}-point outline from the artwork using ${via}. It's tight to the shape — dots/margin sit outside it, so increase nesting spacing. A color-bleed stroke (set below) will paint over the cut edge in the print export so a slightly off cut still shows the design's own color.`
       );
     } catch (err) {
       toast("danger", err instanceof Error ? err.message : "Auto-trace failed");
@@ -575,10 +593,29 @@ export default function CutFileToolClient() {
                                   <Wand2 size={13} className="mr-1.5" /> Auto-trace shape from artwork
                                 </Button>
                                 <p className="text-xs text-ink-muted">
-                                  Works when the PDF has a transparent background (e.g. a logo/shape with nothing behind it). Traces the
-                                  real silhouette instead of a rectangle — increase nesting spacing afterward since dots sit outside the
-                                  tight shape.
+                                  Works via transparency, or by color difference against a solid background. Traces the real silhouette
+                                  instead of a rectangle — increase nesting spacing afterward since dots sit outside the tight shape.
                                 </p>
+                                {p.traceFillColorRgb && (
+                                  <div className="flex items-center gap-2 rounded-md bg-surface-sunken p-2">
+                                    <span
+                                      className="h-5 w-5 shrink-0 rounded border border-line-strong"
+                                      style={{
+                                        backgroundColor: `rgb(${Math.round(p.traceFillColorRgb.r * 255)}, ${Math.round(
+                                          p.traceFillColorRgb.g * 255
+                                        )}, ${Math.round(p.traceFillColorRgb.b * 255)})`,
+                                      }}
+                                    />
+                                    <div className="flex-1">
+                                      <NumberField
+                                        label="Color bleed under the cut edge (mm)"
+                                        value={p.colorBleedMm}
+                                        onChange={(v) => updatePiece(p.id, { colorBleedMm: v })}
+                                        step={0.5}
+                                      />
+                                    </div>
+                                  </div>
+                                )}
                                 <OutlineCanvas
                                   canvasWidthMm={p.canvasWidthMm}
                                   canvasHeightMm={p.canvasHeightMm}
