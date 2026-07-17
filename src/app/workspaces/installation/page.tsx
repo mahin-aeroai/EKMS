@@ -4,10 +4,8 @@ import { useEffect, useState } from "react";
 import { Truck } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
-import { Tag } from "@/components/ui/Tag";
-import { StatCard, AICard } from "@/components/ui/Card";
+import { StatCard } from "@/components/ui/Card";
 import { Table, type TableColumn } from "@/components/ui/Table";
-import { WorkflowTimeline } from "@/components/ui/WorkflowTimeline";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase, type InstallationSiteRow } from "@/lib/supabase";
 
@@ -52,48 +50,25 @@ export default function InstallationPage() {
               <Badge status="warning">{sites ? `${delayed} site${delayed === 1 ? "" : "s"} delayed` : "Loading…"}</Badge>
             </div>
             <p className="mt-0.5 text-sm text-ink-secondary">Operations — field installation status across active sites</p>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              <Tag aiSuggested>Pune Store #12 delay tied to a logistics hold</Tag>
-            </div>
           </div>
         </div>
       </div>
 
       <div className="my-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard label="Sites In Progress" value="3" trend="flat" trendLabel="No change" />
-        <StatCard label="On-Time %" value="89%" trend="down" trendLabel="-3 pts" />
-        <StatCard label="Open Issues" value="2" trend="up" trendLabel="+1 this week" />
+        <StatCard label="Sites In Progress" value={sites === null ? "—" : String(sites.length)} />
+        <StatCard label="On-Time %" value="—" />
+        <StatCard label="Open Issues" value="—" />
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="flex flex-col gap-4 lg:col-span-2">
-          <AICard
-            variant="insight"
-            title="Pune Store #12 delay traced to logistics"
-            citation="Shipment tracking, site log"
-            onAccept={() => toast("success", "Escalated to logistics team")}
-            onDismiss={() => toast("info", "Dismissed")}
-          >
-            The 2-day delay is due to a customs hold on imported hardware, not an on-site issue — the install crew is on schedule and waiting on parts.
-          </AICard>
-          <div className="rounded-lg border border-line bg-surface p-4">
-            <h3 className="mb-3 text-sm font-semibold text-ink">Active sites</h3>
-            {sites === null ? (
-              <p className="py-6 text-center text-sm text-ink-muted">Loading sites…</p>
-            ) : (
-              <Table columns={COLUMNS} rows={sites} onRowClick={(r) => toast("info", `Opened ${r.site}`)} />
-            )}
-          </div>
-        </div>
-        <div className="rounded-lg border border-line bg-surface p-4">
-          <h3 className="mb-3 text-sm font-semibold text-ink">Pune Store #12 — install stages</h3>
-          <WorkflowTimeline stages={[
-            { id: "s1", label: "Site Survey", status: "complete", actor: "Field Team", timestamp: "2 Jul" },
-            { id: "s2", label: "Materials Dispatched", status: "complete", timestamp: "8 Jul" },
-            { id: "s3", label: "Customs Clearance", status: "current" },
-            { id: "s4", label: "Install & Handover", status: "upcoming" },
-          ]} />
-        </div>
+      <div className="rounded-lg border border-line bg-surface p-4">
+        <h3 className="mb-3 text-sm font-semibold text-ink">Active sites</h3>
+        {sites === null ? (
+          <p className="py-6 text-center text-sm text-ink-muted">Loading sites…</p>
+        ) : sites.length === 0 ? (
+          <p className="py-6 text-center text-sm text-ink-muted">No installation sites loaded yet.</p>
+        ) : (
+          <Table columns={COLUMNS} rows={sites} onRowClick={(r) => toast("info", `Opened ${r.site}`)} />
+        )}
       </div>
     </div>
   );

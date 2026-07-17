@@ -35,6 +35,13 @@ from public.customers
 order by name
 limit 50;
 
+-- Known scaffold row from before the real 1,688-row customer import: the
+-- original hardcoded demo record was "Apple India Pvt Ltd - Bangalore",
+-- code C03739. Safe to delete by exact code match if it's still present.
+select id, code, name from public.customers where code = 'C03739';
+
+delete from public.customers where code = 'C03739';
+
 -- ============================================================
 -- STEP 3 — audit: suppliers
 -- ============================================================

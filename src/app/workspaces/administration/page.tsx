@@ -4,8 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Settings, ShieldAlert, ChevronDown, Check } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
-import { Tag } from "@/components/ui/Tag";
-import { StatCard, AICard } from "@/components/ui/Card";
+import { StatCard } from "@/components/ui/Card";
 import { Table, type TableColumn } from "@/components/ui/Table";
 import { TreeView, type TreeNode } from "@/components/ui/TreeView";
 import { Dialog } from "@/components/ui/Dialog";
@@ -267,33 +266,21 @@ export default function AdministrationPage() {
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-xl font-semibold text-ink">Administration</h1>
-              <Badge status="warning">{requests ? `${pending} pending request${pending === 1 ? "" : "s"}` : "Loading…"}</Badge>
+              {requests && pending > 0 && <Badge status="warning">{pending} pending request{pending === 1 ? "" : "s"}</Badge>}
             </div>
             <p className="mt-0.5 text-sm text-ink-secondary">User access, roles, and platform configuration</p>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              <Tag aiSuggested>Contractor access request needs a defined expiry date</Tag>
-            </div>
           </div>
         </div>
       </div>
 
       <div className="my-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard label="User Accounts" value={profiles ? String(profiles.length) : "…"} trend="flat" trendLabel="Admin / Editor / Viewer" />
+        <StatCard label="User Accounts" value={profiles ? String(profiles.length) : "…"} />
         <StatCard label="Roles Configured" value="3" trend="flat" trendLabel="Admin, Editor, Viewer" />
-        <StatCard label="Pending Access Requests" value={String(pending)} trend="up" trendLabel="+1 this week" />
+        <StatCard label="Pending Access Requests" value={String(pending)} />
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="flex flex-col gap-4 lg:col-span-2">
-          <AICard
-            variant="recommendation"
-            title="Set an expiry date on the contractor's access"
-            citation="Access Policy, temporary user guidelines"
-            onAccept={() => toast("success", "Expiry date added to request")}
-            onDismiss={() => toast("info", "Dismissed")}
-          >
-            Temporary contractor access should always carry an expiry date per policy — this request is missing one and shouldn&apos;t be granted as-is.
-          </AICard>
           <div className="rounded-lg border border-line bg-surface p-4">
             <h3 className="mb-3 text-sm font-semibold text-ink">Access requests</h3>
             {requests === null ? (

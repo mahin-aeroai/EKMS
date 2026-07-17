@@ -8,11 +8,9 @@ import { Badge } from "@/components/ui/Badge";
 import { Tag } from "@/components/ui/Tag";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { Tabs } from "@/components/ui/Tabs";
-import { StatCard, AICard } from "@/components/ui/Card";
+import { StatCard } from "@/components/ui/Card";
 import { Timeline } from "@/components/ui/Timeline";
-import { ActivityFeed } from "@/components/ui/ActivityFeed";
-import { LineChart, GaugeChart, Heatmap } from "@/components/ui/Charts";
-import { DocumentPreview, CADViewer } from "@/components/ui/Viewers";
+import { GaugeChart } from "@/components/ui/Charts";
 import { Comments, type Comment } from "@/components/ui/Comments";
 import { ApprovalPanel } from "@/components/ui/ApprovalPanel";
 import { useUserRole, canWrite } from "@/lib/UserRoleContext";
@@ -23,23 +21,6 @@ import { useToast } from "@/components/ui/Notifications";
 import { supabase, type MachineRow, type MachineCommentRow, type MachineApprovalRow } from "@/lib/supabase";
 import { timeAgo } from "@/lib/timeAgo";
 
-const NODES: GraphNode[] = [
-  { id: "center", label: "Machine", type: "Machine" },
-  { id: "n1", label: "Line 3", type: "Production Line" },
-  { id: "n2", label: "NCR-2025-0442", type: "Lesson Learned" },
-  { id: "n3", label: "RM-0231 — PVC-Free Vinyl", type: "Raw Material" },
-  { id: "n4", label: "Maintenance Lead", type: "Maintenance Lead" },
-  { id: "n5", label: "IKEA Wardrobe Program", type: "Project" },
-];
-
-const EDGES: GraphEdge[] = [
-  { from: "center", to: "n1", label: "runs on" },
-  { from: "center", to: "n2", label: "related incident" },
-  { from: "center", to: "n3", label: "processes" },
-  { from: "center", to: "n4", label: "maintained by" },
-  { from: "center", to: "n5", label: "allocated to" },
-];
-
 function toDisplayComment(row: MachineCommentRow): Comment {
   return { id: row.id, author: row.author, content: row.content, time: timeAgo(row.created_at), resolved: row.resolved };
 }
@@ -48,10 +29,11 @@ function toDisplayComment(row: MachineCommentRow): Comment {
  * Client half of the Machine Workspace — follows the same Server/Client
  * split as the Customer workspace (see
  * src/components/workspaces/CustomerWorkspaceClient.tsx). Stat row, machine
- * spec panel, OEE gauge, and the Activity tab (comments + approvals) are
- * real, read from and written to Supabase. Insights/Timeline/Documents/
- * Relationships remain illustrative sample content — there's no sensor
- * telemetry, downtime log, or document storage wired yet.
+ * spec panel, OEE gauge, relationships, and the Activity tab (comments +
+ * approvals) are real, read from and written to Supabase. Insights,
+ * Timeline (beyond last PM / install year), and Documents are not yet wired
+ * to a real data source and show an honest empty state instead of sample
+ * content.
  */
 export function MachineWorkspaceClient({
   machine,
@@ -67,7 +49,15 @@ export function MachineWorkspaceClient({
   const role = useUserRole();
   const [comments, setComments] = useState<Comment[]>(initialComments.map(toDisplayComment));
   const [approval, setApproval] = useState(initialApproval);
-  const nodes = NODES.map((n) => (n.id === "center" ? { ...n, label: machine.name } : n));
+  const nodes: GraphNode[] = [
+    { id: "center", label: machine.name, type: "Machine" },
+    ...(machine.line ? [{ id: "n1", label: machine.line, type: "Production Line" }] : []),
+    ...(machine.maintenance_lead ? [{ id: "n4", label: machine.maintenance_lead, type: "Maintenance Lead" }] : []),
+  ];
+  const edges: GraphEdge[] = [
+    ...(machine.line ? [{ from: "center", to: "n1", label: "runs on" }] : []),
+    ...(machine.maintenance_lead ? [{ from: "center", to: "n4", label: "maintained by" }] : []),
+  ];
   const [center, setCenter] = useState(nodes[0]);
 
   async function handleAddComment(text: string) {
@@ -157,15 +147,6 @@ export function MachineWorkspaceClient({
             content: (
               <div className="grid grid-cols-1 gap-6 pt-5 lg:grid-cols-3">
                 <div className="flex flex-col gap-4 lg:col-span-2">
-                  <AICard
-                    variant="recommendation"
-                    title="Predictive maintenance alert — bearing failure risk"
-                    citation="Vibration sensor telemetry, last 30 days"
-                    onAccept={() => toast("success", "Maintenance work order created")}
-                    onDismiss={() => toast("info", "Dismissed")}
-                  >
-                    Vibration signature on the tie-bar now matches 84% of the pattern observed before the Q1 bearing failure (NCR-2025-0442). Estimated 12 days to failure at current degradation rate — recommend scheduling PM before the next production run.
-                  </AICard>
                   <div className="rounded-lg border border-line bg-surface p-4">
                     <h3 className="mb-3 text-sm font-semibold text-ink">Ask about this machine</h3>
                     <PromptInput
@@ -182,16 +163,6 @@ export function MachineWorkspaceClient({
                         )}
                       </div>
                     )}
-                  </div>
-                  <div className="rounded-lg border border-line bg-surface p-4">
-                    <h3 className="mb-3 text-sm font-semibold text-ink">Recent activity</h3>
-                    <ActivityFeed
-                      items={[
-                        { id: "1", actor: "AI Assistant", action: "flagged a rising vibration trend on", target: machine.name, time: "5h ago", aiRanked: true },
-                        { id: "2", actor: machine.maintenance_lead ?? "Maintenance", action: "logged an inspection note for", target: machine.name, time: "1 day ago" },
-                        { id: "3", actor: "System", action: "recorded a changeover on", target: machine.name, time: "2 days ago" },
-                      ]}
-                    />
                   </div>
                 </div>
                 <div className="flex flex-col gap-4">
@@ -218,19 +189,9 @@ export function MachineWorkspaceClient({
             id: "insights",
             label: "Insights",
             content: (
-              <div className="grid grid-cols-1 gap-6 pt-5 sm:grid-cols-2">
+              <div className="pt-5">
                 <div className="rounded-lg border border-line bg-surface p-4">
-                  <h3 className="mb-3 text-sm font-semibold text-ink">OEE trend — 7 days</h3>
-                  <LineChart data={[{ label: "Mon", value: 74 }, { label: "Tue", value: 71 }, { label: "Wed", value: 69 }, { label: "Thu", value: 72 }, { label: "Fri", value: 65 }, { label: "Sat", value: 68 }, { label: "Sun", value: machine.oee }]} />
-                </div>
-                <div className="rounded-lg border border-line bg-surface p-4">
-                  <h3 className="mb-3 text-sm font-semibold text-ink">Downtime by shift &amp; cause</h3>
-                  <Heatmap rows={["Shift A", "Shift B", "Shift C"]} cols={["Changeover", "Breakdown", "Material Wait"]} values={[[3, 1, 2], [2, 4, 1], [4, 6, 3]]} />
-                </div>
-                <div className="sm:col-span-2">
-                  <AICard variant="insight" title="Shift C is the primary downtime driver" citation="Downtime log, last 30 days">
-                    Shift C accounts for 46% of total unplanned downtime on this machine, concentrated in breakdowns rather than changeovers — worth reviewing operator handover procedure at the Shift B/C boundary.
-                  </AICard>
+                  <p className="py-6 text-center text-sm text-ink-muted">No trend or downtime data connected yet.</p>
                 </div>
               </div>
             ),
@@ -242,10 +203,8 @@ export function MachineWorkspaceClient({
               <div className="pt-5">
                 <Timeline
                   entries={[
-                    { id: "t1", date: machine.last_pm ?? "—", title: "Preventive maintenance completed", description: "Tie-bar bearings inspected and greased; no replacement needed at the time." },
-                    { id: "t2", date: "2 Feb 2026", title: "Unplanned downtime — 4.5h", description: "Hydraulic seal failure, replaced under warranty." },
-                    { id: "t3", date: "11 Jan 2026", title: "NCR-2025-0442 closed", description: "Root cause: worn locating pin, not operator error as initially logged." },
-                    { id: "t4", date: machine.installed_year ? `${machine.installed_year}` : "—", title: `Machine commissioned${machine.line ? ` on ${machine.line}` : ""}` },
+                    ...(machine.last_pm ? [{ id: "t1", date: machine.last_pm, title: "Last preventive maintenance" }] : []),
+                    ...(machine.installed_year ? [{ id: "t4", date: `${machine.installed_year}`, title: `Machine commissioned${machine.line ? ` on ${machine.line}` : ""}` }] : []),
                   ]}
                 />
               </div>
@@ -255,12 +214,9 @@ export function MachineWorkspaceClient({
             id: "documents",
             label: "Documents",
             content: (
-              <div className="grid grid-cols-1 gap-4 pt-5 sm:grid-cols-2">
-                <DocumentPreview title="SOP-0044 — Injection Molding Setup" summary="Standard operating procedure for setting up this machine class prior to a production run." tags={["SOP", "Rev 4"]} />
-                <DocumentPreview title={`Maintenance Manual — ${machine.model ?? machine.name}`} summary="OEM service manual, including bearing replacement torque specs." tags={["OEM", "Reference"]} />
-                <div className="sm:col-span-2">
-                  <h3 className="mb-3 text-sm font-semibold text-ink">Tooling drawing — CAD viewer</h3>
-                  <CADViewer layers={["Outline", "Mold Cavity", "Cooling Channels", "Ejector Pins"]} />
+              <div className="pt-5">
+                <div className="rounded-lg border border-line bg-surface p-4">
+                  <p className="py-6 text-center text-sm text-ink-muted">No documents linked to this machine yet.</p>
                 </div>
               </div>
             ),
@@ -273,7 +229,7 @@ export function MachineWorkspaceClient({
                 <RelationshipGraph
                   center={center}
                   nodes={nodes}
-                  edges={EDGES}
+                  edges={edges}
                   onRecenter={(id) => {
                     const node = nodes.find((n) => n.id === id);
                     if (node) {
@@ -295,7 +251,6 @@ export function MachineWorkspaceClient({
                     title={approval.title}
                     requestedBy={approval.requested_by}
                     value={approval.value}
-                    aiRecommendation="Predicted failure window is 12 days out; scheduling now avoids an unplanned stoppage mid-run."
                     stages={[
                       { id: "s1", label: "Submitted", status: "complete", actor: approval.requested_by.split(",")[0], timestamp: timeAgo(approval.created_at) },
                       {

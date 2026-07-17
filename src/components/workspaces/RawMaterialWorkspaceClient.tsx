@@ -9,10 +9,6 @@ import { Tag } from "@/components/ui/Tag";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { Tabs } from "@/components/ui/Tabs";
 import { StatCard, AICard } from "@/components/ui/Card";
-import { Timeline } from "@/components/ui/Timeline";
-import { ActivityFeed } from "@/components/ui/ActivityFeed";
-import { LineChart, BarChart } from "@/components/ui/Charts";
-import { DocumentPreview } from "@/components/ui/Viewers";
 import { Comments, type Comment } from "@/components/ui/Comments";
 import { ApprovalPanel } from "@/components/ui/ApprovalPanel";
 import { useUserRole, canWrite } from "@/lib/UserRoleContext";
@@ -23,23 +19,6 @@ import { useToast } from "@/components/ui/Notifications";
 import { supabase, type RawMaterialRow, type RawMaterialCommentRow, type RawMaterialApprovalRow } from "@/lib/supabase";
 import { timeAgo } from "@/lib/timeAgo";
 
-const NODES: GraphNode[] = [
-  { id: "center", label: "Raw Material", type: "Raw Material" },
-  { id: "n1", label: "Cosmo Films Ltd", type: "Supplier" },
-  { id: "n2", label: "UFlex Ltd", type: "Supplier" },
-  { id: "n3", label: "IKEA Wardrobe Program", type: "Project" },
-  { id: "n4", label: "Machine M-14", type: "Machine" },
-  { id: "n5", label: "PO-MU-2026-004521", type: "Purchase Order" },
-];
-
-const EDGES: GraphEdge[] = [
-  { from: "center", to: "n1", label: "supplied by (primary)" },
-  { from: "center", to: "n2", label: "supplied by (secondary)" },
-  { from: "center", to: "n3", label: "used in" },
-  { from: "center", to: "n4", label: "processed on" },
-  { from: "center", to: "n5", label: "last ordered via" },
-];
-
 function toDisplayComment(row: RawMaterialCommentRow): Comment {
   return { id: row.id, author: row.author, content: row.content, time: timeAgo(row.created_at), resolved: row.resolved };
 }
@@ -47,9 +26,9 @@ function toDisplayComment(row: RawMaterialCommentRow): Comment {
 /**
  * Client half of the Raw Material Workspace — same Server/Client split as
  * the Customer workspace. Stat row, material spec panel, and the Activity
- * tab (comments + approvals) are real. Insights/Timeline/Documents/
- * Relationships remain illustrative sample content — there's no stock
- * history, consumption log, or document storage wired yet.
+ * tab (comments + approvals) are real. Insights, Timeline, and Documents
+ * aren't wired to a real data source yet and show an honest empty state
+ * instead of sample content.
  */
 export function RawMaterialWorkspaceClient({
   material,
@@ -65,7 +44,13 @@ export function RawMaterialWorkspaceClient({
   const role = useUserRole();
   const [comments, setComments] = useState<Comment[]>(initialComments.map(toDisplayComment));
   const [approval, setApproval] = useState(initialApproval);
-  const nodes = NODES.map((n) => (n.id === "center" ? { ...n, label: material.name } : n));
+  const nodes: GraphNode[] = [
+    { id: "center", label: material.name, type: "Raw Material" },
+    ...(material.category_owner ? [{ id: "n1", label: material.category_owner, type: "Category Owner" }] : []),
+  ];
+  const edges: GraphEdge[] = [
+    ...(material.category_owner ? [{ from: "center", to: "n1", label: "owned by" }] : []),
+  ];
   const [center, setCenter] = useState(nodes[0]);
 
   async function handleAddComment(text: string) {
@@ -184,16 +169,6 @@ export function RawMaterialWorkspaceClient({
                       </div>
                     )}
                   </div>
-                  <div className="rounded-lg border border-line bg-surface p-4">
-                    <h3 className="mb-3 text-sm font-semibold text-ink">Recent activity</h3>
-                    <ActivityFeed
-                      items={[
-                        { id: "1", actor: "AI Assistant", action: lowStock ? "flagged a shortage risk on" : "reviewed stock levels for", target: material.code, time: "18m ago", aiRanked: true },
-                        { id: "2", actor: material.category_owner ?? "Category Manager", action: "logged an update for", target: material.code, time: "1 day ago" },
-                        { id: "3", actor: "System", action: "recorded a stock movement for", target: material.code, time: "2 days ago" },
-                      ]}
-                    />
-                  </div>
                 </div>
                 <div className="flex flex-col gap-4">
                   <div className="rounded-lg border border-line bg-surface p-4">
@@ -213,19 +188,9 @@ export function RawMaterialWorkspaceClient({
             id: "insights",
             label: "Insights",
             content: (
-              <div className="grid grid-cols-1 gap-6 pt-5 sm:grid-cols-2">
+              <div className="pt-5">
                 <div className="rounded-lg border border-line bg-surface p-4">
-                  <h3 className="mb-3 text-sm font-semibold text-ink">Stock level — last 7 days</h3>
-                  <LineChart data={[{ label: "Mon", value: 2100 }, { label: "Tue", value: 1950 }, { label: "Wed", value: 1800 }, { label: "Thu", value: 1620 }, { label: "Fri", value: 1480 }, { label: "Sat", value: 1350 }, { label: "Sun", value: material.current_stock }]} />
-                </div>
-                <div className="rounded-lg border border-line bg-surface p-4">
-                  <h3 className="mb-3 text-sm font-semibold text-ink">Consumption by project</h3>
-                  <BarChart data={[{ label: "IKEA Wardrobe", value: 640 }, { label: "Godrej Interio", value: 210 }, { label: "Urban Ladder", value: 140 }, { label: "Other", value: 90 }]} />
-                </div>
-                <div className="sm:col-span-2">
-                  <AICard variant="insight" title="Demand concentrated in one project" citation="Sales Order history, last 90 days">
-                    68% of current consumption is driven by the IKEA Wardrobe Program alone — a delay or cancellation there would materially change the reorder cadence for this material.
-                  </AICard>
+                  <p className="py-6 text-center text-sm text-ink-muted">No stock trend or consumption data connected yet.</p>
                 </div>
               </div>
             ),
@@ -235,14 +200,9 @@ export function RawMaterialWorkspaceClient({
             label: "Timeline",
             content: (
               <div className="pt-5">
-                <Timeline
-                  entries={[
-                    { id: "t1", date: "12 Jul 2026", title: "Lead time review", description: `Current lead time: ${material.lead_time_days} days.` },
-                    { id: "t2", date: "3 Jun 2026", title: "Supplier base reviewed", description: `${material.approved_suppliers} approved suppliers on file.` },
-                    { id: "t3", date: "14 Feb 2026", title: `Unit cost set to ₹${material.unit_cost}` },
-                    { id: "t4", date: "20 Nov 2025", title: "Material qualified and added to master" },
-                  ]}
-                />
+                <div className="rounded-lg border border-line bg-surface p-4">
+                  <p className="py-6 text-center text-sm text-ink-muted">No material history connected yet.</p>
+                </div>
               </div>
             ),
           },
@@ -250,9 +210,10 @@ export function RawMaterialWorkspaceClient({
             id: "documents",
             label: "Documents",
             content: (
-              <div className="grid grid-cols-1 gap-4 pt-5 sm:grid-cols-2">
-                <DocumentPreview title={`Material Specification Sheet — ${material.code}`} summary="Full technical spec: substrate compatibility, tolerance and storage requirements." tags={["Spec"]} />
-                <DocumentPreview title="Compliance Certificate" summary="Chain-of-custody / compliance certificate on file with the primary supplier." tags={["Compliance"]} />
+              <div className="pt-5">
+                <div className="rounded-lg border border-line bg-surface p-4">
+                  <p className="py-6 text-center text-sm text-ink-muted">No documents linked to this material yet.</p>
+                </div>
               </div>
             ),
           },
@@ -264,7 +225,7 @@ export function RawMaterialWorkspaceClient({
                 <RelationshipGraph
                   center={center}
                   nodes={nodes}
-                  edges={EDGES}
+                  edges={edges}
                   onRecenter={(id) => {
                     const node = nodes.find((n) => n.id === id);
                     if (node) {
@@ -286,7 +247,6 @@ export function RawMaterialWorkspaceClient({
                     title={approval.title}
                     requestedBy={approval.requested_by}
                     value={approval.value}
-                    aiRecommendation="Recommended quantity covers the lead time plus a safety buffer given recent demand."
                     stages={[
                       { id: "s1", label: "Submitted", status: "complete", actor: approval.requested_by.split(",")[0], timestamp: timeAgo(approval.created_at) },
                       {

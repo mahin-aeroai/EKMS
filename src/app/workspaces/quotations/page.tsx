@@ -4,8 +4,7 @@ import { useEffect, useState } from "react";
 import { FileText } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
-import { Tag } from "@/components/ui/Tag";
-import { StatCard, AICard } from "@/components/ui/Card";
+import { StatCard } from "@/components/ui/Card";
 import { Table, type TableColumn } from "@/components/ui/Table";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase, type QuoteRow } from "@/lib/supabase";
@@ -35,6 +34,11 @@ export default function QuotationsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const won = quotes?.filter((q) => q.status === "success").length ?? 0;
+  const lost = quotes?.filter((q) => q.status === "danger").length ?? 0;
+  const openQuotes = quotes ? quotes.length - won - lost : null;
+  const winRate = won + lost > 0 ? `${Math.round((won / (won + lost)) * 100)}%` : "—";
+
   return (
     <div>
       <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "Customers" }, { label: "Quotations" }]} />
@@ -50,37 +54,25 @@ export default function QuotationsPage() {
               <Badge status="info">{quotes ? `${quotes.length} active` : "Loading…"}</Badge>
             </div>
             <p className="mt-0.5 text-sm text-ink-secondary">Customers — quote pipeline across all accounts</p>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              <Tag aiSuggested>QT-MU-2026-1141 is 3 days past typical revision turnaround</Tag>
-            </div>
           </div>
         </div>
       </div>
 
       <div className="my-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard label="Open Quotes" value="2" trend="flat" trendLabel="No change" />
-        <StatCard label="Win Rate" value="58%" trend="up" trendLabel="+4 pts this quarter" />
-        <StatCard label="Avg Turnaround" value="3.4 days" trend="down" trendLabel="-0.6 days" />
+        <StatCard label="Open Quotes" value={openQuotes === null ? "—" : String(openQuotes)} />
+        <StatCard label="Win Rate" value={winRate} />
+        <StatCard label="Avg Turnaround" value="—" />
       </div>
 
-      <div className="flex flex-col gap-6">
-        <AICard
-          variant="recommendation"
-          title="QT-MU-2026-1141 needs follow-up"
-          citation="Quote history, revision cycle time"
-          onAccept={() => toast("success", "Reminder sent to quote owner")}
-          onDismiss={() => toast("info", "Dismissed")}
-        >
-          This quote has been in revision for 3 days past the typical cycle time — IKEA India&apos;s procurement window closes in 5 days.
-        </AICard>
-        <div className="rounded-lg border border-line bg-surface p-4">
-          <h3 className="mb-3 text-sm font-semibold text-ink">Quote pipeline</h3>
-          {quotes === null ? (
-            <p className="py-6 text-center text-sm text-ink-muted">Loading quotes…</p>
-          ) : (
-            <Table columns={COLUMNS} rows={quotes} onRowClick={(r) => toast("info", `Opened ${r.number}`)} />
-          )}
-        </div>
+      <div className="rounded-lg border border-line bg-surface p-4">
+        <h3 className="mb-3 text-sm font-semibold text-ink">Quote pipeline</h3>
+        {quotes === null ? (
+          <p className="py-6 text-center text-sm text-ink-muted">Loading quotes…</p>
+        ) : quotes.length === 0 ? (
+          <p className="py-6 text-center text-sm text-ink-muted">No quotes loaded yet.</p>
+        ) : (
+          <Table columns={COLUMNS} rows={quotes} onRowClick={(r) => toast("info", `Opened ${r.number}`)} />
+        )}
       </div>
     </div>
   );

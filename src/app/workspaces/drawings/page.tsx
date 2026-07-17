@@ -4,11 +4,9 @@ import { useEffect, useState } from "react";
 import { PenTool } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
-import { Tag } from "@/components/ui/Tag";
 import { Button } from "@/components/ui/Button";
-import { StatCard, AICard } from "@/components/ui/Card";
+import { StatCard } from "@/components/ui/Card";
 import { Table, type TableColumn } from "@/components/ui/Table";
-import { CADViewer } from "@/components/ui/Viewers";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase, type DrawingRow } from "@/lib/supabase";
 
@@ -90,43 +88,25 @@ export default function DrawingsPage() {
               <Badge status="warning">{drawings ? `${underRevision} under revision` : "Loading…"}</Badge>
             </div>
             <p className="mt-0.5 text-sm text-ink-secondary">Knowledge — engineering drawing register with live CAD preview</p>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              <Tag aiSuggested>DWG-MU-2231 revision linked to the tooling delay on IKEA Wardrobe Program</Tag>
-            </div>
           </div>
         </div>
       </div>
 
       <div className="my-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard label="Active Drawings" value="486" trend="flat" trendLabel="No change" />
-        <StatCard label="Under Revision" value={String(underRevision)} trend="flat" trendLabel="No change" />
-        <StatCard label="Approved This Month" value="14" trend="up" trendLabel="+3 vs last month" />
+        <StatCard label="Active Drawings" value={drawings === null ? "—" : String(drawings.length)} />
+        <StatCard label="Under Revision" value={String(underRevision)} />
+        <StatCard label="Approved This Month" value="—" />
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="flex flex-col gap-4 lg:col-span-2">
-          <AICard
-            variant="summary"
-            title="DWG-MU-2231 revision tied to project schedule risk"
-            citation="Project Workspace — IKEA Wardrobe Program"
-            onAccept={() => toast("success", "Linked to project risk register")}
-            onDismiss={() => toast("info", "Dismissed")}
-          >
-            This drawing&apos;s revision is the same tooling change the Project Workspace flagged as a schedule risk — resolving one resolves the other.
-          </AICard>
-          <div className="rounded-lg border border-line bg-surface p-4">
-            <h3 className="mb-3 text-sm font-semibold text-ink">Drawing register</h3>
-            {drawings === null ? (
-              <p className="py-6 text-center text-sm text-ink-muted">Loading drawings…</p>
-            ) : (
-              <Table columns={COLUMNS} rows={drawings} onRowClick={(r) => toast("info", `Opened ${r.number}`)} />
-            )}
-          </div>
-        </div>
-        <div className="rounded-lg border border-line bg-surface p-4">
-          <h3 className="mb-3 text-sm font-semibold text-ink">DWG-MU-2231 — layer preview</h3>
-          <CADViewer layers={["Outline", "Mold Cavity", "Cooling Channels", "Ejector Pins"]} />
-        </div>
+      <div className="rounded-lg border border-line bg-surface p-4">
+        <h3 className="mb-3 text-sm font-semibold text-ink">Drawing register</h3>
+        {drawings === null ? (
+          <p className="py-6 text-center text-sm text-ink-muted">Loading drawings…</p>
+        ) : drawings.length === 0 ? (
+          <p className="py-6 text-center text-sm text-ink-muted">No drawings loaded yet.</p>
+        ) : (
+          <Table columns={COLUMNS} rows={drawings} onRowClick={(r) => toast("info", `Opened ${r.number}`)} />
+        )}
       </div>
     </div>
   );

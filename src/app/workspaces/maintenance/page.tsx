@@ -4,8 +4,7 @@ import { useEffect, useState } from "react";
 import { ClipboardList } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
-import { Tag } from "@/components/ui/Tag";
-import { StatCard, AICard } from "@/components/ui/Card";
+import { StatCard } from "@/components/ui/Card";
 import { Calendar, type CalendarEvent } from "@/components/ui/Calendar";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase, type MaintenanceEventRow } from "@/lib/supabase";
@@ -49,29 +48,17 @@ export default function MaintenancePage() {
               <Badge status="warning">{events ? `${conflicts} schedule conflict${conflicts === 1 ? "" : "s"}` : "Loading…"}</Badge>
             </div>
             <p className="mt-0.5 text-sm text-ink-secondary">Operations — preventive maintenance schedule across all machines</p>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              <Tag aiSuggested>Recommend moving M-14&apos;s PM forward to day 9</Tag>
-            </div>
           </div>
         </div>
       </div>
 
       <div className="my-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard label="Open Work Orders" value="9" trend="flat" trendLabel="No change" />
-        <StatCard label="MTTR" value="3.6 h" trend="down" trendLabel="-0.4h" />
-        <StatCard label="PM Compliance" value="94%" trend="up" trendLabel="+2 pts" />
+        <StatCard label="Scheduled PM Events" value={events === null ? "—" : String(events.length)} />
+        <StatCard label="MTTR" value="—" />
+        <StatCard label="PM Compliance" value="—" />
       </div>
 
       <div className="flex flex-col gap-6">
-        <AICard
-          variant="recommendation"
-          title="Bring Machine M-14's PM forward"
-          citation="Vibration sensor telemetry, predictive model"
-          onAccept={() => toast("success", "PM rescheduled to day 9")}
-          onDismiss={() => toast("info", "Dismissed")}
-        >
-          Predicted bearing failure window is 12 days out. Moving M-14&apos;s scheduled PM from day 15 to day 9 avoids the overlap with Machine M-21 and gets ahead of the failure risk.
-        </AICard>
         <div className="rounded-lg border border-line bg-surface p-4">
           <h3 className="mb-3 text-sm font-semibold text-ink">PM schedule</h3>
           {events === null ? (

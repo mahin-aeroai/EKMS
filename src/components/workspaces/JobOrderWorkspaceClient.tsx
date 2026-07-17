@@ -10,8 +10,6 @@ import { ContextMenu } from "@/components/ui/ContextMenu";
 import { Tabs } from "@/components/ui/Tabs";
 import { StatCard, AICard } from "@/components/ui/Card";
 import { Timeline } from "@/components/ui/Timeline";
-import { BarChart } from "@/components/ui/Charts";
-import { DocumentPreview, PDFViewer } from "@/components/ui/Viewers";
 import { Comments, type Comment } from "@/components/ui/Comments";
 import { ApprovalPanel } from "@/components/ui/ApprovalPanel";
 import { useUserRole, canWrite } from "@/lib/UserRoleContext";
@@ -232,16 +230,12 @@ export function JobOrderWorkspaceClient({
             id: "insights",
             label: "Insights",
             content: (
-              <div className="grid grid-cols-1 gap-6 pt-5 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-6 pt-5">
+                <AICard variant="summary" title="Job order economics" citation="Job order record">
+                  ₹{jobOrder.total_value.toLocaleString("en-IN")} across {jobOrder.line_item_count} line item{jobOrder.line_item_count === 1 ? "" : "s"} ({jobOrder.total_sqft.toLocaleString("en-IN")} sqft, {jobOrder.total_qty} units).
+                </AICard>
                 <div className="rounded-lg border border-line bg-surface p-4">
-                  <h3 className="mb-3 text-sm font-semibold text-ink">Value by substrate category</h3>
-                  <BarChart data={jobOrder.tags.slice(0, 4).map((tag, i) => ({ label: tag, value: Math.round(jobOrder.total_value / Math.max(jobOrder.tags.length, 1) / 1000) * (i + 1) }))} />
-                  <p className="mt-2 text-xs text-ink-muted">Illustrative split — no per-line cost ledger exists yet to compute this exactly.</p>
-                </div>
-                <div className="sm:col-span-2">
-                  <AICard variant="summary" title="Job order economics" citation="Job order record">
-                    ₹{jobOrder.total_value.toLocaleString("en-IN")} across {jobOrder.line_item_count} line item{jobOrder.line_item_count === 1 ? "" : "s"} ({jobOrder.total_sqft.toLocaleString("en-IN")} sqft, {jobOrder.total_qty} units).
-                  </AICard>
+                  <p className="py-6 text-center text-sm text-ink-muted">No per-line cost ledger connected yet to break value down by substrate.</p>
                 </div>
               </div>
             ),
@@ -265,12 +259,9 @@ export function JobOrderWorkspaceClient({
             id: "documents",
             label: "Documents",
             content: (
-              <div className="grid grid-cols-1 gap-4 pt-5 sm:grid-cols-2">
-                <DocumentPreview title={`Job Order Sheet — ${jobOrder.code}`} summary="Line-item detail: substrate, machine, operator, shift per line." tags={["Production"]} />
-                <DocumentPreview title={`Customer Artwork — ${jobOrder.customer_name}`} summary="Design and artwork files for this job order." tags={["Artwork"]} />
-                <div className="sm:col-span-2">
-                  <h3 className="mb-3 text-sm font-semibold text-ink">Proof set</h3>
-                  <PDFViewer title={`${jobOrder.name} — Proofs`} pageCount={jobOrder.line_item_count} />
+              <div className="pt-5">
+                <div className="rounded-lg border border-line bg-surface p-4">
+                  <p className="py-6 text-center text-sm text-ink-muted">No documents linked to this job order yet.</p>
                 </div>
               </div>
             ),
@@ -305,7 +296,6 @@ export function JobOrderWorkspaceClient({
                     title={approval.title}
                     requestedBy={approval.requested_by}
                     value={approval.value}
-                    aiRecommendation="Review production and billing detail before sign-off."
                     stages={[
                       { id: "s1", label: "Submitted", status: "complete", actor: approval.requested_by.split(",")[0], timestamp: timeAgo(approval.created_at) },
                       {

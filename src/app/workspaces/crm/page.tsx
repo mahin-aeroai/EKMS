@@ -4,8 +4,7 @@ import { useEffect, useState } from "react";
 import { Users } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
-import { Tag } from "@/components/ui/Tag";
-import { StatCard, AICard } from "@/components/ui/Card";
+import { StatCard } from "@/components/ui/Card";
 import { Table, type TableColumn } from "@/components/ui/Table";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase, type CrmAccountRow } from "@/lib/supabase";
@@ -51,37 +50,25 @@ export default function CRMPage() {
               <Badge status="info">{accounts ? `${accounts.length} accounts` : "Loading…"}</Badge>
             </div>
             <p className="mt-0.5 text-sm text-ink-secondary">Customers — account portfolio across all regions</p>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              <Tag aiSuggested>Urban Ladder health dropped 2 tiers this month</Tag>
-            </div>
           </div>
         </div>
       </div>
 
       <div className="my-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard label="Total Accounts" value={accounts ? String(accounts.length) : "—"} trend="flat" trendLabel="No change" />
-        <StatCard label="Pipeline Value" value="₹4.92 Cr" trend="up" trendLabel="+14% this quarter" />
-        <StatCard label="Win Rate" value="61%" trend="up" trendLabel="+5 pts" />
+        <StatCard label="Total Accounts" value={accounts ? String(accounts.length) : "—"} />
+        <StatCard label="Pipeline Value" value="—" />
+        <StatCard label="Win Rate" value="—" />
       </div>
 
-      <div className="flex flex-col gap-6">
-        <AICard
-          variant="recommendation"
-          title="Urban Ladder needs proactive outreach"
-          citation="Account health score, last 30 days"
-          onAccept={() => toast("success", "Outreach task assigned to Meera Kapoor")}
-          onDismiss={() => toast("info", "Dismissed")}
-        >
-          Health score dropped from 74 to 58 following two late shipments — reach out before the next renewal conversation to avoid escalation.
-        </AICard>
-        <div className="rounded-lg border border-line bg-surface p-4">
-          <h3 className="mb-3 text-sm font-semibold text-ink">Account portfolio</h3>
-          {accounts === null ? (
-            <p className="py-6 text-center text-sm text-ink-muted">Loading accounts…</p>
-          ) : (
-            <Table columns={COLUMNS} rows={accounts} onRowClick={(r) => toast("info", `Opened ${r.name}`)} />
-          )}
-        </div>
+      <div className="rounded-lg border border-line bg-surface p-4">
+        <h3 className="mb-3 text-sm font-semibold text-ink">Account portfolio</h3>
+        {accounts === null ? (
+          <p className="py-6 text-center text-sm text-ink-muted">Loading accounts…</p>
+        ) : accounts.length === 0 ? (
+          <p className="py-6 text-center text-sm text-ink-muted">No accounts loaded yet.</p>
+        ) : (
+          <Table columns={COLUMNS} rows={accounts} onRowClick={(r) => toast("info", `Opened ${r.name}`)} />
+        )}
       </div>
     </div>
   );

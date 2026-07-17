@@ -4,8 +4,7 @@ import { useEffect, useState } from "react";
 import { Lightbulb } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
-import { Tag } from "@/components/ui/Tag";
-import { StatCard, AICard, KnowledgeCard } from "@/components/ui/Card";
+import { StatCard, KnowledgeCard } from "@/components/ui/Card";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase, type LessonLearnedRow } from "@/lib/supabase";
 
@@ -39,32 +38,20 @@ export default function LessonsLearnedPage() {
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-xl font-semibold text-ink">Lessons Learned</h1>
-              <Badge status="info">312 total</Badge>
+              {lessons && <Badge status="info">{lessons.length} total</Badge>}
             </div>
             <p className="mt-0.5 text-sm text-ink-secondary">Knowledge — tacit knowledge captured from NCRs, projects, and daily operations</p>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              <Tag aiSuggested>Machine M-14&apos;s current alert matches a past lesson</Tag>
-            </div>
           </div>
         </div>
       </div>
 
       <div className="my-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard label="Total Lessons" value="312" trend="up" trendLabel="+9 this quarter" />
-        <StatCard label="This Quarter" value="9" trend="up" trendLabel="+3 vs last quarter" />
-        <StatCard label="Linked NCRs" value="146" trend="flat" trendLabel="No change" />
+        <StatCard label="Total Lessons" value={lessons === null ? "—" : String(lessons.length)} />
+        <StatCard label="This Quarter" value="—" />
+        <StatCard label="Linked NCRs" value="—" />
       </div>
 
       <div className="flex flex-col gap-6">
-        <AICard
-          variant="summary"
-          title="This lesson matches Machine M-14's current alert"
-          citation="NCR-2025-0442, vibration telemetry pattern"
-          onAccept={() => toast("success", "Linked to Machine M-14 workspace")}
-          onDismiss={() => toast("info", "Dismissed")}
-        >
-          The tie-bar bearing failure pattern from NCR-2025-0442 matches 84% of Machine M-14&apos;s current vibration signature — the lesson below is directly relevant to the active predictive alert.
-        </AICard>
         {lessons === null ? (
           <p className="py-6 text-center text-sm text-ink-muted">Loading lessons…</p>
         ) : (
