@@ -174,46 +174,49 @@ export interface NestSourceFile {
 }
 
 /**
- * Builds the combined nested-sheet PDF: one blank page at the material
- * size, with each placed piece's ORIGINAL page content embedded at its
- * nested position and rotation (full original resolution preserved),
- * PLUS that piece's cut dots (white halo + black) and a stroked cut-path
- * following its outline — all three move together as one rigid body per
- * placement, since a nested unit is the full design + bleed + dot zone +
- * margin, not just the bare design.
+ * Shared placement logic for both nested-sheet exports. "print" embeds each
+ * piece's original full-resolution page content plus its printed dot marks
+ * (no cut-path — that's not something a printer should lay ink for). "cut"
+ * draws only the stroked cut-path plus the SAME dot marks, no raster
+ * artwork — a small, vector-only file for the cutter. Both modes derive
+ * every position from the exact same transform per placement, so the marks
+ * (and, for print, the design itself) land in identical spots between the
+ * two files — required for the printed sheet's registration dots to line
+ * up with the cutter's vector file.
  */
-export async function buildNestedSheetPdf(opts: {
+async function buildNestedSheetPdfInternal(opts: {
   sheetWidthMm: number;
   sheetHeightMm: number;
   placements: NestPlacement[];
   sources: NestSourceFile[];
-  drawCutPaths?: boolean; // default true
+  mode: "print" | "cut";
 }): Promise<Blob> {
-  const { sheetWidthMm, sheetHeightMm, placements, sources } = opts;
-  const drawCutPaths = opts.drawCutPaths ?? true;
+  const { sheetWidthMm, sheetHeightMm, placements, sources, mode } = opts;
   const outDoc = await PDFDocument.create();
   const page = outDoc.addPage([mmToPt(sheetWidthMm), mmToPt(sheetHeightMm)]);
 
   const embeddedByPiece = new Map<string, Awaited<ReturnType<typeof outDoc.embedPdf>>[number]>();
-  const sourceByPiece = new Map<string, NestSourceFile>();
-  for (const src of sources) {
-    const [embedded] = await outDoc.embedPdf(src.bytes, [0]);
-    embeddedByPiece.set(src.pieceId, embedded);
-    sourceByPiece.set(src.pieceId, src);
+  if (mode === "print") {
+    for (const src of sources) {
+      const [embedded] = await outDoc.embedPdf(src.bytes, [0]);
+      embeddedByPiece.set(src.pieceId, embedded);
+    }
   }
+  const sourceByPiece = new Map(sources.map((s) => [s.pieceId, s]));
 
   for (const placement of placements) {
-    const embedded = embeddedByPiece.get(placement.pieceId);
     const src = sourceByPiece.get(placement.pieceId);
-    if (!embedded || !src || placement.outline.length === 0 || src.outline.length === 0) continue;
+    if (!src || placement.outline.length === 0 || src.outline.length === 0) continue;
 
     // Recover the piece's actual rotate+translate transform empirically:
     // rotate the piece's own local outline by the placement's rotation and
-    // compare its first vertex to the corresponding vertex nesting.ts
-    // already placed on the sheet (placement.outline). The difference is a
-    // constant translation for this placement — apply that same
-    // rotate-then-translate to any other local-frame point (the design's
-    // content offset, each dot center) to keep everything rigidly attached.
+    // compare its first vertex to the corresponding vertex nesting.ts (or a
+    // manual drag/rotate in the UI) already placed on the sheet
+    // (placement.outline). The difference is a constant translation for
+    // this placement — apply that same rotate-then-translate to any other
+    // local-frame point (the design's content offset, each dot center) to
+    // keep everything rigidly attached, regardless of how the placement
+    // got to its current position/rotation.
     const rot = placement.rotationDeg;
     const rotatedLocalOutline = rotatePolygon(src.outline, rot);
     const constX = placement.outline[0].x - rotatedLocalOutline[0].x;
@@ -223,25 +226,49 @@ export async function buildNestedSheetPdf(opts: {
       return { x: r.x + constX, y: r.y + constY };
     };
 
-    const designPos = toSheet(src.contentOffsetMm);
-    page.drawPage(embedded, {
-      x: mmToPt(designPos.x),
-      y: mmToPt(designPos.y),
-      rotate: degrees(rot),
-    });
+    if (mode === "print") {
+      const embedded = embeddedByPiece.get(placement.pieceId);
+      if (embedded) {
+        const designPos = toSheet(src.contentOffsetMm);
+        page.drawPage(embedded, {
+          x: mmToPt(designPos.x),
+          y: mmToPt(designPos.y),
+          rotate: degrees(rot),
+        });
+      }
+    }
 
+    // Marks: identical in both files by construction (same src.dots, same
+    // toSheet transform, same drawDot call) so registration lines up.
     for (const dot of src.dots) {
       const dp = toSheet({ x: dot.x, y: dot.y });
       drawDot(page, dp.x, dp.y, src.dotDiameterMm, src.dotHaloMm ?? 2);
     }
 
-    if (drawCutPaths) {
+    if (mode === "cut") {
       drawCutPath(page, placement.outline);
     }
   }
 
   const bytes = await outDoc.save();
   return new Blob([bytes as unknown as BlobPart], { type: "application/pdf" });
+}
+
+export interface BuildNestedPdfOpts {
+  sheetWidthMm: number;
+  sheetHeightMm: number;
+  placements: NestPlacement[];
+  sources: NestSourceFile[];
+}
+
+/** Print file: original full-resolution artwork + printed registration dots, no cut path. */
+export async function buildNestedPrintPdf(opts: BuildNestedPdfOpts): Promise<Blob> {
+  return buildNestedSheetPdfInternal({ ...opts, mode: "print" });
+}
+
+/** Cut file: only the vector cut-path + the same registration dots — no raster artwork, for the cutter. */
+export async function buildNestedCutPdf(opts: BuildNestedPdfOpts): Promise<Blob> {
+  return buildNestedSheetPdfInternal({ ...opts, mode: "cut" });
 }
 
 export function downloadBlob(blob: Blob, filename: string) {

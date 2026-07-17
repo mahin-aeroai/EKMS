@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Scissors, Upload, Download, Trash2, RefreshCw } from "lucide-react";
+import { Scissors, Upload, Download, Trash2, RefreshCw, FilePlus2, Wand2, Ruler } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -11,13 +11,15 @@ import { DotCanvas } from "@/components/cutfile/DotCanvas";
 import { OutlineCanvas } from "@/components/cutfile/OutlineCanvas";
 import { NestPreview } from "@/components/cutfile/NestPreview";
 import { computeDotLayout, rectPolygon, type DotSpec, type Point } from "@/lib/cutfile/geometry";
-import { loadPdf, buildDotPlacementPdf, buildNestedSheetPdf, downloadBlob } from "@/lib/cutfile/pdfIO";
-import { nestPieces, type NestResult } from "@/lib/cutfile/nesting";
+import { loadPdf, buildDotPlacementPdf, buildNestedPrintPdf, buildNestedCutPdf, downloadBlob } from "@/lib/cutfile/pdfIO";
+import { traceOutlineFromPdf } from "@/lib/cutfile/trace";
+import { nestPieces, suggestSheetHeight, type NestResult } from "@/lib/cutfile/nesting";
 
 interface DotParams {
   bleedMm: number;
   dotDiameterMm: number;
   dotHaloMm: number;
+  haloClearanceMm: number;
   marginMm: number;
   topCount: number;
   bottomCount: number;
@@ -29,12 +31,15 @@ const DEFAULT_DOT_PARAMS: DotParams = {
   bleedMm: 14,
   dotDiameterMm: 6,
   dotHaloMm: 2,
+  haloClearanceMm: 2,
   marginMm: 4,
   topCount: 3,
   bottomCount: 3,
   leftCount: 2,
   rightCount: 2,
 };
+
+const DEFAULT_SHEET = { widthMm: 3000, heightMm: 1500, spacingMm: 5, resolutionMm: 2 };
 
 interface UploadedPiece {
   id: string;
@@ -65,6 +70,8 @@ function recomputeLayout(widthMm: number, heightMm: number, params: DotParams) {
     trimHeightMm: heightMm,
     bleedMm: params.bleedMm,
     dotDiameterMm: params.dotDiameterMm,
+    dotHaloMm: params.dotHaloMm,
+    haloClearanceMm: params.haloClearanceMm,
     marginMm: params.marginMm,
     topCount: params.topCount,
     bottomCount: params.bottomCount,
@@ -80,18 +87,33 @@ export default function CutFileToolClient() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const [sheetWidthMm, setSheetWidthMm] = useState(3000);
-  const [sheetHeightMm, setSheetHeightMm] = useState(1500);
-  const [spacingMm, setSpacingMm] = useState(5);
-  const [resolutionMm, setResolutionMm] = useState(2);
+  const [sheetWidthMm, setSheetWidthMm] = useState(DEFAULT_SHEET.widthMm);
+  const [sheetHeightMm, setSheetHeightMm] = useState(DEFAULT_SHEET.heightMm);
+  const [spacingMm, setSpacingMm] = useState(DEFAULT_SHEET.spacingMm);
+  const [resolutionMm, setResolutionMm] = useState(DEFAULT_SHEET.resolutionMm);
   const [nesting, setNesting] = useState(false);
   const [nestStatus, setNestStatus] = useState<string | null>(null);
   const [nestResult, setNestResult] = useState<NestResult | null>(null);
+  const [suggestingSheet, setSuggestingSheet] = useState(false);
+  const [tracingId, setTracingId] = useState<string | null>(null);
 
   const selected = pieces.find((p) => p.id === selectedId) ?? null;
 
   function updatePiece(id: string, patch: Partial<UploadedPiece>) {
     setPieces((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  }
+
+  function startNewJob() {
+    setPieces([]);
+    setSelectedId(null);
+    setNestResult(null);
+    setNestStatus(null);
+    setSheetWidthMm(DEFAULT_SHEET.widthMm);
+    setSheetHeightMm(DEFAULT_SHEET.heightMm);
+    setSpacingMm(DEFAULT_SHEET.spacingMm);
+    setResolutionMm(DEFAULT_SHEET.resolutionMm);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    toast("success", "Cleared — ready for the next job");
   }
 
   async function handleFiles(files: FileList | null) {
@@ -214,27 +236,113 @@ export default function CutFileToolClient() {
     }
   }
 
-  async function exportNestedPdf() {
+  function nestedSources(): Parameters<typeof buildNestedPrintPdf>[0]["sources"] {
+    return pieces.map((p) => ({
+      pieceId: p.id,
+      bytes: p.bytes,
+      outline: p.outline,
+      contentOffsetMm: { x: p.contentOffsetMm, y: p.contentOffsetMm },
+      dots: p.dots,
+      dotDiameterMm: p.dotParams.dotDiameterMm,
+      dotHaloMm: p.dotParams.dotHaloMm,
+    }));
+  }
+
+  async function exportPrintPdf() {
     if (!nestResult) return;
     try {
-      const blob = await buildNestedSheetPdf({
+      const blob = await buildNestedPrintPdf({
         sheetWidthMm: nestResult.sheetWidthMm,
         sheetHeightMm: nestResult.sheetHeightMm,
         placements: nestResult.placements,
-        sources: pieces.map((p) => ({
-          pieceId: p.id,
-          bytes: p.bytes,
-          outline: p.outline,
-          contentOffsetMm: { x: p.contentOffsetMm, y: p.contentOffsetMm },
-          dots: p.dots,
-          dotDiameterMm: p.dotParams.dotDiameterMm,
-          dotHaloMm: p.dotParams.dotHaloMm,
-        })),
+        sources: nestedSources(),
       });
-      downloadBlob(blob, "nested_sheet.pdf");
-      toast("success", "Exported nested sheet — download started");
+      downloadBlob(blob, "nested_sheet_PRINT.pdf");
+      toast("success", "Print file exported — download started");
     } catch (err) {
       toast("danger", err instanceof Error ? err.message : "Export failed");
+    }
+  }
+
+  async function exportCutPdf() {
+    if (!nestResult) return;
+    try {
+      const blob = await buildNestedCutPdf({
+        sheetWidthMm: nestResult.sheetWidthMm,
+        sheetHeightMm: nestResult.sheetHeightMm,
+        placements: nestResult.placements,
+        sources: nestedSources(),
+      });
+      downloadBlob(blob, "nested_sheet_CUT.pdf");
+      toast("success", "Cut file exported — download started");
+    } catch (err) {
+      toast("danger", err instanceof Error ? err.message : "Export failed");
+    }
+  }
+
+  async function suggestBestSheetSize() {
+    if (pieces.length === 0) {
+      toast("warning", "Upload at least one piece first");
+      return;
+    }
+    setSuggestingSheet(true);
+    await new Promise((r) => setTimeout(r, 20));
+    try {
+      const suggestion = suggestSheetHeight({
+        sheetWidthMm,
+        spacingMm,
+        resolutionMm,
+        pieces: pieces.map((p) => ({
+          pieceId: p.id,
+          label: p.fileName,
+          outline: p.outline,
+          quantity: p.quantity,
+          allowRotationsDeg: p.rotations,
+        })),
+      });
+      if (!suggestion) {
+        toast("warning", "Couldn't find a fitting size — check quantities and rotations allowed");
+        return;
+      }
+      setSheetHeightMm(suggestion.heightMm);
+      toast(
+        "success",
+        `Suggested sheet: ${sheetWidthMm.toFixed(0)} × ${suggestion.heightMm.toFixed(0)} mm (~${suggestion.utilizationPct.toFixed(0)}% utilization) — height applied, run nesting again`
+      );
+    } catch (err) {
+      toast("danger", err instanceof Error ? err.message : "Couldn't compute a suggestion");
+    } finally {
+      setSuggestingSheet(false);
+    }
+  }
+
+  async function autoTraceOutline(piece: UploadedPiece) {
+    setTracingId(piece.id);
+    try {
+      const result = await traceOutlineFromPdf(piece.bytes, {
+        contentWidthMm: piece.widthMm,
+        contentHeightMm: piece.heightMm,
+      });
+      if (!result.hadTransparency || result.outline.length < 3) {
+        toast(
+          "warning",
+          "This page has no transparent background to trace (it's likely a solid bleed fill) — reshape the outline by hand below instead."
+        );
+        return;
+      }
+      // The traced outline is in content-local mm (bottom-left origin at
+      // the design's own corner) — shift it into the piece's canvas-local
+      // frame the same way the design itself sits there, via contentOffsetMm.
+      const shifted = result.outline.map((pt) => ({ x: pt.x + piece.contentOffsetMm, y: pt.y + piece.contentOffsetMm }));
+      updatePiece(piece.id, { outline: shifted, outlineIsDefault: false });
+      toast(
+        "success",
+        `Traced ${shifted.length}-point outline from the artwork. This is tight to the shape — dots/margin sit outside it, so increase nesting spacing to keep them clear of neighboring pieces.`
+      );
+    } catch (err) {
+      toast("danger", err instanceof Error ? err.message : "Auto-trace failed");
+    } finally {
+      setTracingId(null);
     }
   }
 
@@ -257,7 +365,7 @@ export default function CutFileToolClient() {
             </p>
           </div>
         </div>
-        <div>
+        <div className="flex items-center gap-2">
           <input
             ref={fileInputRef}
             type="file"
@@ -266,6 +374,11 @@ export default function CutFileToolClient() {
             className="hidden"
             onChange={(e) => handleFiles(e.target.files)}
           />
+          {pieces.length > 0 && (
+            <Button variant="secondary" onClick={startNewJob}>
+              <FilePlus2 size={14} className="mr-1.5" /> New Job
+            </Button>
+          )}
           <Button onClick={() => fileInputRef.current?.click()} loading={loading}>
             <Upload size={14} className="mr-1.5" /> Upload PDF(s)
           </Button>
@@ -322,6 +435,11 @@ export default function CutFileToolClient() {
                           <NumberField label="Bleed already in file (mm, reference only)" value={selected.dotParams.bleedMm} onChange={(v) => updatePiece(selected.id, { dotParams: { ...selected.dotParams, bleedMm: v } })} />
                           <NumberField label="Dot diameter (mm)" value={selected.dotParams.dotDiameterMm} onChange={(v) => updatePiece(selected.id, { dotParams: { ...selected.dotParams, dotDiameterMm: v } })} />
                           <NumberField label="White halo under dot (mm)" value={selected.dotParams.dotHaloMm} onChange={(v) => updatePiece(selected.id, { dotParams: { ...selected.dotParams, dotHaloMm: v } })} />
+                          <NumberField
+                            label="Clearance between design and halo (mm)"
+                            value={selected.dotParams.haloClearanceMm}
+                            onChange={(v) => updatePiece(selected.id, { dotParams: { ...selected.dotParams, haloClearanceMm: v } })}
+                          />
                           <NumberField label="Extra margin beyond dot (mm)" value={selected.dotParams.marginMm} onChange={(v) => updatePiece(selected.id, { dotParams: { ...selected.dotParams, marginMm: v } })} />
                           <div className="grid grid-cols-2 gap-2">
                             <NumberField label="Top dots" value={selected.dotParams.topCount} onChange={(v) => updatePiece(selected.id, { dotParams: { ...selected.dotParams, topCount: v } })} />
@@ -374,6 +492,13 @@ export default function CutFileToolClient() {
                         <NumberField label="Sheet height (mm)" value={sheetHeightMm} onChange={setSheetHeightMm} />
                         <NumberField label="Spacing between pieces (mm)" value={spacingMm} onChange={setSpacingMm} />
                         <NumberField label="Grid resolution (mm) — lower = tighter but slower" value={resolutionMm} onChange={setResolutionMm} step={0.5} />
+                        <Button variant="secondary" size="sm" onClick={suggestBestSheetSize} loading={suggestingSheet}>
+                          <Ruler size={13} className="mr-1.5" /> Suggest best-fit sheet size
+                        </Button>
+                        <p className="text-xs text-ink-muted">
+                          Keeps the sheet width you set and searches for the shortest height that fits everything — applies the result to
+                          Sheet height above.
+                        </p>
                         <Button onClick={runNesting} loading={nesting}>
                           Run Nesting
                         </Button>
@@ -385,9 +510,18 @@ export default function CutFileToolClient() {
                             {nestResult.unplaced.length > 0 && (
                               <p className="text-danger">Did not fit: {nestResult.unplaced.length}</p>
                             )}
-                            <Button size="sm" variant="secondary" className="mt-2" onClick={exportNestedPdf}>
-                              <Download size={13} className="mr-1.5" /> Export nested PDF
-                            </Button>
+                            <div className="mt-2 flex flex-col gap-2">
+                              <Button size="sm" variant="secondary" onClick={exportPrintPdf}>
+                                <Download size={13} className="mr-1.5" /> Export Print PDF (artwork + dots)
+                              </Button>
+                              <Button size="sm" variant="secondary" onClick={exportCutPdf}>
+                                <Download size={13} className="mr-1.5" /> Export Cut PDF (path + dots, for Zund)
+                              </Button>
+                            </div>
+                            <p className="mt-2 text-xs text-ink-muted">
+                              Both files place the same registration dots at identical positions — print the first, send the second to the
+                              cutter.
+                            </p>
                           </div>
                         )}
                       </div>
@@ -431,7 +565,20 @@ export default function CutFileToolClient() {
                             </div>
                             <details>
                               <summary className="cursor-pointer text-xs text-primary">Edit cut outline</summary>
-                              <div className="mt-2">
+                              <div className="mt-2 flex flex-col gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  onClick={() => autoTraceOutline(p)}
+                                  loading={tracingId === p.id}
+                                >
+                                  <Wand2 size={13} className="mr-1.5" /> Auto-trace shape from artwork
+                                </Button>
+                                <p className="text-xs text-ink-muted">
+                                  Works when the PDF has a transparent background (e.g. a logo/shape with nothing behind it). Traces the
+                                  real silhouette instead of a rectangle — increase nesting spacing afterward since dots sit outside the
+                                  tight shape.
+                                </p>
                                 <OutlineCanvas
                                   canvasWidthMm={p.canvasWidthMm}
                                   canvasHeightMm={p.canvasHeightMm}

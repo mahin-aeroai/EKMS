@@ -34,7 +34,9 @@ export interface DotLayoutParams {
   trimHeightMm: number;
   bleedMm: number;
   dotDiameterMm: number;
-  marginMm: number; // clear space beyond the dot, to the outer edge of the sheet
+  dotHaloMm: number; // white halo radius drawn around each dot
+  haloClearanceMm: number; // gap kept clear between the content edge and the halo's inner edge
+  marginMm: number; // clear space beyond the halo, to the outer edge of the sheet
   topCount: number;
   bottomCount: number;
   leftCount: number; // interior dots only, corners are covered by top/bottom counts
@@ -51,29 +53,45 @@ export interface DotLayoutResult {
 /**
  * Computes the default (auto) dot layout: the original uploaded page —
  * already trim + its own bleed, untouched — is centered on a larger canvas
- * that adds only a dot zone + clear margin on every side. Dots are placed
- * at the center of the dot zone unless the user drags them elsewhere
- * afterward (see DotSpec — these are just the starting positions).
+ * that adds a dot zone + clear margin on every side. Dots are placed at the
+ * center of the dot zone unless the user drags them elsewhere afterward
+ * (see DotSpec — these are just the starting positions).
  *
- * IMPORTANT: `bleedMm` is NOT added into the canvas size here. Earlier this
- * function treated the incoming width/height as a bare trim size and added
- * bleedMm on top of it — but the incoming size is actually the uploaded
- * PDF's full page, which already includes its bleed. Adding bleedMm again
- * inflated the canvas and shifted the content off-center (reported by the
- * user as the design "going down" in the exported PDF). `bleedMm` is kept
- * on the params only so the UI can draw a dashed trim-reference line inset
- * from the content edge.
+ * The zone outside the content, from the content edge outward, is three
+ * bands: `haloClearanceMm` (empty gap so the dot's white halo never
+ * touches the design — this is the gap the operator explicitly asked for
+ * after seeing halos overlap real artwork), then the dot+halo band itself
+ * (dotDiameterMm + 2*dotHaloMm wide), then `marginMm` out to the canvas
+ * edge. Earlier this function sized the dot band as exactly one dot
+ * diameter with no separate clearance term, which put the dot (and after
+ * the halo was added, the halo too) flush against the content edge with
+ * zero gap.
+ *
+ * IMPORTANT: `bleedMm` is NOT added into the canvas size here — see the
+ * comment on that field above.
  */
 export function computeDotLayout(params: DotLayoutParams): DotLayoutResult {
-  const { trimWidthMm, trimHeightMm, dotDiameterMm, marginMm, topCount, bottomCount, leftCount, rightCount } = params;
-  const dotZoneMm = dotDiameterMm; // the band the dot occupies, one diameter wide
-  const sideExtraMm = dotZoneMm + marginMm;
+  const {
+    trimWidthMm,
+    trimHeightMm,
+    dotDiameterMm,
+    dotHaloMm,
+    haloClearanceMm,
+    marginMm,
+    topCount,
+    bottomCount,
+    leftCount,
+    rightCount,
+  } = params;
+
+  const dotZoneMm = dotDiameterMm + 2 * dotHaloMm; // full footprint of the dot including its halo
+  const sideExtraMm = haloClearanceMm + dotZoneMm + marginMm;
 
   const canvasWidthMm = trimWidthMm + 2 * sideExtraMm;
   const canvasHeightMm = trimHeightMm + 2 * sideExtraMm;
 
   // distance from the outer canvas edge to the center of the dot band
-  const dotCenterOffset = marginMm + dotDiameterMm / 2;
+  const dotCenterOffset = marginMm + dotHaloMm + dotDiameterMm / 2;
 
   const topY = canvasHeightMm - dotCenterOffset;
   const bottomY = dotCenterOffset;

@@ -225,5 +225,82 @@ export function nestPieces(opts: {
 
   const utilizationPct = (placedArea / (sheetWidthMm * sheetHeightMm)) * 100;
 
+  // The fill algorithm above packs from the bottom-left corner outward,
+  // which is a fine way to search for space but an awkward place to leave
+  // the result sitting — the operator wants the placed group centered
+  // left-to-right on the sheet and flush against the top edge (a
+  // consistent reference edge to load material against), not jammed into
+  // a corner. This is a pure post-process shift: it doesn't affect which
+  // spots were found valid, just where the whole already-packed group sits
+  // on the sheet, so it's always safe (the group already fit within the
+  // sheet bounds; centering/top-aligning it can't push anything off-sheet).
+  if (placements.length > 0) {
+    let gMinX = Infinity, gMinY = Infinity, gMaxX = -Infinity, gMaxY = -Infinity;
+    for (const p of placements) {
+      const b = polygonBounds(p.outline);
+      if (b.minX < gMinX) gMinX = b.minX;
+      if (b.minY < gMinY) gMinY = b.minY;
+      if (b.maxX > gMaxX) gMaxX = b.maxX;
+      if (b.maxY > gMaxY) gMaxY = b.maxY;
+    }
+    const groupWidth = gMaxX - gMinX;
+    const shiftX = (sheetWidthMm - groupWidth) / 2 - gMinX;
+    const shiftY = sheetHeightMm - gMaxY; // flush to the top edge
+    for (const p of placements) {
+      p.x += shiftX;
+      p.y += shiftY;
+      p.outline = translatePolygon(p.outline, shiftX, shiftY);
+    }
+  }
+
   return { sheetWidthMm, sheetHeightMm, resolutionMm, placements, unplaced, utilizationPct };
+}
+
+/**
+ * Searches for the shortest sheet height (at a fixed sheet width — the
+ * common case for roll-fed material where width is set by the roll and
+ * length is the free variable) that fits every piece instance. Runs the
+ * real nester repeatedly (exponential search for an upper bound, then
+ * binary search for the minimum), so it's meant for an explicit
+ * "Suggest sheet size" action, not something to run on every keystroke.
+ */
+export function suggestSheetHeight(opts: {
+  sheetWidthMm: number;
+  spacingMm: number;
+  resolutionMm: number;
+  pieces: NestPieceInput[];
+  maxHeightMm?: number;
+}): { heightMm: number; utilizationPct: number } | null {
+  const { sheetWidthMm, spacingMm, resolutionMm, pieces } = opts;
+
+  let totalArea = 0;
+  let anyQty = false;
+  for (const p of pieces) {
+    if (p.quantity <= 0) continue;
+    anyQty = true;
+    const b = polygonBounds(p.outline);
+    totalArea += (b.maxX - b.minX) * (b.maxY - b.minY) * p.quantity;
+  }
+  if (!anyQty || totalArea <= 0) return null;
+
+  const fits = (heightMm: number) => nestPieces({ sheetWidthMm, sheetHeightMm: heightMm, spacingMm, resolutionMm, pieces }).unplaced.length === 0;
+
+  let lo = Math.max(resolutionMm * 2, totalArea / sheetWidthMm); // optimistic (100% utilization) lower bound
+  let hi = opts.maxHeightMm ?? Math.max(lo * 2, 100);
+
+  let guard = 0;
+  while (!fits(hi) && guard < 10) {
+    hi *= 1.6;
+    guard++;
+  }
+  if (!fits(hi)) return null; // pieces likely wider than the sheet even alone — no height will help
+
+  for (let i = 0; i < 12 && hi - lo > resolutionMm; i++) {
+    const mid = (lo + hi) / 2;
+    if (fits(mid)) hi = mid;
+    else lo = mid;
+  }
+
+  const finalResult = nestPieces({ sheetWidthMm, sheetHeightMm: hi, spacingMm, resolutionMm, pieces });
+  return { heightMm: Math.ceil(hi / 5) * 5, utilizationPct: finalResult.utilizationPct };
 }
