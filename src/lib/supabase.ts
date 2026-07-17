@@ -11,6 +11,17 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
+// createBrowserClient throws immediately if given an empty string, and every
+// page in this app (including Next's auto-generated /_not-found) renders
+// through AppShell, which imports this module -- so a missing env var used
+// to fail the ENTIRE production build, not just the Supabase-backed pages.
+// Falling back to harmless placeholder values keeps the build (and every
+// non-Supabase page, like the Cut File Tool) working even if these vars are
+// ever unset; real Supabase calls will simply fail at runtime with a clear
+// network/auth error instead of taking the whole site down at build time.
+const FALLBACK_SUPABASE_URL = "https://placeholder.supabase.co";
+const FALLBACK_SUPABASE_ANON_KEY = "placeholder-anon-key";
+
 /**
  * Shared browser-safe Supabase client — for Client Components ("use client")
  * only. Built with createBrowserClient from @supabase/ssr so it automatically
@@ -24,7 +35,10 @@ if (!supabaseUrl || !supabaseAnonKey) {
  * `createServerSupabaseClient()` from "@/lib/supabase-server" instead (see
  * src/app/workspaces/customer/page.tsx for the pattern).
  */
-export const supabase = createBrowserClient(supabaseUrl ?? "", supabaseAnonKey ?? "");
+export const supabase = createBrowserClient(
+  supabaseUrl || FALLBACK_SUPABASE_URL,
+  supabaseAnonKey || FALLBACK_SUPABASE_ANON_KEY
+);
 
 export interface ApplelfgSiteSurveyRow {
   id: string;

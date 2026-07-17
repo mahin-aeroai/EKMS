@@ -12,12 +12,20 @@ import { cookies } from "next/headers";
  *   const supabase = await createServerSupabaseClient();
  *   const { data } = await supabase.from("customers").select("*");
  */
+// See src/lib/supabase.ts for why these fall back to placeholders instead
+// of empty strings: createServerClient throws immediately on an empty URL,
+// which would fail the entire production build (every Server Component
+// page) if these env vars are ever unset -- not just the pages that
+// actually query Supabase.
+const FALLBACK_SUPABASE_URL = "https://placeholder.supabase.co";
+const FALLBACK_SUPABASE_ANON_KEY = "placeholder-anon-key";
+
 export async function createServerSupabaseClient() {
   const cookieStore = await cookies();
 
   return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
+    process.env.NEXT_PUBLIC_SUPABASE_URL || FALLBACK_SUPABASE_URL,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || FALLBACK_SUPABASE_ANON_KEY,
     {
       cookies: {
         getAll() {
