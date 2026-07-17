@@ -424,6 +424,12 @@ export interface ComplianceFindingRow {
   area: string | null;
   status: BadgeStatus;
   status_label: string | null;
+  category: string | null;
+  chapter: string | null;
+  frequency: string | null;
+  baseline_date: string | null;
+  due_date: string | null;
+  responsible: string | null;
 }
 
 export interface AccessRequestRow {

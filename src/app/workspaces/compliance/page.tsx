@@ -6,27 +6,26 @@ import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { StatCard } from "@/components/ui/Card";
 import { Table, type TableColumn } from "@/components/ui/Table";
-import { TreeView, type TreeNode } from "@/components/ui/TreeView";
+import { Timeline } from "@/components/ui/Timeline";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase, type ComplianceFindingRow } from "@/lib/supabase";
 
+const ALL = "All";
+const CATEGORIES = [ALL, "Internal Audit", "Training", "License/Certificate", "Compliance Document"];
+
 const COLUMNS: TableColumn<ComplianceFindingRow>[] = [
   { key: "item", header: "Item", sortable: true },
-  { key: "area", header: "Area", sortable: true },
+  { key: "area", header: "Area", sortable: true, render: (r) => r.area ?? "—" },
+  { key: "category", header: "Category", sortable: true, render: (r) => r.category ?? "—" },
+  { key: "frequency", header: "Cadence", sortable: true, render: (r) => r.frequency ?? "—" },
+  { key: "due_date", header: "Next Due", sortable: true, render: (r) => r.due_date ?? "—" },
   { key: "status", header: "Status", render: (r) => <Badge status={r.status}>{r.status_label}</Badge> },
-];
-
-const TREE: TreeNode[] = [
-  { id: "root", label: "Compliance Framework", children: [
-    { id: "quality", label: "Quality (ISO 9001)", children: [{ id: "q1", label: "Internal Audits" }, { id: "q2", label: "Surveillance Audits" }] },
-    { id: "environmental", label: "Environmental (FSC, PVC-free)" },
-    { id: "safety", label: "Health & Safety" },
-  ]},
 ];
 
 export default function CompliancePage() {
   const { toast } = useToast();
   const [findings, setFindings] = useState<ComplianceFindingRow[] | null>(null);
+  const [categoryFilter, setCategoryFilter] = useState(ALL);
 
   useEffect(() => {
     supabase
@@ -43,6 +42,16 @@ export default function CompliancePage() {
   }, []);
 
   const overdue = findings?.filter((f) => f.status === "danger").length ?? 0;
+  const licensesActive = findings?.filter((f) => f.category === "License/Certificate" && f.status !== "danger").length ?? null;
+  const dueWithin60Days = findings?.filter((f) => f.status === "warning").length ?? null;
+
+  const visibleFindings = findings?.filter((f) => categoryFilter === ALL || f.category === categoryFilter) ?? null;
+
+  const upcoming = (findings ?? [])
+    .filter((f): f is ComplianceFindingRow & { due_date: string } => Boolean(f.due_date))
+    .slice()
+    .sort((a, b) => (a.due_date < b.due_date ? -1 : a.due_date > b.due_date ? 1 : 0))
+    .slice(0, 12);
 
   return (
     <div>
@@ -56,33 +65,66 @@ export default function CompliancePage() {
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-xl font-semibold text-ink">Compliance</h1>
-              {findings && overdue > 0 && <Badge status="danger">{overdue} overdue finding{overdue === 1 ? "" : "s"}</Badge>}
+              {findings && overdue > 0 && <Badge status="danger">{overdue} overdue item{overdue === 1 ? "" : "s"}</Badge>}
             </div>
-            <p className="mt-0.5 text-sm text-ink-secondary">Company-wide certifications, audits, and open findings</p>
+            <p className="mt-0.5 text-sm text-ink-secondary">
+              IWAY internal audit checklist — certifications, training, and license renewal schedule
+            </p>
           </div>
         </div>
       </div>
 
       <div className="my-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard label="Open Findings" value={findings === null ? "—" : String(findings.length)} />
-        <StatCard label="Certifications Active" value="—" />
-        <StatCard label="Audits This Quarter" value="—" />
+        <StatCard label="Total Checklist Items" value={findings === null ? "—" : String(findings.length)} />
+        <StatCard label="Licenses/Certificates Active" value={licensesActive === null ? "—" : String(licensesActive)} />
+        <StatCard label="Due Within 60 Days" value={dueWithin60Days === null ? "—" : String(dueWithin60Days)} />
+      </div>
+
+      <div className="mb-4 flex flex-wrap gap-2">
+        {CATEGORIES.map((c) => (
+          <button
+            key={c}
+            onClick={() => setCategoryFilter(c)}
+            className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+              categoryFilter === c
+                ? "border-primary bg-primary text-on-brand"
+                : "border-line text-ink-secondary hover:bg-surface-sunken"
+            }`}
+          >
+            {c}
+          </button>
+        ))}
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="flex flex-col gap-4 lg:col-span-2">
           <div className="rounded-lg border border-line bg-surface p-4">
-            <h3 className="mb-3 text-sm font-semibold text-ink">Open findings</h3>
-            {findings === null ? (
-              <p className="py-6 text-center text-sm text-ink-muted">Loading findings…</p>
+            <h3 className="mb-3 text-sm font-semibold text-ink">
+              Checklist items{categoryFilter !== ALL ? ` — ${categoryFilter}` : ""}
+            </h3>
+            {visibleFindings === null ? (
+              <p className="py-6 text-center text-sm text-ink-muted">Loading checklist…</p>
+            ) : visibleFindings.length === 0 ? (
+              <p className="py-6 text-center text-sm text-ink-muted">No items in this category.</p>
             ) : (
-              <Table columns={COLUMNS} rows={findings} onRowClick={(r) => toast("info", `Opened ${r.item}`)} />
+              <Table columns={COLUMNS} rows={visibleFindings} onRowClick={(r) => toast("info", `Opened ${r.item}`)} />
             )}
           </div>
         </div>
         <div className="rounded-lg border border-line bg-surface p-4">
-          <h3 className="mb-3 text-sm font-semibold text-ink">Compliance framework</h3>
-          <TreeView nodes={TREE} />
+          <h3 className="mb-3 text-sm font-semibold text-ink">Upcoming schedule</h3>
+          {upcoming.length === 0 ? (
+            <p className="py-6 text-center text-sm text-ink-muted">No dated renewals yet.</p>
+          ) : (
+            <Timeline
+              entries={upcoming.map((f) => ({
+                id: f.id,
+                date: f.due_date,
+                title: f.item,
+                description: [f.category, f.frequency].filter(Boolean).join(" · "),
+              }))}
+            />
+          )}
         </div>
       </div>
     </div>

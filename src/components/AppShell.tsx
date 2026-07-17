@@ -40,6 +40,7 @@ import {
   Receipt,
   Target,
   Ruler,
+  Scissors,
 } from "lucide-react";
 import { Sidebar, type SidebarSection } from "@/components/ui/Sidebar";
 import { TopNav } from "@/components/ui/TopNav";
@@ -129,6 +130,7 @@ const NAV: SidebarSection[] = [
       { id: "purchase-register", label: "Purchase Register", icon: <Receipt size={16} />, href: "/workspaces/purchase-register" },
       { id: "suppliers", label: "Suppliers", icon: <Handshake size={16} />, href: "/workspaces/suppliers" },
       { id: "costing", label: "Costing", icon: <Calculator size={16} />, href: "/workspaces/costing" },
+      { id: "cut-file-tool", label: "Cut File Tool", icon: <Scissors size={16} />, href: "/workspaces/cut-file-tool" },
     ],
   },
   {
