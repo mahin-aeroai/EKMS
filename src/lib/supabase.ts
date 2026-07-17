@@ -407,6 +407,15 @@ export interface EmployeeRow {
   department: string | null;
   status: BadgeStatus;
   status_label: string | null;
+  employee_code: string | null;
+  location: string | null;
+  off_email: string | null;
+  off_phone: string | null;
+  personal_email: string | null;
+  personal_phone: string | null;
+  date_of_joining: string | null;
+  date_of_birth: string | null;
+  gender: string | null;
 }
 
 export interface ComplianceFindingRow {

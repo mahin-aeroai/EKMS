@@ -7,16 +7,17 @@
 -- supabase-knowledge-files-source-url-migration.sql for why).
 --
 -- 91 files total. content_text (real extracted/OCR'd text, used by the AI
--- Copilot's search_knowledge_base tool for grounding) is populated for 11
--- of them so far; the remaining 80 are staged with title/category/Drive
--- link only (content_text NULL) so the full library is browsable
--- immediately -- content_text will be backfilled for the rest via a
--- follow-up UPDATE-only script (same ON CONFLICT (source_url) DO UPDATE
--- pattern), safe to run this file again after that lands.
+-- Copilot's search_knowledge_base tool for grounding) is populated for 21
+-- of them so far; the rest are staged with title/category/Drive link only
+-- (content_text NULL) so the full library is browsable immediately --
+-- content_text will be backfilled for the rest via re-running this same
+-- file as more get processed (ON CONFLICT (source_url) DO UPDATE, safe to
+-- re-run/extend any number of times).
 --
--- Run AFTER supabase-knowledge-files-migration.sql AND
--- supabase-knowledge-files-source-url-migration.sql.
--- Idempotent: ON CONFLICT (source_url) DO UPDATE, safe to re-run/extend.
+-- Run AFTER supabase-knowledge-files-migration.sql,
+-- supabase-knowledge-files-source-url-migration.sql, AND
+-- supabase-knowledge-files-fix-conflict-indexes.sql (all three already
+-- confirmed run in production as of 17 July 2026).
 
 insert into documents (title, summary, tags, category, file_name, source_url, mime_type, file_size_bytes, content_text, uploaded_at)
 values (
@@ -219,14 +220,14 @@ on conflict (source_url) do update set
 insert into documents (title, summary, tags, category, file_name, source_url, mime_type, file_size_bytes, content_text, uploaded_at)
 values (
   $mmdi_iway$G8_6 Net Metering Connection Agreement$mmdi_iway$,
-  NULL,
+  $mmdi_iway$Net Metering Connection Agreement between MMDI and Southern Power Distribution Company of Telangana (DISCOM) for a 120kW rooftop solar PV grid-interactive system.$mmdi_iway$,
   ARRAY[$mmdi_iway$G8.6$mmdi_iway$]::text[],
   $mmdi_iway$IKEA IWAY$mmdi_iway$,
   $mmdi_iway$G8_6 Net Metering Connection Agreement.pdf$mmdi_iway$,
   $mmdi_iway$https://drive.google.com/file/d/1X1eM74opRf7u4Wn4hWSMSBiD89ZhyR81/view?usp=drivesdk$mmdi_iway$,
   $mmdi_iway$application/pdf$mmdi_iway$,
   493955,
-  NULL,
+  $mmdi_iway$Net Metering Connection Agreement, executed on non-judicial stamp paper (Telangana), between Macro Media Digital Imaging Pvt Ltd (First Party / Eligible Consumer) and Southern Power Distribution Company of Telangana Limited (DISCOM, Second Party). Approves a Net Metering arrangement at Plot 23-B & 24, Cherlapally, Phase-V, under TSERC (Net Metering Rooftop Solar PV Grid Interactive System) Regulation No. 06 of 2016. DISCOM agrees to provide grid connectivity for injection of electricity from a Rooftop Solar PV System of capacity 120 kilowatts. Both parties agree to comply with Electricity Act 2003 and TSERC terms. Net metering facility: consumer generates solar power for self-consumption and feeds excess into DISCOM grid; a bidirectional meter records import/export. Safety: consumer responsible for system up to interconnection point; DISCOM responsible beyond. DISCOM may disconnect for emergencies, maintenance, or hazardous conditions. Signed by Directors of Macro Media Digital Imaging (P) Ltd and Superintending Engineer, Habsiguda Circle, TSSPDCL.$mmdi_iway$,
   now()
 )
 on conflict (source_url) do update set
@@ -237,14 +238,14 @@ on conflict (source_url) do update set
 insert into documents (title, summary, tags, category, file_name, source_url, mime_type, file_size_bytes, content_text, uploaded_at)
 values (
   $mmdi_iway$G9_4 Form 4_2023$mmdi_iway$,
-  NULL,
+  $mmdi_iway$Form IV environmental audit report submission letter to APPCB/TSPCB Joint Chief Environmental Engineer for the year 2022, referencing Consent Order No. 1364-RR-II/TSPCB/ZOH/TS-Ipass/CFO/2022-10.$mmdi_iway$,
   ARRAY[$mmdi_iway$G9.4$mmdi_iway$]::text[],
   $mmdi_iway$IKEA IWAY$mmdi_iway$,
   $mmdi_iway$G9_4 Form 4_2023.pdf$mmdi_iway$,
   $mmdi_iway$https://drive.google.com/file/d/1TegAg8Qo2XE_mXMYhaqLiBHM7dwm3HEp/view?usp=drivesdk$mmdi_iway$,
   $mmdi_iway$application/pdf$mmdi_iway$,
   1678441,
-  NULL,
+  $mmdi_iway$Macromedia Digital Imaging Private Limited letter dated 03-07-2023 to the Joint Chief Environmental Engineer, APPCB/TSPCB Regional Office. Subject: submission of Form IV (environmental audit report) for the year 2022, as specified in Schedule C, Part 2 of the CFO Consent Order No. 1364-RR-II/TSPCB/ZOH/TS-Ipass/CFO/2022-10 dated 10/05/2022. Branch Office: Plot No 23B & 24, IDA Phase V, Cherlapally, Hyderabad. Registered Office: Plot No.44, Apparel Export Park, Auto Nagar, Visakhapatnam.$mmdi_iway$,
   now()
 )
 on conflict (source_url) do update set
@@ -255,14 +256,14 @@ on conflict (source_url) do update set
 insert into documents (title, summary, tags, category, file_name, source_url, mime_type, file_size_bytes, content_text, uploaded_at)
 values (
   $mmdi_iway$G9_4 Waste Handling Training Record$mmdi_iway$,
-  NULL,
+  $mmdi_iway$Waste handling training session record (4 Feb 2023) covering waste categorization and segregation, with attendee sign-off.$mmdi_iway$,
   ARRAY[$mmdi_iway$G9.4$mmdi_iway$]::text[],
   $mmdi_iway$IKEA IWAY$mmdi_iway$,
   $mmdi_iway$G9_4 Waste Handling Training Record.pdf$mmdi_iway$,
   $mmdi_iway$https://drive.google.com/file/d/1STBY1Fb6fNmtAxDzA9RaRLuzBAzLRSzW/view?usp=drivesdk$mmdi_iway$,
   $mmdi_iway$application/pdf$mmdi_iway$,
   63290,
-  NULL,
+  $mmdi_iway$MACRO MEDIA DIGITAL IMAGING PRIVATE LIMITED. WASTE HANDLING training, 04/02/2023. Given By: Srinivas Babu N. Topics covered: check the category of waste before you dump; separate the waste according to the list of category; do not mix the waste; deposit the material in designated place. Attendee list with employee ID, department, and signature (approx 6 attendees). Confirmed delivered by Srinivas Babu N, AGM.$mmdi_iway$,
   now()
 )
 on conflict (source_url) do update set
@@ -273,14 +274,14 @@ on conflict (source_url) do update set
 insert into documents (title, summary, tags, category, file_name, source_url, mime_type, file_size_bytes, content_text, uploaded_at)
 values (
   $mmdi_iway$G6_12 First AID Training Certificates$mmdi_iway$,
-  NULL,
+  $mmdi_iway$First Aid Training Certificates (10 June 2024) issued to multiple MMDI employees by Dr. G.V. Raju, MBBS, covering CPR, wound care, and emergency response.$mmdi_iway$,
   ARRAY[$mmdi_iway$G6.12$mmdi_iway$]::text[],
   $mmdi_iway$IKEA IWAY$mmdi_iway$,
   $mmdi_iway$G6_12 First AID Training Certificates$mmdi_iway$,
   $mmdi_iway$https://drive.google.com/file/d/1bt1scJ0sF9F3Wq4cMRtqRkRjVXPi_7nG/view?usp=drivesdk$mmdi_iway$,
   $mmdi_iway$application/pdf$mmdi_iway$,
   590398,
-  NULL,
+  $mmdi_iway$FIRST AID TRAINING CERTIFICATEs, Macromedia Digital Imaging Pvt. Ltd., 23B & 24, IDA-Cherlapally, Hyderabad-500051. Multiple individual certificates (Certificate IDs MMDI/2024/FA/01 through at least 07+), each certifying an employee completed the First Aid Training Course conducted by Dr. G.V. Raju, MBBS, on 10th June 2024, covering CPR, wound care, and emergency response. Certified employees include: Fayaz SK, Hassain Sha CK, Srinath V, Praveen Kumar S, Mahesh Kumar M, Jashwanth Reddy V, Hanumandlu M, Buchaiah Chowdary V, and others.$mmdi_iway$,
   now()
 )
 on conflict (source_url) do update set
@@ -291,14 +292,14 @@ on conflict (source_url) do update set
 insert into documents (title, summary, tags, category, file_name, source_url, mime_type, file_size_bytes, content_text, uploaded_at)
 values (
   $mmdi_iway$G6_9 Emergency Evacuation Plan_First Floor$mmdi_iway$,
-  NULL,
+  $mmdi_iway$Emergency evacuation plan diagram for the First Floor (CDR/CorelDRAW-sourced layout drawing) -- minimal extractable text, primarily a floor-plan graphic.$mmdi_iway$,
   ARRAY[$mmdi_iway$G6.9$mmdi_iway$]::text[],
   $mmdi_iway$IKEA IWAY$mmdi_iway$,
   $mmdi_iway$G6_9 Emergency Evacuation Plan_First Floor.pdf$mmdi_iway$,
   $mmdi_iway$https://drive.google.com/file/d/1QYIIys9I0H946mElFjkIUti0Jiy032Nm/view?usp=drivesdk$mmdi_iway$,
   $mmdi_iway$application/pdf$mmdi_iway$,
   282634,
-  NULL,
+  $mmdi_iway$G6_9 Emergency Evacuation Plan_Final.cdr. Macromedia Digital Imaging. (Primarily a graphical floor-plan diagram showing evacuation routes for the First Floor; source file was a CorelDRAW export, minimal machine-extractable text.)$mmdi_iway$,
   now()
 )
 on conflict (source_url) do update set
@@ -309,14 +310,14 @@ on conflict (source_url) do update set
 insert into documents (title, summary, tags, category, file_name, source_url, mime_type, file_size_bytes, content_text, uploaded_at)
 values (
   $mmdi_iway$G6_14 EVACUATION DRILL REPORT$mmdi_iway$,
-  NULL,
+  $mmdi_iway$Fire evacuation drill report (18 Jan 2024) -- 47 people evacuated in under 6 minutes, with per-department attendance sign-off.$mmdi_iway$,
   ARRAY[$mmdi_iway$G6.14$mmdi_iway$]::text[],
   $mmdi_iway$IKEA IWAY$mmdi_iway$,
   $mmdi_iway$G6_14 EVACUATION DRILL REPORT.pdf$mmdi_iway$,
   $mmdi_iway$https://drive.google.com/file/d/1ivFe-b37-CvguOg8uVms8FO1__ekp0hd/view?usp=drivesdk$mmdi_iway$,
   $mmdi_iway$application/pdf$mmdi_iway$,
   237003,
-  NULL,
+  $mmdi_iway$EVACUATION DRILL REPORT. Date of drill: 18/01/24. Floor No. 4/2. Departments participating: Printing, Finishing, Stores, Accounts, Logistics, Pre-press, Security. Total people on floor: 47. Time alarm sounded: 1:54PM. Time evacuation started/completed: 1:54PM - 2:01PM. Pre-movement time: 21 seconds. Total building evacuation time: 1-6 minutes. Sample individual evacuation times recorded for 2 employees. Effectiveness rated Satisfactory across personnel response, familiarity with egress routes, communication, and speed of evacuation. MMDI Emergency coordinator: Srinivas Babu N. Full attendee sign-off list (~40 employees) with name, designation, division/department, and signature, spanning Printing, Finishing, Prepress, Logistics, Accounts & Admin, Stores, Operations, House Keeping departments.$mmdi_iway$,
   now()
 )
 on conflict (source_url) do update set
@@ -327,14 +328,14 @@ on conflict (source_url) do update set
 insert into documents (title, summary, tags, category, file_name, source_url, mime_type, file_size_bytes, content_text, uploaded_at)
 values (
   $mmdi_iway$G6_12 First AID Training Certificates$mmdi_iway$,
-  NULL,
+  $mmdi_iway$Collection of First Aid training certificates (badges: NEBOSH, British Safety Council, CILA, IOSH) -- mostly scanned certificate graphics with minimal extractable text.$mmdi_iway$,
   ARRAY[$mmdi_iway$G6.12$mmdi_iway$]::text[],
   $mmdi_iway$IKEA IWAY$mmdi_iway$,
   $mmdi_iway$G6_12 First AID Training Certificates.pdf$mmdi_iway$,
   $mmdi_iway$https://drive.google.com/file/d/1zZCC1iFEUNRcR6ZfDv9BSAGa2ENgQEPw/view?usp=drivesdk$mmdi_iway$,
   $mmdi_iway$application/pdf$mmdi_iway$,
   28228672,
-  NULL,
+  $mmdi_iway$First Aid Training Certificates.pdf -- a scanned collection of individual training certificates bearing accreditation badges (NEBOSH, British Safety Council, CILA, IOSH). Predominantly graphical/scanned content; minimal machine-extractable text beyond the accreditation body names, repeated across many certificate pages.$mmdi_iway$,
   now()
 )
 on conflict (source_url) do update set
@@ -345,14 +346,14 @@ on conflict (source_url) do update set
 insert into documents (title, summary, tags, category, file_name, source_url, mime_type, file_size_bytes, content_text, uploaded_at)
 values (
   $mmdi_iway$G6_9 Emergency Response Team$mmdi_iway$,
-  NULL,
+  $mmdi_iway$Emergency response team roster -- designated responsible official, emergency coordinators, emergency phone numbers, and the full list of First Aid trained employees by location/department.$mmdi_iway$,
   ARRAY[$mmdi_iway$G6.9$mmdi_iway$]::text[],
   $mmdi_iway$IKEA IWAY$mmdi_iway$,
   $mmdi_iway$G6_9 Emergency Response Team.pdf$mmdi_iway$,
   $mmdi_iway$https://drive.google.com/file/d/1CSqqDxy4O21pKeMC4MR9txDw6b22gwZO/view?usp=drivesdk$mmdi_iway$,
   $mmdi_iway$application/pdf$mmdi_iway$,
   69767,
-  NULL,
+  $mmdi_iway$EMERGENCY PERSONNEL NAMES AND PHONE NUMBERS. Designated Responsible Official: Srinivas Babu Nandipa, AGM-Operations, 9866078800. Emergency Coordinators: Sridhar Nandipa (Asst. Manager - Printing, 8341164105), SK. Fayaz (Asst. Manager - Printing, 8143880162). Emergency phone numbers: Fire Department 101, Paramedics 9849046887, Ambulance 102, Police 100. List of First Aid trained employees by location (Ground Floor Office, Production, Production 2, Post-production, Maintenance, First Floor Production) including Fayaz SK, Hassain Sha CK, Srinath V, Praveen Kumar S, Mahesh Kumar M, Jashwanth Reddy V, Hanumandlu M, Buchaiah Chowdary V, George K, Balaraj B, Srinivas Reddy M, Gowtham Krishna P, Mahamod Yakub, Naveen Kumar G, Murthy DVVKNSN, Srinivas B, Rajanikanth Reddy V, Jaipal S, Mahendar V, with contact numbers. Macromedia Digital Imaging Private Limited, 23B & 24, Phase 5, IDA-Cherlapally, Hyderabad-500051.$mmdi_iway$,
   now()
 )
 on conflict (source_url) do update set
@@ -363,14 +364,14 @@ on conflict (source_url) do update set
 insert into documents (title, summary, tags, category, file_name, source_url, mime_type, file_size_bytes, content_text, uploaded_at)
 values (
   $mmdi_iway$G1_^ Sub Supplier Audit documents$mmdi_iway$,
-  NULL,
-  ARRAY[]::text[],
+  $mmdi_iway$MMDI's Business Ethics Policy plus a sub-supplier ethical/sustainability audit report (Vision Security Services, July 2023) -- fully compliant across all checklist categories.$mmdi_iway$,
+  ARRAY[$mmdi_iway$G1.6$mmdi_iway$]::text[],
   $mmdi_iway$IKEA IWAY$mmdi_iway$,
   $mmdi_iway$G1_^ Sub Supplier Audit documents.pdf$mmdi_iway$,
   $mmdi_iway$https://drive.google.com/file/d/1JgTFxKRxNz3maz4n8FxwFeO3HVsBZJJV/view?usp=drivesdk$mmdi_iway$,
   $mmdi_iway$application/pdf$mmdi_iway$,
   3012158,
-  NULL,
+  $mmdi_iway$BUSINESS ETHICS POLICY: MMDI commits to elimination of child labour, protection of workers' freedom (association/collective bargaining), compliance with working hours/time off, ensuring minimum wages, safe occupational health and safety conditions, and minimizing environmental impacts. Sub-Supplier Audit: Supplier Vision Security Services, Bhavani Plaza, ECIL, Hyderabad, contact Mr. Ravi. Purpose: assess supplier compliance with MMDI's ethical/sustainable practices. Methodology: on-site inspection, document review, interviews, checklist assessment. Checklist categories (A-G: Business Ethics, Elimination of Child Labour, Protection of Workers' Freedom, Working Hours Compliance, Minimum Wages, Occupational Health & Safety, Environmental Impacts) -- all criteria marked Yes/compliant. Conclusion: meets required standards in all assessed areas, no improvement recommendations. Audited 01-07-2023.$mmdi_iway$,
   now()
 )
 on conflict (source_url) do update set
@@ -381,14 +382,14 @@ on conflict (source_url) do update set
 insert into documents (title, summary, tags, category, file_name, source_url, mime_type, file_size_bytes, content_text, uploaded_at)
 values (
   $mmdi_iway$G6_3 HEALTH AND SAFETY TRAINING RECORD$mmdi_iway$,
-  NULL,
+  $mmdi_iway$Health and safety training record (29 Jan 2024) covering risk management, safe work procedures, PPE, hazardous substance handling, and emergency procedures, with 10 attendee sign-offs.$mmdi_iway$,
   ARRAY[$mmdi_iway$G6.3$mmdi_iway$]::text[],
   $mmdi_iway$IKEA IWAY$mmdi_iway$,
   $mmdi_iway$G6_3 HEALTH AND SAFETY TRAINING RECORD.pdf$mmdi_iway$,
   $mmdi_iway$https://drive.google.com/file/d/1FKeMYbhalXXPHDWxYXosaiIFcYWBZq4e/view?usp=drivesdk$mmdi_iway$,
   $mmdi_iway$application/pdf$mmdi_iway$,
   69285,
-  NULL,
+  $mmdi_iway$MACRO MEDIA DIGITAL IMAGING PRIVATE LIMITED. Health and Safety Training Record. Date: 29th January 2024. Trainer: Srinivas Babu N. Topics: health and safety responsibilities, risk identification and management, incident recording/reporting, safe work procedures, safe use of plant/equipment, PPE use and maintenance, safe use/storage of hazardous substances (chemicals), emergency procedures (evacuation, emergency equipment), OOS (Occupational Overuse Syndrome) prevention, stress management, managing extreme behaviour, safe handling and lifting. Attendees (10): Nandipa Sridhar, Vogulam Raji Reddy, Vogulam Rajanikanth Reddy, Gundelly Narsimlu, Mangolu Pramod, Thallapalli Ashok, DVVK NSN Murthy, Kapalla Sathish, B Maheshwar, Gundlli Ramesh -- spanning Printing, Finishing, Operations, Stores departments, with signatures.$mmdi_iway$,
   now()
 )
 on conflict (source_url) do update set

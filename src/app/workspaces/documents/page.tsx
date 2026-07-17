@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { FileStack } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
-import { Tag } from "@/components/ui/Tag";
 import { Button } from "@/components/ui/Button";
 import { StatCard, AICard } from "@/components/ui/Card";
 import { DocumentPreview } from "@/components/ui/Viewers";
@@ -83,6 +82,16 @@ export default function DocumentsPage() {
   const visibleDocuments = documents?.filter((d) => categoryFilter === ALL || d.category === categoryFilter) ?? null;
   const categoryChips = [ALL, ...DOCUMENT_CATEGORIES];
 
+  // Real, computed stats from the live table -- no illustrative/mock numbers.
+  const totalCount = documents?.length ?? null;
+  const withFileCount = documents?.filter((d) => d.relative_path || d.source_url).length ?? null;
+  const supersededCount = documents?.filter((d) => d.superseded).length ?? null;
+  // Files that are linked/uploaded but not yet grounded for the AI Copilot
+  // (content_text still null) -- a genuine, useful signal rather than a
+  // placeholder insight.
+  const ungroundedCount =
+    documents?.filter((d) => (d.relative_path || d.source_url) && !d.content_text).length ?? null;
+
   return (
     <div>
       <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "Knowledge" }, { label: "Documents" }]} />
@@ -95,32 +104,24 @@ export default function DocumentsPage() {
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-xl font-semibold text-ink">Documents</h1>
-              <Badge status="info">2 pending review</Badge>
             </div>
             <p className="mt-0.5 text-sm text-ink-secondary">Knowledge — governed document library across all modules</p>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              <Tag aiSuggested>Quality Manual v3 has an unreviewed successor</Tag>
-            </div>
           </div>
         </div>
       </div>
 
       <div className="my-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard label="Total Documents" value="1,842" trend="up" trendLabel="+34 this month" />
-        <StatCard label="Pending Review" value="2" trend="flat" trendLabel="No change" />
-        <StatCard label="Superseded" value="126" trend="up" trendLabel="+6 this month" />
+        <StatCard label="Total Documents" value={totalCount === null ? "—" : totalCount.toLocaleString()} />
+        <StatCard label="With File Linked" value={withFileCount === null ? "—" : withFileCount.toLocaleString()} />
+        <StatCard label="Superseded" value={supersededCount === null ? "—" : supersededCount.toLocaleString()} />
       </div>
 
       <div className="flex flex-col gap-6">
-        <AICard
-          variant="insight"
-          title="Quality Manual v4 awaiting approval"
-          citation="Document Master, version control log"
-          onAccept={() => toast("success", "Reminder sent to reviewer")}
-          onDismiss={() => toast("info", "Dismissed")}
-        >
-          v4 has been in review for 8 days — longer than the typical 3-day review cycle for Tier 1 documents.
-        </AICard>
+        {ungroundedCount !== null && ungroundedCount > 0 && (
+          <AICard variant="insight" title="Documents pending AI grounding">
+            {ungroundedCount.toLocaleString()} linked document{ungroundedCount === 1 ? "" : "s"} still {ungroundedCount === 1 ? "doesn't" : "don't"} have extracted content, so the AI Copilot can browse and link them but can&apos;t answer questions from their contents yet.
+          </AICard>
+        )}
         <div className="flex flex-wrap gap-2">
           {categoryChips.map((c) => (
             <button
