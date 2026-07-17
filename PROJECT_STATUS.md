@@ -1831,3 +1831,23 @@ over what the code actually does again.
     localStorage, not a file that could be exported) — the 7 master tables
     ship pre-seeded with the same default catalogue the original tool
     shipped with, ready to edit via the new Masters tab.
+    ship pre-seeded with the same default catalogue the original tool
+    shipped with, ready to edit via the new Masters tab.
+
+52. Confirmed Sign Estimator is live in production.
+    Follow-up to item 51: the user ran supabase-sign-estimator-schema.sql in
+    the Supabase SQL Editor and pushed the code (commit 0293de7) —
+    /workspaces/sign-estimator is live. Also cleaned up two loose ends from
+    that handoff while updating this file and README.md: added
+    supabase-sign-estimator-schema.sql to the repo itself (it had only ever
+    been run directly in the SQL Editor, never committed — every other
+    schema/migration file in this repo lives at the repo root, so this
+    brought it in line with that convention), and re-verified counts across
+    the whole app for the README refresh below rather than estimating them
+    (46 routes total per `next build`'s own output, 31 real workspace pages
+    now that `project` is confirmed to be a pure redirect stub to
+    job-orders, and effectively all 31 are Supabase-backed — the only two
+    that don't import supabase.ts directly in their page.tsx, ai-copilot
+    and sign-estimator, are backed indirectly via the Copilot's API route
+    and sign-estimator's own tab subcomponents respectively). `npm run
+    build` and `npx eslint src` both still pass clean after these changes.

@@ -5,9 +5,14 @@
 Repo: [github.com/mahin-aeroai/EKMS](https://github.com/mahin-aeroai/EKMS)
 
 An AI-native enterprise operating platform for MMDI, built on top of a 42-component
-design system: 26 Intelligent Workspace modules covering the full MDI-ONE navigation
+design system: 31 Intelligent Workspace modules covering the full MDI-ONE navigation
 tree (Executive, Customers, Operations, Manufacturing, Knowledge, People, Finance,
-Compliance, Administration), 20 of which read/write real data from Supabase.
+Compliance, Administration), effectively all of which now read/write real data from
+Supabase (either directly, or through the AI Copilot's API route / a workspace's own
+tab subcomponents). Highlights beyond the core CRUD workspaces: an AI Copilot with
+16 grounded tools, a from-scratch soft-signage cost estimator (bin-packing, LED
+layout, GST-ready pricing) rebuilt from a standalone tool the team already used, and
+a searchable archive of 333 real site-survey PDFs backed by Cloudflare R2.
 
 **For a full status report — what's built, what's wired to real data, known gaps,
 and suggested next steps — see [`PROJECT_STATUS.md`](./PROJECT_STATUS.md).**
@@ -44,11 +49,13 @@ Users → Add user). There's no self-signup by design.
   every component live, grouped the same way as the Design System document
   (Inputs & Actions, Cards, Data & Structure, Navigation, Collaboration, Feedback &
   Overlays, AI-Native, Document & Media Viewers, Layout Primitives).
-- `src/app/workspaces/*` — 26 Intelligent Workspace modules. The four flagship ones
-  (`customer`, `machine`, `raw-material`, `project`) use the full 6-tab Universal
-  Workspace Pattern with a Server/Client component split; the rest are lighter
-  single-page modules. See `PROJECT_STATUS.md` for which are wired to Supabase vs
-  still sample data.
+- `src/app/workspaces/*` — 31 Intelligent Workspace modules (`project` is a redirect
+  stub pointing at `job-orders`, its real replacement). The flagship ones
+  (`customer`, `machine`, `raw-material`, `job-orders`) use the full 6-tab Universal
+  Workspace Pattern with a Server/Client component split; most others are lighter
+  single-page modules; `sign-estimator` is its own small multi-tab app (Estimator /
+  Masters / Cost Sheet / Dashboard / History) living entirely on one route. See
+  `PROJECT_STATUS.md` for the full build history of each.
 - `src/lib/supabase.ts` — the shared browser Supabase client and every workspace
   row-type definition. `src/lib/supabase-server.ts` is the equivalent for Server
   Components; `middleware.ts` + `src/lib/supabase-middleware.ts` refresh the auth
@@ -56,10 +63,11 @@ Users → Add user). There's no self-signup by design.
 
 ## Verified
 
-`npm run build` and `npm run lint` both pass clean, 0 lint errors. 36 routes total —
-static prerendering for the design-system pages and the lighter workspace modules,
-dynamic/force-rendered for the 4 flagship workspaces (which fetch live Supabase data
-server-side on every request).
+`npm run build` and `npm run lint` both pass clean, 0 lint errors. 46 routes total —
+static prerendering for the design-system pages and most workspace modules, dynamic/
+force-rendered for the workspaces that fetch live Supabase data server-side on every
+request (`customer/[code]`, `job-orders`, `machine`, `raw-material`), plus 2 API
+routes (`/api/ai-copilot`, `/api/lfg-surveys/signed-url`).
 
 ## Deployment
 
