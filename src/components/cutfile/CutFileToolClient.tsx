@@ -17,6 +17,7 @@ import { nestPieces, type NestResult } from "@/lib/cutfile/nesting";
 interface DotParams {
   bleedMm: number;
   dotDiameterMm: number;
+  dotHaloMm: number;
   marginMm: number;
   topCount: number;
   bottomCount: number;
@@ -27,6 +28,7 @@ interface DotParams {
 const DEFAULT_DOT_PARAMS: DotParams = {
   bleedMm: 14,
   dotDiameterMm: 6,
+  dotHaloMm: 2,
   marginMm: 4,
   topCount: 3,
   bottomCount: 3,
@@ -46,7 +48,13 @@ interface UploadedPiece {
   canvasWidthMm: number;
   canvasHeightMm: number;
   contentOffsetMm: number;
+  // The cut-contour used for BOTH nesting placement and the exported cut
+  // path. Defaults to a rectangle matching the full output canvas (design
+  // + bleed + dot zone + margin) — nesting must respect that whole area,
+  // not just the bare design — and stays in sync with that rectangle as
+  // layout parameters change, until the operator manually reshapes it.
   outline: Point[];
+  outlineIsDefault: boolean;
   quantity: number;
   rotations: number[];
 }
@@ -111,7 +119,8 @@ export default function CutFileToolClient() {
           canvasWidthMm: layout.canvasWidthMm,
           canvasHeightMm: layout.canvasHeightMm,
           contentOffsetMm: layout.contentOffsetMm,
-          outline: rectPolygon(loaded.widthMm, loaded.heightMm),
+          outline: rectPolygon(layout.canvasWidthMm, layout.canvasHeightMm),
+          outlineIsDefault: true,
           quantity: 1,
           rotations: [0, 90, 180, 270],
         };
@@ -138,6 +147,11 @@ export default function CutFileToolClient() {
       canvasWidthMm: layout.canvasWidthMm,
       canvasHeightMm: layout.canvasHeightMm,
       contentOffsetMm: layout.contentOffsetMm,
+      // Keep the default rectangle outline (used for nesting + the cut
+      // path) matched to the new canvas size, unless the operator has
+      // manually reshaped it — a manual edit should survive a parameter
+      // tweak rather than getting silently overwritten.
+      outline: piece.outlineIsDefault ? rectPolygon(layout.canvasWidthMm, layout.canvasHeightMm) : piece.outline,
     });
   }
 
@@ -150,6 +164,8 @@ export default function CutFileToolClient() {
         contentOffsetMm: piece.contentOffsetMm,
         dots: piece.dots,
         dotDiameterMm: piece.dotParams.dotDiameterMm,
+        dotHaloMm: piece.dotParams.dotHaloMm,
+        outline: piece.outline,
       });
       downloadBlob(blob, piece.fileName.replace(/\.pdf$/i, "") + "_bleed_dots.pdf");
       toast("success", "Exported — download started");
@@ -205,8 +221,15 @@ export default function CutFileToolClient() {
         sheetWidthMm: nestResult.sheetWidthMm,
         sheetHeightMm: nestResult.sheetHeightMm,
         placements: nestResult.placements,
-        sources: pieces.map((p) => ({ pieceId: p.id, bytes: p.bytes })),
-        pieceOriginMm: Object.fromEntries(pieces.map((p) => [p.id, { x: 0, y: 0 }])),
+        sources: pieces.map((p) => ({
+          pieceId: p.id,
+          bytes: p.bytes,
+          outline: p.outline,
+          contentOffsetMm: { x: p.contentOffsetMm, y: p.contentOffsetMm },
+          dots: p.dots,
+          dotDiameterMm: p.dotParams.dotDiameterMm,
+          dotHaloMm: p.dotParams.dotHaloMm,
+        })),
       });
       downloadBlob(blob, "nested_sheet.pdf");
       toast("success", "Exported nested sheet — download started");
@@ -296,8 +319,9 @@ export default function CutFileToolClient() {
                           <p className="text-xs text-ink-secondary">
                             Trim size detected: {selected.widthMm.toFixed(1)} × {selected.heightMm.toFixed(1)} mm
                           </p>
-                          <NumberField label="Bleed (mm)" value={selected.dotParams.bleedMm} onChange={(v) => updatePiece(selected.id, { dotParams: { ...selected.dotParams, bleedMm: v } })} />
+                          <NumberField label="Bleed already in file (mm, reference only)" value={selected.dotParams.bleedMm} onChange={(v) => updatePiece(selected.id, { dotParams: { ...selected.dotParams, bleedMm: v } })} />
                           <NumberField label="Dot diameter (mm)" value={selected.dotParams.dotDiameterMm} onChange={(v) => updatePiece(selected.id, { dotParams: { ...selected.dotParams, dotDiameterMm: v } })} />
+                          <NumberField label="White halo under dot (mm)" value={selected.dotParams.dotHaloMm} onChange={(v) => updatePiece(selected.id, { dotParams: { ...selected.dotParams, dotHaloMm: v } })} />
                           <NumberField label="Extra margin beyond dot (mm)" value={selected.dotParams.marginMm} onChange={(v) => updatePiece(selected.id, { dotParams: { ...selected.dotParams, marginMm: v } })} />
                           <div className="grid grid-cols-2 gap-2">
                             <NumberField label="Top dots" value={selected.dotParams.topCount} onChange={(v) => updatePiece(selected.id, { dotParams: { ...selected.dotParams, topCount: v } })} />
@@ -326,6 +350,8 @@ export default function CutFileToolClient() {
                           contentHeightMm={selected.heightMm}
                           previewDataUrl={selected.previewDataUrl}
                           dotDiameterMm={selected.dotParams.dotDiameterMm}
+                          dotHaloMm={selected.dotParams.dotHaloMm}
+                          bleedMm={selected.dotParams.bleedMm}
                           dots={selected.dots}
                           onChange={(dots) => updatePiece(selected.id, { dots })}
                         />
@@ -372,7 +398,8 @@ export default function CutFileToolClient() {
                           <div key={p.id} className="rounded-lg border border-line bg-surface p-3">
                             <p className="mb-1 truncate text-sm font-medium text-ink">{p.fileName}</p>
                             <p className="mb-2 text-xs text-ink-secondary">
-                              {p.widthMm.toFixed(1)} × {p.heightMm.toFixed(1)} mm
+                              Design {p.widthMm.toFixed(1)} × {p.heightMm.toFixed(1)} mm · nested unit{" "}
+                              {p.canvasWidthMm.toFixed(1)} × {p.canvasHeightMm.toFixed(1)} mm (incl. bleed zone + dots)
                             </p>
                             <div className="mb-2 flex items-center gap-2">
                               <label className="text-xs text-ink-secondary">Qty</label>
@@ -406,11 +433,14 @@ export default function CutFileToolClient() {
                               <summary className="cursor-pointer text-xs text-primary">Edit cut outline</summary>
                               <div className="mt-2">
                                 <OutlineCanvas
-                                  widthMm={p.widthMm}
-                                  heightMm={p.heightMm}
+                                  canvasWidthMm={p.canvasWidthMm}
+                                  canvasHeightMm={p.canvasHeightMm}
+                                  contentOffsetMm={p.contentOffsetMm}
+                                  contentWidthMm={p.widthMm}
+                                  contentHeightMm={p.heightMm}
                                   previewDataUrl={p.previewDataUrl}
                                   outline={p.outline}
-                                  onChange={(outline) => updatePiece(p.id, { outline })}
+                                  onChange={(outline) => updatePiece(p.id, { outline, outlineIsDefault: false })}
                                 />
                               </div>
                             </details>
@@ -421,7 +451,10 @@ export default function CutFileToolClient() {
 
                     <div className="flex-1">
                       {nestResult ? (
-                        <NestPreview result={nestResult} />
+                        <NestPreview
+                          result={nestResult}
+                          onChange={(placements) => setNestResult((prev) => (prev ? { ...prev, placements } : prev))}
+                        />
                       ) : (
                         <div className="rounded-lg border border-line bg-surface p-10 text-center text-sm text-ink-muted">
                           Set your material size and quantities, then run nesting to see the layout here.

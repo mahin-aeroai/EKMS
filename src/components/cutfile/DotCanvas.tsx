@@ -19,6 +19,8 @@ export function DotCanvas({
   contentHeightMm,
   previewDataUrl,
   dotDiameterMm,
+  dotHaloMm = 0,
+  bleedMm = 0,
   dots,
   onChange,
 }: {
@@ -29,6 +31,9 @@ export function DotCanvas({
   contentHeightMm: number;
   previewDataUrl: string | null;
   dotDiameterMm: number;
+  dotHaloMm?: number;
+  /** How much of the uploaded page's own outer edge is bleed — reference only, draws a dashed trim line inset from the content edge. */
+  bleedMm?: number;
   dots: DotSpec[];
   onChange: (dots: DotSpec[]) => void;
 }) {
@@ -97,7 +102,7 @@ export function DotCanvas({
           />
         )}
 
-        {/* Content boundary (trim + the original file's own bleed) */}
+        {/* Content boundary (the original uploaded page, trim + its own bleed, unchanged) */}
         <rect
           x={contentOffsetMm}
           y={canvasHeightMm - contentOffsetMm - contentHeightMm}
@@ -109,19 +114,45 @@ export function DotCanvas({
           strokeWidth={canvasWidthMm / 1000}
         />
 
-        {/* Dots */}
-        {dots.map((d) => (
-          <circle
-            key={d.id}
-            cx={d.x}
-            cy={canvasHeightMm - d.y}
-            r={radiusMm}
-            fill="black"
-            stroke={draggingId === d.id ? "#EF4444" : "white"}
-            strokeWidth={radiusMm * 0.25}
-            onPointerDown={(e) => handlePointerDown(d.id, e)}
-            style={{ cursor: "grab" }}
+        {/* Trim reference line — inset from the content edge by the declared bleed, informational only */}
+        {bleedMm > 0 && (
+          <rect
+            x={contentOffsetMm + bleedMm}
+            y={canvasHeightMm - contentOffsetMm - contentHeightMm + bleedMm}
+            width={Math.max(0, contentWidthMm - 2 * bleedMm)}
+            height={Math.max(0, contentHeightMm - 2 * bleedMm)}
+            fill="none"
+            stroke="#F59E0B"
+            strokeDasharray={`${canvasWidthMm / 250} ${canvasWidthMm / 250}`}
+            strokeWidth={canvasWidthMm / 1200}
           />
+        )}
+
+        {/* Dots — white halo drawn first so it sits underneath the black dot,
+            matching the exported PDF (see pdfIO.ts drawDot) */}
+        {dots.map((d) => (
+          <g key={d.id}>
+            {dotHaloMm > 0 && (
+              <circle
+                cx={d.x}
+                cy={canvasHeightMm - d.y}
+                r={radiusMm + dotHaloMm}
+                fill="white"
+                stroke="#D1D5DB"
+                strokeWidth={canvasWidthMm / 1500}
+              />
+            )}
+            <circle
+              cx={d.x}
+              cy={canvasHeightMm - d.y}
+              r={radiusMm}
+              fill="black"
+              stroke={draggingId === d.id ? "#EF4444" : "white"}
+              strokeWidth={radiusMm * 0.25}
+              onPointerDown={(e) => handlePointerDown(d.id, e)}
+              style={{ cursor: "grab" }}
+            />
+          </g>
         ))}
       </svg>
     </div>

@@ -5,27 +5,38 @@ import type { Point } from "@/lib/cutfile/geometry";
 
 /**
  * Editable cut-contour outline for a single piece, drawn over its preview.
- * Defaults to a rectangle matching the page's own trim size, but every
- * vertex can be dragged, edge midpoints can be clicked to insert a new
- * vertex, and a vertex can be double-clicked to remove it (min 3 points) —
- * this is how "move around based on design shape" gets handled without
- * needing perfect automatic contour detection from the PDF.
+ * This is the shape the nesting engine actually packs and the shape drawn
+ * as the cut path in exports — so it's defined over the FULL output canvas
+ * (design + bleed + dot zone + margin), the same frame DotCanvas uses, not
+ * just the bare design. Every vertex can be dragged, edge midpoints can be
+ * clicked to insert a new vertex, and a vertex can be double-clicked to
+ * remove it (min 3 points) — this is how "move around based on design
+ * shape" gets handled without needing perfect automatic contour detection
+ * from the PDF.
  */
 export function OutlineCanvas({
-  widthMm,
-  heightMm,
+  canvasWidthMm,
+  canvasHeightMm,
+  contentOffsetMm,
+  contentWidthMm,
+  contentHeightMm,
   previewDataUrl,
   outline,
   onChange,
 }: {
-  widthMm: number;
-  heightMm: number;
+  canvasWidthMm: number;
+  canvasHeightMm: number;
+  contentOffsetMm: number;
+  contentWidthMm: number;
+  contentHeightMm: number;
   previewDataUrl: string | null;
   outline: Point[];
   onChange: (outline: Point[]) => void;
 }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
+  const widthMm = canvasWidthMm;
+  const heightMm = canvasHeightMm;
   const viewBox = `0 0 ${widthMm} ${heightMm}`;
 
   function screenToMm(clientX: number, clientY: number): Point {
@@ -82,7 +93,15 @@ export function OutlineCanvas({
       >
         <rect x={0} y={0} width={widthMm} height={heightMm} fill="white" stroke="#D1D5DB" strokeWidth={widthMm / 800} />
         {previewDataUrl && (
-          <image href={previewDataUrl} x={0} y={0} width={widthMm} height={heightMm} preserveAspectRatio="none" opacity={0.85} />
+          <image
+            href={previewDataUrl}
+            x={contentOffsetMm}
+            y={canvasHeightMm - contentOffsetMm - contentHeightMm}
+            width={contentWidthMm}
+            height={contentHeightMm}
+            preserveAspectRatio="none"
+            opacity={0.85}
+          />
         )}
 
         <path d={pathD} fill="rgba(37,99,235,0.12)" stroke="#2563EB" strokeWidth={widthMm / 500} />

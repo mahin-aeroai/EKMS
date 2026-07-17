@@ -24,6 +24,12 @@ export interface DotSpec {
 }
 
 export interface DotLayoutParams {
+  // Full size of the UPLOADED page, as-is. Production art in this workflow
+  // is delivered already including its own bleed (e.g. a "4100x1100 with
+  // 14mm bleed" file is a 4128x1128mm page) — this function does not add a
+  // second, independent bleed margin on top of that. `bleedMm` below is
+  // purely informational (used to draw a trim reference line) and never
+  // changes canvas size or content placement — see the bug this fixed.
   trimWidthMm: number;
   trimHeightMm: number;
   bleedMm: number;
@@ -38,21 +44,30 @@ export interface DotLayoutParams {
 export interface DotLayoutResult {
   canvasWidthMm: number;
   canvasHeightMm: number;
-  contentOffsetMm: number; // how far in from the new canvas edge the original trim+bleed content is placed
+  contentOffsetMm: number; // how far in from the new canvas edge the original (already bleed-inclusive) content is placed
   dots: DotSpec[];
 }
 
 /**
- * Computes the default (auto) dot layout: original design (trim + its own
- * bleed) is centered on a larger canvas that adds a dot zone + clear margin
- * on every side. Dots are placed at the center of the dot zone unless the
- * user drags them elsewhere afterward (see DotSpec — these are just the
- * starting positions).
+ * Computes the default (auto) dot layout: the original uploaded page —
+ * already trim + its own bleed, untouched — is centered on a larger canvas
+ * that adds only a dot zone + clear margin on every side. Dots are placed
+ * at the center of the dot zone unless the user drags them elsewhere
+ * afterward (see DotSpec — these are just the starting positions).
+ *
+ * IMPORTANT: `bleedMm` is NOT added into the canvas size here. Earlier this
+ * function treated the incoming width/height as a bare trim size and added
+ * bleedMm on top of it — but the incoming size is actually the uploaded
+ * PDF's full page, which already includes its bleed. Adding bleedMm again
+ * inflated the canvas and shifted the content off-center (reported by the
+ * user as the design "going down" in the exported PDF). `bleedMm` is kept
+ * on the params only so the UI can draw a dashed trim-reference line inset
+ * from the content edge.
  */
 export function computeDotLayout(params: DotLayoutParams): DotLayoutResult {
-  const { trimWidthMm, trimHeightMm, bleedMm, dotDiameterMm, marginMm, topCount, bottomCount, leftCount, rightCount } = params;
+  const { trimWidthMm, trimHeightMm, dotDiameterMm, marginMm, topCount, bottomCount, leftCount, rightCount } = params;
   const dotZoneMm = dotDiameterMm; // the band the dot occupies, one diameter wide
-  const sideExtraMm = bleedMm + dotZoneMm + marginMm;
+  const sideExtraMm = dotZoneMm + marginMm;
 
   const canvasWidthMm = trimWidthMm + 2 * sideExtraMm;
   const canvasHeightMm = trimHeightMm + 2 * sideExtraMm;
@@ -76,7 +91,7 @@ export function computeDotLayout(params: DotLayoutParams): DotLayoutResult {
   distributeInterior(leftCount, bottomY, topY).forEach((y) => dots.push({ id: `d${n++}`, x: leftX, y }));
   distributeInterior(rightCount, bottomY, topY).forEach((y) => dots.push({ id: `d${n++}`, x: rightX, y }));
 
-  return { canvasWidthMm, canvasHeightMm, contentOffsetMm: sideExtraMm - bleedMm, dots };
+  return { canvasWidthMm, canvasHeightMm, contentOffsetMm: sideExtraMm, dots };
 }
 
 function distributeInclusive(count: number, from: number, to: number): number[] {

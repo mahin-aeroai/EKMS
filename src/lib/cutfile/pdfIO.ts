@@ -4,9 +4,64 @@
 "use client";
 
 import * as pdfjsLib from "pdfjs-dist";
-import { PDFDocument, degrees, rgb } from "pdf-lib";
-import { mmToPt, ptToMm, type Point, type DotSpec } from "./geometry";
+import {
+  PDFDocument,
+  type PDFPage,
+  degrees,
+  rgb,
+  pushGraphicsState,
+  popGraphicsState,
+  moveTo,
+  lineTo,
+  closePath,
+  stroke,
+  setLineWidth,
+  setStrokingColor,
+  setDashPattern,
+} from "pdf-lib";
+import { mmToPt, ptToMm, rotatePolygon, type Point, type DotSpec } from "./geometry";
 import type { NestPlacement } from "./nesting";
+
+/**
+ * Draws a closed polygon as a thin stroked vector line — the actual cut
+ * path a machine like a Zund table follows, as opposed to the rasterized
+ * artwork underneath it. Uses pdf-lib's raw content-stream operators
+ * (rather than drawSvgPath, which expects SVG's y-down convention and
+ * would need every point flipped) so the incoming points can be handed
+ * over directly in the same y-up mm space used everywhere else in this
+ * tool. Bright magenta by default — a common stand-in for a dedicated
+ * "CutContour" spot color, which pdf-lib can't create directly.
+ */
+function drawCutPath(page: PDFPage, outlineMm: Point[], color = rgb(1, 0, 1), lineWidthMm = 0.25) {
+  if (outlineMm.length < 2) return;
+  page.pushOperators(
+    pushGraphicsState(),
+    setStrokingColor(color),
+    setLineWidth(mmToPt(lineWidthMm)),
+    setDashPattern([], 0),
+    moveTo(mmToPt(outlineMm[0].x), mmToPt(outlineMm[0].y)),
+    ...outlineMm.slice(1).map((p) => lineTo(mmToPt(p.x), mmToPt(p.y))),
+    closePath(),
+    stroke(),
+    popGraphicsState()
+  );
+}
+
+/**
+ * Draws one cut-registration dot: a white halo (so the mark stays visible
+ * to the operator when the material is flipped for cutting from the
+ * reverse side on a Zund table) with the black dot on top. Order matters —
+ * PDF content paints in the order it's issued, so the white circle is
+ * drawn first and the black circle over it.
+ */
+function drawDot(page: PDFPage, xMm: number, yMm: number, dotDiameterMm: number, haloMm: number) {
+  const xPt = mmToPt(xMm);
+  const yPt = mmToPt(yMm);
+  if (haloMm > 0) {
+    page.drawCircle({ x: xPt, y: yPt, size: mmToPt(dotDiameterMm / 2 + haloMm), color: rgb(1, 1, 1) });
+  }
+  page.drawCircle({ x: xPt, y: yPt, size: mmToPt(dotDiameterMm / 2), color: rgb(0, 0, 0) });
+}
 
 let workerConfigured = false;
 function ensureWorker() {
@@ -74,8 +129,11 @@ export async function buildDotPlacementPdf(opts: {
   contentOffsetMm: number;
   dots: DotSpec[];
   dotDiameterMm: number;
+  dotHaloMm?: number; // white halo width around each black dot, default 2mm
+  outline?: Point[]; // optional cut-contour, in the same canvas-local mm frame as `dots`
 }): Promise<Blob> {
-  const { originalBytes, canvasWidthMm, canvasHeightMm, contentOffsetMm, dots, dotDiameterMm } = opts;
+  const { originalBytes, canvasWidthMm, canvasHeightMm, contentOffsetMm, dots, dotDiameterMm, outline } = opts;
+  const haloMm = opts.dotHaloMm ?? 2;
 
   const outDoc = await PDFDocument.create();
   const [embedded] = await outDoc.embedPdf(originalBytes, [0]);
@@ -86,14 +144,12 @@ export async function buildDotPlacementPdf(opts: {
     y: mmToPt(contentOffsetMm),
   });
 
-  const radiusPt = mmToPt(dotDiameterMm / 2);
   for (const dot of dots) {
-    page.drawCircle({
-      x: mmToPt(dot.x),
-      y: mmToPt(dot.y),
-      size: radiusPt,
-      color: rgb(0, 0, 0),
-    });
+    drawDot(page, dot.x, dot.y, dotDiameterMm, haloMm);
+  }
+
+  if (outline && outline.length >= 3) {
+    drawCutPath(page, outline);
   }
 
   const bytes = await outDoc.save();
@@ -103,43 +159,85 @@ export async function buildDotPlacementPdf(opts: {
 export interface NestSourceFile {
   pieceId: string;
   bytes: ArrayBuffer;
+  // The SAME local outline array that was passed into nestPieces() for this
+  // piece (the un-rotated, un-translated cut-contour, in canvas-local mm —
+  // i.e. the piece's own bottom-left-origin frame that also anchors
+  // contentOffsetMm and dots below). Needed to recover exactly how nesting
+  // rotated + translated this piece, so the design and dots can be placed
+  // as one rigid body consistent with placement.outline, without having to
+  // assume anything about nesting.ts's internal normalization math.
+  outline: Point[];
+  contentOffsetMm: Point; // where the original PDF page sits inside the canvas-local frame
+  dots: DotSpec[]; // in the same canvas-local frame
+  dotDiameterMm: number;
+  dotHaloMm?: number;
 }
 
 /**
  * Builds the combined nested-sheet PDF: one blank page at the material
  * size, with each placed piece's ORIGINAL page content embedded at its
- * nested position and rotation (full original resolution preserved).
+ * nested position and rotation (full original resolution preserved),
+ * PLUS that piece's cut dots (white halo + black) and a stroked cut-path
+ * following its outline — all three move together as one rigid body per
+ * placement, since a nested unit is the full design + bleed + dot zone +
+ * margin, not just the bare design.
  */
 export async function buildNestedSheetPdf(opts: {
   sheetWidthMm: number;
   sheetHeightMm: number;
   placements: NestPlacement[];
   sources: NestSourceFile[];
-  pieceOriginMm: Record<string, Point>; // each piece's outline-space (0,0) in ITS OWN page's bottom-left mm coords — normally {x:0,y:0}
+  drawCutPaths?: boolean; // default true
 }): Promise<Blob> {
   const { sheetWidthMm, sheetHeightMm, placements, sources } = opts;
+  const drawCutPaths = opts.drawCutPaths ?? true;
   const outDoc = await PDFDocument.create();
   const page = outDoc.addPage([mmToPt(sheetWidthMm), mmToPt(sheetHeightMm)]);
 
   const embeddedByPiece = new Map<string, Awaited<ReturnType<typeof outDoc.embedPdf>>[number]>();
+  const sourceByPiece = new Map<string, NestSourceFile>();
   for (const src of sources) {
     const [embedded] = await outDoc.embedPdf(src.bytes, [0]);
     embeddedByPiece.set(src.pieceId, embedded);
+    sourceByPiece.set(src.pieceId, src);
   }
 
   for (const placement of placements) {
     const embedded = embeddedByPiece.get(placement.pieceId);
-    if (!embedded) continue;
-    // placement.x/y is the translation applied AFTER rotating the outline
-    // about its own local origin and normalizing to non-negative bounds —
-    // see nesting.ts. pdf-lib's drawPage rotates the embedded page about
-    // (x,y) using the SAME convention (rotate about local origin, then
-    // translate to x,y), so we can pass the values straight through.
+    const src = sourceByPiece.get(placement.pieceId);
+    if (!embedded || !src || placement.outline.length === 0 || src.outline.length === 0) continue;
+
+    // Recover the piece's actual rotate+translate transform empirically:
+    // rotate the piece's own local outline by the placement's rotation and
+    // compare its first vertex to the corresponding vertex nesting.ts
+    // already placed on the sheet (placement.outline). The difference is a
+    // constant translation for this placement — apply that same
+    // rotate-then-translate to any other local-frame point (the design's
+    // content offset, each dot center) to keep everything rigidly attached.
+    const rot = placement.rotationDeg;
+    const rotatedLocalOutline = rotatePolygon(src.outline, rot);
+    const constX = placement.outline[0].x - rotatedLocalOutline[0].x;
+    const constY = placement.outline[0].y - rotatedLocalOutline[0].y;
+    const toSheet = (p: Point): Point => {
+      const [r] = rotatePolygon([p], rot);
+      return { x: r.x + constX, y: r.y + constY };
+    };
+
+    const designPos = toSheet(src.contentOffsetMm);
     page.drawPage(embedded, {
-      x: mmToPt(placement.x),
-      y: mmToPt(placement.y),
-      rotate: degrees(placement.rotationDeg),
+      x: mmToPt(designPos.x),
+      y: mmToPt(designPos.y),
+      rotate: degrees(rot),
     });
+
+    for (const dot of src.dots) {
+      const dp = toSheet({ x: dot.x, y: dot.y });
+      drawDot(page, dp.x, dp.y, src.dotDiameterMm, src.dotHaloMm ?? 2);
+    }
+
+    if (drawCutPaths) {
+      drawCutPath(page, placement.outline);
+    }
   }
 
   const bytes = await outDoc.save();
