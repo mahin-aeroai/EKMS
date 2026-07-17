@@ -5,6 +5,7 @@ import { ListChecks } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { Tag } from "@/components/ui/Tag";
+import { Button } from "@/components/ui/Button";
 import { StatCard, AICard } from "@/components/ui/Card";
 import { DocumentPreview } from "@/components/ui/Viewers";
 import { Timeline } from "@/components/ui/Timeline";
@@ -14,6 +15,7 @@ import { supabase, type SopRow } from "@/lib/supabase";
 export default function SOPsPage() {
   const { toast } = useToast();
   const [sops, setSops] = useState<SopRow[] | null>(null);
+  const [openingId, setOpeningId] = useState<string | null>(null);
 
   useEffect(() => {
     supabase
@@ -28,6 +30,21 @@ export default function SOPsPage() {
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function openFile(row: SopRow) {
+    if (!row.relative_path) return;
+    setOpeningId(row.id);
+    try {
+      const res = await fetch(`/api/knowledge-files/signed-url?table=sops&path=${encodeURIComponent(row.relative_path)}`);
+      const json = await res.json();
+      if (!res.ok || !json.url) throw new Error(json.message ?? "Couldn't get a link to this file");
+      window.open(json.url, "_blank", "noopener,noreferrer");
+    } catch {
+      toast("danger", "Couldn't open this SOP");
+    } finally {
+      setOpeningId(null);
+    }
+  }
 
   return (
     <div>
@@ -73,7 +90,14 @@ export default function SOPsPage() {
           ) : (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               {sops.map((s) => (
-                <DocumentPreview key={s.id} title={s.title} summary={s.summary ?? ""} tags={s.tags} />
+                <div key={s.id} className="flex flex-col gap-2">
+                  <DocumentPreview title={s.title} summary={s.summary ?? ""} tags={s.tags} />
+                  {s.relative_path && (
+                    <Button variant="secondary" size="sm" loading={openingId === s.id} onClick={() => openFile(s)}>
+                      View file{s.file_size_bytes ? ` (${(s.file_size_bytes / 1024 / 1024).toFixed(1)} MB)` : ""}
+                    </Button>
+                  )}
+                </div>
               ))}
             </div>
           )}

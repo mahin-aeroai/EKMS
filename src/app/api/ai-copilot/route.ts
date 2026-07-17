@@ -63,6 +63,8 @@ Sales by rep, with all their customers, for a period: there's now a dedicated wo
 
 Apple LFG sites, Apple rate card, IKEA rate card (contract/spec data, NOT invoiced sales): three new tools cover this. search_lfg_sites covers Apple's LFG (large-format graphics) site catalog -- one row per physical retail site with its material/size/rate spec, installation team, address, AND installation cost detail including scaffolding (852 sites total across 9 programs/chains: APP, APR, Mono AAR, Multi AAR, Reliance, Vijay Sales, Wireless Chain, Croma, Croma (Hold)) -- use this for "what material/size/rate is specified at site X" AND "does site X need scaffolding" / "what's the installation cost at site X" questions, reading the scaffolding/installation_amount/total_installation_amount fields directly rather than guessing. The Croma tab specifically has no address/installation/scaffolding data recorded (NULL, not "No") -- say so plainly if asked about a Croma site's installation detail. search_apple_rate_card and search_ikea_rate_card cover each customer's approved SKU/product-level rate card (117 Apple SKUs, 51 IKEA products) with contract pricing, cost breakdown (Apple only), and validity dates (Apple only) -- use these for "what's the approved/contract rate for X" questions. IMPORTANT: these three tools are reference/contract data, not a record of what was actually billed -- if someone asks what MMDI actually charged/sold, use sales_summary/search_sale_items instead, and don't conflate a contract rate with an invoiced rate even for the same product (they can differ). Site survey PDF reports for LFG sites: use find_site_survey to check whether one exists for a given site (matches store name/chain/Apple ID). It can only confirm existence and give a file name -- it CANNOT show or read the PDF's contents, since chat is text-only. To actually view the original PDF, point the person to the Site Surveys workspace page (/workspaces/site-surveys, under the Customers nav section) where they can search and open it directly -- don't guess at what's inside a survey even if asked directly.
 
+Knowledge base (Documents, Drawings, SOPs): use search_knowledge_base for questions about company documents, engineering drawings, or standard operating procedures -- it searches title/tags/category AND, for files that have been uploaded with real content, the actual extracted text (content_snippet in the result), so it can answer "what does X say about Y" style questions, not just confirm a document exists. Rows without content_text (older illustrative entries) will only match on title/tags and return no snippet -- say so rather than implying you read something you didn't. This tool never returns the full file, only a short excerpt -- for the real file, point the person to /workspaces/documents, /workspaces/drawings, or /workspaces/sops (Knowledge nav section) and the "View file" button on the matching row.
+
 Formatting: the chat UI renders your reply as plain text only — no markdown. Never use markdown tables (| pipes |), headers (#), or bold (**). For lists, use a simple numbered or dashed list with one item per line, or short plain sentences. Keep it readable as plain prose.
 
 Totals: when search_customers or search_job_orders returns more matches than the detail list shows, use the tool's own total_* aggregate fields for any sum/total the person asks for — never add up just the visible detail rows yourself, since that list is capped and may exclude the largest matches (it's sorted by value, but a common search term can still match more records than fit in the list).`;
@@ -243,6 +245,19 @@ const TOOLS: Tool[] = [
       type: "object",
       properties: {
         query: { type: "string", description: "Text to search for in store name, chain, or Apple store ID" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "search_knowledge_base",
+    description: "Search MMDI's Knowledge module -- Documents, Drawings, and SOPs (Standard Operating Procedures) -- by matching against title, tags, category, AND the file's extracted text content where available (content_text), so this can actually answer questions ABOUT what's inside a document/drawing/SOP, not just confirm it exists. Only files uploaded via the real file-storage pipeline (upload-knowledge-files.mjs) have content_text populated; older illustrative rows may match only on title/tags and return no content snippet. Use module to narrow to one of the three, or 'all' to search across all three at once. This tool returns short text snippets, not the full document -- to view or download the original file, point the person to the matching workspace page (/workspaces/documents, /workspaces/drawings, or /workspaces/sops, all under the Knowledge nav section), where a 'View file' button opens the real file if one is attached.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Text to search for in title, tags, category, or file content" },
+        module: { type: "string", enum: ["documents", "drawings", "sops", "all"], description: "Which Knowledge table to search (default 'all')" },
+        limit: { type: "number", description: "Max results per module (default 10, max 50)" },
       },
       required: ["query"],
     },
@@ -780,6 +795,54 @@ async function executeToolCall(
         note: "This tool only confirms a survey PDF exists -- it cannot display or read the PDF's contents. Direct the person to /workspaces/site-surveys to actually view it.",
       };
       return { result, citation: data?.length ? `Site survey search: "${query}" (${data.length} matches)` : undefined };
+    }
+    case "search_knowledge_base": {
+      const query = String(input.query ?? "");
+      const moduleFilter = typeof input.module === "string" ? input.module : "all";
+      const limit = Math.min(Math.max(typeof input.limit === "number" ? Math.floor(input.limit) : 10, 1), 50);
+      const tables = moduleFilter === "all" ? (["documents", "drawings", "sops"] as const) : ([moduleFilter] as const);
+
+      const SNIPPET_RADIUS = 200;
+      function snippet(text: string | null, q: string): string | null {
+        if (!text) return null;
+        const idx = text.toLowerCase().indexOf(q.toLowerCase());
+        if (idx === -1) return text.slice(0, SNIPPET_RADIUS * 2).trim() + (text.length > SNIPPET_RADIUS * 2 ? "..." : "");
+        const start = Math.max(0, idx - SNIPPET_RADIUS);
+        const end = Math.min(text.length, idx + q.length + SNIPPET_RADIUS);
+        return (start > 0 ? "..." : "") + text.slice(start, end).trim() + (end < text.length ? "..." : "");
+      }
+
+      const perTable = await Promise.all(
+        tables.map(async (table) => {
+          const filter = `title.ilike.%${query}%,category.ilike.%${query}%,content_text.ilike.%${query}%`;
+          const { data, error } = await supabase.from(table).select("*").or(filter).limit(limit);
+          if (error) return { table, error: error.message, matches: [] as Record<string, unknown>[] };
+          const matches = (data ?? []).map((row) => {
+            const r = row as Record<string, unknown>;
+            return {
+              id: r.id,
+              title: r.title ?? r.number,
+              category: r.category ?? null,
+              tags: r.tags ?? null,
+              has_file: !!(r.relative_path || r.source_url),
+              file_name: r.file_name ?? null,
+              content_snippet: snippet((r.content_text as string | null) ?? null, query),
+            };
+          });
+          return { table, matches };
+        })
+      );
+
+      const totalMatches = perTable.reduce((sum, t) => sum + t.matches.length, 0);
+      const result = {
+        total_matches: totalMatches,
+        by_module: Object.fromEntries(perTable.map((t) => [t.table, t.matches])),
+        note: "content_snippet is an excerpt, not the full file. To view/download the original, direct the person to /workspaces/documents, /workspaces/drawings, or /workspaces/sops (Knowledge nav section) and use the 'View file' button on the matching row.",
+      };
+      return {
+        result,
+        citation: totalMatches ? `Knowledge base search: "${query}" across ${tables.join(", ")} (${totalMatches} matches)` : undefined,
+      };
     }
     default:
       return { result: { error: `Unknown tool: ${name}` } };

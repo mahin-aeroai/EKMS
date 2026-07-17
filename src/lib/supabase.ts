@@ -351,6 +351,14 @@ export interface DocumentRow {
   summary: string | null;
   tags: string[];
   superseded: boolean;
+  category: string | null;
+  file_name: string | null;
+  relative_path: string | null;
+  source_url: string | null;
+  file_size_bytes: number | null;
+  mime_type: string | null;
+  content_text: string | null;
+  uploaded_at: string | null;
 }
 
 export interface DrawingRow {
@@ -359,6 +367,14 @@ export interface DrawingRow {
   title: string;
   status: BadgeStatus;
   status_label: string | null;
+  category: string | null;
+  file_name: string | null;
+  relative_path: string | null;
+  source_url: string | null;
+  file_size_bytes: number | null;
+  mime_type: string | null;
+  content_text: string | null;
+  uploaded_at: string | null;
 }
 
 export interface SopRow {
@@ -366,6 +382,14 @@ export interface SopRow {
   title: string;
   summary: string | null;
   tags: string[];
+  category: string | null;
+  file_name: string | null;
+  relative_path: string | null;
+  source_url: string | null;
+  file_size_bytes: number | null;
+  mime_type: string | null;
+  content_text: string | null;
+  uploaded_at: string | null;
 }
 
 export interface LessonLearnedRow {

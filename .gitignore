@@ -36,6 +36,10 @@ yarn-error.log*
 # vercel
 .vercel
 
+# local staging area for upload-knowledge-files.mjs -- raw files + metadata
+# JSON live here only long enough to be pushed to R2/Supabase, never in git
+/knowledge-uploads/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
