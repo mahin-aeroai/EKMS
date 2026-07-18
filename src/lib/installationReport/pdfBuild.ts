@@ -378,10 +378,22 @@ function drawFooter(ctx: Ctx, page: PDFPage) {
   page.drawText(right, { x: PAGE_WIDTH - MARGIN - rw, y: FOOTER_HEIGHT / 2 - 2, size: 7.5, font: ctx.font, color: MUTED });
 }
 
-function drawSectionHeading(ctx: Ctx, page: PDFPage, text: string, x: number, yTop: number): number {
-  page.drawRectangle({ x, y: yTop - 21, width: 4, height: 21, color: ACCENT });
-  page.drawText(text, { x: x + 14, y: yTop - 15.5, size: 19, font: ctx.bold, color: INK });
-  return yTop - 34;
+/**
+ * Big editorial section heading — this is the "creative and professional"
+ * layer the earlier, more informative-looking 19pt heading didn't deliver.
+ * An optional oversized ghost numeral sits behind the title (classic
+ * annual-report device for numbered sections like installation sites);
+ * cards drawn afterwards simply paint over it, so it only ever shows
+ * through the surrounding whitespace.
+ */
+function drawSectionHeading(ctx: Ctx, page: PDFPage, text: string, x: number, yTop: number, opts?: { bigNumber?: string }): number {
+  if (opts?.bigNumber) {
+    page.drawText(opts.bigNumber, { x: x - 4, y: yTop - 88, size: 108, font: ctx.bold, color: SURFACE_ALT });
+  }
+  page.drawRectangle({ x, y: yTop - 30, width: 5, height: 30, color: ACCENT });
+  const size = fitFontSize(ctx.bold, text, PAGE_WIDTH - MARGIN * 2 - 20, 28, 18);
+  page.drawText(text, { x: x + 16, y: yTop - 22, size, font: ctx.bold, color: INK });
+  return yTop - 44;
 }
 
 // ---------------------------------------------------------------------------
@@ -407,7 +419,7 @@ function drawInfoCard(
 
   drawCardBg(page, x, yTop, w, h);
   drawIconChip(page, icon, x + padX, yTop - 13, 24, ACCENT, ACCENT_TINT);
-  page.drawText(title, { x: x + padX + 32, y: yTop - 27, size: 12.5, font: ctx.bold, color: INK });
+  page.drawText(title, { x: x + padX + 32, y: yTop - 27, size: 14.5, font: ctx.bold, color: INK });
   if (badge) drawStatusPill(ctx, page, badge, x + w - padX, yTop - 13);
 
   page.drawLine({ start: { x: x + padX, y: yTop - headerH }, end: { x: x + w - padX, y: yTop - headerH }, thickness: 0.75, color: BORDER });
@@ -441,7 +453,7 @@ function drawTextCard(ctx: Ctx, page: PDFPage, opts: { x: number; yTop: number; 
 
   drawCardBg(page, x, yTop, w, h);
   drawIconChip(page, icon, x + padX, yTop - 13, 24, ACCENT, ACCENT_TINT);
-  page.drawText(title, { x: x + padX + 32, y: yTop - 27, size: 12.5, font: ctx.bold, color: INK });
+  page.drawText(title, { x: x + padX + 32, y: yTop - 27, size: 14.5, font: ctx.bold, color: INK });
   page.drawLine({ start: { x: x + padX, y: yTop - headerH }, end: { x: x + w - padX, y: yTop - headerH }, thickness: 0.75, color: BORDER });
 
   shownLines.forEach((line, i) => {
@@ -455,7 +467,15 @@ function drawTextCard(ctx: Ctx, page: PDFPage, opts: { x: number; yTop: number; 
 // Photos
 // ---------------------------------------------------------------------------
 
-async function drawPhotoBox(
+/**
+ * Editorial photo box — caption sits directly on the photo over a soft dark
+ * gradient scrim (built from stacked translucent bars, darkest at the
+ * bottom) instead of on a line below it, the way a modern photo-led report
+ * or magazine spread captions its images. Falls back to a plain
+ * below-image caption when there's no photo to overlay onto. `badge`, if
+ * given, is a small pill in the top-left corner of the photo (e.g. "TL").
+ */
+async function drawPhotoBoxOverlay(
   ctx: Ctx,
   page: PDFPage,
   file: File | null,
@@ -464,89 +484,114 @@ async function drawPhotoBox(
   w: number,
   h: number,
   caption?: string,
-  subcaption?: string
+  subcaption?: string,
+  badge?: string,
+  r = 12
 ) {
-  const r = 10;
   if (!file) {
     roundedRectFill(page, x, yBottom + h, w, h, r, SURFACE_ALT, { color: BORDER, width: 1 });
     const msg = "No photo attached";
     const size = 9.5;
     const tw = ctx.font.widthOfTextAtSize(msg, size);
     page.drawText(msg, { x: x + w / 2 - tw / 2, y: yBottom + h / 2, size, font: ctx.font, color: MUTED });
-  } else {
-    const prepared = await prepareCoverImage(file, w, h);
-    const img = await ctx.doc.embedJpg(prepared.bytes);
-    beginRoundedClip(page, x, yBottom, w, h, r);
-    page.drawImage(img, { x, y: yBottom, width: w, height: h });
-    endRoundedClip(page);
-    roundedRectFill(page, x, yBottom + h, w, h, r, undefined, { color: BORDER, width: 1 });
+    if (caption) {
+      page.drawText(caption, { x, y: yBottom - 14, size: 10, font: ctx.bold, color: INK });
+      if (subcaption) page.drawText(subcaption, { x, y: yBottom - 26, size: 8.5, font: ctx.italic, color: MUTED });
+    }
+    return;
   }
+
+  const prepared = await prepareCoverImage(file, w, h);
+  const img = await ctx.doc.embedJpg(prepared.bytes);
+  beginRoundedClip(page, x, yBottom, w, h, r);
+  page.drawImage(img, { x, y: yBottom, width: w, height: h });
+
   if (caption) {
-    page.drawText(caption, { x, y: yBottom - 14, size: 10, font: ctx.bold, color: INK });
+    const scrimH = Math.min(h * 0.42, 74);
+    const steps = 28;
+    for (let i = 0; i < steps; i++) {
+      const stepH = scrimH / steps;
+      const t = i / (steps - 1);
+      const eased = t * t;
+      page.drawRectangle({ x, y: yBottom + i * stepH, width: w, height: stepH + 0.75, color: rgb(0, 0, 0), opacity: 0.5 - eased * 0.46 });
+    }
+  }
+  endRoundedClip(page);
+  roundedRectFill(page, x, yBottom + h, w, h, r, undefined, { color: BORDER, width: 1 });
+
+  if (badge) {
+    const size = 7.5;
+    const padX = 8;
+    const bw = ctx.bold.widthOfTextAtSize(badge.toUpperCase(), size) + padX * 2;
+    roundedRectFill(page, x + 10, yBottom + h - 10, bw, 16, 8, rgb(1, 1, 1), undefined, 0.85);
+    page.drawText(badge.toUpperCase(), { x: x + 10 + padX, y: yBottom + h - 10 - 11.5, size, font: ctx.bold, color: INK });
+  }
+
+  if (caption) {
+    page.drawText(caption, { x: x + 12, y: yBottom + 14, size: 11, font: ctx.bold, color: rgb(1, 1, 1) });
     if (subcaption) {
-      page.drawText(subcaption, { x, y: yBottom - 26, size: 8.5, font: ctx.italic, color: MUTED });
+      page.drawText(subcaption, { x: x + 12, y: yBottom + 4, size: 8, font: ctx.italic, color: rgb(0.92, 0.92, 0.94) });
     }
   }
 }
 
-/** Lays out `items` in a fixed-column grid of equal-sized cells with captions, filling row-major (last row left-aligned by simply having fewer cells). */
-async function drawPhotoGrid(
-  ctx: Ctx,
-  page: PDFPage,
-  items: { file: File | null; caption: string }[],
-  x: number,
-  yTop: number,
-  w: number,
-  h: number,
-  cols: number
-) {
-  const gap = mm(6);
-  const captionH = 30;
-  const rows = Math.ceil(items.length / cols);
-  const cellW = (w - gap * (cols - 1)) / cols;
-  const cellH = (h - gap * (rows - 1) - rows * captionH) / rows;
+/**
+ * Editorial "spread" page for a site's two hero shots — a big Main Slide
+ * background photo with the Close-up rendered as a smaller framed inset
+ * card floating over its bottom-right corner (a common magazine layout:
+ * one dominant image, one accent image), instead of two nearly identical
+ * full-bleed pages back to back. Falls back to a single full-page hero
+ * when only one of the two photos exists.
+ */
+async function drawSiteSpreadPage(ctx: Ctx, site: SiteEntry, index: number) {
+  const mainSlide = site.mainSlide;
+  const closeUp = site.closeUp;
+  if (!mainSlide && !closeUp) return;
 
-  for (let i = 0; i < items.length; i++) {
-    const col = i % cols;
-    const row = Math.floor(i / cols);
-    const cx = x + col * (cellW + gap);
-    const cellTop = yTop - row * (cellH + captionH + gap);
-    const cellBottom = cellTop - cellH;
-    await drawPhotoBox(ctx, page, items[i].file, cx, cellBottom, cellW, cellH, items[i].caption);
-  }
-}
-
-/** Full-page hero photo — orientation-adaptive: landscape sources get a wide box, portrait sources get a taller centered box, so nothing looks stretched or awkwardly cropped. */
-async function drawHeroPage(ctx: Ctx, eyebrow: string, heading: string, file: File | null, caption: string, subcaption: string) {
-  const page = newPage(ctx, eyebrow);
+  const page = newPage(ctx, `Installation Site ${index + 1}`);
   const b = contentBounds();
+  const heading = `Site ${index + 1} — Installation Views`;
   let y = drawSectionHeading(ctx, page, heading, b.left, b.top);
-  y -= 8;
+  y -= 6;
 
   const availW = b.right - b.left;
-  const availH = y - b.bottom - 34;
+  const availH = y - b.bottom;
 
-  let boxW = availW;
-  let boxH = availH;
-  if (file) {
-    try {
-      const dims = await getImageDimensions(file);
-      const isPortrait = dims.height > dims.width * 1.05;
-      if (isPortrait) {
-        boxW = Math.min(availW, availH * 0.72);
-        boxH = availH;
-      } else {
-        boxW = availW;
-        boxH = Math.min(availH, availW * 0.56);
+  if (mainSlide && closeUp) {
+    await drawPhotoBoxOverlay(ctx, page, mainSlide, b.left, y - availH, availW, availH, "Main Installation View", "Primary photo of the completed installation");
+
+    const insetW = availW * 0.32;
+    const insetH = availH * 0.42;
+    const insetX = b.left + availW - insetW - mm(10);
+    const insetYBottom = y - availH + mm(10);
+    // White frame/mat behind the inset, like a photo card set on top of the hero image.
+    roundedRectFill(page, insetX - 6, insetYBottom + insetH + 6, insetW + 12, insetH + 12, 14, SHADOW, undefined, 0.18);
+    roundedRectFill(page, insetX - 5, insetYBottom + insetH + 5, insetW + 10, insetH + 10, 13, SURFACE);
+    await drawPhotoBoxOverlay(ctx, page, closeUp, insetX, insetYBottom, insetW, insetH, "Close-up View", undefined, undefined, 9);
+  } else {
+    const file = mainSlide ?? closeUp;
+    const label = mainSlide ? "Main Installation View" : "Close-up View";
+    const sub = mainSlide ? "Primary photo of the completed installation" : "Detail shot of the fixture / artwork";
+
+    let boxW = availW;
+    let boxH = availH;
+    if (file) {
+      try {
+        const dims = await getImageDimensions(file);
+        const isPortrait = dims.height > dims.width * 1.05;
+        if (isPortrait) {
+          boxW = Math.min(availW, availH * 0.72);
+          boxH = availH;
+        } else {
+          boxH = Math.min(availH, availW * 0.62);
+        }
+      } catch {
+        // fall back to the full-width landscape box computed above
       }
-    } catch {
-      // fall back to the full-width landscape box computed above
     }
+    const boxX = b.left + (availW - boxW) / 2;
+    await drawPhotoBoxOverlay(ctx, page, file, boxX, y - boxH, boxW, boxH, label, sub);
   }
-
-  const boxX = b.left + (availW - boxW) / 2;
-  const boxYBottom = y - boxH - 34;
-  await drawPhotoBox(ctx, page, file, boxX, boxYBottom, boxW, boxH, caption, subcaption);
 }
 
 // ---------------------------------------------------------------------------
@@ -685,38 +730,61 @@ function drawStoreAndCreativePage(ctx: Ctx, data: ReportData) {
   });
 }
 
+/**
+ * Store Overview Photos as an editorial mosaic instead of a uniform grid:
+ * a big hero (Store Full Cover) on the left, two medium photos stacked on
+ * the right, and a filmstrip of the remaining shots underneath — the same
+ * "one dominant image, supporting images smaller" idea real photo-led
+ * reports use, rather than eight equal boxes in rows.
+ */
 async function drawStorePicturesPages(ctx: Ctx, pictures: StorePictures) {
   const page = newPage(ctx, "Store Overview");
   const b = contentBounds();
   let y = drawSectionHeading(ctx, page, "Store Overview Photos", b.left, b.top);
-  y -= 8;
+  y -= 6;
 
   const availW = b.right - b.left;
-  const heroH = mm(70);
-  const heroBottom = y - heroH;
-  await drawPhotoBox(ctx, page, pictures.storeFullCover, b.left, heroBottom - 30, availW, heroH, "Store Full Cover", "Primary storefront view");
+  const availH = y - b.bottom;
+  const gap = mm(6);
 
-  const gridTop = heroBottom - 30 - mm(16);
-  const gridItems = [
-    { file: pictures.installationCloseUp, caption: "Installation Close-up" },
-    { file: pictures.streetView1, caption: "Street View 1" },
+  const heroRowH = availH * 0.66;
+  const filmstripH = availH - heroRowH - gap;
+
+  const heroW = availW * 0.6;
+  await drawPhotoBoxOverlay(ctx, page, pictures.storeFullCover, b.left, y - heroRowH, heroW, heroRowH, "Store Full Cover", "Primary storefront view");
+
+  const stackX = b.left + heroW + gap;
+  const stackW = availW - heroW - gap;
+  const stackCellH = (heroRowH - gap) / 2;
+  await drawPhotoBoxOverlay(ctx, page, pictures.installationCloseUp, stackX, y - stackCellH, stackW, stackCellH, "Installation Close-up");
+  await drawPhotoBoxOverlay(ctx, page, pictures.streetView1, stackX, y - heroRowH, stackW, stackCellH, "Street View 1");
+
+  const filmItems = [
     { file: pictures.streetView2, caption: "Street View 2" },
     { file: pictures.cornerPic1, caption: "Corner Pic 1" },
     { file: pictures.cornerPic2, caption: "Corner Pic 2" },
     { file: pictures.cornerPic3, caption: "Corner Pic 3" },
     { file: pictures.cornerPic4, caption: "Corner Pic 4" },
   ];
-  await drawPhotoGrid(ctx, page, gridItems, b.left, gridTop, availW, gridTop - b.bottom, 4);
+  const filmGap = mm(4);
+  const filmCellW = (availW - filmGap * (filmItems.length - 1)) / filmItems.length;
+  const filmYTop = y - heroRowH - gap;
+  for (let i = 0; i < filmItems.length; i++) {
+    const cx = b.left + i * (filmCellW + filmGap);
+    await drawPhotoBoxOverlay(ctx, page, filmItems[i].file, cx, filmYTop - filmstripH, filmCellW, filmstripH, filmItems[i].caption, undefined, undefined, 9);
+  }
 }
 
 async function drawSiteOverviewPage(ctx: Ctx, site: SiteEntry, index: number) {
   const page = newPage(ctx, `Installation Site ${index + 1}`);
   const b = contentBounds();
-  const heading = `Installation Site ${index + 1}${site.label ? ` — ${site.label}` : ""}`;
-  page.drawRectangle({ x: b.left, y: b.top - 21, width: 4, height: 21, color: ACCENT });
-  page.drawText(heading, { x: b.left + 14, y: b.top - 15.5, size: 19, font: ctx.bold, color: INK });
-  drawStatusPill(ctx, page, site.overallStatus || "Pending", b.right, b.top - 4);
-  let y = b.top - 34;
+  const heading = site.label ? `Site ${index + 1} — ${site.label}` : `Installation Site ${index + 1}`;
+  page.drawText(String(index + 1).padStart(2, "0"), { x: b.left - 4, y: b.top - 88, size: 108, font: ctx.bold, color: SURFACE_ALT });
+  page.drawRectangle({ x: b.left, y: b.top - 30, width: 5, height: 30, color: ACCENT });
+  const headingSize = fitFontSize(ctx.bold, heading, b.right - b.left - 140, 28, 18);
+  page.drawText(heading, { x: b.left + 16, y: b.top - 22, size: headingSize, font: ctx.bold, color: INK });
+  drawStatusPill(ctx, page, site.overallStatus || "Pending", b.right, b.top - 8);
+  let y = b.top - 44;
 
   const gap = mm(8);
   const colW = (b.right - b.left - gap) / 2;
@@ -772,7 +840,7 @@ async function drawSiteOverviewPage(ctx: Ctx, site: SiteEntry, index: number) {
 
   drawCardBg(page, b.left, y, qW, qH);
   drawIconChip(page, "shield", b.left + padX, y - 13, 24, ACCENT, ACCENT_TINT);
-  page.drawText("Quality Inspection", { x: b.left + padX + 32, y: y - 27, size: 12.5, font: ctx.bold, color: INK });
+  page.drawText("Quality Inspection", { x: b.left + padX + 32, y: y - 27, size: 14.5, font: ctx.bold, color: INK });
   drawStatusPill(ctx, page, site.overallStatus || "Pending", b.left + qW - padX, y - 13);
   page.drawLine({ start: { x: b.left + padX, y: y - headerH }, end: { x: b.left + qW - padX, y: y - headerH }, thickness: 0.75, color: BORDER });
 
@@ -798,28 +866,51 @@ async function drawCornersPage(ctx: Ctx, site: SiteEntry, index: number) {
   const page = newPage(ctx, `Installation Site ${index + 1}`);
   const b = contentBounds();
   let y = drawSectionHeading(ctx, page, `Site ${index + 1} — Corner Inspection`, b.left, b.top);
-  y -= 8;
+  y -= 6;
 
-  const items = [
-    { file: site.cornerTL, caption: "Top Left Corner" },
-    { file: site.cornerTR, caption: "Top Right Corner" },
-    { file: site.cornerBL, caption: "Bottom Left Corner" },
-    { file: site.cornerBR, caption: "Bottom Right Corner" },
+  const availW = b.right - b.left;
+  const availH = y - b.bottom;
+  const gap = mm(4);
+  const cellW = (availW - gap) / 2;
+  const cellH = (availH - gap) / 2;
+
+  const corners: { file: File | null; caption: string; badge: string }[] = [
+    { file: site.cornerTL, caption: "Top Left Corner", badge: "TL" },
+    { file: site.cornerTR, caption: "Top Right Corner", badge: "TR" },
+    { file: site.cornerBL, caption: "Bottom Left Corner", badge: "BL" },
+    { file: site.cornerBR, caption: "Bottom Right Corner", badge: "BR" },
   ];
-  await drawPhotoGrid(ctx, page, items, b.left, y, b.right - b.left, y - b.bottom, 2);
+  for (let i = 0; i < 4; i++) {
+    const col = i % 2;
+    const row = Math.floor(i / 2);
+    const cx = b.left + col * (cellW + gap);
+    const cellTop = y - row * (cellH + gap);
+    await drawPhotoBoxOverlay(ctx, page, corners[i].file, cx, cellTop - cellH, cellW, cellH, corners[i].caption, undefined, corners[i].badge);
+  }
 }
 
 async function drawBeforeAfterPage(ctx: Ctx, site: SiteEntry, index: number) {
   const page = newPage(ctx, `Installation Site ${index + 1}`);
   const b = contentBounds();
   let y = drawSectionHeading(ctx, page, `Site ${index + 1} — Before & After`, b.left, b.top);
-  y -= 8;
+  y -= 6;
 
-  const items = [
-    { file: site.beforePhoto, caption: "Before" },
-    { file: site.afterPhoto, caption: "After" },
-  ];
-  await drawPhotoGrid(ctx, page, items, b.left, y, b.right - b.left, y - b.bottom, 2);
+  const availW = b.right - b.left;
+  const availH = y - b.bottom;
+  const dividerW = mm(10);
+  const cellW = (availW - dividerW) / 2;
+
+  await drawPhotoBoxOverlay(ctx, page, site.beforePhoto, b.left, y - availH, cellW, availH, "Before", "Prior to installation");
+  await drawPhotoBoxOverlay(ctx, page, site.afterPhoto, b.left + cellW + dividerW, y - availH, cellW, availH, "After", "Completed installation");
+
+  // Small accent chip with a hand-drawn arrow (avoids relying on a unicode
+  // glyph like "→", which the standard WinAnsi-encoded fonts can't render).
+  const cx = b.left + cellW + dividerW / 2;
+  const cy = y - availH / 2;
+  page.drawCircle({ x: cx, y: cy, size: 15, color: ACCENT });
+  page.drawLine({ start: { x: cx - 6, y: cy }, end: { x: cx + 4, y: cy }, thickness: 1.6, color: rgb(1, 1, 1), lineCap: LineCapStyle.Round });
+  page.drawLine({ start: { x: cx + 1, y: cy + 4 }, end: { x: cx + 6, y: cy }, thickness: 1.6, color: rgb(1, 1, 1), lineCap: LineCapStyle.Round });
+  page.drawLine({ start: { x: cx + 1, y: cy - 4 }, end: { x: cx + 6, y: cy }, thickness: 1.6, color: rgb(1, 1, 1), lineCap: LineCapStyle.Round });
 }
 
 function siteHasCornerPhoto(site: SiteEntry): boolean {
@@ -844,8 +935,7 @@ export async function buildInstallationReportPdf(data: ReportData): Promise<Blob
   for (let i = 0; i < data.sites.length; i++) {
     const site = data.sites[i];
     await drawSiteOverviewPage(ctx, site, i);
-    if (site.mainSlide) await drawHeroPage(ctx, `Installation Site ${i + 1}`, `Site ${i + 1} — Main Slide`, site.mainSlide, "Main Installation View", "Primary photo of the completed installation");
-    if (site.closeUp) await drawHeroPage(ctx, `Installation Site ${i + 1}`, `Site ${i + 1} — Close-up View`, site.closeUp, "Close-up View", "Detail shot of the fixture / artwork");
+    await drawSiteSpreadPage(ctx, site, i);
     if (siteHasCornerPhoto(site)) await drawCornersPage(ctx, site, i);
     if (site.beforePhoto || site.afterPhoto) await drawBeforeAfterPage(ctx, site, i);
   }
