@@ -84,7 +84,6 @@ export interface SiteEntry {
   installedByTeam: string;
   installationStatus: string;
 
-  installedArtwork: string;
   storePermissionSlots: string;
 
   // Quality Inspection
@@ -111,10 +110,6 @@ export interface StorePictures {
   installationCloseUp: PhotoValue | null;
   streetView1: PhotoValue | null;
   streetView2: PhotoValue | null;
-  cornerPic1: PhotoValue | null;
-  cornerPic2: PhotoValue | null;
-  cornerPic3: PhotoValue | null;
-  cornerPic4: PhotoValue | null;
 }
 
 export interface ReportData {
@@ -702,10 +697,10 @@ function drawStoreAndCreativePage(ctx: Ctx, data: ReportData) {
 
 /**
  * Store Overview Photos as an editorial mosaic instead of a uniform grid:
- * a big hero (Store Full Cover) on the left, two medium photos stacked on
- * the right, and a filmstrip of the remaining shots underneath — the same
- * "one dominant image, supporting images smaller" idea real photo-led
- * reports use, rather than eight equal boxes in rows.
+ * a big hero (Store Full Cover) on the left, full page height, and the
+ * remaining three shots stacked on the right — the same "one dominant
+ * image, supporting images smaller" idea real photo-led reports use,
+ * rather than equal boxes in rows.
  */
 async function drawStorePicturesPages(ctx: Ctx, pictures: StorePictures) {
   const page = newPage(ctx, "Store Overview");
@@ -717,31 +712,20 @@ async function drawStorePicturesPages(ctx: Ctx, pictures: StorePictures) {
   const availH = y - b.bottom;
   const gap = mm(6);
 
-  const heroRowH = availH * 0.66;
-  const filmstripH = availH - heroRowH - gap;
-
-  const heroW = availW * 0.6;
-  await drawPhotoBoxOverlay(ctx, page, pictures.storeFullCover, b.left, y - heroRowH, heroW, heroRowH, "Store Full Cover", "Primary storefront view");
+  const heroW = availW * 0.58;
+  await drawPhotoBoxOverlay(ctx, page, pictures.storeFullCover, b.left, y - availH, heroW, availH, "Store Full Cover", "Primary storefront view");
 
   const stackX = b.left + heroW + gap;
   const stackW = availW - heroW - gap;
-  const stackCellH = (heroRowH - gap) / 2;
-  await drawPhotoBoxOverlay(ctx, page, pictures.installationCloseUp, stackX, y - stackCellH, stackW, stackCellH, "Installation Close-up");
-  await drawPhotoBoxOverlay(ctx, page, pictures.streetView1, stackX, y - heroRowH, stackW, stackCellH, "Street View 1");
-
-  const filmItems = [
+  const stackItems = [
+    { file: pictures.installationCloseUp, caption: "Installation Close-up" },
+    { file: pictures.streetView1, caption: "Street View 1" },
     { file: pictures.streetView2, caption: "Street View 2" },
-    { file: pictures.cornerPic1, caption: "Corner Pic 1" },
-    { file: pictures.cornerPic2, caption: "Corner Pic 2" },
-    { file: pictures.cornerPic3, caption: "Corner Pic 3" },
-    { file: pictures.cornerPic4, caption: "Corner Pic 4" },
   ];
-  const filmGap = mm(4);
-  const filmCellW = (availW - filmGap * (filmItems.length - 1)) / filmItems.length;
-  const filmYTop = y - heroRowH - gap;
-  for (let i = 0; i < filmItems.length; i++) {
-    const cx = b.left + i * (filmCellW + filmGap);
-    await drawPhotoBoxOverlay(ctx, page, filmItems[i].file, cx, filmYTop - filmstripH, filmCellW, filmstripH, filmItems[i].caption, undefined, undefined, 9);
+  const stackCellH = (availH - gap * (stackItems.length - 1)) / stackItems.length;
+  for (let i = 0; i < stackItems.length; i++) {
+    const cellTop = y - i * (stackCellH + gap);
+    await drawPhotoBoxOverlay(ctx, page, stackItems[i].file, stackX, cellTop - stackCellH, stackW, stackCellH, stackItems[i].caption);
   }
 }
 
@@ -784,7 +768,6 @@ async function drawSiteOverviewPage(ctx: Ctx, site: SiteEntry, index: number) {
       { label: "Installation Date", value: formatDate(ctx.installationDate) },
       { label: "Installation Team", value: site.installedByTeam },
       { label: "Installation Status", value: site.installationStatus },
-      { label: "Installed Artwork", value: site.installedArtwork },
     ],
   });
 

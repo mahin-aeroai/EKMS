@@ -76,7 +76,6 @@ const CARRY_FORWARD_KEYS: (keyof SiteEntry)[] = [
   "signType",
   "size",
   "installedByTeam",
-  "installedArtwork",
   "wasSuccessful",
   "fixtureCondition",
   "scaffoldingRequired",
@@ -93,7 +92,6 @@ function emptySite(): SiteEntry {
     creativeName: "",
     installedByTeam: "MMDI",
     installationStatus: "Completed",
-    installedArtwork: "",
     storePermissionSlots: "",
     wasSuccessful: "Yes",
     siteCondition: "Good",
@@ -117,12 +115,11 @@ function emptySite(): SiteEntry {
 // operator picks the wrong store first and then picks the right one right
 // after, the second pick still needs to be able to overwrite them. Only
 // content a store pick could never have produced — a label, a chosen
-// creative, artwork notes, or an attached photo — blocks the auto-fill.
+// creative, or an attached photo — blocks the auto-fill.
 function isSitePristine(s: SiteEntry): boolean {
   return (
     !s.label &&
     !s.creativeName &&
-    !s.installedArtwork &&
     !s.mainSlide &&
     !s.closeUp &&
     !s.cornerTL &&
@@ -138,10 +135,6 @@ function emptyStorePictures(): StorePictures {
     installationCloseUp: null,
     streetView1: null,
     streetView2: null,
-    cornerPic1: null,
-    cornerPic2: null,
-    cornerPic3: null,
-    cornerPic4: null,
   };
 }
 
@@ -488,10 +481,6 @@ export default function InstallationReportClient() {
             <ImageSlot label="Installation Close-up" value={storePictures.installationCloseUp} onChange={(f) => setStorePictures((p) => ({ ...p, installationCloseUp: f }))} />
             <ImageSlot label="Street View 1" value={storePictures.streetView1} onChange={(f) => setStorePictures((p) => ({ ...p, streetView1: f }))} />
             <ImageSlot label="Street View 2" value={storePictures.streetView2} onChange={(f) => setStorePictures((p) => ({ ...p, streetView2: f }))} />
-            <ImageSlot label="Corner Pic 1" value={storePictures.cornerPic1} onChange={(f) => setStorePictures((p) => ({ ...p, cornerPic1: f }))} />
-            <ImageSlot label="Corner Pic 2" value={storePictures.cornerPic2} onChange={(f) => setStorePictures((p) => ({ ...p, cornerPic2: f }))} />
-            <ImageSlot label="Corner Pic 3" value={storePictures.cornerPic3} onChange={(f) => setStorePictures((p) => ({ ...p, cornerPic3: f }))} />
-            <ImageSlot label="Corner Pic 4" value={storePictures.cornerPic4} onChange={(f) => setStorePictures((p) => ({ ...p, cornerPic4: f }))} />
           </div>
         </div>
 
@@ -589,15 +578,6 @@ export default function InstallationReportClient() {
                     onChange={(e) => updateSite(i, { storePermissionSlots: e.target.value })}
                     className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink focus:border-primary focus:outline-none"
                     placeholder="e.g. Before store hours, 7–9 AM"
-                  />
-                </label>
-                <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary sm:col-span-4">
-                  Installed Artwork Details
-                  <input
-                    type="text"
-                    value={site.installedArtwork}
-                    onChange={(e) => updateSite(i, { installedArtwork: e.target.value })}
-                    className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink focus:border-primary focus:outline-none"
                   />
                 </label>
               </div>
