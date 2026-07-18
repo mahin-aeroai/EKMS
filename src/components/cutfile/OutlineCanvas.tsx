@@ -20,15 +20,26 @@ export function OutlineCanvas({
   contentOffsetMm,
   contentWidthMm,
   contentHeightMm,
+  pdfOffsetMm,
+  pdfWidthMm,
+  pdfHeightMm,
+  addedBleedColorRgb,
   previewDataUrl,
   outline,
   onChange,
 }: {
   canvasWidthMm: number;
   canvasHeightMm: number;
+  /** Effective content rect (trim + any tool-generated bleed) — the frame the outline itself is defined in. */
   contentOffsetMm: number;
   contentWidthMm: number;
   contentHeightMm: number;
+  /** Offset/size of the raw uploaded PDF page, if different from the effective content rect above (i.e. bleed is being generated). Defaults to the effective values. */
+  pdfOffsetMm?: number;
+  pdfWidthMm?: number;
+  pdfHeightMm?: number;
+  /** Sampled edge color for the generated-bleed band, shown behind the raw PDF preview when present. */
+  addedBleedColorRgb?: { r: number; g: number; b: number } | null;
   previewDataUrl: string | null;
   outline: Point[];
   onChange: (outline: Point[]) => void;
@@ -92,13 +103,22 @@ export function OutlineCanvas({
         onPointerUp={handlePointerUp}
       >
         <rect x={0} y={0} width={widthMm} height={heightMm} fill="white" stroke="#D1D5DB" strokeWidth={widthMm / 800} />
-        {previewDataUrl && (
-          <image
-            href={previewDataUrl}
+        {addedBleedColorRgb && (
+          <rect
             x={contentOffsetMm}
             y={canvasHeightMm - contentOffsetMm - contentHeightMm}
             width={contentWidthMm}
             height={contentHeightMm}
+            fill={`rgb(${Math.round(addedBleedColorRgb.r * 255)}, ${Math.round(addedBleedColorRgb.g * 255)}, ${Math.round(addedBleedColorRgb.b * 255)})`}
+          />
+        )}
+        {previewDataUrl && (
+          <image
+            href={previewDataUrl}
+            x={pdfOffsetMm ?? contentOffsetMm}
+            y={canvasHeightMm - (pdfOffsetMm ?? contentOffsetMm) - (pdfHeightMm ?? contentHeightMm)}
+            width={pdfWidthMm ?? contentWidthMm}
+            height={pdfHeightMm ?? contentHeightMm}
             preserveAspectRatio="none"
             opacity={0.85}
           />

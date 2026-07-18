@@ -10,6 +10,17 @@ import type { DotSpec } from "@/lib/cutfile/geometry";
  * All coordinates in the `dots` array are in mm relative to the full canvas
  * (bottom-left origin); this component only handles screen<->mm conversion
  * and drag interaction, positions are reported back via onChange.
+ *
+ * `contentOffsetMm`/`contentWidthMm`/`contentHeightMm` describe the
+ * EFFECTIVE content rectangle (the design's trim, plus any tool-generated
+ * bleed) — this is what the dashed blue boundary and the trim-reference
+ * line are drawn against. When the tool is generating bleed rather than
+ * assuming the file already includes it, the actual uploaded PDF page is
+ * smaller and sits further inside that rectangle — its own position/size
+ * are given separately via `pdfOffsetMm`/`pdfWidthMm`/`pdfHeightMm`, and the
+ * gap between the two is filled with `addedBleedColorRgb` for a WYSIWYG
+ * preview of the generated bleed band. When bleed is already in the file,
+ * the two rectangles coincide and this renders exactly as before.
  */
 export function DotCanvas({
   canvasWidthMm,
@@ -17,10 +28,15 @@ export function DotCanvas({
   contentOffsetMm,
   contentWidthMm,
   contentHeightMm,
+  pdfOffsetMm,
+  pdfWidthMm,
+  pdfHeightMm,
   previewDataUrl,
   dotDiameterMm,
   dotHaloMm = 0,
   bleedMm = 0,
+  bleedAlreadyInFile = true,
+  addedBleedColorRgb,
   dots,
   onChange,
 }: {
@@ -29,11 +45,19 @@ export function DotCanvas({
   contentOffsetMm: number;
   contentWidthMm: number;
   contentHeightMm: number;
+  /** Offset/size of the raw uploaded PDF page, if different from the effective content rect above. Defaults to the effective values. */
+  pdfOffsetMm?: number;
+  pdfWidthMm?: number;
+  pdfHeightMm?: number;
   previewDataUrl: string | null;
   dotDiameterMm: number;
   dotHaloMm?: number;
   /** How much of the uploaded page's own outer edge is bleed — reference only, draws a dashed trim line inset from the content edge. */
   bleedMm?: number;
+  /** False when the tool is generating the bleed itself rather than the file already including it — changes what the boundary lines mean and shows the generated-bleed band fill. */
+  bleedAlreadyInFile?: boolean;
+  /** Sampled edge color used to fill the generated bleed band when bleedAlreadyInFile is false. */
+  addedBleedColorRgb?: { r: number; g: number; b: number } | null;
   dots: DotSpec[];
   onChange: (dots: DotSpec[]) => void;
 }) {
@@ -76,6 +100,12 @@ export function DotCanvas({
   }
 
   const radiusMm = dotDiameterMm / 2;
+  const imgOffsetMm = pdfOffsetMm ?? contentOffsetMm;
+  const imgWidthMm = pdfWidthMm ?? contentWidthMm;
+  const imgHeightMm = pdfHeightMm ?? contentHeightMm;
+  const rgbCss = addedBleedColorRgb
+    ? `rgb(${Math.round(addedBleedColorRgb.r * 255)}, ${Math.round(addedBleedColorRgb.g * 255)}, ${Math.round(addedBleedColorRgb.b * 255)})`
+    : undefined;
 
   return (
     <div className="w-full overflow-hidden rounded-lg border border-line bg-surface-sunken">
@@ -90,19 +120,30 @@ export function DotCanvas({
         {/* Outer canvas boundary */}
         <rect x={0} y={0} width={canvasWidthMm} height={canvasHeightMm} fill="white" stroke="#D1D5DB" strokeWidth={canvasWidthMm / 800} />
 
-        {/* Original design preview, placed at its offset within the canvas */}
-        {previewDataUrl && (
-          <image
-            href={previewDataUrl}
+        {/* Generated-bleed band fill — the area between the effective content rect and the smaller raw PDF page, shown when the tool (not the file) is providing the bleed */}
+        {!bleedAlreadyInFile && rgbCss && (
+          <rect
             x={contentOffsetMm}
             y={canvasHeightMm - contentOffsetMm - contentHeightMm}
             width={contentWidthMm}
             height={contentHeightMm}
+            fill={rgbCss}
+          />
+        )}
+
+        {/* Original design preview, placed at its own offset within the canvas (the raw uploaded page, smaller than the effective content rect when bleed is being generated) */}
+        {previewDataUrl && (
+          <image
+            href={previewDataUrl}
+            x={imgOffsetMm}
+            y={canvasHeightMm - imgOffsetMm - imgHeightMm}
+            width={imgWidthMm}
+            height={imgHeightMm}
             preserveAspectRatio="none"
           />
         )}
 
-        {/* Content boundary (the original uploaded page, trim + its own bleed, unchanged) */}
+        {/* Content boundary — the effective trim+bleed area (or, when bleed is already in the file, the original uploaded page unchanged) */}
         <rect
           x={contentOffsetMm}
           y={canvasHeightMm - contentOffsetMm - contentHeightMm}
@@ -114,8 +155,8 @@ export function DotCanvas({
           strokeWidth={canvasWidthMm / 1000}
         />
 
-        {/* Trim reference line — inset from the content edge by the declared bleed, informational only */}
-        {bleedMm > 0 && (
+        {/* Trim reference line — only meaningful when the bleed is already baked into the file; inset from the content edge by the declared bleed, informational only */}
+        {bleedAlreadyInFile && bleedMm > 0 && (
           <rect
             x={contentOffsetMm + bleedMm}
             y={canvasHeightMm - contentOffsetMm - contentHeightMm + bleedMm}

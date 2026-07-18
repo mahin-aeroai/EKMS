@@ -309,3 +309,64 @@ function perpendicularDistance(p: Point, a: Point, b: Point): number {
   if (len === 0) return Math.hypot(p.x - a.x, p.y - a.y);
   return Math.abs(dy * p.x - dx * p.y + b.x * a.y - b.y * a.x) / len;
 }
+
+/**
+ * Samples a representative "edge color" from an already-rendered preview
+ * (the same PNG data URL loadPdf() produces) — averages a thin band of
+ * pixels around the outer border. Used for the "add bleed beyond print
+ * size" mode: when the uploaded PDF is pure trim size with no bleed baked
+ * in, the newly generated bleed band gets filled with this color rather
+ * than being left blank, so a keder sewn 12-14mm out from the design edge
+ * has real material (not white gaps) under it.
+ */
+export function sampleEdgeColorFromDataUrl(dataUrl: string): Promise<{ r: number; g: number; b: number } | undefined> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(undefined);
+          return;
+        }
+        ctx.drawImage(img, 0, 0);
+        const { width, height } = canvas;
+        const bandPx = Math.max(1, Math.round(Math.min(width, height) * 0.02));
+        const data = ctx.getImageData(0, 0, width, height).data;
+        let r = 0, g = 0, b = 0, n = 0;
+        const sampleAt = (x: number, y: number) => {
+          const o = (y * width + x) * 4;
+          r += data[o];
+          g += data[o + 1];
+          b += data[o + 2];
+          n++;
+        };
+        const step = Math.max(1, Math.round(Math.max(width, height) / 300));
+        for (let x = 0; x < width; x += step) {
+          for (let d = 0; d < bandPx; d++) {
+            sampleAt(x, d);
+            sampleAt(x, height - 1 - d);
+          }
+        }
+        for (let y = 0; y < height; y += step) {
+          for (let d = 0; d < bandPx; d++) {
+            sampleAt(d, y);
+            sampleAt(width - 1 - d, y);
+          }
+        }
+        if (n === 0) {
+          resolve(undefined);
+          return;
+        }
+        resolve({ r: r / n / 255, g: g / n / 255, b: b / n / 255 });
+      } catch {
+        resolve(undefined);
+      }
+    };
+    img.onerror = () => resolve(undefined);
+    img.src = dataUrl;
+  });
+}

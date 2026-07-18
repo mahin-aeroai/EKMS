@@ -11,12 +11,19 @@ import { DotCanvas } from "@/components/cutfile/DotCanvas";
 import { OutlineCanvas } from "@/components/cutfile/OutlineCanvas";
 import { NestPreview } from "@/components/cutfile/NestPreview";
 import { computeDotLayout, rectPolygon, translatePolygon, type DotSpec, type Point } from "@/lib/cutfile/geometry";
-import { loadPdf, buildDotPlacementPdf, buildNestedPrintPdf, buildNestedCutPdf, downloadBlob, type RgbColor } from "@/lib/cutfile/pdfIO";
-import { traceOutlineFromPdf } from "@/lib/cutfile/trace";
+import { loadPdf, buildDotPlacementPdf, buildNestedPrintPdf, buildNestedCutPdf, downloadBlob, type RgbColor, type AddedBleedRect } from "@/lib/cutfile/pdfIO";
+import { traceOutlineFromPdf, sampleEdgeColorFromDataUrl } from "@/lib/cutfile/trace";
 import { nestPieces, suggestSheetHeight, suggestSheetSize, type NestResult } from "@/lib/cutfile/nesting";
 
 interface DotParams {
   bleedMm: number;
+  // When true (default), the uploaded PDF is assumed to already include its
+  // own bleed — bleedMm is purely a reference value for the trim line. When
+  // false, the tool GENERATES bleed by extending the canvas beyond the
+  // file's own edge by bleedMm on every side (e.g. the 12-14mm allowance
+  // needed to stitch a silicone keder onto SEG fabric edges) and fills that
+  // extra band with a sampled edge color.
+  bleedAlreadyInFile: boolean;
   dotDiameterMm: number;
   dotHaloMm: number;
   haloClearanceMm: number;
@@ -29,6 +36,7 @@ interface DotParams {
 
 const DEFAULT_DOT_PARAMS: DotParams = {
   bleedMm: 14,
+  bleedAlreadyInFile: true,
   dotDiameterMm: 6,
   dotHaloMm: 2,
   haloClearanceMm: 2,
@@ -45,6 +53,7 @@ interface UploadedPiece {
   id: string;
   fileName: string;
   bytes: ArrayBuffer;
+  // Raw uploaded PDF page size, untouched.
   widthMm: number;
   heightMm: number;
   previewDataUrl: string;
@@ -52,7 +61,22 @@ interface UploadedPiece {
   dots: DotSpec[];
   canvasWidthMm: number;
   canvasHeightMm: number;
+  // Offset of the EFFECTIVE content (trim + any tool-generated bleed) from
+  // the canvas edge. Equal to pdfOffsetMm when bleedAlreadyInFile is true.
   contentOffsetMm: number;
+  // Effective content size used for layout/outline purposes: same as
+  // widthMm/heightMm when bleedAlreadyInFile is true, or widthMm/heightMm
+  // expanded by 2*bleedMm when the tool is generating the bleed itself.
+  effectiveWidthMm: number;
+  effectiveHeightMm: number;
+  // Offset of the RAW uploaded PDF page from the canvas edge — where the
+  // page actually gets drawn on export. Equal to contentOffsetMm unless
+  // bleed is being generated, in which case it sits bleedMm further in.
+  pdfOffsetMm: number;
+  // Sampled edge color used to fill the generated-bleed band, when
+  // bleedAlreadyInFile is false. Null until sampling completes (or if
+  // bleed isn't being generated at all).
+  addedBleedColorRgb: RgbColor | null;
   // The cut-contour used for BOTH nesting placement and the exported cut
   // path. Defaults to a rectangle matching the full output canvas (design
   // + bleed + dot zone + margin) — nesting must respect that whole area,
@@ -71,25 +95,39 @@ interface UploadedPiece {
 
 const DEFAULT_COLOR_BLEED_MM = 1.5;
 
+/** The content rectangle actually used for layout: the raw page as-is, or that page expanded by the generated bleed on every side. */
+function effectiveContentDims(widthMm: number, heightMm: number, params: DotParams): { width: number; height: number } {
+  if (params.bleedAlreadyInFile) return { width: widthMm, height: heightMm };
+  return { width: widthMm + 2 * params.bleedMm, height: heightMm + 2 * params.bleedMm };
+}
+
 /**
  * Default cut path for a piece that hasn't been manually reshaped or
- * auto-traced: the TRIM rectangle — the design's content inset by its own
- * declared bleed, i.e. where the material actually gets cut, matching the
- * dashed amber reference line already drawn in DotCanvas. This is NOT the
- * full canvas rectangle (which also spans the dot zone + margin) — using
- * the full canvas as the exported cut path was the bug behind the cut line
- * landing on the outer dot-zone edge instead of the real trim edge, and
- * the color-bleed stroke (which follows this same outline) painting along
- * that same wrong, far-out edge instead of the design's actual boundary.
+ * auto-traced.
+ *
+ * When bleedAlreadyInFile is true: the TRIM rectangle — the design's
+ * content inset by its own declared bleed, i.e. where the material
+ * actually gets cut, matching the dashed amber reference line drawn in
+ * DotCanvas. This is NOT the full canvas rectangle (which also spans the
+ * dot zone + margin) — using the full canvas as the exported cut path was
+ * the bug behind the cut line landing on the outer dot-zone edge instead
+ * of the real trim edge.
+ *
+ * When bleedAlreadyInFile is false: the FULL effective content rectangle
+ * (design + the tool-generated bleed band) with no further inset — the
+ * generated bleed is real material meant to be kept (e.g. for a silicone
+ * keder seam allowance), not trimmed away.
+ *
  * Nesting still reserves the dot-zone space separately via reserveCircles
  * (see runNesting/suggestBestSheetSize) so this tight outline is safe to
  * use for both collision and the exported cut path.
  */
-function trimOutline(contentWidthMm: number, contentHeightMm: number, contentOffsetMm: number, bleedMm: number): Point[] {
-  const trimWidthMm = Math.max(0, contentWidthMm - 2 * bleedMm);
-  const trimHeightMm = Math.max(0, contentHeightMm - 2 * bleedMm);
-  const inset = contentOffsetMm + bleedMm;
-  return translatePolygon(rectPolygon(trimWidthMm, trimHeightMm), inset, inset);
+function defaultCutOutline(effWidthMm: number, effHeightMm: number, contentOffsetMm: number, params: DotParams): Point[] {
+  const insetMm = params.bleedAlreadyInFile ? params.bleedMm : 0;
+  const w = Math.max(0, effWidthMm - 2 * insetMm);
+  const h = Math.max(0, effHeightMm - 2 * insetMm);
+  const off = contentOffsetMm + insetMm;
+  return translatePolygon(rectPolygon(w, h), off, off);
 }
 
 /** Registration dot centers + their printed radius (dot + halo), as nesting reserveCircles — see nesting.ts for why the tight cut-path outline alone isn't enough. */
@@ -99,9 +137,10 @@ function dotReserveCircles(piece: UploadedPiece): { point: Point; radiusMm: numb
 }
 
 function recomputeLayout(widthMm: number, heightMm: number, params: DotParams) {
-  return computeDotLayout({
-    trimWidthMm: widthMm,
-    trimHeightMm: heightMm,
+  const eff = effectiveContentDims(widthMm, heightMm, params);
+  const layout = computeDotLayout({
+    trimWidthMm: eff.width,
+    trimHeightMm: eff.height,
     bleedMm: params.bleedMm,
     dotDiameterMm: params.dotDiameterMm,
     dotHaloMm: params.dotHaloMm,
@@ -112,6 +151,16 @@ function recomputeLayout(widthMm: number, heightMm: number, params: DotParams) {
     leftCount: params.leftCount,
     rightCount: params.rightCount,
   });
+  // Where the RAW uploaded page gets drawn: same as the effective content
+  // offset unless the tool is generating bleed, in which case the raw page
+  // sits bleedMm further inside the effective content rectangle.
+  const pdfOffsetMm = layout.contentOffsetMm + (params.bleedAlreadyInFile ? 0 : params.bleedMm);
+  return {
+    ...layout,
+    effectiveWidthMm: eff.width,
+    effectiveHeightMm: eff.height,
+    pdfOffsetMm,
+  };
 }
 
 export default function CutFileToolClient() {
@@ -176,7 +225,11 @@ export default function CutFileToolClient() {
           canvasWidthMm: layout.canvasWidthMm,
           canvasHeightMm: layout.canvasHeightMm,
           contentOffsetMm: layout.contentOffsetMm,
-          outline: trimOutline(loaded.widthMm, loaded.heightMm, layout.contentOffsetMm, dotParams.bleedMm),
+          effectiveWidthMm: layout.effectiveWidthMm,
+          effectiveHeightMm: layout.effectiveHeightMm,
+          pdfOffsetMm: layout.pdfOffsetMm,
+          addedBleedColorRgb: null,
+          outline: defaultCutOutline(layout.effectiveWidthMm, layout.effectiveHeightMm, layout.contentOffsetMm, dotParams),
           outlineIsDefault: true,
           traceFillColorRgb: null,
           colorBleedMm: DEFAULT_COLOR_BLEED_MM,
@@ -185,6 +238,11 @@ export default function CutFileToolClient() {
         };
         setPieces((prev) => [...prev, piece]);
         setSelectedId((cur) => cur ?? id);
+        if (!dotParams.bleedAlreadyInFile) {
+          sampleEdgeColorFromDataUrl(loaded.previewDataUrl).then((rgb) => {
+            if (rgb) updatePiece(id, { addedBleedColorRgb: rgb });
+          });
+        }
       }
       toast("success", "File(s) loaded — all processing stays in your browser, nothing is uploaded.");
     } catch (err) {
@@ -206,15 +264,37 @@ export default function CutFileToolClient() {
       canvasWidthMm: layout.canvasWidthMm,
       canvasHeightMm: layout.canvasHeightMm,
       contentOffsetMm: layout.contentOffsetMm,
-      // Keep the default trim-rectangle outline (used for the cut path,
-      // plus nesting collision together with reserveCircles) matched to
-      // the new layout, unless the operator has manually reshaped it — a
+      effectiveWidthMm: layout.effectiveWidthMm,
+      effectiveHeightMm: layout.effectiveHeightMm,
+      pdfOffsetMm: layout.pdfOffsetMm,
+      // Keep the default cut-path outline (used for the cut path, plus
+      // nesting collision together with reserveCircles) matched to the
+      // new layout, unless the operator has manually reshaped it — a
       // manual edit should survive a parameter tweak rather than getting
       // silently overwritten.
       outline: piece.outlineIsDefault
-        ? trimOutline(piece.widthMm, piece.heightMm, layout.contentOffsetMm, piece.dotParams.bleedMm)
+        ? defaultCutOutline(layout.effectiveWidthMm, layout.effectiveHeightMm, layout.contentOffsetMm, piece.dotParams)
         : piece.outline,
     });
+    if (!piece.dotParams.bleedAlreadyInFile) {
+      sampleEdgeColorFromDataUrl(piece.previewDataUrl).then((rgb) => {
+        if (rgb) updatePiece(piece.id, { addedBleedColorRgb: rgb });
+      });
+    } else if (piece.addedBleedColorRgb) {
+      updatePiece(piece.id, { addedBleedColorRgb: null });
+    }
+  }
+
+  /** Canvas-local fill rect for the tool-generated bleed band, or undefined when bleed is already baked into the file (or the color hasn't been sampled yet). */
+  function addedBleedRectFor(piece: UploadedPiece): AddedBleedRect | undefined {
+    if (piece.dotParams.bleedAlreadyInFile || !piece.addedBleedColorRgb) return undefined;
+    return {
+      x: piece.contentOffsetMm,
+      y: piece.contentOffsetMm,
+      width: piece.effectiveWidthMm,
+      height: piece.effectiveHeightMm,
+      colorRgb: piece.addedBleedColorRgb,
+    };
   }
 
   async function exportDotPdf(piece: UploadedPiece) {
@@ -223,13 +303,14 @@ export default function CutFileToolClient() {
         originalBytes: piece.bytes,
         canvasWidthMm: piece.canvasWidthMm,
         canvasHeightMm: piece.canvasHeightMm,
-        contentOffsetMm: piece.contentOffsetMm,
+        contentOffsetMm: piece.pdfOffsetMm,
         dots: piece.dots,
         dotDiameterMm: piece.dotParams.dotDiameterMm,
         dotHaloMm: piece.dotParams.dotHaloMm,
         outline: piece.outline,
         bleedColorRgb: piece.traceFillColorRgb ?? undefined,
         colorBleedMm: piece.colorBleedMm,
+        addedBleedRect: addedBleedRectFor(piece),
       });
       downloadBlob(blob, piece.fileName.replace(/\.pdf$/i, "") + "_bleed_dots.pdf");
       toast("success", "Exported — download started");
@@ -284,12 +365,13 @@ export default function CutFileToolClient() {
       pieceId: p.id,
       bytes: p.bytes,
       outline: p.outline,
-      contentOffsetMm: { x: p.contentOffsetMm, y: p.contentOffsetMm },
+      contentOffsetMm: { x: p.pdfOffsetMm, y: p.pdfOffsetMm },
       dots: p.dots,
       dotDiameterMm: p.dotParams.dotDiameterMm,
       dotHaloMm: p.dotParams.dotHaloMm,
       bleedColorRgb: p.traceFillColorRgb ?? undefined,
       colorBleedMm: p.colorBleedMm,
+      addedBleedRect: addedBleedRectFor(p),
     }));
   }
 
@@ -388,9 +470,12 @@ export default function CutFileToolClient() {
         return;
       }
       // The traced outline is in content-local mm (bottom-left origin at
-      // the design's own corner) — shift it into the piece's canvas-local
-      // frame the same way the design itself sits there, via contentOffsetMm.
-      const shifted = result.outline.map((pt) => ({ x: pt.x + piece.contentOffsetMm, y: pt.y + piece.contentOffsetMm }));
+      // the RAW uploaded page's own corner, since that's what trace reads)
+      // — shift it into the piece's canvas-local frame the same way that
+      // raw page itself sits there, via pdfOffsetMm (not contentOffsetMm,
+      // which is the effective trim+generated-bleed offset and can differ
+      // from where the raw page is actually drawn).
+      const shifted = result.outline.map((pt) => ({ x: pt.x + piece.pdfOffsetMm, y: pt.y + piece.pdfOffsetMm }));
       updatePiece(piece.id, {
         outline: shifted,
         outlineIsDefault: false,
@@ -494,7 +579,46 @@ export default function CutFileToolClient() {
                           <p className="text-xs text-ink-secondary">
                             Trim size detected: {selected.widthMm.toFixed(1)} × {selected.heightMm.toFixed(1)} mm
                           </p>
-                          <NumberField label="Bleed already in file (mm, reference only)" value={selected.dotParams.bleedMm} onChange={(v) => updatePiece(selected.id, { dotParams: { ...selected.dotParams, bleedMm: v } })} />
+                          <label className="flex items-center gap-2 text-xs text-ink-secondary">
+                            <input
+                              type="checkbox"
+                              checked={selected.dotParams.bleedAlreadyInFile}
+                              onChange={(e) =>
+                                updatePiece(selected.id, { dotParams: { ...selected.dotParams, bleedAlreadyInFile: e.target.checked } })
+                              }
+                            />
+                            File already includes bleed
+                          </label>
+                          <NumberField
+                            label={
+                              selected.dotParams.bleedAlreadyInFile
+                                ? "Bleed already in file (mm, reference only)"
+                                : "Add bleed beyond print size (mm) — e.g. silicone keder allowance"
+                            }
+                            value={selected.dotParams.bleedMm}
+                            onChange={(v) => updatePiece(selected.id, { dotParams: { ...selected.dotParams, bleedMm: v } })}
+                          />
+                          {!selected.dotParams.bleedAlreadyInFile && (
+                            <div className="flex items-center gap-2 rounded-md bg-surface-sunken p-2">
+                              <span
+                                className="h-5 w-5 shrink-0 rounded border border-line-strong"
+                                style={
+                                  selected.addedBleedColorRgb
+                                    ? {
+                                        backgroundColor: `rgb(${Math.round(selected.addedBleedColorRgb.r * 255)}, ${Math.round(
+                                          selected.addedBleedColorRgb.g * 255
+                                        )}, ${Math.round(selected.addedBleedColorRgb.b * 255)})`,
+                                      }
+                                    : undefined
+                                }
+                              />
+                              <p className="text-xs text-ink-secondary">
+                                {selected.addedBleedColorRgb
+                                  ? "Generated bleed band fill color, sampled from the artwork's edge."
+                                  : "Sampling edge color for the generated bleed band…"}
+                              </p>
+                            </div>
+                          )}
                           <NumberField label="Dot diameter (mm)" value={selected.dotParams.dotDiameterMm} onChange={(v) => updatePiece(selected.id, { dotParams: { ...selected.dotParams, dotDiameterMm: v } })} />
                           <NumberField label="White halo under dot (mm)" value={selected.dotParams.dotHaloMm} onChange={(v) => updatePiece(selected.id, { dotParams: { ...selected.dotParams, dotHaloMm: v } })} />
                           <NumberField
@@ -526,12 +650,17 @@ export default function CutFileToolClient() {
                           canvasWidthMm={selected.canvasWidthMm}
                           canvasHeightMm={selected.canvasHeightMm}
                           contentOffsetMm={selected.contentOffsetMm}
-                          contentWidthMm={selected.widthMm}
-                          contentHeightMm={selected.heightMm}
+                          contentWidthMm={selected.effectiveWidthMm}
+                          contentHeightMm={selected.effectiveHeightMm}
+                          pdfOffsetMm={selected.pdfOffsetMm}
+                          pdfWidthMm={selected.widthMm}
+                          pdfHeightMm={selected.heightMm}
                           previewDataUrl={selected.previewDataUrl}
                           dotDiameterMm={selected.dotParams.dotDiameterMm}
                           dotHaloMm={selected.dotParams.dotHaloMm}
                           bleedMm={selected.dotParams.bleedMm}
+                          bleedAlreadyInFile={selected.dotParams.bleedAlreadyInFile}
+                          addedBleedColorRgb={selected.addedBleedColorRgb}
                           dots={selected.dots}
                           onChange={(dots) => updatePiece(selected.id, { dots })}
                         />
@@ -669,8 +798,12 @@ export default function CutFileToolClient() {
                                   canvasWidthMm={p.canvasWidthMm}
                                   canvasHeightMm={p.canvasHeightMm}
                                   contentOffsetMm={p.contentOffsetMm}
-                                  contentWidthMm={p.widthMm}
-                                  contentHeightMm={p.heightMm}
+                                  contentWidthMm={p.effectiveWidthMm}
+                                  contentHeightMm={p.effectiveHeightMm}
+                                  pdfOffsetMm={p.pdfOffsetMm}
+                                  pdfWidthMm={p.widthMm}
+                                  pdfHeightMm={p.heightMm}
+                                  addedBleedColorRgb={p.addedBleedColorRgb}
                                   previewDataUrl={p.previewDataUrl}
                                   outline={p.outline}
                                   onChange={(outline) => updatePiece(p.id, { outline, outlineIsDefault: false })}
