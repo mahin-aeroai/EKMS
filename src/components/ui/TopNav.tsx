@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Bell, LogOut, Search, Sparkles } from "lucide-react";
+import { Bell, LogOut, Search, ShieldCheck, Sparkles } from "lucide-react";
 import { ThemeSwitcher } from "@/components/theme/ThemeSwitcher";
 import { Badge, type BadgeStatus } from "./Badge";
 import { type UserRole } from "@/lib/supabase";
@@ -39,6 +39,7 @@ export function TopNav({
   userEmail,
   userRole,
   onSignOut,
+  onOpenAccount,
 }: {
   onOpenSearch?: () => void;
   onOpenAI?: () => void;
@@ -46,6 +47,7 @@ export function TopNav({
   userEmail?: string | null;
   userRole?: UserRole | null;
   onSignOut?: () => void;
+  onOpenAccount?: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -105,6 +107,16 @@ export function TopNav({
                     )}
                   </div>
                 )}
+                <button
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onOpenAccount?.();
+                  }}
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-ink hover:bg-surface-sunken"
+                >
+                  <ShieldCheck size={14} />
+                  Account &amp; Security
+                </button>
                 <button
                   onClick={() => {
                     setMenuOpen(false);

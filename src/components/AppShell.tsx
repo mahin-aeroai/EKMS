@@ -214,7 +214,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     router.refresh();
   }
 
-  const activeId = NAV.flatMap((s) => s.items).find((i) => i.href === pathname)?.id ?? "home";
+  // Falls back to "" (nothing highlighted) rather than "home" for pages
+  // that aren't in the sidebar at all, like /account — reached only via the
+  // avatar menu in TopNav, not a workspace someone navigates to directly.
+  const activeId = NAV.flatMap((s) => s.items).find((i) => i.href === pathname)?.id ?? "";
 
   // /login renders its own full-page layout — no sidebar/topnav chrome.
   if (pathname === "/login") {
@@ -299,6 +302,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           userEmail={userEmail}
           userRole={userRole}
           onSignOut={handleSignOut}
+          onOpenAccount={() => router.push("/account")}
         />
         <div className="flex flex-1 overflow-hidden">
           <Sidebar sections={visibleNav} activeId={activeId} onNavigate={(id) => {

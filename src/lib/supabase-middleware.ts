@@ -53,6 +53,27 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
+  // A user can be signed in at the password-only level (aal1) but have a
+  // verified authenticator app enrolled on their account, which requires
+  // stepping up to aal2 before they're treated as fully authenticated.
+  // Without this check, someone who enrolled MFA could just navigate
+  // straight to a protected URL right after entering their password,
+  // skipping the code prompt entirely and defeating the point of having
+  // enrolled — the login page's own MFA step-up (see beginMfaChallenge in
+  // src/app/login/page.tsx) only runs if the person actually goes through
+  // that page. getAuthenticatorAssuranceLevel reads the current session's
+  // JWT claims (no extra network round trip beyond the getUser() above).
+  if (user && !isPublicPath(pathname)) {
+    const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (aal && aal.nextLevel === "aal2" && aal.nextLevel !== aal.currentLevel) {
+      const loginUrl = request.nextUrl.clone();
+      loginUrl.pathname = "/login";
+      loginUrl.searchParams.set("redirectTo", pathname);
+      loginUrl.searchParams.set("mfa", "1");
+      return NextResponse.redirect(loginUrl);
+    }
+  }
+
   // Deliberately NOT redirecting already-signed-in users away from /login
   // here. Invite and password-recovery emails link to /login with an
   // access_token in the URL *hash*, which never reaches the server (hashes
