@@ -37,6 +37,27 @@ interface CreativeMasterRow {
 
 const INSTALLATION_STATUS_OPTIONS = ["Scheduled", "In Progress", "Completed", "Delayed", "Cancelled"];
 const OVERALL_STATUS_OPTIONS = ["Pass", "Conditional", "Fail"];
+const SITE_CONDITION_OPTIONS = ["Good", "Poor"];
+const POOR_CONDITION_REASONS = ["Need replacement of entire fixture", "Need to service the lighting"];
+const OTHERS_REASON = "Others";
+
+// Fields that carry over to a newly added site from the previous one —
+// these tend to stay the same across most sites in the same report (same
+// fixture/material/team etc.), so only the handful of fields that
+// genuinely vary per visit (date, permission slot, condition, remarks)
+// start blank / at their default each time. See addSite() below.
+const CARRY_FORWARD_KEYS: (keyof SiteEntry)[] = [
+  "fixtureType",
+  "material",
+  "signType",
+  "size",
+  "installedByTeam",
+  "installedArtwork",
+  "wasSuccessful",
+  "fixtureCondition",
+  "scaffoldingRequired",
+  "overallStatus",
+];
 
 function emptySite(): SiteEntry {
   return {
@@ -47,11 +68,11 @@ function emptySite(): SiteEntry {
     size: "",
     dateOfInstallation: "",
     installedByTeam: "",
-    installationStatus: "Scheduled",
+    installationStatus: "Completed",
     installedArtwork: "",
     storePermissionSlots: "",
     wasSuccessful: "Yes",
-    siteCondition: "",
+    siteCondition: "Good",
     fixtureCondition: "",
     scaffoldingRequired: "No",
     inspectorRemarks: "",
@@ -193,7 +214,16 @@ export default function InstallationReportClient() {
   }
 
   function addSite() {
-    setSites((prev) => [...prev, emptySite()]);
+    setSites((prev) => {
+      const next = emptySite();
+      const last = prev[prev.length - 1];
+      if (last) {
+        for (const key of CARRY_FORWARD_KEYS) {
+          (next as Record<keyof SiteEntry, unknown>)[key] = last[key];
+        }
+      }
+      return [...prev, next];
+    });
   }
 
   function removeSite(index: number) {
@@ -612,12 +642,21 @@ export default function InstallationReportClient() {
                 </label>
                 <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary">
                   Site Condition
-                  <input
-                    type="text"
+                  <select
                     value={site.siteCondition}
-                    onChange={(e) => updateSite(i, { siteCondition: e.target.value })}
-                    className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink focus:border-primary focus:outline-none"
-                  />
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      // Clearing the remarks when switching back to Good keeps
+                      // a stale "needs replacement" note from silently
+                      // lingering on a site that's since been marked fine.
+                      updateSite(i, { siteCondition: value, inspectorRemarks: value === "Good" ? "" : site.inspectorRemarks });
+                    }}
+                    className="h-10 rounded-md border border-line-strong bg-surface px-2 text-sm text-ink focus:border-primary focus:outline-none"
+                  >
+                    {SITE_CONDITION_OPTIONS.map((o) => (
+                      <option key={o}>{o}</option>
+                    ))}
+                  </select>
                 </label>
                 <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary sm:col-span-2">
                   Fixture Condition
@@ -628,15 +667,38 @@ export default function InstallationReportClient() {
                     className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink focus:border-primary focus:outline-none"
                   />
                 </label>
-                <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary sm:col-span-2">
-                  Inspector Remarks
-                  <input
-                    type="text"
-                    value={site.inspectorRemarks}
-                    onChange={(e) => updateSite(i, { inspectorRemarks: e.target.value })}
-                    className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink focus:border-primary focus:outline-none"
-                  />
-                </label>
+
+                {site.siteCondition === "Poor" && (
+                  <>
+                    <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary">
+                      Condition Remarks
+                      <select
+                        value={POOR_CONDITION_REASONS.includes(site.inspectorRemarks) ? site.inspectorRemarks : OTHERS_REASON}
+                        onChange={(e) =>
+                          updateSite(i, { inspectorRemarks: e.target.value === OTHERS_REASON ? "" : e.target.value })
+                        }
+                        className="h-10 rounded-md border border-line-strong bg-surface px-2 text-sm text-ink focus:border-primary focus:outline-none"
+                      >
+                        {POOR_CONDITION_REASONS.map((o) => (
+                          <option key={o}>{o}</option>
+                        ))}
+                        <option>{OTHERS_REASON}</option>
+                      </select>
+                    </label>
+                    {!POOR_CONDITION_REASONS.includes(site.inspectorRemarks) && (
+                      <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary sm:col-span-3">
+                        Remarks <span className="font-normal text-ink-muted">— describe the issue</span>
+                        <input
+                          type="text"
+                          value={site.inspectorRemarks}
+                          onChange={(e) => updateSite(i, { inspectorRemarks: e.target.value })}
+                          className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink focus:border-primary focus:outline-none"
+                          placeholder="e.g. Bracket bent during shipping, needs a replacement part"
+                        />
+                      </label>
+                    )}
+                  </>
+                )}
               </div>
 
               <p className="mb-2 mt-4 text-xs font-semibold uppercase tracking-wide text-ink-muted">Photos</p>
