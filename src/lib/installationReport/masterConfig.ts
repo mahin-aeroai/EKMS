@@ -5,7 +5,7 @@
 // this, and supabase-installation-report-master-migration.sql for the
 // underlying tables.
 
-export type FieldType = "text" | "select" | "checkbox";
+export type FieldType = "text" | "number" | "select" | "checkbox";
 
 export interface FieldDef {
   key: string;
@@ -34,6 +34,11 @@ export interface MasterConfig {
 
 export const MASTER_CONFIGS: MasterConfig[] = [
   {
+    // no_of_sites + the three default_* fields drive the "auto-create sites
+    // when a multi-site store is picked" behavior in
+    // InstallationReportClient.tsx: picking a store with no_of_sites > 1
+    // auto-creates that many site blocks, each pre-filled with these
+    // defaults (still fully editable per site afterwards).
     id: "stores",
     table: "installation_report_stores",
     label: "Store Master",
@@ -45,6 +50,7 @@ export const MASTER_CONFIGS: MasterConfig[] = [
       { key: "sfo_id", label: "SFO ID" },
       { key: "program", label: "Program" },
       { key: "campaign", label: "Campaign" },
+      { key: "no_of_sites", label: "No of Sites" },
     ],
     fields: [
       { key: "store_name", label: "Store Name", type: "text", required: true },
@@ -52,9 +58,18 @@ export const MASTER_CONFIGS: MasterConfig[] = [
       { key: "sfo_id", label: "SFO ID", type: "text" },
       { key: "program", label: "Program", type: "text", placeholder: "e.g. APR" },
       { key: "campaign", label: "Campaign", type: "text" },
+      {
+        key: "no_of_sites",
+        label: "No of Sites",
+        type: "number",
+        placeholder: "1",
+      },
+      { key: "default_fixture_type", label: "Default Fixture Type", type: "text" },
+      { key: "default_material", label: "Default Material", type: "text" },
+      { key: "default_sign_type", label: "Default Sign Type", type: "text" },
       { key: "active", label: "Active", type: "checkbox" },
     ],
-    defaults: { active: true },
+    defaults: { active: true, no_of_sites: 1 },
   },
   {
     id: "creatives",

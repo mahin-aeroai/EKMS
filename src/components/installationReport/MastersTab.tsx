@@ -80,7 +80,9 @@ function MasterPanel({ config, onChanged }: { config: MasterConfig; onChanged?: 
     setSaving(true);
     const payload: Record<string, unknown> = {};
     for (const f of config.fields) {
-      payload[f.key] = form[f.key] ?? (f.type === "checkbox" ? false : null);
+      let v = form[f.key];
+      if (f.type === "number") v = v === "" || v === undefined || v === null ? null : Number(v);
+      payload[f.key] = v ?? (f.type === "checkbox" ? false : null);
     }
     const result = editing
       ? await supabase.from(config.table).update(payload).eq("id", editing.id)
@@ -227,6 +229,22 @@ function FormField({ field, value, onChange }: { field: FieldDef; value: unknown
             </option>
           ))}
         </select>
+      </div>
+    );
+  }
+
+  if (field.type === "number") {
+    return (
+      <div>
+        {labelEl}
+        <input
+          type="number"
+          value={(value as number | string) ?? ""}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={field.placeholder}
+          min={0}
+          className="h-10 w-full rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none placeholder:text-ink-muted"
+        />
       </div>
     );
   }

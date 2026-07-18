@@ -25,6 +25,10 @@ interface StoreMasterRow {
   sfo_id: string | null;
   program: string | null;
   campaign: string | null;
+  no_of_sites: number | null;
+  default_fixture_type: string | null;
+  default_material: string | null;
+  default_sign_type: string | null;
 }
 
 interface CreativeMasterRow {
@@ -86,6 +90,29 @@ function emptySite(): SiteEntry {
     beforePhoto: null,
     afterPhoto: null,
   };
+}
+
+// True if a site has nothing meaningful entered yet — used to decide
+// whether picking a multi-site store is allowed to auto-create/replace the
+// site blocks below. Never overwrite a site the operator has already
+// started filling in.
+function isSitePristine(s: SiteEntry): boolean {
+  return (
+    !s.label &&
+    !s.fixtureType &&
+    !s.material &&
+    !s.signType &&
+    !s.size &&
+    !s.installedArtwork &&
+    !s.mainSlide &&
+    !s.closeUp &&
+    !s.cornerTL &&
+    !s.cornerTR &&
+    !s.cornerBL &&
+    !s.cornerBR &&
+    !s.beforePhoto &&
+    !s.afterPhoto
+  );
 }
 
 function emptyStorePictures(): StorePictures {
@@ -158,7 +185,7 @@ export default function InstallationReportClient() {
       const term = storeQuery.trim();
       let q = supabase
         .from("installation_report_stores")
-        .select("id, store_name, address, sfo_id, program, campaign")
+        .select("id, store_name, address, sfo_id, program, campaign, no_of_sites, default_fixture_type, default_material, default_sign_type")
         .eq("active", true)
         .order("store_name", { ascending: true })
         .limit(25);
@@ -196,7 +223,31 @@ export default function InstallationReportClient() {
     setCampaign(row.campaign ?? "");
     setStoreOpen(false);
     setStoreQuery("");
-    toast("success", "Store details filled from Store Master — adjust anything below as needed");
+
+    const siteCount = row.no_of_sites && row.no_of_sites > 0 ? row.no_of_sites : 1;
+
+    setSites((prev) => {
+      // Only auto-create/replace the site list when it's still untouched —
+      // if the operator has already started filling sites in, leave their
+      // work alone and just fill the store fields above.
+      if (!(prev.length === 1 && isSitePristine(prev[0]))) return prev;
+      return Array.from({ length: siteCount }, () => {
+        const site = emptySite();
+        site.fixtureType = row.default_fixture_type ?? "";
+        site.material = row.default_material ?? "";
+        site.signType = row.default_sign_type ?? "";
+        return site;
+      });
+    });
+
+    if (siteCount > 1) {
+      toast(
+        "success",
+        `Store details filled — this store has ${siteCount} sites, so ${siteCount} site blocks were created with its default sign details (adjust anything as needed)`
+      );
+    } else {
+      toast("success", "Store details filled from Store Master — adjust anything below as needed");
+    }
   }
 
   function applyCreative(row: CreativeMasterRow) {
