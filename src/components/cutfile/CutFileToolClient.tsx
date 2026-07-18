@@ -177,6 +177,30 @@ export default function CutFileToolClient() {
   const [nesting, setNesting] = useState(false);
   const [nestStatus, setNestStatus] = useState<string | null>(null);
   const [nestResult, setNestResult] = useState<NestResult | null>(null);
+  // Frozen snapshot of each piece's artwork/outline/dots, captured at the
+  // exact moment nesting ran — see runNesting(). Exports read from THIS,
+  // never from live `pieces`, so a piece edited after nesting (auto-trace
+  // re-run, dot params recomputed, outline reshaped) can't silently
+  // desync the print/cut files from the layout that was actually packed.
+  // Before this fix, exportPrintPdf/exportCutPdf rebuilt sources from
+  // current `pieces` state on every export click — if ANY piece's outline
+  // had changed since Run Nesting was last clicked, the placement
+  // transform (derived from the outline nesting actually used) would be
+  // computed against a DIFFERENT outline than what's now stored on the
+  // piece, throwing the recovered rotate+translate off by an arbitrary
+  // amount — large enough to visibly overlap a neighboring piece, not
+  // just a fine boundary-precision issue.
+  const [nestSources, setNestSources] = useState<Parameters<typeof buildNestedPrintPdf>[0]["sources"] | null>(null);
+  // True once any piece has been added/edited/removed after the current
+  // nestResult was computed — the export buttons stay usable (still export
+  // the last good, internally-consistent snapshot) but a banner warns the
+  // operator that what's about to download no longer reflects the pieces
+  // panel, so they know to click Run Nesting again first.
+  const [nestStale, setNestStale] = useState(false);
+
+  function markNestStale() {
+    setNestStale((cur) => (nestResult ? true : cur));
+  }
   const [suggestingSheet, setSuggestingSheet] = useState(false);
   const [optimizeWidthToo, setOptimizeWidthToo] = useState(false);
   const [tracingId, setTracingId] = useState<string | null>(null);
@@ -185,12 +209,15 @@ export default function CutFileToolClient() {
 
   function updatePiece(id: string, patch: Partial<UploadedPiece>) {
     setPieces((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+    markNestStale();
   }
 
   function startNewJob() {
     setPieces([]);
     setSelectedId(null);
     setNestResult(null);
+    setNestSources(null);
+    setNestStale(false);
     setNestStatus(null);
     setSheetWidthMm(DEFAULT_SHEET.widthMm);
     setSheetHeightMm(DEFAULT_SHEET.heightMm);
@@ -238,6 +265,7 @@ export default function CutFileToolClient() {
         };
         setPieces((prev) => [...prev, piece]);
         setSelectedId((cur) => cur ?? id);
+        markNestStale();
         if (!dotParams.bleedAlreadyInFile) {
           sampleEdgeColorFromDataUrl(loaded.previewDataUrl).then((rgb) => {
             if (rgb) updatePiece(id, { addedBleedColorRgb: rgb });
@@ -255,6 +283,7 @@ export default function CutFileToolClient() {
   function removePiece(id: string) {
     setPieces((prev) => prev.filter((p) => p.id !== id));
     if (selectedId === id) setSelectedId(null);
+    markNestStale();
   }
 
   function recomputeDots(piece: UploadedPiece) {
@@ -327,6 +356,7 @@ export default function CutFileToolClient() {
     setNesting(true);
     setNestStatus("Starting…");
     setNestResult(null);
+    setNestSources(null);
     // Let the UI paint the loading state before the (synchronous, possibly
     // slow) grid nesting computation runs.
     await new Promise((r) => setTimeout(r, 30));
@@ -347,6 +377,11 @@ export default function CutFileToolClient() {
         onProgress: (msg) => setNestStatus(msg),
       });
       setNestResult(result);
+      // Freeze the exact piece data nesting just used — see the nestSources
+      // comment above for why exports must read from this snapshot, not
+      // live `pieces`, which could drift before the operator clicks export.
+      setNestSources(nestedSources());
+      setNestStale(false);
       if (result.unplaced.length > 0) {
         toast("warning", `${result.unplaced.length} piece instance(s) didn't fit on the sheet`);
       } else {
@@ -376,13 +411,13 @@ export default function CutFileToolClient() {
   }
 
   async function exportPrintPdf() {
-    if (!nestResult) return;
+    if (!nestResult || !nestSources) return;
     try {
       const blob = await buildNestedPrintPdf({
         sheetWidthMm: nestResult.sheetWidthMm,
         sheetHeightMm: nestResult.sheetHeightMm,
         placements: nestResult.placements,
-        sources: nestedSources(),
+        sources: nestSources,
       });
       downloadBlob(blob, "nested_sheet_PRINT.pdf");
       toast("success", "Print file exported — download started");
@@ -392,13 +427,13 @@ export default function CutFileToolClient() {
   }
 
   async function exportCutPdf() {
-    if (!nestResult) return;
+    if (!nestResult || !nestSources) return;
     try {
       const blob = await buildNestedCutPdf({
         sheetWidthMm: nestResult.sheetWidthMm,
         sheetHeightMm: nestResult.sheetHeightMm,
         placements: nestResult.placements,
-        sources: nestedSources(),
+        sources: nestSources,
       });
       downloadBlob(blob, "nested_sheet_CUT.pdf");
       toast("success", "Cut file exported — download started");
@@ -699,6 +734,13 @@ export default function CutFileToolClient() {
                           Run Nesting
                         </Button>
                         {nestStatus && <p className="text-xs text-ink-muted">{nestStatus}</p>}
+                        {nestResult && nestStale && (
+                          <p className="rounded-md bg-warning-tint p-2 text-xs text-warning">
+                            A piece changed since this layout was nested — the buttons below still export the last
+                            good layout, but it won&apos;t match what&apos;s shown in the pieces panel now. Click Run
+                            Nesting again first.
+                          </p>
+                        )}
                         {nestResult && (
                           <div className="rounded-md bg-surface-sunken p-2 text-xs text-ink-secondary">
                             <p>Utilization: {nestResult.utilizationPct.toFixed(1)}%</p>
