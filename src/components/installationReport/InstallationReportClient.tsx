@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ClipboardList, Download, FilePlus2, Plus, Search, Trash2 } from "lucide-react";
+import Link from "next/link";
+import { ClipboardList, Download, FilePlus2, Plus, Settings, Search, Trash2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Notifications";
-import { supabase, type ApplelfgSiteSurveyRow } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase";
 import { ImageSlot } from "@/components/installationReport/ImageSlot";
+import { MasterPickSelect } from "@/components/installationReport/MasterPickSelect";
 import {
   buildInstallationReportPdf,
   downloadBlob,
@@ -16,25 +18,52 @@ import {
   type StorePictures,
 } from "@/lib/installationReport/pdfBuild";
 
+interface StoreMasterRow {
+  id: string;
+  store_name: string;
+  address: string | null;
+  sfo_id: string | null;
+  program: string | null;
+  campaign: string | null;
+}
+
+interface CreativeMasterRow {
+  id: string;
+  creative_name: string;
+  program: string | null;
+  campaign: string | null;
+  creative_version: string | null;
+}
+
+const INSTALLATION_STATUS_OPTIONS = ["Scheduled", "In Progress", "Completed", "Delayed", "Cancelled"];
+const OVERALL_STATUS_OPTIONS = ["Pass", "Conditional", "Fail"];
+
 function emptySite(): SiteEntry {
   return {
     label: "",
     fixtureType: "",
-    size: "",
     material: "",
+    signType: "",
+    size: "",
     dateOfInstallation: "",
-    installedBy: "",
+    installedByTeam: "",
+    installationStatus: "Scheduled",
+    installedArtwork: "",
+    storePermissionSlots: "",
     wasSuccessful: "Yes",
     siteCondition: "",
+    fixtureCondition: "",
     scaffoldingRequired: "No",
-    storePermissionSlots: "",
-    installedArtwork: "",
+    inspectorRemarks: "",
+    overallStatus: "Pass",
     mainSlide: null,
     closeUp: null,
     cornerTL: null,
     cornerTR: null,
     cornerBL: null,
     cornerBR: null,
+    beforePhoto: null,
+    afterPhoto: null,
   };
 }
 
@@ -52,15 +81,15 @@ function emptyStorePictures(): StorePictures {
 }
 
 /**
- * Installation Report tool — same spirit as the Cut File Tool
- * (src/components/cutfile/CutFileToolClient.tsx): a page inside MMDI ONE
- * that does its real work entirely in the browser. Photos are picked
- * straight from the operator's local drive and never uploaded anywhere;
- * the only network call is the optional Site Surveys lookup below, used to
- * pull Store Name / SFO ID from an existing survey record instead of
- * retyping them. The final multi-page PDF (matching the Apple Site
- * Installation Report format) is assembled client-side by
- * src/lib/installationReport/pdfBuild.ts and downloaded directly.
+ * Installation Report tool — a page inside MMDI ONE that does its real work
+ * entirely in the browser, in the same spirit as the Cut File Tool. Photos
+ * are picked straight from the operator's local drive and never uploaded
+ * anywhere. Store details, creative details, and the fixture/material/sign
+ * type/team pick-lists all come from small master-data tables (see
+ * src/app/workspaces/installation-report/master-data/page.tsx) instead of
+ * being retyped on every report — that's the whole point of the Store
+ * Master / Creative Master lookups below. The final multi-page PDF is
+ * assembled client-side by src/lib/installationReport/pdfBuild.ts.
  */
 export default function InstallationReportClient() {
   const { toast } = useToast();
@@ -68,52 +97,95 @@ export default function InstallationReportClient() {
   const [storeName, setStoreName] = useState("");
   const [address, setAddress] = useState("");
   const [sfoId, setSfoId] = useState("");
-  const [program, setProgram] = useState("APR");
+  const [program, setProgram] = useState("");
+  const [campaign, setCampaign] = useState("");
+
+  const [creativeProgram, setCreativeProgram] = useState("");
+  const [creativeCampaign, setCreativeCampaign] = useState("");
+  const [creativeName, setCreativeName] = useState("");
+  const [creativeVersion, setCreativeVersion] = useState("");
+
   const [programDetails, setProgramDetails] = useState("");
   const [storePictures, setStorePictures] = useState<StorePictures>(emptyStorePictures());
   const [sites, setSites] = useState<SiteEntry[]>([emptySite()]);
   const [exporting, setExporting] = useState(false);
 
-  // Site Surveys lookup — searchable picker over apple_lfg_site_surveys,
-  // same query shape as src/app/workspaces/site-surveys/page.tsx.
-  const [surveyQuery, setSurveyQuery] = useState("");
-  const [surveyResults, setSurveyResults] = useState<ApplelfgSiteSurveyRow[] | null>(null);
-  const [surveyOpen, setSurveyOpen] = useState(false);
-  const surveyBoxRef = useRef<HTMLDivElement>(null);
+  // Store Master picker
+  const [storeQuery, setStoreQuery] = useState("");
+  const [storeResults, setStoreResults] = useState<StoreMasterRow[] | null>(null);
+  const [storeOpen, setStoreOpen] = useState(false);
+  const storeBoxRef = useRef<HTMLDivElement>(null);
+
+  // Creative Master picker
+  const [creativeQuery, setCreativeQuery] = useState("");
+  const [creativeResults, setCreativeResults] = useState<CreativeMasterRow[] | null>(null);
+  const [creativeOpen, setCreativeOpen] = useState(false);
+  const creativeBoxRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
-      if (surveyBoxRef.current && !surveyBoxRef.current.contains(e.target as Node)) setSurveyOpen(false);
+      if (storeBoxRef.current && !storeBoxRef.current.contains(e.target as Node)) setStoreOpen(false);
+      if (creativeBoxRef.current && !creativeBoxRef.current.contains(e.target as Node)) setCreativeOpen(false);
     }
     document.addEventListener("mousedown", onClick);
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
 
   useEffect(() => {
-    if (!surveyOpen) return;
+    if (!storeOpen) return;
     const handle = setTimeout(() => {
-      const term = surveyQuery.trim();
+      const term = storeQuery.trim();
       let q = supabase
-        .from("apple_lfg_site_surveys")
-        .select("*")
+        .from("installation_report_stores")
+        .select("id, store_name, address, sfo_id, program, campaign")
+        .eq("active", true)
         .order("store_name", { ascending: true })
         .limit(25);
-      if (term) {
-        q = q.or(`store_name.ilike.%${term}%,apple_store_id.ilike.%${term}%,chain.ilike.%${term}%`);
-      }
+      if (term) q = q.or(`store_name.ilike.%${term}%,sfo_id.ilike.%${term}%`);
       q.then(({ data, error }) => {
-        if (!error) setSurveyResults((data as ApplelfgSiteSurveyRow[]) ?? []);
+        if (!error) setStoreResults((data as StoreMasterRow[]) ?? []);
       });
     }, 250);
     return () => clearTimeout(handle);
-  }, [surveyQuery, surveyOpen]);
+  }, [storeQuery, storeOpen]);
 
-  function applySurvey(row: ApplelfgSiteSurveyRow) {
-    setStoreName(row.store_name ?? row.file_name);
-    if (row.apple_store_id) setSfoId(row.apple_store_id);
-    setSurveyOpen(false);
-    setSurveyQuery("");
-    toast("success", "Store name and SFO ID filled from the site survey — adjust anything below as needed");
+  useEffect(() => {
+    if (!creativeOpen) return;
+    const handle = setTimeout(() => {
+      const term = creativeQuery.trim();
+      let q = supabase
+        .from("installation_report_creatives")
+        .select("id, creative_name, program, campaign, creative_version")
+        .eq("active", true)
+        .order("creative_name", { ascending: true })
+        .limit(25);
+      if (term) q = q.or(`creative_name.ilike.%${term}%,program.ilike.%${term}%,campaign.ilike.%${term}%`);
+      q.then(({ data, error }) => {
+        if (!error) setCreativeResults((data as CreativeMasterRow[]) ?? []);
+      });
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [creativeQuery, creativeOpen]);
+
+  function applyStore(row: StoreMasterRow) {
+    setStoreName(row.store_name);
+    setAddress(row.address ?? "");
+    setSfoId(row.sfo_id ?? "");
+    setProgram(row.program ?? "");
+    setCampaign(row.campaign ?? "");
+    setStoreOpen(false);
+    setStoreQuery("");
+    toast("success", "Store details filled from Store Master — adjust anything below as needed");
+  }
+
+  function applyCreative(row: CreativeMasterRow) {
+    setCreativeName(row.creative_name);
+    setCreativeProgram(row.program ?? "");
+    setCreativeCampaign(row.campaign ?? "");
+    setCreativeVersion(row.creative_version ?? "");
+    setCreativeOpen(false);
+    setCreativeQuery("");
+    toast("success", "Creative details filled from Creative Master");
   }
 
   function updateSite(index: number, patch: Partial<SiteEntry>) {
@@ -132,7 +204,12 @@ export default function InstallationReportClient() {
     setStoreName("");
     setAddress("");
     setSfoId("");
-    setProgram("APR");
+    setProgram("");
+    setCampaign("");
+    setCreativeProgram("");
+    setCreativeCampaign("");
+    setCreativeName("");
+    setCreativeVersion("");
     setProgramDetails("");
     setStorePictures(emptyStorePictures());
     setSites([emptySite()]);
@@ -146,7 +223,20 @@ export default function InstallationReportClient() {
     }
     setExporting(true);
     try {
-      const data: ReportData = { storeName, address, sfoId, program, programDetails, storePictures, sites };
+      const data: ReportData = {
+        storeName,
+        address,
+        sfoId,
+        program,
+        campaign,
+        creativeProgram,
+        creativeCampaign,
+        creativeName,
+        creativeVersion,
+        programDetails,
+        storePictures,
+        sites,
+      };
       const blob = await buildInstallationReportPdf(data);
       const safeName = storeName.replace(/[^\w\-]+/g, "_").slice(0, 60) || "installation_report";
       downloadBlob(blob, `${safeName}_installation_report.pdf`);
@@ -173,12 +263,18 @@ export default function InstallationReportClient() {
               <Badge status="info">Runs locally in your browser</Badge>
             </div>
             <p className="mt-0.5 text-sm text-ink-secondary">
-              Fill in install details, attach photos from your local drive, and export an Apple Site Installation
-              Report PDF — photos never leave this device.
+              Pick the store and creative from master data, fill in the sites, attach photos from your local drive,
+              and export a premium Apple Site Installation Report PDF — photos never leave this device.
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <Link
+            href="/workspaces/installation-report/master-data"
+            className="flex items-center gap-1.5 rounded-md border border-line-strong px-3 py-2 text-sm font-medium text-ink-secondary hover:bg-surface-sunken"
+          >
+            <Settings size={14} /> Manage Master Data
+          </Link>
           <Button variant="secondary" onClick={startNewReport}>
             <FilePlus2 size={14} className="mr-1.5" /> New Report
           </Button>
@@ -190,13 +286,13 @@ export default function InstallationReportClient() {
 
       <div className="mt-6 flex flex-col gap-6">
         <div className="rounded-lg border border-line bg-surface p-4">
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-muted">Store details</h3>
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-muted">Store information</h3>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div ref={surveyBoxRef} className="relative flex flex-col gap-1.5 sm:col-span-2">
+            <div ref={storeBoxRef} className="relative flex flex-col gap-1.5 sm:col-span-2">
               <label className="text-sm font-medium text-ink-secondary">
                 Store name
-                <span className="ml-1 font-normal text-ink-muted">— type, or search your Site Surveys to fill it in</span>
+                <span className="ml-1 font-normal text-ink-muted">— search Store Master to autofill, or type a new one</span>
               </label>
               <div className="flex items-center gap-2 rounded-md border border-line-strong bg-surface px-2">
                 <Search size={14} className="text-ink-muted" />
@@ -205,29 +301,35 @@ export default function InstallationReportClient() {
                   value={storeName}
                   onChange={(e) => {
                     setStoreName(e.target.value);
-                    setSurveyQuery(e.target.value);
-                    setSurveyOpen(true);
+                    setStoreQuery(e.target.value);
+                    setStoreOpen(true);
                   }}
-                  onFocus={() => setSurveyOpen(true)}
+                  onFocus={() => setStoreOpen(true)}
                   placeholder="e.g. Aptronix - Malabar Vijayawada"
                   className="h-9 w-full bg-transparent text-sm text-ink outline-none placeholder:text-ink-muted"
                 />
               </div>
-              {surveyOpen && surveyResults && surveyResults.length > 0 && (
+              {storeOpen && storeResults && storeResults.length > 0 && (
                 <div className="absolute top-full z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-line bg-surface-overlay p-1 shadow-3">
-                  {surveyResults.map((row) => (
+                  {storeResults.map((row) => (
                     <button
                       key={row.id}
                       type="button"
-                      onClick={() => applySurvey(row)}
+                      onClick={() => applyStore(row)}
                       className="flex w-full flex-col rounded-md px-2 py-1.5 text-left text-sm hover:bg-surface-sunken"
                     >
-                      <span className="text-ink">{row.store_name ?? row.file_name}</span>
+                      <span className="text-ink">{row.store_name}</span>
                       <span className="text-xs text-ink-muted">
-                        {row.chain} {row.apple_store_id ? `· Apple ID ${row.apple_store_id}` : ""}
+                        {row.sfo_id ? `SFO ${row.sfo_id}` : ""} {row.program ? `· ${row.program}` : ""}
                       </span>
                     </button>
                   ))}
+                </div>
+              )}
+              {storeOpen && storeResults && storeResults.length === 0 && (
+                <div className="absolute top-full z-20 mt-1 w-full rounded-md border border-line bg-surface-overlay p-3 text-xs text-ink-muted shadow-3">
+                  No matches in Store Master. Fill in the fields below and add it via Manage Master Data to reuse it
+                  next time.
                 </div>
               )}
             </div>
@@ -244,13 +346,24 @@ export default function InstallationReportClient() {
             </label>
 
             <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary">
-              Apple Program
+              Program
               <input
                 type="text"
                 value={program}
                 onChange={(e) => setProgram(e.target.value)}
                 className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
                 placeholder="e.g. APR"
+              />
+            </label>
+
+            <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary">
+              Campaign
+              <input
+                type="text"
+                value={campaign}
+                onChange={(e) => setCampaign(e.target.value)}
+                className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
+                placeholder="e.g. Spring Refresh 2026"
               />
             </label>
 
@@ -264,18 +377,91 @@ export default function InstallationReportClient() {
                 placeholder="Store address"
               />
             </label>
+          </div>
+        </div>
 
-            <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary sm:col-span-2">
-              Program details
-              <textarea
-                value={programDetails}
-                onChange={(e) => setProgramDetails(e.target.value)}
-                rows={2}
+        <div className="rounded-lg border border-line bg-surface p-4">
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-muted">Creative details</h3>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div ref={creativeBoxRef} className="relative flex flex-col gap-1.5 sm:col-span-2">
+              <label className="text-sm font-medium text-ink-secondary">
+                Creative name / artwork
+                <span className="ml-1 font-normal text-ink-muted">— search Creative Master to autofill, or type a new one</span>
+              </label>
+              <div className="flex items-center gap-2 rounded-md border border-line-strong bg-surface px-2">
+                <Search size={14} className="text-ink-muted" />
+                <input
+                  type="text"
+                  value={creativeName}
+                  onChange={(e) => {
+                    setCreativeName(e.target.value);
+                    setCreativeQuery(e.target.value);
+                    setCreativeOpen(true);
+                  }}
+                  onFocus={() => setCreativeOpen(true)}
+                  placeholder="e.g. Spring Refresh Hero Banner"
+                  className="h-9 w-full bg-transparent text-sm text-ink outline-none placeholder:text-ink-muted"
+                />
+              </div>
+              {creativeOpen && creativeResults && creativeResults.length > 0 && (
+                <div className="absolute top-full z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-line bg-surface-overlay p-1 shadow-3">
+                  {creativeResults.map((row) => (
+                    <button
+                      key={row.id}
+                      type="button"
+                      onClick={() => applyCreative(row)}
+                      className="flex w-full flex-col rounded-md px-2 py-1.5 text-left text-sm hover:bg-surface-sunken"
+                    >
+                      <span className="text-ink">{row.creative_name}</span>
+                      <span className="text-xs text-ink-muted">
+                        {row.program ?? ""} {row.campaign ? `· ${row.campaign}` : ""} {row.creative_version ? `· v${row.creative_version}` : ""}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary">
+              Program
+              <input
+                type="text"
+                value={creativeProgram}
+                onChange={(e) => setCreativeProgram(e.target.value)}
                 className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
-                placeholder="e.g. Spring Refresh – MacBook & iPhone 17e"
+              />
+            </label>
+            <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary">
+              Campaign
+              <input
+                type="text"
+                value={creativeCampaign}
+                onChange={(e) => setCreativeCampaign(e.target.value)}
+                className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
+              />
+            </label>
+            <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary sm:col-span-2">
+              Creative version <span className="font-normal text-ink-muted">(optional)</span>
+              <input
+                type="text"
+                value={creativeVersion}
+                onChange={(e) => setCreativeVersion(e.target.value)}
+                className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
+                placeholder="e.g. v2"
               />
             </label>
           </div>
+        </div>
+
+        <div className="rounded-lg border border-line bg-surface p-4">
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-muted">Program details</h3>
+          <textarea
+            value={programDetails}
+            onChange={(e) => setProgramDetails(e.target.value)}
+            rows={2}
+            className="w-full rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
+            placeholder="Any additional context for this report"
+          />
         </div>
 
         <div className="rounded-lg border border-line bg-surface p-4">
@@ -315,64 +501,82 @@ export default function InstallationReportClient() {
                 )}
               </div>
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary">
-                  Site label <span className="font-normal text-ink-muted">(optional)</span>
-                  <input
-                    type="text"
-                    value={site.label}
-                    onChange={(e) => updateSite(i, { label: e.target.value })}
-                    className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
-                    placeholder="e.g. Entrance banner"
-                  />
-                </label>
-                <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary">
-                  Fixture Type
-                  <input
-                    type="text"
-                    value={site.fixtureType}
-                    onChange={(e) => updateSite(i, { fixtureType: e.target.value })}
-                    className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
-                  />
-                </label>
+              <label className="mb-3 flex flex-col gap-1.5 text-sm font-medium text-ink-secondary">
+                Site label <span className="font-normal text-ink-muted">(optional)</span>
+                <input
+                  type="text"
+                  value={site.label}
+                  onChange={(e) => updateSite(i, { label: e.target.value })}
+                  className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none sm:max-w-sm"
+                  placeholder="e.g. Entrance banner"
+                />
+              </label>
+
+              <p className="mb-2 mt-4 text-xs font-semibold uppercase tracking-wide text-ink-muted">Installation details</p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
+                <MasterPickSelect label="Fixture Type" table="installation_report_fixture_types" value={site.fixtureType} onChange={(v) => updateSite(i, { fixtureType: v })} />
+                <MasterPickSelect label="Material" table="installation_report_materials" value={site.material} onChange={(v) => updateSite(i, { material: v })} />
+                <MasterPickSelect label="Sign Type" table="installation_report_sign_types" value={site.signType} onChange={(v) => updateSite(i, { signType: v })} />
                 <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary">
                   Size
                   <input
                     type="text"
                     value={site.size}
                     onChange={(e) => updateSite(i, { size: e.target.value })}
-                    className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
+                    className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink focus:border-primary focus:outline-none"
                   />
                 </label>
+              </div>
+
+              <p className="mb-2 mt-4 text-xs font-semibold uppercase tracking-wide text-ink-muted">Installation schedule</p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
                 <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary">
-                  Material
-                  <input
-                    type="text"
-                    value={site.material}
-                    onChange={(e) => updateSite(i, { material: e.target.value })}
-                    className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
-                  />
-                </label>
-                <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary">
-                  Date of Installation
+                  Installation Date
                   <input
                     type="date"
                     value={site.dateOfInstallation}
                     onChange={(e) => updateSite(i, { dateOfInstallation: e.target.value })}
-                    className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
+                    className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink focus:border-primary focus:outline-none"
                   />
                 </label>
+                <MasterPickSelect label="Installation Team" table="installation_report_teams" value={site.installedByTeam} onChange={(v) => updateSite(i, { installedByTeam: v })} />
                 <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary">
-                  Installation Carried by
+                  Installation Status
+                  <select
+                    value={site.installationStatus}
+                    onChange={(e) => updateSite(i, { installationStatus: e.target.value })}
+                    className="h-10 rounded-md border border-line-strong bg-surface px-2 text-sm text-ink focus:border-primary focus:outline-none"
+                  >
+                    {INSTALLATION_STATUS_OPTIONS.map((o) => (
+                      <option key={o}>{o}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary">
+                  Store Permission Slot
                   <input
                     type="text"
-                    value={site.installedBy}
-                    onChange={(e) => updateSite(i, { installedBy: e.target.value })}
-                    className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
+                    value={site.storePermissionSlots}
+                    onChange={(e) => updateSite(i, { storePermissionSlots: e.target.value })}
+                    className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink focus:border-primary focus:outline-none"
+                    placeholder="e.g. Before store hours, 7–9 AM"
                   />
                 </label>
+                <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary sm:col-span-4">
+                  Installed Artwork Details
+                  <input
+                    type="text"
+                    value={site.installedArtwork}
+                    onChange={(e) => updateSite(i, { installedArtwork: e.target.value })}
+                    className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink focus:border-primary focus:outline-none"
+                  />
+                </label>
+              </div>
+
+              <p className="mb-2 mt-4 text-xs font-semibold uppercase tracking-wide text-ink-muted">Quality inspection</p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
                 <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary">
-                  Was the Installation Successful?
+                  Installation Successful
                   <select
                     value={site.wasSuccessful}
                     onChange={(e) => updateSite(i, { wasSuccessful: e.target.value })}
@@ -384,7 +588,7 @@ export default function InstallationReportClient() {
                   </select>
                 </label>
                 <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary">
-                  Scaffolding Required?
+                  Scaffolding Required
                   <select
                     value={site.scaffoldingRequired}
                     onChange={(e) => updateSite(i, { scaffoldingRequired: e.target.value })}
@@ -395,36 +599,48 @@ export default function InstallationReportClient() {
                   </select>
                 </label>
                 <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary">
-                  Store Permission Slots
-                  <input
-                    type="text"
-                    value={site.storePermissionSlots}
-                    onChange={(e) => updateSite(i, { storePermissionSlots: e.target.value })}
-                    className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
-                    placeholder="e.g. Before store hours, 7–9 AM"
-                  />
+                  Overall Status
+                  <select
+                    value={site.overallStatus}
+                    onChange={(e) => updateSite(i, { overallStatus: e.target.value })}
+                    className="h-10 rounded-md border border-line-strong bg-surface px-2 text-sm text-ink focus:border-primary focus:outline-none"
+                  >
+                    {OVERALL_STATUS_OPTIONS.map((o) => (
+                      <option key={o}>{o}</option>
+                    ))}
+                  </select>
                 </label>
-                <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary sm:col-span-3">
-                  Site / Fixture Condition
+                <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary">
+                  Site Condition
                   <input
                     type="text"
                     value={site.siteCondition}
                     onChange={(e) => updateSite(i, { siteCondition: e.target.value })}
-                    className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
+                    className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink focus:border-primary focus:outline-none"
                   />
                 </label>
-                <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary sm:col-span-3">
-                  Installed Artwork Details
+                <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary sm:col-span-2">
+                  Fixture Condition
                   <input
                     type="text"
-                    value={site.installedArtwork}
-                    onChange={(e) => updateSite(i, { installedArtwork: e.target.value })}
-                    className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
+                    value={site.fixtureCondition}
+                    onChange={(e) => updateSite(i, { fixtureCondition: e.target.value })}
+                    className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink focus:border-primary focus:outline-none"
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary sm:col-span-2">
+                  Inspector Remarks
+                  <input
+                    type="text"
+                    value={site.inspectorRemarks}
+                    onChange={(e) => updateSite(i, { inspectorRemarks: e.target.value })}
+                    className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink focus:border-primary focus:outline-none"
                   />
                 </label>
               </div>
 
-              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <p className="mb-2 mt-4 text-xs font-semibold uppercase tracking-wide text-ink-muted">Photos</p>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 <ImageSlot label="Main Slide" file={site.mainSlide} onChange={(f) => updateSite(i, { mainSlide: f })} aspect="wide" />
                 <ImageSlot label="Close-up View" file={site.closeUp} onChange={(f) => updateSite(i, { closeUp: f })} aspect="wide" />
               </div>
@@ -433,6 +649,10 @@ export default function InstallationReportClient() {
                 <ImageSlot label="Top Right Corner" file={site.cornerTR} onChange={(f) => updateSite(i, { cornerTR: f })} />
                 <ImageSlot label="Bottom Left Corner" file={site.cornerBL} onChange={(f) => updateSite(i, { cornerBL: f })} />
                 <ImageSlot label="Bottom Right Corner" file={site.cornerBR} onChange={(f) => updateSite(i, { cornerBR: f })} />
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <ImageSlot label="Before (optional)" file={site.beforePhoto} onChange={(f) => updateSite(i, { beforePhoto: f })} />
+                <ImageSlot label="After (optional)" file={site.afterPhoto} onChange={(f) => updateSite(i, { afterPhoto: f })} />
               </div>
             </div>
           ))}

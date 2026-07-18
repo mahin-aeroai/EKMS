@@ -18,6 +18,14 @@ export function createPreviewUrl(file: File): string {
   return URL.createObjectURL(file);
 }
 
+/** Natural pixel dimensions of a local image file, without any cropping — used to decide whether a hero photo should get a wide landscape layout box or a taller portrait one. */
+export async function getImageDimensions(file: File): Promise<{ width: number; height: number }> {
+  const img = await loadHtmlImage(file);
+  const dims = { width: img.naturalWidth, height: img.naturalHeight };
+  URL.revokeObjectURL(img.src);
+  return dims;
+}
+
 function loadHtmlImage(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
