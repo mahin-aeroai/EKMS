@@ -54,6 +54,22 @@ interface Mask {
   data: Uint8Array; // row-major, 1 = occupied
 }
 
+// Sub-samples per grid cell edge (3 -> 3x3 = 9 samples/cell) for rasterize()
+// below. A single center-point test per cell is fine for bulky shapes, but a
+// sharp, narrow feature — a star's point, tapering below one cell's width —
+// can pass through a cell without ever containing that cell's exact center,
+// so the cell reads as empty even though part of the shape occupies it. That
+// under-reservation is exactly what let two auto-traced stars' points end up
+// overlapping in an exported nest despite passing collision checks: the
+// vector cut-path is exact, but the occupancy grid it was checked against
+// wasn't. Testing several sample points per cell and marking it occupied if
+// ANY of them lands inside the shape makes the mask conservative (slightly
+// over-reserves at edges, never under-reserves), which is the right
+// trade-off for production cutting — a touch less packing density beats a
+// real overlap.
+const SUPERSAMPLE = 3;
+const SUB_OFFSETS = Array.from({ length: SUPERSAMPLE }, (_, i) => (i + 0.5) / SUPERSAMPLE);
+
 /**
  * Rasterizes `outline` (already normalized so nothing is negative) onto a
  * mask of explicit `cols`x`rows`, additionally marking any cell within a
@@ -72,17 +88,25 @@ function rasterize(
   const { cols, rows } = dims;
   const data = new Uint8Array(cols * rows);
   for (let r = 0; r < rows; r++) {
-    const y = (r + 0.5) * resMm;
     for (let c = 0; c < cols; c++) {
-      const x = (c + 0.5) * resMm;
-      let occupied = pointInPolygon({ x, y }, outline);
-      if (!occupied && reserveCircles) {
-        for (const rc of reserveCircles) {
-          const dx = x - rc.point.x;
-          const dy = y - rc.point.y;
-          if (dx * dx + dy * dy <= rc.radiusMm * rc.radiusMm) {
+      let occupied = false;
+      sampleLoop: for (const oy of SUB_OFFSETS) {
+        const y = (r + oy) * resMm;
+        for (const ox of SUB_OFFSETS) {
+          const x = (c + ox) * resMm;
+          if (pointInPolygon({ x, y }, outline)) {
             occupied = true;
-            break;
+            break sampleLoop;
+          }
+          if (reserveCircles) {
+            for (const rc of reserveCircles) {
+              const dx = x - rc.point.x;
+              const dy = y - rc.point.y;
+              if (dx * dx + dy * dy <= rc.radiusMm * rc.radiusMm) {
+                occupied = true;
+                break sampleLoop;
+              }
+            }
           }
         }
       }
