@@ -49,6 +49,7 @@ export const MASTER_CONFIGS: MasterConfig[] = [
       { key: "address", label: "Address" },
       { key: "sfo_id", label: "SFO ID" },
       { key: "program", label: "Store Program" },
+      { key: "asm_name", label: "ASM" },
       { key: "no_of_sites", label: "No of Sites" },
     ],
     fields: [
@@ -56,6 +57,8 @@ export const MASTER_CONFIGS: MasterConfig[] = [
       { key: "address", label: "Address", type: "text" },
       { key: "sfo_id", label: "SFO ID", type: "text" },
       { key: "program", label: "Store Program", type: "text", placeholder: "e.g. APR, Mono AAR" },
+      { key: "asm_name", label: "ASM Name", type: "text", placeholder: "Area/Assistant Store Manager" },
+      { key: "asm_contact", label: "ASM Contact", type: "text", placeholder: "Phone number" },
       {
         key: "no_of_sites",
         label: "No of Sites",

@@ -28,6 +28,8 @@ interface StoreMasterRow {
   default_fixture_type: string | null;
   default_material: string | null;
   default_sign_type: string | null;
+  asm_name: string | null;
+  asm_contact: string | null;
 }
 
 // One row per physical installation site at a store (installation_report_store_sites)
@@ -156,6 +158,8 @@ export default function InstallationReportClient() {
   const [address, setAddress] = useState("");
   const [sfoId, setSfoId] = useState("");
   const [program, setProgram] = useState("");
+  const [asmName, setAsmName] = useState("");
+  const [asmContact, setAsmContact] = useState("");
 
   // Report-level — chosen once, applies to every site in the report.
   const [seasonProgram, setSeasonProgram] = useState("");
@@ -192,7 +196,9 @@ export default function InstallationReportClient() {
       const term = storeQuery.trim();
       let q = supabase
         .from("installation_report_stores")
-        .select("id, store_name, address, sfo_id, program, no_of_sites, default_fixture_type, default_material, default_sign_type")
+        .select(
+          "id, store_name, address, sfo_id, program, no_of_sites, default_fixture_type, default_material, default_sign_type, asm_name, asm_contact"
+        )
         .eq("active", true)
         .order("store_name", { ascending: true })
         .limit(25);
@@ -209,6 +215,8 @@ export default function InstallationReportClient() {
     setAddress(row.address ?? "");
     setSfoId(row.sfo_id ?? "");
     setProgram(row.program ?? "");
+    setAsmName(row.asm_name ?? "");
+    setAsmContact(row.asm_contact ?? "");
     setStoreOpen(false);
     setStoreQuery("");
 
@@ -300,6 +308,8 @@ export default function InstallationReportClient() {
     setAddress("");
     setSfoId("");
     setProgram("");
+    setAsmName("");
+    setAsmContact("");
     setSeasonProgram("");
     setInstallationDate("");
     setStorePictures(emptyStorePictures());
@@ -320,6 +330,8 @@ export default function InstallationReportClient() {
         address,
         sfoId,
         program,
+        asmName,
+        asmContact,
         seasonProgram,
         installationDate,
         storePictures,
@@ -452,6 +464,28 @@ export default function InstallationReportClient() {
                 onChange={(e) => setAddress(e.target.value)}
                 className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
                 placeholder="Store address"
+              />
+            </label>
+
+            <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary">
+              ASM Name <span className="font-normal text-ink-muted">(optional)</span>
+              <input
+                type="text"
+                value={asmName}
+                onChange={(e) => setAsmName(e.target.value)}
+                className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
+                placeholder="Area/Assistant Store Manager"
+              />
+            </label>
+
+            <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary">
+              ASM Contact <span className="font-normal text-ink-muted">(optional)</span>
+              <input
+                type="text"
+                value={asmContact}
+                onChange={(e) => setAsmContact(e.target.value)}
+                className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
+                placeholder="Phone number"
               />
             </label>
           </div>

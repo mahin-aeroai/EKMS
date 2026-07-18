@@ -118,6 +118,12 @@ export interface ReportData {
   sfoId: string;
   program: string;
 
+  // Area/Assistant Store Manager contact for this store — sourced from
+  // Store Master (asm_name/asm_contact). Both start empty until a real ASM
+  // roster is imported; the report renders them gracefully blank until then.
+  asmName: string;
+  asmContact: string;
+
   // Season/rollout program (Fall 25, Spring 26...) — chosen once per
   // report from the Program Master, applies to every site in it.
   seasonProgram: string;
@@ -646,108 +652,133 @@ function drawCoverPage(ctx: Ctx, data: ReportData) {
   drawFooter(ctx, page);
 }
 
-function drawStoreAndCreativePage(ctx: Ctx, data: ReportData) {
-  const page = newPage(ctx, "Store Details");
-  const b = contentBounds();
-  let y = drawSectionHeading(ctx, page, "Store Information", b.left, b.top);
-  y -= 6;
-
-  const availW = b.right - b.left;
-
-  // Glanceable facts row, same dashboard language as the cover — fills the
-  // top of the page with real visual weight instead of a couple of
-  // skinny label/value cards that left most of it blank.
-  const kpis: KpiTile[] = [
-    { icon: "pin", label: "SFO ID", value: data.sfoId || "—" },
-    { icon: "store", label: "Store Program", value: data.program || "—" },
-    { icon: "tag", label: "Program", value: data.seasonProgram || "—" },
-    { icon: "calendar", label: "Installation Date", value: formatDate(data.installationDate) },
-    { icon: "sites", label: "No of Sites", value: String(data.sites.length) },
-  ];
-  y = drawKpiRow(ctx, page, b.left, y, availW, mm(44), kpis);
-  y -= mm(8);
-
-  // Full-width "Store Location" hero card fills the rest of the page —
-  // large store name, full address, and a footer note tying it to the
-  // rest of the report — instead of ending the page early.
-  const cardH = y - b.bottom;
-  const padX = 28;
-  drawCardBg(page, b.left, y, availW, cardH, 16);
-
-  drawIconChip(page, "pin", b.left + padX, y - padX + 2, 26, ACCENT, ACCENT_TINT);
-  page.drawText("STORE LOCATION", { x: b.left + padX + 38, y: y - padX - 12, size: 9.5, font: ctx.bold, color: MUTED });
-
-  const nameSize = fitFontSize(ctx.bold, data.storeName || "Untitled store", availW - padX * 2, 30, 18);
-  page.drawText(data.storeName || "Untitled store", { x: b.left + padX, y: y - padX - 48, size: nameSize, font: ctx.bold, color: INK });
-
-  const addrLines = wrapText(ctx.font, data.address || "No address on file.", 14, availW - padX * 2 - mm(20)).slice(0, 5);
-  addrLines.forEach((line, i) => {
-    page.drawText(line, { x: b.left + padX, y: y - padX - 82 - i * 22, size: 14, font: ctx.font, color: INK_SECONDARY });
-  });
-
-  // A giant pale store-initial monogram fills the blank space below the
-  // address instead of leaving it empty — the same "oversized faint
-  // background character" device used for the site-numeral watermark on
-  // the installation site pages, reused here for visual consistency.
-  const footerLineY = y - cardH + 40;
-  const addrBottom = y - padX - 82 - addrLines.length * 22;
-  const blankTop = addrBottom - 24;
-  const blankBottom = footerLineY + 20;
-  const blankH = blankTop - blankBottom;
-  if (blankH > 80) {
-    const monogram = (data.storeName || "?").trim().charAt(0).toUpperCase() || "?";
-    const monoSize = Math.min(blankH * 0.85, 280);
-    const monoW = ctx.bold.widthOfTextAtSize(monogram, monoSize);
-    page.drawText(monogram, {
-      x: b.left + availW / 2 - monoW / 2,
-      y: blankBottom + (blankH - monoSize) / 2 + monoSize * 0.18,
-      size: monoSize,
-      font: ctx.bold,
-      color: SURFACE_ALT,
-    });
+/**
+ * Minimal, borderless photo tile for the Apple-style Store Overview page —
+ * a plain rounded-corner image with a hairline outline and a small
+ * uppercase caption sitting quietly below it, instead of the gradient
+ * scrim + on-image caption used elsewhere in the report. Deliberately the
+ * quietest possible treatment: no shadow, no badge, no card background.
+ */
+async function drawPhotoMinimal(
+  ctx: Ctx,
+  page: PDFPage,
+  photo: PhotoValue | null,
+  x: number,
+  yBottom: number,
+  w: number,
+  h: number,
+  caption: string,
+  r = 10
+) {
+  if (!photo) {
+    roundedRectFill(page, x, yBottom + h, w, h, r, SURFACE_ALT, { color: BORDER, width: 1 });
+    const msg = "No photo attached";
+    const size = 9.5;
+    const tw = ctx.font.widthOfTextAtSize(msg, size);
+    page.drawText(msg, { x: x + w / 2 - tw / 2, y: yBottom + h / 2, size, font: ctx.font, color: MUTED });
+  } else {
+    const prepared = await prepareCoverImage(photo.file, w, h, photo);
+    const img = await ctx.doc.embedJpg(prepared.bytes);
+    beginRoundedClip(page, x, yBottom, w, h, r);
+    page.drawImage(img, { x, y: yBottom, width: w, height: h });
+    endRoundedClip(page);
+    roundedRectFill(page, x, yBottom + h, w, h, r, undefined, { color: BORDER, width: 1 });
   }
-
-  page.drawLine({ start: { x: b.left + padX, y: footerLineY }, end: { x: b.left + availW - padX, y: footerLineY }, thickness: 0.75, color: BORDER });
-  page.drawText("Every site in this report shares this store, this program, and this installation date.", {
-    x: b.left + padX,
-    y: y - cardH + 22,
-    size: 10,
-    font: ctx.italic,
-    color: MUTED,
-  });
+  page.drawText(caption.toUpperCase(), { x, y: yBottom - 16, size: 8.5, font: ctx.bold, color: MUTED });
 }
 
 /**
- * Store Overview Photos as an editorial mosaic instead of a uniform grid:
- * a big hero (Store Full Cover) on the left, full page height, and the
- * remaining three shots stacked on the right — the same "one dominant
- * image, supporting images smaller" idea real photo-led reports use,
- * rather than equal boxes in rows.
+ * Store Information + Photos, combined onto a single page in a clean,
+ * minimal, Apple-inspired style — deliberately the opposite treatment from
+ * the KPI-dashboard cards used on the cover and site pages: plain
+ * typography, thin hairline dividers instead of bordered/shadowed cards,
+ * and generous white space. Store Name, Store Program, Campaign (season
+ * program), Installation Date, and Status are the five things called out
+ * with real visual weight; everything else (SFO ID, site count, ASM
+ * contact, address) sits quietly underneath in a smaller supporting line.
+ * ASM Name/Contact come from Store Master and render as "—" until that
+ * roster is imported.
  */
-async function drawStorePicturesPages(ctx: Ctx, pictures: StorePictures) {
+async function drawStoreOverviewPage(ctx: Ctx, data: ReportData) {
   const page = newPage(ctx, "Store Overview");
   const b = contentBounds();
-  let y = drawSectionHeading(ctx, page, "Store Overview Photos", b.left, b.top);
-  y -= 6;
-
   const availW = b.right - b.left;
-  const availH = y - b.bottom;
-  const gap = mm(6);
+  const dash = computeDashboard(data);
+  let y = b.top;
 
-  const heroW = availW * 0.58;
-  await drawPhotoBoxOverlay(ctx, page, pictures.storeFullCover, b.left, y - availH, heroW, availH, "Store Full Cover", "Primary storefront view");
+  page.drawText("STORE INFORMATION", { x: b.left, y: y - 2, size: 9.5, font: ctx.bold, color: ACCENT });
+  y -= 24;
 
-  const stackX = b.left + heroW + gap;
-  const stackW = availW - heroW - gap;
-  const stackItems = [
-    { file: pictures.installationCloseUp, caption: "Installation Close-up" },
-    { file: pictures.streetView1, caption: "Street View 1" },
-    { file: pictures.streetView2, caption: "Street View 2" },
+  const nameSize = fitFontSize(ctx.bold, data.storeName || "Untitled store", availW, 34, 20);
+  page.drawText(data.storeName || "Untitled store", { x: b.left, y: y - nameSize * 0.8, size: nameSize, font: ctx.bold, color: INK });
+  y -= nameSize * 1.05 + 16;
+
+  const subtitleParts = [
+    `SFO ${data.sfoId || "—"}`,
+    `${data.sites.length} site${data.sites.length === 1 ? "" : "s"}`,
+    data.asmName ? `ASM ${data.asmName}${data.asmContact ? ` (${data.asmContact})` : ""}` : "ASM —",
   ];
-  const stackCellH = (availH - gap * (stackItems.length - 1)) / stackItems.length;
-  for (let i = 0; i < stackItems.length; i++) {
-    const cellTop = y - i * (stackCellH + gap);
-    await drawPhotoBoxOverlay(ctx, page, stackItems[i].file, stackX, cellTop - stackCellH, stackW, stackCellH, stackItems[i].caption);
+  page.drawText(subtitleParts.join("   ·   "), { x: b.left, y, size: 10.5, font: ctx.font, color: MUTED });
+  y -= 20;
+
+  if (data.address) {
+    const addrLines = wrapText(ctx.font, data.address, 12, availW * 0.85).slice(0, 2);
+    addrLines.forEach((line, i) => {
+      page.drawText(line, { x: b.left, y: y - i * 16, size: 12, font: ctx.font, color: INK_SECONDARY });
+    });
+    y -= addrLines.length * 16 + 14;
+  } else {
+    y -= 6;
+  }
+
+  page.drawLine({ start: { x: b.left, y }, end: { x: b.right, y }, thickness: 0.75, color: BORDER });
+  y -= 28;
+
+  // The five highlighted facts, laid out as plain label/value columns with
+  // thin vertical hairlines between them — no boxes, no icon chips.
+  const metaCols: { label: string; value: string; tone?: "status" }[] = [
+    { label: "Store Program", value: data.program || "—" },
+    { label: "Campaign", value: data.seasonProgram || "—" },
+    { label: "Installation Date", value: formatDate(data.installationDate) },
+    { label: "Status", value: dash.overall, tone: "status" },
+  ];
+  const colW = availW / metaCols.length;
+  const metaTop = y;
+  metaCols.forEach((col, i) => {
+    const cx = b.left + i * colW;
+    if (i > 0) {
+      page.drawLine({ start: { x: cx, y: metaTop + 4 }, end: { x: cx, y: metaTop - 34 }, thickness: 0.75, color: BORDER });
+    }
+    const textX = cx + (i > 0 ? 20 : 0);
+    page.drawText(col.label.toUpperCase(), { x: textX, y: metaTop, size: 8, font: ctx.bold, color: MUTED });
+    const color = col.tone === "status" ? statusTone(col.value).fg : INK;
+    const valSize = fitFontSize(ctx.bold, col.value, colW - (i > 0 ? 34 : 14), 16, 10);
+    page.drawText(col.value, { x: textX, y: metaTop - 24, size: valSize, font: ctx.bold, color });
+  });
+  y -= 46;
+
+  page.drawLine({ start: { x: b.left, y }, end: { x: b.right, y }, thickness: 0.75, color: BORDER });
+  y -= 30;
+
+  // Photo grid — a plain 2x2, generously spaced, captions sitting quietly
+  // below each frame instead of overlaid on the image.
+  const availH = y - b.bottom;
+  const gap = mm(10);
+  const captionH = 20;
+  const cellW = (availW - gap) / 2;
+  const cellH = (availH - gap - captionH * 2) / 2;
+  const photos: { photo: PhotoValue | null; caption: string }[] = [
+    { photo: data.storePictures.storeFullCover, caption: "Store Full Cover" },
+    { photo: data.storePictures.installationCloseUp, caption: "Installation Close-up" },
+    { photo: data.storePictures.streetView1, caption: "Street View 1" },
+    { photo: data.storePictures.streetView2, caption: "Street View 2" },
+  ];
+  for (let i = 0; i < photos.length; i++) {
+    const col = i % 2;
+    const row = Math.floor(i / 2);
+    const cx = b.left + col * (cellW + gap);
+    const rowTop = y - row * (cellH + captionH + gap);
+    await drawPhotoMinimal(ctx, page, photos[i].photo, cx, rowTop - cellH, cellW, cellH, photos[i].caption);
   }
 }
 
@@ -895,8 +926,7 @@ export async function buildInstallationReportPdf(data: ReportData): Promise<Blob
   };
 
   drawCoverPage(ctx, data);
-  drawStoreAndCreativePage(ctx, data);
-  await drawStorePicturesPages(ctx, data.storePictures);
+  await drawStoreOverviewPage(ctx, data);
 
   for (let i = 0; i < data.sites.length; i++) {
     const site = data.sites[i];
