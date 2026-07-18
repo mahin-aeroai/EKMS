@@ -27,7 +27,7 @@ import {
   clip,
   endPath,
 } from "pdf-lib";
-import { prepareCoverImage, getImageDimensions } from "./imaging";
+import { prepareCoverImage, getImageDimensions, type PhotoValue } from "./imaging";
 
 const PT_PER_MM = 72 / 25.4;
 const mm = (v: number) => v * PT_PER_MM;
@@ -95,26 +95,26 @@ export interface SiteEntry {
   inspectorRemarks: string;
   overallStatus: string;
 
-  // Photos — none of these ever leave the browser.
-  mainSlide: File | null;
-  closeUp: File | null;
-  cornerTL: File | null;
-  cornerTR: File | null;
-  cornerBL: File | null;
-  cornerBR: File | null;
-  beforePhoto: File | null;
-  afterPhoto: File | null;
+  // Photos — none of these ever leave the browser. Each carries the
+  // operator's pan/zoom framing alongside the file (see PhotoValue in
+  // imaging.ts) instead of always auto-centering.
+  mainSlide: PhotoValue | null;
+  closeUp: PhotoValue | null;
+  cornerTL: PhotoValue | null;
+  cornerTR: PhotoValue | null;
+  cornerBL: PhotoValue | null;
+  cornerBR: PhotoValue | null;
 }
 
 export interface StorePictures {
-  storeFullCover: File | null;
-  installationCloseUp: File | null;
-  streetView1: File | null;
-  streetView2: File | null;
-  cornerPic1: File | null;
-  cornerPic2: File | null;
-  cornerPic3: File | null;
-  cornerPic4: File | null;
+  storeFullCover: PhotoValue | null;
+  installationCloseUp: PhotoValue | null;
+  streetView1: PhotoValue | null;
+  streetView2: PhotoValue | null;
+  cornerPic1: PhotoValue | null;
+  cornerPic2: PhotoValue | null;
+  cornerPic3: PhotoValue | null;
+  cornerPic4: PhotoValue | null;
 }
 
 export interface ReportData {
@@ -462,7 +462,7 @@ function drawInfoCard(
 async function drawPhotoBoxOverlay(
   ctx: Ctx,
   page: PDFPage,
-  file: File | null,
+  photo: PhotoValue | null,
   x: number,
   yBottom: number,
   w: number,
@@ -472,7 +472,7 @@ async function drawPhotoBoxOverlay(
   badge?: string,
   r = 12
 ) {
-  if (!file) {
+  if (!photo) {
     roundedRectFill(page, x, yBottom + h, w, h, r, SURFACE_ALT, { color: BORDER, width: 1 });
     const msg = "No photo attached";
     const size = 9.5;
@@ -485,7 +485,7 @@ async function drawPhotoBoxOverlay(
     return;
   }
 
-  const prepared = await prepareCoverImage(file, w, h);
+  const prepared = await prepareCoverImage(photo.file, w, h, photo);
   const img = await ctx.doc.embedJpg(prepared.bytes);
   beginRoundedClip(page, x, yBottom, w, h, r);
   page.drawImage(img, { x, y: yBottom, width: w, height: h });
@@ -561,7 +561,7 @@ async function drawSiteSpreadPage(ctx: Ctx, site: SiteEntry, index: number) {
     let boxH = availH;
     if (file) {
       try {
-        const dims = await getImageDimensions(file);
+        const dims = await getImageDimensions(file.file);
         const isPortrait = dims.height > dims.width * 1.05;
         if (isPortrait) {
           boxW = Math.min(availW, availH * 0.72);
@@ -845,7 +845,7 @@ async function drawCornersPage(ctx: Ctx, site: SiteEntry, index: number) {
   const cellW = (availW - gap) / 2;
   const cellH = (availH - gap) / 2;
 
-  const corners: { file: File | null; caption: string; badge: string }[] = [
+  const corners: { file: PhotoValue | null; caption: string; badge: string }[] = [
     { file: site.cornerTL, caption: "Top Left Corner", badge: "TL" },
     { file: site.cornerTR, caption: "Top Right Corner", badge: "TR" },
     { file: site.cornerBL, caption: "Bottom Left Corner", badge: "BL" },
@@ -858,30 +858,6 @@ async function drawCornersPage(ctx: Ctx, site: SiteEntry, index: number) {
     const cellTop = y - row * (cellH + gap);
     await drawPhotoBoxOverlay(ctx, page, corners[i].file, cx, cellTop - cellH, cellW, cellH, corners[i].caption, undefined, corners[i].badge);
   }
-}
-
-async function drawBeforeAfterPage(ctx: Ctx, site: SiteEntry, index: number) {
-  const page = newPage(ctx, `Installation Site ${index + 1}`);
-  const b = contentBounds();
-  let y = drawSectionHeading(ctx, page, `Site ${index + 1} — Before & After`, b.left, b.top);
-  y -= 6;
-
-  const availW = b.right - b.left;
-  const availH = y - b.bottom;
-  const dividerW = mm(10);
-  const cellW = (availW - dividerW) / 2;
-
-  await drawPhotoBoxOverlay(ctx, page, site.beforePhoto, b.left, y - availH, cellW, availH, "Before", "Prior to installation");
-  await drawPhotoBoxOverlay(ctx, page, site.afterPhoto, b.left + cellW + dividerW, y - availH, cellW, availH, "After", "Completed installation");
-
-  // Small accent chip with a hand-drawn arrow (avoids relying on a unicode
-  // glyph like "→", which the standard WinAnsi-encoded fonts can't render).
-  const cx = b.left + cellW + dividerW / 2;
-  const cy = y - availH / 2;
-  page.drawCircle({ x: cx, y: cy, size: 15, color: ACCENT });
-  page.drawLine({ start: { x: cx - 6, y: cy }, end: { x: cx + 4, y: cy }, thickness: 1.6, color: rgb(1, 1, 1), lineCap: LineCapStyle.Round });
-  page.drawLine({ start: { x: cx + 1, y: cy + 4 }, end: { x: cx + 6, y: cy }, thickness: 1.6, color: rgb(1, 1, 1), lineCap: LineCapStyle.Round });
-  page.drawLine({ start: { x: cx + 1, y: cy - 4 }, end: { x: cx + 6, y: cy }, thickness: 1.6, color: rgb(1, 1, 1), lineCap: LineCapStyle.Round });
 }
 
 function siteHasCornerPhoto(site: SiteEntry): boolean {
@@ -917,7 +893,6 @@ export async function buildInstallationReportPdf(data: ReportData): Promise<Blob
     await drawSiteOverviewPage(ctx, site, i);
     await drawSiteSpreadPage(ctx, site, i);
     if (siteHasCornerPhoto(site)) await drawCornersPage(ctx, site, i);
-    if (site.beforePhoto || site.afterPhoto) await drawBeforeAfterPage(ctx, site, i);
   }
 
   const bytes = await doc.save();

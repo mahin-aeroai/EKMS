@@ -11,6 +11,29 @@ export interface PreparedImage {
   heightPx: number;
 }
 
+/** Pan/zoom the operator applied to a photo before export — focalX/focalY (0-1) is the point of the source image kept centered in its box, zoom (>=1) narrows the crop window around that point. Defaults (0.5, 0.5, 1) reproduce the old always-centered "cover" crop. */
+export interface PhotoTransform {
+  focalX: number;
+  focalY: number;
+  zoom: number;
+}
+
+/** A photo picked for a slot, plus how the operator has chosen to frame it. */
+export interface PhotoValue {
+  file: File;
+  focalX: number;
+  focalY: number;
+  zoom: number;
+}
+
+export function defaultPhotoTransform(): PhotoTransform {
+  return { focalX: 0.5, focalY: 0.5, zoom: 1 };
+}
+
+export function photoValueFromFile(file: File): PhotoValue {
+  return { file, ...defaultPhotoTransform() };
+}
+
 const MAX_OUTPUT_DIM = 1600; // px on the longer edge — plenty for a full-page report photo, keeps file size sane
 
 /** For on-screen thumbnails only — caller is responsible for revoking this when the slot's file changes or unmounts. */
@@ -44,26 +67,41 @@ function loadHtmlImage(file: File): Promise<HTMLImageElement> {
  * boxWidth:boxHeight ("cover" behavior, like CSS object-fit: cover) so
  * every photo in the exported report fills its slot edge-to-edge with no
  * white bars — matching the reference report's cropped photo boxes.
+ *
+ * `transform` is the operator's pan/zoom adjustment from the ImageSlot
+ * editor: at the default (centered, zoom 1) this crops exactly like plain
+ * "cover" did before pan/zoom existed; a higher zoom shrinks the crop
+ * window (so the output is more zoomed-in) and focalX/focalY re-centers
+ * that window on a different point of the source image, clamped so the
+ * crop never runs off the edge of the photo.
  */
-export async function prepareCoverImage(file: File, boxWidth: number, boxHeight: number): Promise<PreparedImage> {
+export async function prepareCoverImage(
+  file: File,
+  boxWidth: number,
+  boxHeight: number,
+  transform?: PhotoTransform
+): Promise<PreparedImage> {
   const img = await loadHtmlImage(file);
   try {
     const boxAspect = boxWidth / boxHeight;
     const srcAspect = img.naturalWidth / img.naturalHeight;
 
-    let sx = 0;
-    let sy = 0;
-    let sw = img.naturalWidth;
-    let sh = img.naturalHeight;
+    let baseSw = img.naturalWidth;
+    let baseSh = img.naturalHeight;
     if (srcAspect > boxAspect) {
       // Source is relatively wider than the box — crop left/right.
-      sw = img.naturalHeight * boxAspect;
-      sx = (img.naturalWidth - sw) / 2;
+      baseSw = img.naturalHeight * boxAspect;
     } else {
       // Source is relatively taller than the box — crop top/bottom.
-      sh = img.naturalWidth / boxAspect;
-      sy = (img.naturalHeight - sh) / 2;
+      baseSh = img.naturalWidth / boxAspect;
     }
+
+    const { focalX, focalY, zoom } = transform ?? defaultPhotoTransform();
+    const z = Math.max(1, zoom || 1);
+    const sw = baseSw / z;
+    const sh = baseSh / z;
+    const sx = Math.min(Math.max(focalX * img.naturalWidth - sw / 2, 0), img.naturalWidth - sw);
+    const sy = Math.min(Math.max(focalY * img.naturalHeight - sh / 2, 0), img.naturalHeight - sh);
 
     const scale = Math.min(1, MAX_OUTPUT_DIM / Math.max(sw, sh));
     const outW = Math.max(1, Math.round(sw * scale));

@@ -30,6 +30,25 @@ interface StoreMasterRow {
   default_sign_type: string | null;
 }
 
+// One row per physical installation site at a store (installation_report_store_sites)
+// — a multi-site store's sites can each carry their own Fixture Type /
+// Material / Sign Type / Size instead of sharing one store-wide default.
+interface StoreSiteRow {
+  id: string;
+  site_index: number;
+  fixture_type: string | null;
+  material: string | null;
+  sign_type: string | null;
+  width_mm: number | null;
+  height_mm: number | null;
+}
+
+function sizeLabel(widthMm: number | null, heightMm: number | null): string {
+  if (!widthMm || !heightMm) return "";
+  const round = (n: number) => (Number.isInteger(n) ? n : Math.round(n * 10) / 10);
+  return `${round(widthMm)} x ${round(heightMm)} mm`;
+}
+
 const INSTALLATION_STATUS_OPTIONS = ["Scheduled", "In Progress", "Completed", "Delayed", "Cancelled"];
 const OVERALL_STATUS_OPTIONS = ["Pass", "Conditional", "Fail"];
 const SITE_CONDITION_OPTIONS = ["Good", "Poor"];
@@ -78,22 +97,20 @@ function emptySite(): SiteEntry {
     cornerTR: null,
     cornerBL: null,
     cornerBR: null,
-    beforePhoto: null,
-    afterPhoto: null,
   };
 }
 
 // True if a site has nothing meaningful entered yet — used to decide
-// whether picking a multi-site store is allowed to auto-create/replace the
-// site blocks below. Never overwrite a site the operator has already
-// started filling in.
+// whether picking a store is allowed to auto-create/replace the site blocks
+// below. Deliberately does NOT check fixtureType/material/signType/size:
+// those are exactly the fields a store pick is about to (re)fill, so if the
+// operator picks the wrong store first and then picks the right one right
+// after, the second pick still needs to be able to overwrite them. Only
+// content a store pick could never have produced — a label, a chosen
+// creative, artwork notes, or an attached photo — blocks the auto-fill.
 function isSitePristine(s: SiteEntry): boolean {
   return (
     !s.label &&
-    !s.fixtureType &&
-    !s.material &&
-    !s.signType &&
-    !s.size &&
     !s.creativeName &&
     !s.installedArtwork &&
     !s.mainSlide &&
@@ -101,9 +118,7 @@ function isSitePristine(s: SiteEntry): boolean {
     !s.cornerTL &&
     !s.cornerTR &&
     !s.cornerBL &&
-    !s.cornerBR &&
-    !s.beforePhoto &&
-    !s.afterPhoto
+    !s.cornerBR
   );
 }
 
@@ -179,7 +194,7 @@ export default function InstallationReportClient() {
     return () => clearTimeout(handle);
   }, [storeQuery, storeOpen]);
 
-  function applyStore(row: StoreMasterRow) {
+  async function applyStore(row: StoreMasterRow) {
     setStoreName(row.store_name);
     setAddress(row.address ?? "");
     setSfoId(row.sfo_id ?? "");
@@ -187,26 +202,59 @@ export default function InstallationReportClient() {
     setStoreOpen(false);
     setStoreQuery("");
 
-    const siteCount = row.no_of_sites && row.no_of_sites > 0 ? row.no_of_sites : 1;
-
+    // Only auto-create/replace the site list when every existing site is
+    // still untouched — if the operator has already started filling sites
+    // in, leave their work alone and just fill the store fields above.
+    // Checked before the async lookup below runs too, so a slow network
+    // can't let a second pick race ahead of the guard.
+    let allowAutoFill = false;
     setSites((prev) => {
-      // Only auto-create/replace the site list when it's still untouched —
-      // if the operator has already started filling sites in, leave their
-      // work alone and just fill the store fields above.
-      if (!(prev.length === 1 && isSitePristine(prev[0]))) return prev;
-      return Array.from({ length: siteCount }, () => {
+      allowAutoFill = prev.every(isSitePristine);
+      return prev;
+    });
+    if (!allowAutoFill) {
+      toast("success", "Store details filled from Store Master — adjust anything below as needed");
+      return;
+    }
+
+    // Per-site Fixture Type / Material / Sign Type / Size (each site of a
+    // multi-site store can differ) — falls back to the store-wide
+    // default_* columns + no_of_sites if this store hasn't been imported
+    // into installation_report_store_sites yet.
+    const { data: siteRows, error: siteError } = await supabase
+      .from("installation_report_store_sites")
+      .select("id, site_index, fixture_type, material, sign_type, width_mm, height_mm")
+      .eq("store_id", row.id)
+      .eq("active", true)
+      .order("site_index", { ascending: true });
+
+    let nextSites: SiteEntry[];
+    if (!siteError && siteRows && siteRows.length > 0) {
+      nextSites = (siteRows as StoreSiteRow[]).map((r) => {
+        const site = emptySite();
+        site.fixtureType = r.fixture_type ?? "";
+        site.material = r.material ?? "";
+        site.signType = r.sign_type ?? "";
+        site.size = sizeLabel(r.width_mm, r.height_mm);
+        return site;
+      });
+    } else {
+      const siteCount = row.no_of_sites && row.no_of_sites > 0 ? row.no_of_sites : 1;
+      nextSites = Array.from({ length: siteCount }, () => {
         const site = emptySite();
         site.fixtureType = row.default_fixture_type ?? "";
         site.material = row.default_material ?? "";
         site.signType = row.default_sign_type ?? "";
         return site;
       });
-    });
+    }
 
-    if (siteCount > 1) {
+    setSites((prev) => (prev.every(isSitePristine) ? nextSites : prev));
+
+    if (nextSites.length > 1) {
       toast(
         "success",
-        `Store details filled — this store has ${siteCount} sites, so ${siteCount} site blocks were created with its default sign details (adjust anything as needed)`
+        `Store details filled — this store has ${nextSites.length} sites, so ${nextSites.length} site blocks were created with each site's own fixture details (adjust anything as needed)`
       );
     } else {
       toast("success", "Store details filled from Store Master — adjust anything below as needed");
@@ -415,14 +463,14 @@ export default function InstallationReportClient() {
         <div className="rounded-lg border border-line bg-surface p-4">
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-muted">Store overview photos</h3>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <ImageSlot label="Store Full Cover" file={storePictures.storeFullCover} onChange={(f) => setStorePictures((p) => ({ ...p, storeFullCover: f }))} />
-            <ImageSlot label="Installation Close-up" file={storePictures.installationCloseUp} onChange={(f) => setStorePictures((p) => ({ ...p, installationCloseUp: f }))} />
-            <ImageSlot label="Street View 1" file={storePictures.streetView1} onChange={(f) => setStorePictures((p) => ({ ...p, streetView1: f }))} />
-            <ImageSlot label="Street View 2" file={storePictures.streetView2} onChange={(f) => setStorePictures((p) => ({ ...p, streetView2: f }))} />
-            <ImageSlot label="Corner Pic 1" file={storePictures.cornerPic1} onChange={(f) => setStorePictures((p) => ({ ...p, cornerPic1: f }))} />
-            <ImageSlot label="Corner Pic 2" file={storePictures.cornerPic2} onChange={(f) => setStorePictures((p) => ({ ...p, cornerPic2: f }))} />
-            <ImageSlot label="Corner Pic 3" file={storePictures.cornerPic3} onChange={(f) => setStorePictures((p) => ({ ...p, cornerPic3: f }))} />
-            <ImageSlot label="Corner Pic 4" file={storePictures.cornerPic4} onChange={(f) => setStorePictures((p) => ({ ...p, cornerPic4: f }))} />
+            <ImageSlot label="Store Full Cover" value={storePictures.storeFullCover} onChange={(f) => setStorePictures((p) => ({ ...p, storeFullCover: f }))} />
+            <ImageSlot label="Installation Close-up" value={storePictures.installationCloseUp} onChange={(f) => setStorePictures((p) => ({ ...p, installationCloseUp: f }))} />
+            <ImageSlot label="Street View 1" value={storePictures.streetView1} onChange={(f) => setStorePictures((p) => ({ ...p, streetView1: f }))} />
+            <ImageSlot label="Street View 2" value={storePictures.streetView2} onChange={(f) => setStorePictures((p) => ({ ...p, streetView2: f }))} />
+            <ImageSlot label="Corner Pic 1" value={storePictures.cornerPic1} onChange={(f) => setStorePictures((p) => ({ ...p, cornerPic1: f }))} />
+            <ImageSlot label="Corner Pic 2" value={storePictures.cornerPic2} onChange={(f) => setStorePictures((p) => ({ ...p, cornerPic2: f }))} />
+            <ImageSlot label="Corner Pic 3" value={storePictures.cornerPic3} onChange={(f) => setStorePictures((p) => ({ ...p, cornerPic3: f }))} />
+            <ImageSlot label="Corner Pic 4" value={storePictures.cornerPic4} onChange={(f) => setStorePictures((p) => ({ ...p, cornerPic4: f }))} />
           </div>
         </div>
 
@@ -618,19 +666,15 @@ export default function InstallationReportClient() {
               </div>
 
               <p className="mb-2 mt-4 text-xs font-semibold uppercase tracking-wide text-ink-muted">Photos</p>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                <ImageSlot label="Main Slide" file={site.mainSlide} onChange={(f) => updateSite(i, { mainSlide: f })} aspect="wide" />
-                <ImageSlot label="Close-up View" file={site.closeUp} onChange={(f) => updateSite(i, { closeUp: f })} aspect="wide" />
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <ImageSlot label="Main Slide" value={site.mainSlide} onChange={(f) => updateSite(i, { mainSlide: f })} aspect="wide" size="large" />
+                <ImageSlot label="Close-up View" value={site.closeUp} onChange={(f) => updateSite(i, { closeUp: f })} aspect="wide" size="large" />
               </div>
               <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <ImageSlot label="Top Left Corner" file={site.cornerTL} onChange={(f) => updateSite(i, { cornerTL: f })} />
-                <ImageSlot label="Top Right Corner" file={site.cornerTR} onChange={(f) => updateSite(i, { cornerTR: f })} />
-                <ImageSlot label="Bottom Left Corner" file={site.cornerBL} onChange={(f) => updateSite(i, { cornerBL: f })} />
-                <ImageSlot label="Bottom Right Corner" file={site.cornerBR} onChange={(f) => updateSite(i, { cornerBR: f })} />
-              </div>
-              <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <ImageSlot label="Before (optional)" file={site.beforePhoto} onChange={(f) => updateSite(i, { beforePhoto: f })} />
-                <ImageSlot label="After (optional)" file={site.afterPhoto} onChange={(f) => updateSite(i, { afterPhoto: f })} />
+                <ImageSlot label="Top Left Corner" value={site.cornerTL} onChange={(f) => updateSite(i, { cornerTL: f })} />
+                <ImageSlot label="Top Right Corner" value={site.cornerTR} onChange={(f) => updateSite(i, { cornerTR: f })} />
+                <ImageSlot label="Bottom Left Corner" value={site.cornerBL} onChange={(f) => updateSite(i, { cornerBL: f })} />
+                <ImageSlot label="Bottom Right Corner" value={site.cornerBR} onChange={(f) => updateSite(i, { cornerBR: f })} />
               </div>
             </div>
           ))}
