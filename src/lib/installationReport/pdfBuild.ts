@@ -405,41 +405,41 @@ interface CardRow {
   value: string;
 }
 
-/** Modern label/value list card — replaces the old grid-of-table-cells look. Returns the y just below the card. */
-function drawInfoCard(
-  ctx: Ctx,
-  page: PDFPage,
-  opts: { x: number; yTop: number; w: number; title: string; icon: IconKind; rows: CardRow[]; badge?: string }
-): number {
-  const { x, yTop, w, title, icon, rows, badge } = opts;
-  const padX = 18;
-  const headerH = 40;
-  const rowH = 30;
-  const h = headerH + rows.length * rowH + 12;
 
-  drawCardBg(page, x, yTop, w, h);
-  drawIconChip(page, icon, x + padX, yTop - 13, 24, ACCENT, ACCENT_TINT);
-  page.drawText(title, { x: x + padX + 32, y: yTop - 27, size: 14.5, font: ctx.bold, color: INK });
-  if (badge) drawStatusPill(ctx, page, badge, x + w - padX, yTop - 13);
+interface KpiTile {
+  icon: IconKind;
+  label: string;
+  value: string;
+  tone?: "status";
+}
 
-  page.drawLine({ start: { x: x + padX, y: yTop - headerH }, end: { x: x + w - padX, y: yTop - headerH }, thickness: 0.75, color: BORDER });
+/**
+ * A row of big dashboard-style tiles (icon, large value, small label) —
+ * originally just the cover page's KPI dashboard, pulled out so the same
+ * "glanceable facts, generously sized" treatment can fill out the Store
+ * Information and Site Overview pages instead of leaving them as a couple
+ * of skinny list cards with a lot of blank page below. `cardH` is the
+ * caller's choice deliberately — a taller row uses more of the page.
+ */
+function drawKpiRow(ctx: Ctx, page: PDFPage, x: number, rowTop: number, w: number, cardH: number, tiles: KpiTile[]): number {
+  const gap = mm(6);
+  const cardW = (w - gap * (tiles.length - 1)) / tiles.length;
 
-  rows.forEach((row, i) => {
-    const rowTop = yTop - headerH - i * rowH;
-    page.drawText(row.label.toUpperCase(), { x: x + padX, y: rowTop - 15, size: 8, font: ctx.bold, color: MUTED });
-    const valueLines = wrapText(ctx.font, row.value || "—", 10.5, w - padX * 2);
-    page.drawText(valueLines[0] ?? "—", { x: x + padX, y: rowTop - 27, size: 10.5, font: ctx.font, color: INK });
-    if (i < rows.length - 1) {
-      page.drawLine({
-        start: { x: x + padX, y: rowTop - rowH },
-        end: { x: x + w - padX, y: rowTop - rowH },
-        thickness: 0.5,
-        color: BORDER,
-      });
+  tiles.forEach((tile, i) => {
+    const cx = x + i * (cardW + gap);
+    drawCardBg(page, cx, rowTop, cardW, cardH, 12);
+    drawIconChip(page, tile.icon, cx + 14, rowTop - 14, 20, ACCENT, ACCENT_TINT);
+    const valueColor = tile.tone === "status" ? statusTone(tile.value).fg : INK;
+    const valueSize = fitFontSize(ctx.bold, tile.value || "—", cardW - 28, 20, 10);
+    const valueLines = wrapText(ctx.bold, tile.value || "—", valueSize, cardW - 28);
+    page.drawText(valueLines[0] ?? "—", { x: cx + 14, y: rowTop - 60, size: valueSize, font: ctx.bold, color: valueColor });
+    if (valueLines[1]) {
+      page.drawText(valueLines[1], { x: cx + 14, y: rowTop - 60 - valueSize * 1.15, size: valueSize, font: ctx.bold, color: valueColor });
     }
+    page.drawText(tile.label.toUpperCase(), { x: cx + 14, y: rowTop - cardH + 12, size: 7.5, font: ctx.bold, color: MUTED });
   });
 
-  return yTop - h;
+  return rowTop - cardH;
 }
 
 // ---------------------------------------------------------------------------
@@ -631,7 +631,7 @@ function drawCoverPage(ctx: Ctx, data: ReportData) {
 
   // ---- KPI dashboard row ----
   const dash = computeDashboard(data);
-  const kpis: { icon: IconKind; label: string; value: string; tone?: "status" }[] = [
+  const kpis: KpiTile[] = [
     { icon: "sites", label: "Total Sites", value: String(dash.total) },
     { icon: "check", label: "Completed", value: String(dash.completed) },
     { icon: "pending", label: "Pending", value: String(dash.pending) },
@@ -641,19 +641,7 @@ function drawCoverPage(ctx: Ctx, data: ReportData) {
   ];
 
   const rowTop = PAGE_HEIGHT - heroH - mm(14);
-  const gap = mm(6);
-  const cardW = (PAGE_WIDTH - MARGIN * 2 - gap * (kpis.length - 1)) / kpis.length;
-  const cardH = mm(40);
-
-  kpis.forEach((kpi, i) => {
-    const x = MARGIN + i * (cardW + gap);
-    drawCardBg(page, x, rowTop, cardW, cardH, 12);
-    drawIconChip(page, kpi.icon, x + 14, rowTop - 14, 20, ACCENT, ACCENT_TINT);
-    const valueColor = kpi.tone === "status" ? statusTone(kpi.value).fg : INK;
-    const valueSize = fitFontSize(ctx.bold, kpi.value, cardW - 28, 20, 12);
-    page.drawText(kpi.value, { x: x + 14, y: rowTop - 60, size: valueSize, font: ctx.bold, color: valueColor });
-    page.drawText(kpi.label.toUpperCase(), { x: x + 14, y: rowTop - cardH + 12, size: 7.5, font: ctx.bold, color: MUTED });
-  });
+  drawKpiRow(ctx, page, MARGIN, rowTop, PAGE_WIDTH - MARGIN * 2, mm(40), kpis);
 
   drawFooter(ctx, page);
 }
@@ -664,34 +652,68 @@ function drawStoreAndCreativePage(ctx: Ctx, data: ReportData) {
   let y = drawSectionHeading(ctx, page, "Store Information", b.left, b.top);
   y -= 6;
 
-  const gap = mm(8);
-  const colW = (b.right - b.left - gap) / 2;
+  const availW = b.right - b.left;
 
-  drawInfoCard(ctx, page, {
-    x: b.left,
-    yTop: y,
-    w: colW,
-    title: "Store Information",
-    icon: "store",
-    rows: [
-      { label: "Store Name", value: data.storeName },
-      { label: "Address", value: data.address },
-      { label: "SFO ID", value: data.sfoId },
-      { label: "Store Program", value: data.program },
-    ],
+  // Glanceable facts row, same dashboard language as the cover — fills the
+  // top of the page with real visual weight instead of a couple of
+  // skinny label/value cards that left most of it blank.
+  const kpis: KpiTile[] = [
+    { icon: "pin", label: "SFO ID", value: data.sfoId || "—" },
+    { icon: "store", label: "Store Program", value: data.program || "—" },
+    { icon: "tag", label: "Program", value: data.seasonProgram || "—" },
+    { icon: "calendar", label: "Installation Date", value: formatDate(data.installationDate) },
+    { icon: "sites", label: "No of Sites", value: String(data.sites.length) },
+  ];
+  y = drawKpiRow(ctx, page, b.left, y, availW, mm(44), kpis);
+  y -= mm(8);
+
+  // Full-width "Store Location" hero card fills the rest of the page —
+  // large store name, full address, and a footer note tying it to the
+  // rest of the report — instead of ending the page early.
+  const cardH = y - b.bottom;
+  const padX = 28;
+  drawCardBg(page, b.left, y, availW, cardH, 16);
+
+  drawIconChip(page, "pin", b.left + padX, y - padX + 2, 26, ACCENT, ACCENT_TINT);
+  page.drawText("STORE LOCATION", { x: b.left + padX + 38, y: y - padX - 12, size: 9.5, font: ctx.bold, color: MUTED });
+
+  const nameSize = fitFontSize(ctx.bold, data.storeName || "Untitled store", availW - padX * 2, 30, 18);
+  page.drawText(data.storeName || "Untitled store", { x: b.left + padX, y: y - padX - 48, size: nameSize, font: ctx.bold, color: INK });
+
+  const addrLines = wrapText(ctx.font, data.address || "No address on file.", 14, availW - padX * 2 - mm(20)).slice(0, 5);
+  addrLines.forEach((line, i) => {
+    page.drawText(line, { x: b.left + padX, y: y - padX - 82 - i * 22, size: 14, font: ctx.font, color: INK_SECONDARY });
   });
 
-  drawInfoCard(ctx, page, {
-    x: b.left + colW + gap,
-    yTop: y,
-    w: colW,
-    title: "Program & Schedule",
-    icon: "calendar",
-    rows: [
-      { label: "Program", value: data.seasonProgram },
-      { label: "Installation Date", value: formatDate(data.installationDate) },
-      { label: "No of Sites", value: String(data.sites.length) },
-    ],
+  // A giant pale store-initial monogram fills the blank space below the
+  // address instead of leaving it empty — the same "oversized faint
+  // background character" device used for the site-numeral watermark on
+  // the installation site pages, reused here for visual consistency.
+  const footerLineY = y - cardH + 40;
+  const addrBottom = y - padX - 82 - addrLines.length * 22;
+  const blankTop = addrBottom - 24;
+  const blankBottom = footerLineY + 20;
+  const blankH = blankTop - blankBottom;
+  if (blankH > 80) {
+    const monogram = (data.storeName || "?").trim().charAt(0).toUpperCase() || "?";
+    const monoSize = Math.min(blankH * 0.85, 280);
+    const monoW = ctx.bold.widthOfTextAtSize(monogram, monoSize);
+    page.drawText(monogram, {
+      x: b.left + availW / 2 - monoW / 2,
+      y: blankBottom + (blankH - monoSize) / 2 + monoSize * 0.18,
+      size: monoSize,
+      font: ctx.bold,
+      color: SURFACE_ALT,
+    });
+  }
+
+  page.drawLine({ start: { x: b.left + padX, y: footerLineY }, end: { x: b.left + availW - padX, y: footerLineY }, thickness: 0.75, color: BORDER });
+  page.drawText("Every site in this report shares this store, this program, and this installation date.", {
+    x: b.left + padX,
+    y: y - cardH + 22,
+    size: 10,
+    font: ctx.italic,
+    color: MUTED,
   });
 }
 
@@ -740,44 +762,30 @@ async function drawSiteOverviewPage(ctx: Ctx, site: SiteEntry, index: number) {
   drawStatusPill(ctx, page, site.overallStatus || "Pending", b.right, b.top - 8);
   let y = b.top - 44;
 
-  const gap = mm(8);
-  const colW = (b.right - b.left - gap) / 2;
+  const availW = b.right - b.left;
 
-  const detailsBottom = drawInfoCard(ctx, page, {
-    x: b.left,
-    yTop: y,
-    w: colW,
-    title: "Installation Details",
-    icon: "clipboard",
-    rows: [
-      { label: "Fixture Type", value: site.fixtureType },
-      { label: "Material", value: site.material },
-      { label: "Sign Type", value: site.signType },
-      { label: "Size", value: site.size },
-      { label: "Creative", value: site.creativeName },
-    ],
-  });
+  // Glanceable facts row — same dashboard tiles as the cover/store pages —
+  // instead of two skinny label/value cards.
+  const kpis: KpiTile[] = [
+    { icon: "clipboard", label: "Fixture Type", value: site.fixtureType || "—" },
+    { icon: "tag", label: "Material", value: site.material || "—" },
+    { icon: "pin", label: "Sign Type", value: site.signType || "—" },
+    { icon: "sites", label: "Size", value: site.size || "—" },
+    { icon: "camera", label: "Creative", value: site.creativeName || "—" },
+    { icon: "team", label: "Installation Team", value: site.installedByTeam || "—" },
+  ];
+  y = drawKpiRow(ctx, page, b.left, y, availW, mm(44), kpis);
+  y -= mm(8);
 
-  const scheduleBottom = drawInfoCard(ctx, page, {
-    x: b.left + colW + gap,
-    yTop: y,
-    w: colW,
-    title: "Installation Schedule",
-    icon: "calendar",
-    rows: [
-      { label: "Installation Date", value: formatDate(ctx.installationDate) },
-      { label: "Installation Team", value: site.installedByTeam },
-      { label: "Installation Status", value: site.installationStatus },
-    ],
-  });
-
-  y = Math.min(detailsBottom, scheduleBottom) - mm(8);
-
-  // Quality Inspection — full width, denser 2-column grid of short fields
-  // plus a remarks paragraph, so it reads as one coherent inspection block.
-  const padX = 18;
-  const headerH = 40;
+  // Quality Inspection — full width, denser 3-column grid of short fields
+  // (now including Date/Status, since those no longer have their own
+  // card) plus a remarks paragraph, stretched to fill the rest of the
+  // page instead of stopping partway down it.
+  const padX = 22;
+  const headerH = 44;
   const qRows: CardRow[] = [
+    { label: "Installation Date", value: formatDate(ctx.installationDate) },
+    { label: "Installation Status", value: site.installationStatus },
     { label: "Installation Successful", value: site.wasSuccessful },
     { label: "Scaffolding Required", value: site.scaffoldingRequired },
     { label: "Store Permission Slot", value: site.storePermissionSlots },
@@ -785,17 +793,18 @@ async function drawSiteOverviewPage(ctx: Ctx, site: SiteEntry, index: number) {
     { label: "Fixture Condition", value: site.fixtureCondition },
   ];
   const qCols = 3;
-  const qRowH = 30;
+  const qRowH = 36;
   const qRowCount = Math.ceil(qRows.length / qCols);
-  const remarksLines = wrapText(ctx.font, site.inspectorRemarks || "No remarks.", 10, b.right - b.left - padX * 2);
-  const remarksH = remarksLines.length * 14 + 26;
-  const qH = headerH + qRowCount * qRowH + remarksH + 12;
-  const qW = b.right - b.left;
+  const remarksLines = wrapText(ctx.font, site.inspectorRemarks || "No remarks.", 11, availW - padX * 2);
+  const remarksH = remarksLines.length * 16 + 30;
+  const naturalQH = headerH + qRowCount * qRowH + remarksH + 16;
+  const qH = Math.max(naturalQH, y - b.bottom);
+  const qW = availW;
 
-  drawCardBg(page, b.left, y, qW, qH);
-  drawIconChip(page, "shield", b.left + padX, y - 13, 24, ACCENT, ACCENT_TINT);
-  page.drawText("Quality Inspection", { x: b.left + padX + 32, y: y - 27, size: 14.5, font: ctx.bold, color: INK });
-  drawStatusPill(ctx, page, site.overallStatus || "Pending", b.left + qW - padX, y - 13);
+  drawCardBg(page, b.left, y, qW, qH, 14);
+  drawIconChip(page, "shield", b.left + padX, y - 15, 26, ACCENT, ACCENT_TINT);
+  page.drawText("Quality Inspection", { x: b.left + padX + 36, y: y - 30, size: 15, font: ctx.bold, color: INK });
+  drawStatusPill(ctx, page, site.overallStatus || "Pending", b.left + qW - padX, y - 15);
   page.drawLine({ start: { x: b.left + padX, y: y - headerH }, end: { x: b.left + qW - padX, y: y - headerH }, thickness: 0.75, color: BORDER });
 
   const qColW = (qW - padX * 2) / qCols;
@@ -804,16 +813,34 @@ async function drawSiteOverviewPage(ctx: Ctx, site: SiteEntry, index: number) {
     const rIdx = Math.floor(i / qCols);
     const cx = b.left + padX + col * qColW;
     const rowTop = y - headerH - rIdx * qRowH;
-    page.drawText(row.label.toUpperCase(), { x: cx, y: rowTop - 15, size: 7.5, font: ctx.bold, color: MUTED });
-    const lines = wrapText(ctx.font, row.value || "—", 10, qColW - 10);
-    page.drawText(lines[0] ?? "—", { x: cx, y: rowTop - 27, size: 10, font: ctx.font, color: INK });
+    page.drawText(row.label.toUpperCase(), { x: cx, y: rowTop - 17, size: 8, font: ctx.bold, color: MUTED });
+    const lines = wrapText(ctx.font, row.value || "—", 11, qColW - 10);
+    page.drawText(lines[0] ?? "—", { x: cx, y: rowTop - 31, size: 11, font: ctx.font, color: INK });
   });
 
-  const remarksTop = y - headerH - qRowCount * qRowH - 10;
-  page.drawText("INSPECTOR REMARKS", { x: b.left + padX, y: remarksTop, size: 7.5, font: ctx.bold, color: MUTED });
+  const remarksTop = y - headerH - qRowCount * qRowH - 12;
+  page.drawText("INSPECTOR REMARKS", { x: b.left + padX, y: remarksTop, size: 8, font: ctx.bold, color: MUTED });
   remarksLines.forEach((line, i) => {
-    page.drawText(line, { x: b.left + padX, y: remarksTop - 14 - i * 14, size: 10, font: ctx.font, color: INK_SECONDARY });
+    page.drawText(line, { x: b.left + padX, y: remarksTop - 16 - i * 16, size: 11, font: ctx.font, color: INK_SECONDARY });
   });
+
+  // Same device as the Store Information page's giant monogram: when the
+  // card has been stretched to fill the page and there's real blank space
+  // left under the remarks, a huge pale echo of the card's own icon fills
+  // it instead of leaving it empty.
+  const contentBottom = remarksTop - 16 - remarksLines.length * 16;
+  const cardBottom = y - qH + 24;
+  const blankH = contentBottom - cardBottom;
+  if (blankH > 90) {
+    const ghostSize = Math.min(blankH * 0.5, qW * 0.2, 300);
+    const ghostCx = b.left + qW / 2;
+    const ghostCy = cardBottom + blankH / 2 + 14;
+    drawIconChip(page, "shield", ghostCx - ghostSize / 2, ghostCy + ghostSize / 2, ghostSize, SURFACE_ALT, SURFACE);
+
+    const caption = "Quality checks recorded for this installation";
+    const cw = ctx.italic.widthOfTextAtSize(caption, 10.5);
+    page.drawText(caption, { x: ghostCx - cw / 2, y: ghostCy - ghostSize / 2 - 22, size: 10.5, font: ctx.italic, color: MUTED });
+  }
 }
 
 async function drawCornersPage(ctx: Ctx, site: SiteEntry, index: number) {
