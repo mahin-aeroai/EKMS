@@ -41,6 +41,7 @@ import {
   Target,
   Ruler,
   Scissors,
+  Camera,
 } from "lucide-react";
 import { Sidebar, type SidebarSection } from "@/components/ui/Sidebar";
 import { TopNav } from "@/components/ui/TopNav";
@@ -119,6 +120,7 @@ const NAV: SidebarSection[] = [
       { id: "workspace-machine", label: "Machines", icon: <Wrench size={16} />, href: "/workspaces/machine" },
       { id: "maintenance", label: "Maintenance", icon: <ClipboardList size={16} />, href: "/workspaces/maintenance" },
       { id: "installation", label: "Installation", icon: <Truck size={16} />, href: "/workspaces/installation" },
+      { id: "installation-report", label: "Installation Report", icon: <Camera size={16} />, href: "/workspaces/installation-report" },
     ],
   },
   {
