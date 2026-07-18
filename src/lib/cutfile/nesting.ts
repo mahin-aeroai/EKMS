@@ -185,13 +185,20 @@ export function nestPieces(opts: {
   instances.sort((a, b) => b.area - a.area);
 
   const placements: NestPlacement[] = [];
+  const placementReserves: { point: Point; radiusMm: number }[][] = [];
   const unplaced: NestResult["unplaced"] = [];
   let placedArea = 0;
 
   for (const inst of instances) {
     onProgress?.(`Placing ${inst.label} #${inst.instanceIndex + 1}…`);
 
-    type Candidate = { rotationDeg: number; normOutline: Point[]; checkMask: Mask; trueMask: Mask };
+    type Candidate = {
+      rotationDeg: number;
+      normOutline: Point[];
+      normReserve: { point: Point; radiusMm: number }[];
+      checkMask: Mask;
+      trueMask: Mask;
+    };
     const candidates: Candidate[] = inst.allowRotationsDeg.map((rot) => {
       const rotated = rotatePolygon(inst.outline, rot);
       const rotatedReserve = inst.reserveCircles.map((rc) => ({
@@ -223,7 +230,7 @@ export function nestPieces(opts: {
       const rows = Math.max(1, Math.ceil((b.maxY - b.minY) / resolutionMm) + 1);
       const trueMask = rasterize(normOutline, resolutionMm, { cols, rows }, normReserve);
       const checkMask = dilate(trueMask, dilateRadius);
-      return { rotationDeg: rot, normOutline, checkMask, trueMask };
+      return { rotationDeg: rot, normOutline, normReserve, checkMask, trueMask };
     });
 
     let best: { cand: Candidate; gx: number; gy: number } | null = null;
@@ -292,6 +299,13 @@ export function nestPieces(opts: {
       rotationDeg: cand.rotationDeg,
       outline: finalOutline,
     });
+    // Final sheet-space reserve-circle positions for this placement, kept
+    // in lockstep with `placements` (same index) — needed below so the
+    // top/center alignment shift accounts for the dot zone, which extends
+    // beyond the tight outline and would otherwise get pushed off-sheet.
+    placementReserves.push(
+      cand.normReserve.map((rc) => ({ point: { x: rc.point.x + xMm, y: rc.point.y + yMm }, radiusMm: rc.radiusMm }))
+    );
   }
 
   const utilizationPct = (placedArea / (sheetWidthMm * sheetHeightMm)) * 100;
@@ -305,14 +319,28 @@ export function nestPieces(opts: {
   // spots were found valid, just where the whole already-packed group sits
   // on the sheet, so it's always safe (the group already fit within the
   // sheet bounds; centering/top-aligning it can't push anything off-sheet).
+  //
+  // IMPORTANT: the group's bounds must include each placement's reserved
+  // dot circles, not just its outline. The outline is now the tight cut
+  // path — dots sit beyond it, in the margin reserveCircles carves out
+  // (see nestPieces's placement loop above). Computing the shift from the
+  // outline alone would flush the CUT PATH to the sheet's top edge while
+  // the dots (which extend further out) get pushed past it, off the
+  // printable area — exactly the bug this fixes.
   if (placements.length > 0) {
     let gMinX = Infinity, gMinY = Infinity, gMaxX = -Infinity, gMaxY = -Infinity;
-    for (const p of placements) {
-      const b = polygonBounds(p.outline);
+    for (let i = 0; i < placements.length; i++) {
+      const b = polygonBounds(placements[i].outline);
       if (b.minX < gMinX) gMinX = b.minX;
       if (b.minY < gMinY) gMinY = b.minY;
       if (b.maxX > gMaxX) gMaxX = b.maxX;
       if (b.maxY > gMaxY) gMaxY = b.maxY;
+      for (const rc of placementReserves[i]) {
+        if (rc.point.x - rc.radiusMm < gMinX) gMinX = rc.point.x - rc.radiusMm;
+        if (rc.point.y - rc.radiusMm < gMinY) gMinY = rc.point.y - rc.radiusMm;
+        if (rc.point.x + rc.radiusMm > gMaxX) gMaxX = rc.point.x + rc.radiusMm;
+        if (rc.point.y + rc.radiusMm > gMaxY) gMaxY = rc.point.y + rc.radiusMm;
+      }
     }
     const groupWidth = gMaxX - gMinX;
     const shiftX = (sheetWidthMm - groupWidth) / 2 - gMinX;
