@@ -19,6 +19,14 @@ export interface NestPieceInput {
   outline: Point[]; // mm, the real cut-contour (or rectangle fallback)
   quantity: number;
   allowRotationsDeg: number[]; // e.g. [0, 90, 180, 270]
+  // Extra circular areas (e.g. registration dot centers + radius) that must
+  // also be reserved during nesting even though they fall outside
+  // `outline` itself. `outline` is now always the tight, real cut path
+  // (a trim rectangle or an auto-traced silhouette) — it does NOT include
+  // the surrounding dot/margin zone, so without this a neighboring piece
+  // could get packed into a concave pocket or margin area that visually
+  // overlaps this piece's own printed registration dots.
+  reserveCircles?: { point: Point; radiusMm: number }[];
 }
 
 export interface NestPlacement {
@@ -46,17 +54,39 @@ interface Mask {
   data: Uint8Array; // row-major, 1 = occupied
 }
 
-function rasterize(outline: Point[], resMm: number): Mask {
-  const b = polygonBounds(outline);
-  const cols = Math.max(1, Math.ceil((b.maxX - b.minX) / resMm) + 1);
-  const rows = Math.max(1, Math.ceil((b.maxY - b.minY) / resMm) + 1);
+/**
+ * Rasterizes `outline` (already normalized so nothing is negative) onto a
+ * mask of explicit `cols`x`rows`, additionally marking any cell within a
+ * reserveCircles entry's radius of its center as occupied. The dimensions
+ * are passed in rather than derived from `outline` alone because when
+ * reserveCircles extend further than the outline itself (a dot sitting
+ * outside a tight/concave shape), the mask needs to be sized to the
+ * COMBINED bounds — see the caller in nestPieces().
+ */
+function rasterize(
+  outline: Point[],
+  resMm: number,
+  dims: { cols: number; rows: number },
+  reserveCircles?: { point: Point; radiusMm: number }[]
+): Mask {
+  const { cols, rows } = dims;
   const data = new Uint8Array(cols * rows);
-  const norm = translatePolygon(outline, -b.minX, -b.minY);
   for (let r = 0; r < rows; r++) {
     const y = (r + 0.5) * resMm;
     for (let c = 0; c < cols; c++) {
       const x = (c + 0.5) * resMm;
-      if (pointInPolygon({ x, y }, norm)) data[r * cols + c] = 1;
+      let occupied = pointInPolygon({ x, y }, outline);
+      if (!occupied && reserveCircles) {
+        for (const rc of reserveCircles) {
+          const dx = x - rc.point.x;
+          const dy = y - rc.point.y;
+          if (dx * dx + dy * dy <= rc.radiusMm * rc.radiusMm) {
+            occupied = true;
+            break;
+          }
+        }
+      }
+      if (occupied) data[r * cols + c] = 1;
     }
   }
   return { cols, rows, data };
@@ -127,13 +157,29 @@ export function nestPieces(opts: {
   // Expand quantities into individual instances, largest bounding area first
   // (a standard, simple bin-packing heuristic: big pieces are hardest to
   // place, so give them first pick of open space).
-  type Instance = { pieceId: string; label: string; outline: Point[]; allowRotationsDeg: number[]; instanceIndex: number; area: number };
+  type Instance = {
+    pieceId: string;
+    label: string;
+    outline: Point[];
+    allowRotationsDeg: number[];
+    reserveCircles: { point: Point; radiusMm: number }[];
+    instanceIndex: number;
+    area: number;
+  };
   const instances: Instance[] = [];
   for (const p of pieces) {
     const b = polygonBounds(p.outline);
     const area = (b.maxX - b.minX) * (b.maxY - b.minY);
     for (let i = 0; i < p.quantity; i++) {
-      instances.push({ pieceId: p.pieceId, label: p.label, outline: p.outline, allowRotationsDeg: p.allowRotationsDeg.length ? p.allowRotationsDeg : [0], instanceIndex: i, area });
+      instances.push({
+        pieceId: p.pieceId,
+        label: p.label,
+        outline: p.outline,
+        allowRotationsDeg: p.allowRotationsDeg.length ? p.allowRotationsDeg : [0],
+        reserveCircles: p.reserveCircles ?? [],
+        instanceIndex: i,
+        area,
+      });
     }
   }
   instances.sort((a, b) => b.area - a.area);
@@ -148,9 +194,34 @@ export function nestPieces(opts: {
     type Candidate = { rotationDeg: number; normOutline: Point[]; checkMask: Mask; trueMask: Mask };
     const candidates: Candidate[] = inst.allowRotationsDeg.map((rot) => {
       const rotated = rotatePolygon(inst.outline, rot);
-      const b = polygonBounds(rotated);
+      const rotatedReserve = inst.reserveCircles.map((rc) => ({
+        point: rotatePolygon([rc.point], rot)[0],
+        radiusMm: rc.radiusMm,
+      }));
+
+      // Combined bounds across the outline AND any reserve circles — a
+      // circle can extend further out than the outline itself (a dot
+      // sitting outside a tight/concave traced shape), so the mask has to
+      // be sized to whichever is larger, not just the outline.
+      let b = polygonBounds(rotated);
+      for (const rc of rotatedReserve) {
+        b = {
+          minX: Math.min(b.minX, rc.point.x - rc.radiusMm),
+          minY: Math.min(b.minY, rc.point.y - rc.radiusMm),
+          maxX: Math.max(b.maxX, rc.point.x + rc.radiusMm),
+          maxY: Math.max(b.maxY, rc.point.y + rc.radiusMm),
+        };
+      }
+
       const normOutline = translatePolygon(rotated, -b.minX, -b.minY);
-      const trueMask = rasterize(normOutline, resolutionMm);
+      const normReserve = rotatedReserve.map((rc) => ({
+        point: { x: rc.point.x - b.minX, y: rc.point.y - b.minY },
+        radiusMm: rc.radiusMm,
+      }));
+
+      const cols = Math.max(1, Math.ceil((b.maxX - b.minX) / resolutionMm) + 1);
+      const rows = Math.max(1, Math.ceil((b.maxY - b.minY) / resolutionMm) + 1);
+      const trueMask = rasterize(normOutline, resolutionMm, { cols, rows }, normReserve);
       const checkMask = dilate(trueMask, dilateRadius);
       return { rotationDeg: rot, normOutline, checkMask, trueMask };
     });
@@ -303,4 +374,66 @@ export function suggestSheetHeight(opts: {
 
   const finalResult = nestPieces({ sheetWidthMm, sheetHeightMm: hi, spacingMm, resolutionMm, pieces });
   return { heightMm: Math.ceil(hi / 5) * 5, utilizationPct: finalResult.utilizationPct };
+}
+
+/**
+ * Same idea as suggestSheetHeight, but for a flatbed-style sheet where
+ * neither dimension is fixed by a material roll: alternates fixing width
+ * and searching for minimal height, then fixing that height and searching
+ * for minimal width, a couple of rounds. Not a globally optimal packing —
+ * just a practical way to shrink both dimensions toward a tighter sheet
+ * than leaving one arbitrarily fixed would.
+ */
+export function suggestSheetSize(opts: {
+  initialWidthMm: number;
+  spacingMm: number;
+  resolutionMm: number;
+  pieces: NestPieceInput[];
+}): { widthMm: number; heightMm: number; utilizationPct: number } | null {
+  const { spacingMm, resolutionMm, pieces } = opts;
+
+  let totalArea = 0;
+  let anyQty = false;
+  for (const p of pieces) {
+    if (p.quantity <= 0) continue;
+    anyQty = true;
+    const b = polygonBounds(p.outline);
+    totalArea += (b.maxX - b.minX) * (b.maxY - b.minY) * p.quantity;
+  }
+  if (!anyQty || totalArea <= 0) return null;
+
+  let widthMm = opts.initialWidthMm;
+  const heightResult = suggestSheetHeight({ sheetWidthMm: widthMm, spacingMm, resolutionMm, pieces });
+  if (!heightResult) return null;
+  let heightMm = heightResult.heightMm;
+
+  for (let round = 0; round < 2; round++) {
+    const widthResult = suggestSheetHeight({
+      // Reuse the same height-search binary search, just with axes swapped:
+      // fix the "width" role to the current heightMm and search the other axis.
+      sheetWidthMm: heightMm,
+      spacingMm,
+      resolutionMm,
+      pieces: swapXY(pieces),
+    });
+    if (!widthResult) break;
+    widthMm = widthResult.heightMm;
+
+    const nextHeight = suggestSheetHeight({ sheetWidthMm: widthMm, spacingMm, resolutionMm, pieces });
+    if (!nextHeight) break;
+    heightMm = nextHeight.heightMm;
+  }
+
+  const finalResult = nestPieces({ sheetWidthMm: widthMm, sheetHeightMm: heightMm, spacingMm, resolutionMm, pieces });
+  return { widthMm, heightMm, utilizationPct: finalResult.utilizationPct };
+}
+
+/** Swaps X/Y on every outline + reserve circle, used to reuse the width-searching binary search for the other axis. */
+function swapXY(pieces: NestPieceInput[]): NestPieceInput[] {
+  const swapPt = (p: Point): Point => ({ x: p.y, y: p.x });
+  return pieces.map((p) => ({
+    ...p,
+    outline: p.outline.map(swapPt),
+    reserveCircles: p.reserveCircles?.map((rc) => ({ point: swapPt(rc.point), radiusMm: rc.radiusMm })),
+  }));
 }

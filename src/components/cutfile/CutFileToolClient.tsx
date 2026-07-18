@@ -10,10 +10,10 @@ import { useToast } from "@/components/ui/Notifications";
 import { DotCanvas } from "@/components/cutfile/DotCanvas";
 import { OutlineCanvas } from "@/components/cutfile/OutlineCanvas";
 import { NestPreview } from "@/components/cutfile/NestPreview";
-import { computeDotLayout, rectPolygon, type DotSpec, type Point } from "@/lib/cutfile/geometry";
+import { computeDotLayout, rectPolygon, translatePolygon, type DotSpec, type Point } from "@/lib/cutfile/geometry";
 import { loadPdf, buildDotPlacementPdf, buildNestedPrintPdf, buildNestedCutPdf, downloadBlob, type RgbColor } from "@/lib/cutfile/pdfIO";
 import { traceOutlineFromPdf } from "@/lib/cutfile/trace";
-import { nestPieces, suggestSheetHeight, type NestResult } from "@/lib/cutfile/nesting";
+import { nestPieces, suggestSheetHeight, suggestSheetSize, type NestResult } from "@/lib/cutfile/nesting";
 
 interface DotParams {
   bleedMm: number;
@@ -71,6 +71,33 @@ interface UploadedPiece {
 
 const DEFAULT_COLOR_BLEED_MM = 1.5;
 
+/**
+ * Default cut path for a piece that hasn't been manually reshaped or
+ * auto-traced: the TRIM rectangle — the design's content inset by its own
+ * declared bleed, i.e. where the material actually gets cut, matching the
+ * dashed amber reference line already drawn in DotCanvas. This is NOT the
+ * full canvas rectangle (which also spans the dot zone + margin) — using
+ * the full canvas as the exported cut path was the bug behind the cut line
+ * landing on the outer dot-zone edge instead of the real trim edge, and
+ * the color-bleed stroke (which follows this same outline) painting along
+ * that same wrong, far-out edge instead of the design's actual boundary.
+ * Nesting still reserves the dot-zone space separately via reserveCircles
+ * (see runNesting/suggestBestSheetSize) so this tight outline is safe to
+ * use for both collision and the exported cut path.
+ */
+function trimOutline(contentWidthMm: number, contentHeightMm: number, contentOffsetMm: number, bleedMm: number): Point[] {
+  const trimWidthMm = Math.max(0, contentWidthMm - 2 * bleedMm);
+  const trimHeightMm = Math.max(0, contentHeightMm - 2 * bleedMm);
+  const inset = contentOffsetMm + bleedMm;
+  return translatePolygon(rectPolygon(trimWidthMm, trimHeightMm), inset, inset);
+}
+
+/** Registration dot centers + their printed radius (dot + halo), as nesting reserveCircles — see nesting.ts for why the tight cut-path outline alone isn't enough. */
+function dotReserveCircles(piece: UploadedPiece): { point: Point; radiusMm: number }[] {
+  const radiusMm = piece.dotParams.dotDiameterMm / 2 + piece.dotParams.dotHaloMm;
+  return piece.dots.map((d) => ({ point: { x: d.x, y: d.y }, radiusMm }));
+}
+
 function recomputeLayout(widthMm: number, heightMm: number, params: DotParams) {
   return computeDotLayout({
     trimWidthMm: widthMm,
@@ -102,6 +129,7 @@ export default function CutFileToolClient() {
   const [nestStatus, setNestStatus] = useState<string | null>(null);
   const [nestResult, setNestResult] = useState<NestResult | null>(null);
   const [suggestingSheet, setSuggestingSheet] = useState(false);
+  const [optimizeWidthToo, setOptimizeWidthToo] = useState(false);
   const [tracingId, setTracingId] = useState<string | null>(null);
 
   const selected = pieces.find((p) => p.id === selectedId) ?? null;
@@ -148,7 +176,7 @@ export default function CutFileToolClient() {
           canvasWidthMm: layout.canvasWidthMm,
           canvasHeightMm: layout.canvasHeightMm,
           contentOffsetMm: layout.contentOffsetMm,
-          outline: rectPolygon(layout.canvasWidthMm, layout.canvasHeightMm),
+          outline: trimOutline(loaded.widthMm, loaded.heightMm, layout.contentOffsetMm, dotParams.bleedMm),
           outlineIsDefault: true,
           traceFillColorRgb: null,
           colorBleedMm: DEFAULT_COLOR_BLEED_MM,
@@ -178,11 +206,14 @@ export default function CutFileToolClient() {
       canvasWidthMm: layout.canvasWidthMm,
       canvasHeightMm: layout.canvasHeightMm,
       contentOffsetMm: layout.contentOffsetMm,
-      // Keep the default rectangle outline (used for nesting + the cut
-      // path) matched to the new canvas size, unless the operator has
-      // manually reshaped it — a manual edit should survive a parameter
-      // tweak rather than getting silently overwritten.
-      outline: piece.outlineIsDefault ? rectPolygon(layout.canvasWidthMm, layout.canvasHeightMm) : piece.outline,
+      // Keep the default trim-rectangle outline (used for the cut path,
+      // plus nesting collision together with reserveCircles) matched to
+      // the new layout, unless the operator has manually reshaped it — a
+      // manual edit should survive a parameter tweak rather than getting
+      // silently overwritten.
+      outline: piece.outlineIsDefault
+        ? trimOutline(piece.widthMm, piece.heightMm, layout.contentOffsetMm, piece.dotParams.bleedMm)
+        : piece.outline,
     });
   }
 
@@ -230,6 +261,7 @@ export default function CutFileToolClient() {
           outline: p.outline,
           quantity: p.quantity,
           allowRotationsDeg: p.rotations,
+          reserveCircles: dotReserveCircles(p),
         })),
         onProgress: (msg) => setNestStatus(msg),
       });
@@ -301,27 +333,39 @@ export default function CutFileToolClient() {
     setSuggestingSheet(true);
     await new Promise((r) => setTimeout(r, 20));
     try {
-      const suggestion = suggestSheetHeight({
-        sheetWidthMm,
-        spacingMm,
-        resolutionMm,
-        pieces: pieces.map((p) => ({
-          pieceId: p.id,
-          label: p.fileName,
-          outline: p.outline,
-          quantity: p.quantity,
-          allowRotationsDeg: p.rotations,
-        })),
-      });
-      if (!suggestion) {
-        toast("warning", "Couldn't find a fitting size — check quantities and rotations allowed");
-        return;
+      const nestPieceInputs = pieces.map((p) => ({
+        pieceId: p.id,
+        label: p.fileName,
+        outline: p.outline,
+        quantity: p.quantity,
+        allowRotationsDeg: p.rotations,
+        reserveCircles: dotReserveCircles(p),
+      }));
+
+      if (optimizeWidthToo) {
+        const suggestion = suggestSheetSize({ initialWidthMm: sheetWidthMm, spacingMm, resolutionMm, pieces: nestPieceInputs });
+        if (!suggestion) {
+          toast("warning", "Couldn't find a fitting size — check quantities and rotations allowed");
+          return;
+        }
+        setSheetWidthMm(suggestion.widthMm);
+        setSheetHeightMm(suggestion.heightMm);
+        toast(
+          "success",
+          `Suggested sheet: ${suggestion.widthMm.toFixed(0)} × ${suggestion.heightMm.toFixed(0)} mm (~${suggestion.utilizationPct.toFixed(0)}% utilization) — applied, run nesting again`
+        );
+      } else {
+        const suggestion = suggestSheetHeight({ sheetWidthMm, spacingMm, resolutionMm, pieces: nestPieceInputs });
+        if (!suggestion) {
+          toast("warning", "Couldn't find a fitting size — check quantities and rotations allowed");
+          return;
+        }
+        setSheetHeightMm(suggestion.heightMm);
+        toast(
+          "success",
+          `Suggested sheet: ${sheetWidthMm.toFixed(0)} × ${suggestion.heightMm.toFixed(0)} mm (~${suggestion.utilizationPct.toFixed(0)}% utilization) — height applied, run nesting again`
+        );
       }
-      setSheetHeightMm(suggestion.heightMm);
-      toast(
-        "success",
-        `Suggested sheet: ${sheetWidthMm.toFixed(0)} × ${suggestion.heightMm.toFixed(0)} mm (~${suggestion.utilizationPct.toFixed(0)}% utilization) — height applied, run nesting again`
-      );
     } catch (err) {
       toast("danger", err instanceof Error ? err.message : "Couldn't compute a suggestion");
     } finally {
@@ -510,12 +554,17 @@ export default function CutFileToolClient() {
                         <NumberField label="Sheet height (mm)" value={sheetHeightMm} onChange={setSheetHeightMm} />
                         <NumberField label="Spacing between pieces (mm)" value={spacingMm} onChange={setSpacingMm} />
                         <NumberField label="Grid resolution (mm) — lower = tighter but slower" value={resolutionMm} onChange={setResolutionMm} step={0.5} />
+                        <label className="flex items-center gap-2 text-xs text-ink-secondary">
+                          <input type="checkbox" checked={optimizeWidthToo} onChange={(e) => setOptimizeWidthToo(e.target.checked)} />
+                          Also optimize width (flatbed sheet, not a fixed-width roll)
+                        </label>
                         <Button variant="secondary" size="sm" onClick={suggestBestSheetSize} loading={suggestingSheet}>
                           <Ruler size={13} className="mr-1.5" /> Suggest best-fit sheet size
                         </Button>
                         <p className="text-xs text-ink-muted">
-                          Keeps the sheet width you set and searches for the shortest height that fits everything — applies the result to
-                          Sheet height above.
+                          {optimizeWidthToo
+                            ? "Searches both dimensions for a tighter sheet — applies the result to both Sheet width and Sheet height above."
+                            : "Keeps the sheet width you set and searches for the shortest height that fits everything — applies the result to Sheet height above."}
                         </p>
                         <Button onClick={runNesting} loading={nesting}>
                           Run Nesting

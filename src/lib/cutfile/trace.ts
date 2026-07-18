@@ -92,9 +92,13 @@ export async function traceOutlineFromPdf(
   }
 
   keepLargestComponent(mask, width, height);
-  const fillColorRgb = averageMaskedColor(img, mask);
   const contour = traceBoundary(mask, width, height);
   if (!contour || contour.length < 3) return { outline: [], method: "none" };
+  // Sample color from pixels just inside the traced boundary rather than
+  // averaging the whole shape — a whole-shape average washes out to a
+  // muddy blend for gradient-filled designs (e.g. a rainbow star), while
+  // the edge is what actually needs to match for the color-bleed stroke.
+  const fillColorRgb = averageColorNearBoundary(img, mask, contour, width, height);
 
   const simplified = simplifyPolygon(contour, Math.max(width, height) * 0.0025);
 
@@ -129,13 +133,52 @@ function colorDistance(r: number, g: number, b: number, ref: [number, number, nu
   return Math.hypot(r - ref[0], g - ref[1], b - ref[2]);
 }
 
-/** Average color of masked (foreground) pixels, subsampled for speed on large canvases. Returned 0-1 per channel for pdf-lib's rgb(). */
-function averageMaskedColor(img: Uint8ClampedArray, mask: Uint8Array): { r: number; g: number; b: number } | undefined {
+/**
+ * Averages pixel color a few px INSIDE the traced boundary (walking along
+ * the inward normal from each boundary point, staying within the mask),
+ * subsampled along the contour for speed. This is the color that actually
+ * sits at the cut edge, which is what the color-bleed stroke needs to
+ * match — a whole-shape average would blur toward the design's overall
+ * average color instead, which can look visibly wrong for a gradient or
+ * multi-color fill.
+ */
+function averageColorNearBoundary(
+  img: Uint8ClampedArray,
+  mask: Uint8Array,
+  contour: Point[],
+  width: number,
+  height: number
+): { r: number; g: number; b: number } | undefined {
+  const at = (xx: number, yy: number) => (xx < 0 || yy < 0 || xx >= width || yy >= height ? 0 : mask[yy * width + xx]);
+  const insetPx = Math.max(1, Math.round(Math.max(width, height) * 0.01)); // ~1% of the longest side, inward from the edge
+
   let r = 0, g = 0, b = 0, n = 0;
-  const step = mask.length > 200_000 ? 7 : 1;
-  for (let i = 0; i < mask.length; i += step) {
-    if (!mask[i]) continue;
-    const o = i * 4;
+  const step = Math.max(1, Math.floor(contour.length / 400)); // cap sample count on long contours
+  for (let i = 0; i < contour.length; i += step) {
+    const p = contour[i];
+    const prev = contour[(i - step + contour.length) % contour.length];
+    const next = contour[(i + step) % contour.length];
+    // Approximate inward normal from the local tangent direction.
+    const tx = next.x - prev.x;
+    const ty = next.y - prev.y;
+    const len = Math.hypot(tx, ty) || 1;
+    // Rotate tangent -90° for one candidate normal; the mask tells us which
+    // side is actually "inward" (foreground).
+    let nx = ty / len;
+    let ny = -tx / len;
+    let sx = Math.round(p.x + nx * insetPx);
+    let sy = Math.round(p.y + ny * insetPx);
+    if (!at(sx, sy)) {
+      nx = -nx;
+      ny = -ny;
+      sx = Math.round(p.x + nx * insetPx);
+      sy = Math.round(p.y + ny * insetPx);
+    }
+    if (!at(sx, sy)) {
+      sx = p.x;
+      sy = p.y; // fall back to the boundary pixel itself
+    }
+    const o = (sy * width + sx) * 4;
     r += img[o];
     g += img[o + 1];
     b += img[o + 2];
