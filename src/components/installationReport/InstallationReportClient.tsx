@@ -49,6 +49,16 @@ function sizeLabel(widthMm: number | null, heightMm: number | null): string {
   return `${round(widthMm)} x ${round(heightMm)} mm`;
 }
 
+function siteFromOption(option: StoreSiteRow | undefined): SiteEntry {
+  const site = emptySite();
+  if (!option) return site;
+  site.fixtureType = option.fixture_type ?? "";
+  site.material = option.material ?? "";
+  site.signType = option.sign_type ?? "";
+  site.size = sizeLabel(option.width_mm, option.height_mm);
+  return site;
+}
+
 const INSTALLATION_STATUS_OPTIONS = ["Scheduled", "In Progress", "Completed", "Delayed", "Cancelled"];
 const OVERALL_STATUS_OPTIONS = ["Pass", "Conditional", "Fail"];
 const SITE_CONDITION_OPTIONS = ["Good", "Poor"];
@@ -162,6 +172,13 @@ export default function InstallationReportClient() {
   const [sites, setSites] = useState<SiteEntry[]>([emptySite()]);
   const [exporting, setExporting] = useState(false);
 
+  // Every known site (site_index 1, 2, 3...) for the currently-picked
+  // store, from installation_report_store_sites — drives the "Site 1 /
+  // Site 2 / Site 3" quick-add buttons below instead of a single blind
+  // "+ Add site" button, so it's obvious up front how many sites a store
+  // has and which ones are already added.
+  const [storeSiteOptions, setStoreSiteOptions] = useState<StoreSiteRow[]>([]);
+
   // Store Master picker
   const [storeQuery, setStoreQuery] = useState("");
   const [storeResults, setStoreResults] = useState<StoreMasterRow[] | null>(null);
@@ -202,25 +219,10 @@ export default function InstallationReportClient() {
     setStoreOpen(false);
     setStoreQuery("");
 
-    // Only auto-create/replace the site list when every existing site is
-    // still untouched — if the operator has already started filling sites
-    // in, leave their work alone and just fill the store fields above.
-    // Checked before the async lookup below runs too, so a slow network
-    // can't let a second pick race ahead of the guard.
-    let allowAutoFill = false;
-    setSites((prev) => {
-      allowAutoFill = prev.every(isSitePristine);
-      return prev;
-    });
-    if (!allowAutoFill) {
-      toast("success", "Store details filled from Store Master — adjust anything below as needed");
-      return;
-    }
-
     // Per-site Fixture Type / Material / Sign Type / Size (each site of a
-    // multi-site store can differ) — falls back to the store-wide
-    // default_* columns + no_of_sites if this store hasn't been imported
-    // into installation_report_store_sites yet.
+    // multi-site store can differ) — falls back to a synthesized list from
+    // the store-wide default_* columns + no_of_sites if this store hasn't
+    // been imported into installation_report_store_sites yet.
     const { data: siteRows, error: siteError } = await supabase
       .from("installation_report_store_sites")
       .select("id, site_index, fixture_type, material, sign_type, width_mm, height_mm")
@@ -228,36 +230,43 @@ export default function InstallationReportClient() {
       .eq("active", true)
       .order("site_index", { ascending: true });
 
-    let nextSites: SiteEntry[];
-    if (!siteError && siteRows && siteRows.length > 0) {
-      nextSites = (siteRows as StoreSiteRow[]).map((r) => {
-        const site = emptySite();
-        site.fixtureType = r.fixture_type ?? "";
-        site.material = r.material ?? "";
-        site.signType = r.sign_type ?? "";
-        site.size = sizeLabel(r.width_mm, r.height_mm);
-        return site;
-      });
-    } else {
-      const siteCount = row.no_of_sites && row.no_of_sites > 0 ? row.no_of_sites : 1;
-      nextSites = Array.from({ length: siteCount }, () => {
-        const site = emptySite();
-        site.fixtureType = row.default_fixture_type ?? "";
-        site.material = row.default_material ?? "";
-        site.signType = row.default_sign_type ?? "";
-        return site;
-      });
-    }
+    const options: StoreSiteRow[] =
+      !siteError && siteRows && siteRows.length > 0
+        ? (siteRows as StoreSiteRow[])
+        : Array.from({ length: row.no_of_sites && row.no_of_sites > 0 ? row.no_of_sites : 1 }, (_, i) => ({
+            id: "",
+            site_index: i + 1,
+            fixture_type: row.default_fixture_type,
+            material: row.default_material,
+            sign_type: row.default_sign_type,
+            width_mm: null,
+            height_mm: null,
+          }));
+    setStoreSiteOptions(options);
 
-    setSites((prev) => (prev.every(isSitePristine) ? nextSites : prev));
+    // Only auto-fill Site 1 into the existing single block when it's still
+    // untouched — if the operator has already started filling it in, leave
+    // it alone and just fill the store fields + refresh the Site
+    // quick-add buttons above.
+    let filledSiteOne = false;
+    setSites((prev) => {
+      if (prev.length !== 1 || !isSitePristine(prev[0])) return prev;
+      filledSiteOne = true;
+      return [siteFromOption(options.find((o) => o.site_index === 1))];
+    });
 
-    if (nextSites.length > 1) {
+    if (options.length > 1) {
       toast(
         "success",
-        `Store details filled — this store has ${nextSites.length} sites, so ${nextSites.length} site blocks were created with each site's own fixture details (adjust anything as needed)`
+        `Store details filled — this store has ${options.length} sites. Use the Site ${options
+          .slice(1)
+          .map((o) => o.site_index)
+          .join(" / Site ")} buttons below to add the rest.`
       );
-    } else {
+    } else if (filledSiteOne) {
       toast("success", "Store details filled from Store Master — adjust anything below as needed");
+    } else {
+      toast("success", "Store details filled from Store Master — pick a Site number below to add its details");
     }
   }
 
@@ -265,6 +274,9 @@ export default function InstallationReportClient() {
     setSites((prev) => prev.map((s, i) => (i === index ? { ...s, ...patch } : s)));
   }
 
+  // With no known site number (the generic "+ Add site" fallback, for a
+  // site beyond what Store Master knows about): carries forward the
+  // previous site's fixture/material/etc, same as before.
   function addSite() {
     setSites((prev) => {
       const next = emptySite();
@@ -276,6 +288,14 @@ export default function InstallationReportClient() {
       }
       return [...prev, next];
     });
+  }
+
+  // With a known site number (one of the Site 1 / Site 2 / ... quick-add
+  // buttons): pre-fills from that site's own master data instead of
+  // carrying forward the previous site's.
+  function addKnownSite(siteIndex: number) {
+    const option = storeSiteOptions.find((o) => o.site_index === siteIndex);
+    setSites((prev) => [...prev, siteFromOption(option)]);
   }
 
   function removeSite(index: number) {
@@ -291,6 +311,7 @@ export default function InstallationReportClient() {
     setInstallationDate("");
     setStorePictures(emptyStorePictures());
     setSites([emptySite()]);
+    setStoreSiteOptions([]);
     toast("success", "Cleared — ready for the next report");
   }
 
@@ -475,11 +496,25 @@ export default function InstallationReportClient() {
         </div>
 
         <div className="flex flex-col gap-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Installation sites</h3>
-            <Button variant="secondary" size="sm" onClick={addSite}>
-              <Plus size={13} className="mr-1.5" /> Add site
-            </Button>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {storeSiteOptions
+                .filter((o) => o.site_index > sites.length)
+                .map((o) => (
+                  <button
+                    key={o.site_index}
+                    type="button"
+                    onClick={() => addKnownSite(o.site_index)}
+                    className="flex items-center gap-1 rounded-md border border-primary/40 bg-primary-tint px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-primary/10"
+                  >
+                    <Plus size={12} /> Site {o.site_index}
+                  </button>
+                ))}
+              <Button variant="secondary" size="sm" onClick={addSite}>
+                <Plus size={13} className="mr-1.5" /> Add site
+              </Button>
+            </div>
           </div>
 
           {sites.map((site, i) => (
