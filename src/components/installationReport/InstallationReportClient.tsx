@@ -24,19 +24,10 @@ interface StoreMasterRow {
   address: string | null;
   sfo_id: string | null;
   program: string | null;
-  campaign: string | null;
   no_of_sites: number | null;
   default_fixture_type: string | null;
   default_material: string | null;
   default_sign_type: string | null;
-}
-
-interface CreativeMasterRow {
-  id: string;
-  creative_name: string;
-  program: string | null;
-  campaign: string | null;
-  creative_version: string | null;
 }
 
 const INSTALLATION_STATUS_OPTIONS = ["Scheduled", "In Progress", "Completed", "Delayed", "Cancelled"];
@@ -70,8 +61,8 @@ function emptySite(): SiteEntry {
     material: "",
     signType: "",
     size: "",
-    dateOfInstallation: "",
-    installedByTeam: "",
+    creativeName: "",
+    installedByTeam: "MMDI",
     installationStatus: "Completed",
     installedArtwork: "",
     storePermissionSlots: "",
@@ -103,6 +94,7 @@ function isSitePristine(s: SiteEntry): boolean {
     !s.material &&
     !s.signType &&
     !s.size &&
+    !s.creativeName &&
     !s.installedArtwork &&
     !s.mainSlide &&
     !s.closeUp &&
@@ -146,14 +138,11 @@ export default function InstallationReportClient() {
   const [address, setAddress] = useState("");
   const [sfoId, setSfoId] = useState("");
   const [program, setProgram] = useState("");
-  const [campaign, setCampaign] = useState("");
 
-  const [creativeProgram, setCreativeProgram] = useState("");
-  const [creativeCampaign, setCreativeCampaign] = useState("");
-  const [creativeName, setCreativeName] = useState("");
-  const [creativeVersion, setCreativeVersion] = useState("");
+  // Report-level — chosen once, applies to every site in the report.
+  const [seasonProgram, setSeasonProgram] = useState("");
+  const [installationDate, setInstallationDate] = useState("");
 
-  const [programDetails, setProgramDetails] = useState("");
   const [storePictures, setStorePictures] = useState<StorePictures>(emptyStorePictures());
   const [sites, setSites] = useState<SiteEntry[]>([emptySite()]);
   const [exporting, setExporting] = useState(false);
@@ -164,16 +153,9 @@ export default function InstallationReportClient() {
   const [storeOpen, setStoreOpen] = useState(false);
   const storeBoxRef = useRef<HTMLDivElement>(null);
 
-  // Creative Master picker
-  const [creativeQuery, setCreativeQuery] = useState("");
-  const [creativeResults, setCreativeResults] = useState<CreativeMasterRow[] | null>(null);
-  const [creativeOpen, setCreativeOpen] = useState(false);
-  const creativeBoxRef = useRef<HTMLDivElement>(null);
-
   useEffect(() => {
     function onClick(e: MouseEvent) {
       if (storeBoxRef.current && !storeBoxRef.current.contains(e.target as Node)) setStoreOpen(false);
-      if (creativeBoxRef.current && !creativeBoxRef.current.contains(e.target as Node)) setCreativeOpen(false);
     }
     document.addEventListener("mousedown", onClick);
     return () => document.removeEventListener("mousedown", onClick);
@@ -185,7 +167,7 @@ export default function InstallationReportClient() {
       const term = storeQuery.trim();
       let q = supabase
         .from("installation_report_stores")
-        .select("id, store_name, address, sfo_id, program, campaign, no_of_sites, default_fixture_type, default_material, default_sign_type")
+        .select("id, store_name, address, sfo_id, program, no_of_sites, default_fixture_type, default_material, default_sign_type")
         .eq("active", true)
         .order("store_name", { ascending: true })
         .limit(25);
@@ -197,30 +179,11 @@ export default function InstallationReportClient() {
     return () => clearTimeout(handle);
   }, [storeQuery, storeOpen]);
 
-  useEffect(() => {
-    if (!creativeOpen) return;
-    const handle = setTimeout(() => {
-      const term = creativeQuery.trim();
-      let q = supabase
-        .from("installation_report_creatives")
-        .select("id, creative_name, program, campaign, creative_version")
-        .eq("active", true)
-        .order("creative_name", { ascending: true })
-        .limit(25);
-      if (term) q = q.or(`creative_name.ilike.%${term}%,program.ilike.%${term}%,campaign.ilike.%${term}%`);
-      q.then(({ data, error }) => {
-        if (!error) setCreativeResults((data as CreativeMasterRow[]) ?? []);
-      });
-    }, 250);
-    return () => clearTimeout(handle);
-  }, [creativeQuery, creativeOpen]);
-
   function applyStore(row: StoreMasterRow) {
     setStoreName(row.store_name);
     setAddress(row.address ?? "");
     setSfoId(row.sfo_id ?? "");
     setProgram(row.program ?? "");
-    setCampaign(row.campaign ?? "");
     setStoreOpen(false);
     setStoreQuery("");
 
@@ -250,16 +213,6 @@ export default function InstallationReportClient() {
     }
   }
 
-  function applyCreative(row: CreativeMasterRow) {
-    setCreativeName(row.creative_name);
-    setCreativeProgram(row.program ?? "");
-    setCreativeCampaign(row.campaign ?? "");
-    setCreativeVersion(row.creative_version ?? "");
-    setCreativeOpen(false);
-    setCreativeQuery("");
-    toast("success", "Creative details filled from Creative Master");
-  }
-
   function updateSite(index: number, patch: Partial<SiteEntry>) {
     setSites((prev) => prev.map((s, i) => (i === index ? { ...s, ...patch } : s)));
   }
@@ -286,12 +239,8 @@ export default function InstallationReportClient() {
     setAddress("");
     setSfoId("");
     setProgram("");
-    setCampaign("");
-    setCreativeProgram("");
-    setCreativeCampaign("");
-    setCreativeName("");
-    setCreativeVersion("");
-    setProgramDetails("");
+    setSeasonProgram("");
+    setInstallationDate("");
     setStorePictures(emptyStorePictures());
     setSites([emptySite()]);
     toast("success", "Cleared — ready for the next report");
@@ -309,12 +258,8 @@ export default function InstallationReportClient() {
         address,
         sfoId,
         program,
-        campaign,
-        creativeProgram,
-        creativeCampaign,
-        creativeName,
-        creativeVersion,
-        programDetails,
+        seasonProgram,
+        installationDate,
         storePictures,
         sites,
       };
@@ -427,24 +372,13 @@ export default function InstallationReportClient() {
             </label>
 
             <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary">
-              Program
+              Store Program
               <input
                 type="text"
                 value={program}
                 onChange={(e) => setProgram(e.target.value)}
                 className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
-                placeholder="e.g. APR"
-              />
-            </label>
-
-            <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary">
-              Campaign
-              <input
-                type="text"
-                value={campaign}
-                onChange={(e) => setCampaign(e.target.value)}
-                className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
-                placeholder="e.g. Spring Refresh 2026"
+                placeholder="e.g. APR, Mono AAR"
               />
             </label>
 
@@ -462,87 +396,20 @@ export default function InstallationReportClient() {
         </div>
 
         <div className="rounded-lg border border-line bg-surface p-4">
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-muted">Creative details</h3>
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-muted">Program &amp; schedule</h3>
+          <p className="mb-3 text-xs text-ink-muted">Chosen once per report — applies to every site below.</p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div ref={creativeBoxRef} className="relative flex flex-col gap-1.5 sm:col-span-2">
-              <label className="text-sm font-medium text-ink-secondary">
-                Creative name / artwork
-                <span className="ml-1 font-normal text-ink-muted">— search Creative Master to autofill, or type a new one</span>
-              </label>
-              <div className="flex items-center gap-2 rounded-md border border-line-strong bg-surface px-2">
-                <Search size={14} className="text-ink-muted" />
-                <input
-                  type="text"
-                  value={creativeName}
-                  onChange={(e) => {
-                    setCreativeName(e.target.value);
-                    setCreativeQuery(e.target.value);
-                    setCreativeOpen(true);
-                  }}
-                  onFocus={() => setCreativeOpen(true)}
-                  placeholder="e.g. Spring Refresh Hero Banner"
-                  className="h-9 w-full bg-transparent text-sm text-ink outline-none placeholder:text-ink-muted"
-                />
-              </div>
-              {creativeOpen && creativeResults && creativeResults.length > 0 && (
-                <div className="absolute top-full z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-line bg-surface-overlay p-1 shadow-3">
-                  {creativeResults.map((row) => (
-                    <button
-                      key={row.id}
-                      type="button"
-                      onClick={() => applyCreative(row)}
-                      className="flex w-full flex-col rounded-md px-2 py-1.5 text-left text-sm hover:bg-surface-sunken"
-                    >
-                      <span className="text-ink">{row.creative_name}</span>
-                      <span className="text-xs text-ink-muted">
-                        {row.program ?? ""} {row.campaign ? `· ${row.campaign}` : ""} {row.creative_version ? `· v${row.creative_version}` : ""}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
+            <MasterPickSelect label="Program" table="installation_report_programs" value={seasonProgram} onChange={setSeasonProgram} />
             <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary">
-              Program
+              Installation Date
               <input
-                type="text"
-                value={creativeProgram}
-                onChange={(e) => setCreativeProgram(e.target.value)}
-                className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
-              />
-            </label>
-            <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary">
-              Campaign
-              <input
-                type="text"
-                value={creativeCampaign}
-                onChange={(e) => setCreativeCampaign(e.target.value)}
-                className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
-              />
-            </label>
-            <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary sm:col-span-2">
-              Creative version <span className="font-normal text-ink-muted">(optional)</span>
-              <input
-                type="text"
-                value={creativeVersion}
-                onChange={(e) => setCreativeVersion(e.target.value)}
-                className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
-                placeholder="e.g. v2"
+                type="date"
+                value={installationDate}
+                onChange={(e) => setInstallationDate(e.target.value)}
+                className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink focus:border-primary focus:outline-none"
               />
             </label>
           </div>
-        </div>
-
-        <div className="rounded-lg border border-line bg-surface p-4">
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-muted">Program details</h3>
-          <textarea
-            value={programDetails}
-            onChange={(e) => setProgramDetails(e.target.value)}
-            rows={2}
-            className="w-full rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
-            placeholder="Any additional context for this report"
-          />
         </div>
 
         <div className="rounded-lg border border-line bg-surface p-4">
@@ -607,19 +474,17 @@ export default function InstallationReportClient() {
                     className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink focus:border-primary focus:outline-none"
                   />
                 </label>
+                <MasterPickSelect
+                  label="Creative"
+                  table="installation_report_creatives"
+                  column="creative_name"
+                  value={site.creativeName}
+                  onChange={(v) => updateSite(i, { creativeName: v })}
+                />
               </div>
 
               <p className="mb-2 mt-4 text-xs font-semibold uppercase tracking-wide text-ink-muted">Installation schedule</p>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
-                <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary">
-                  Installation Date
-                  <input
-                    type="date"
-                    value={site.dateOfInstallation}
-                    onChange={(e) => updateSite(i, { dateOfInstallation: e.target.value })}
-                    className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink focus:border-primary focus:outline-none"
-                  />
-                </label>
                 <MasterPickSelect label="Installation Team" table="installation_report_teams" value={site.installedByTeam} onChange={(v) => updateSite(i, { installedByTeam: v })} />
                 <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary">
                   Installation Status

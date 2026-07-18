@@ -48,16 +48,14 @@ export const MASTER_CONFIGS: MasterConfig[] = [
       { key: "store_name", label: "Store Name" },
       { key: "address", label: "Address" },
       { key: "sfo_id", label: "SFO ID" },
-      { key: "program", label: "Program" },
-      { key: "campaign", label: "Campaign" },
+      { key: "program", label: "Store Program" },
       { key: "no_of_sites", label: "No of Sites" },
     ],
     fields: [
       { key: "store_name", label: "Store Name", type: "text", required: true },
       { key: "address", label: "Address", type: "text" },
       { key: "sfo_id", label: "SFO ID", type: "text" },
-      { key: "program", label: "Program", type: "text", placeholder: "e.g. APR" },
-      { key: "campaign", label: "Campaign", type: "text" },
+      { key: "program", label: "Store Program", type: "text", placeholder: "e.g. APR, Mono AAR" },
       {
         key: "no_of_sites",
         label: "No of Sites",
@@ -72,22 +70,29 @@ export const MASTER_CONFIGS: MasterConfig[] = [
     defaults: { active: true, no_of_sites: 1 },
   },
   {
+    // The season program (Fall 25, Spring 26...) picked once per report —
+    // distinct from a store's own format program above (APR, Mono AAR...).
+    id: "programs",
+    table: "installation_report_programs",
+    label: "Programs",
+    singular: "Program",
+    orderBy: "name",
+    columns: [{ key: "name", label: "Name" }],
+    fields: [
+      { key: "name", label: "Name", type: "text", required: true, placeholder: "e.g. Fall 25" },
+      { key: "active", label: "Active", type: "checkbox" },
+    ],
+    defaults: { active: true },
+  },
+  {
     id: "creatives",
     table: "installation_report_creatives",
     label: "Creative Master",
     singular: "Creative",
     orderBy: "creative_name",
-    columns: [
-      { key: "creative_name", label: "Creative Name" },
-      { key: "program", label: "Program" },
-      { key: "campaign", label: "Campaign" },
-      { key: "creative_version", label: "Version" },
-    ],
+    columns: [{ key: "creative_name", label: "Creative Name" }],
     fields: [
       { key: "creative_name", label: "Creative Name / Artwork", type: "text", required: true },
-      { key: "program", label: "Program", type: "text" },
-      { key: "campaign", label: "Campaign", type: "text" },
-      { key: "creative_version", label: "Creative Version", type: "text" },
       { key: "active", label: "Active", type: "checkbox" },
     ],
     defaults: { active: true },

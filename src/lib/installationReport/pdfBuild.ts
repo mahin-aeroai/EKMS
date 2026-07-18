@@ -74,9 +74,13 @@ export interface SiteEntry {
   signType: string;
   size: string;
 
-  // Installation Schedule — Team is picked from the reusable roster; Date
-  // and Status are specific to this site's visit.
-  dateOfInstallation: string;
+  // Creative — picked per site from the Creative Master, since different
+  // sites within the same store can carry different artwork.
+  creativeName: string;
+
+  // Installation Schedule — Team is picked from the reusable roster,
+  // Status is specific to this site's visit. Installation Date lives at
+  // report level now (every site in a report shares one visit date).
   installedByTeam: string;
   installationStatus: string;
 
@@ -118,14 +122,14 @@ export interface ReportData {
   address: string;
   sfoId: string;
   program: string;
-  campaign: string;
 
-  creativeProgram: string;
-  creativeCampaign: string;
-  creativeName: string;
-  creativeVersion: string;
+  // Season/rollout program (Fall 25, Spring 26...) — chosen once per
+  // report from the Program Master, applies to every site in it.
+  seasonProgram: string;
+  // Installation Date — also chosen once per report; every site in a
+  // report shares the same visit date.
+  installationDate: string;
 
-  programDetails: string;
   storePictures: StorePictures;
   sites: SiteEntry[];
 }
@@ -137,6 +141,7 @@ interface Ctx {
   italic: PDFFont;
   storeName: string;
   sfoId: string;
+  installationDate: string;
   pageNumber: number;
 }
 
@@ -442,27 +447,6 @@ function drawInfoCard(
   return yTop - h;
 }
 
-/** Same card chrome, but for a longer freeform paragraph (Program Details, Inspector Remarks) instead of label/value rows. */
-function drawTextCard(ctx: Ctx, page: PDFPage, opts: { x: number; yTop: number; w: number; title: string; icon: IconKind; text: string; minLines?: number }): number {
-  const { x, yTop, w, title, icon, text } = opts;
-  const padX = 18;
-  const headerH = 40;
-  const bodyLines = wrapText(ctx.font, text || "No additional notes.", 10.5, w - padX * 2);
-  const shownLines = bodyLines.slice(0, Math.max(opts.minLines ?? 3, bodyLines.length));
-  const h = headerH + shownLines.length * 15 + 20;
-
-  drawCardBg(page, x, yTop, w, h);
-  drawIconChip(page, icon, x + padX, yTop - 13, 24, ACCENT, ACCENT_TINT);
-  page.drawText(title, { x: x + padX + 32, y: yTop - 27, size: 14.5, font: ctx.bold, color: INK });
-  page.drawLine({ start: { x: x + padX, y: yTop - headerH }, end: { x: x + w - padX, y: yTop - headerH }, thickness: 0.75, color: BORDER });
-
-  shownLines.forEach((line, i) => {
-    page.drawText(line, { x: x + padX, y: yTop - headerH - 18 - i * 15, size: 10.5, font: ctx.font, color: INK_SECONDARY });
-  });
-
-  return yTop - h;
-}
-
 // ---------------------------------------------------------------------------
 // Photos
 // ---------------------------------------------------------------------------
@@ -603,8 +587,7 @@ function computeDashboard(data: ReportData) {
   const completed = data.sites.filter((s) => (s.overallStatus || "").toLowerCase() === "pass").length;
   const pending = total - completed;
 
-  const dates = Array.from(new Set(data.sites.map((s) => s.dateOfInstallation).filter(Boolean)));
-  const dateLabel = dates.length === 0 ? "—" : dates.length === 1 ? formatDate(dates[0]) : `${dates.length} dates`;
+  const dateLabel = formatDate(data.installationDate);
 
   const teams = Array.from(new Set(data.sites.map((s) => s.installedByTeam).filter(Boolean)));
   const teamLabel = teams.length === 0 ? "—" : teams.length === 1 ? teams[0] : `${teams.length} teams`;
@@ -639,7 +622,7 @@ function drawCoverPage(ctx: Ctx, data: ReportData) {
   const titleSize = fitFontSize(ctx.bold, data.storeName || "Untitled store", PAGE_WIDTH - MARGIN * 2, 40, 22);
   page.drawText(data.storeName || "Untitled store", { x: MARGIN, y: PAGE_HEIGHT - mm(38), size: titleSize, font: ctx.bold, color: rgb(1, 1, 1) });
 
-  const metaParts = [`SFO ID ${data.sfoId || "—"}`, `Program ${data.program || "—"}`, data.campaign ? `Campaign ${data.campaign}` : null].filter(Boolean);
+  const metaParts = [`SFO ID ${data.sfoId || "—"}`, `Program ${data.program || "—"}`, data.seasonProgram ? `Season ${data.seasonProgram}` : null].filter(Boolean);
   page.drawText((metaParts as string[]).join("   ·   "), { x: MARGIN, y: PAGE_HEIGHT - mm(50), size: 12, font: ctx.font, color: rgb(0.82, 0.84, 0.9) });
 
   if (data.address) {
@@ -681,15 +664,15 @@ function drawCoverPage(ctx: Ctx, data: ReportData) {
 }
 
 function drawStoreAndCreativePage(ctx: Ctx, data: ReportData) {
-  const page = newPage(ctx, "Store & Creative Details");
+  const page = newPage(ctx, "Store Details");
   const b = contentBounds();
-  let y = drawSectionHeading(ctx, page, "Store & Creative Information", b.left, b.top);
+  let y = drawSectionHeading(ctx, page, "Store Information", b.left, b.top);
   y -= 6;
 
   const gap = mm(8);
   const colW = (b.right - b.left - gap) / 2;
 
-  const storeBottom = drawInfoCard(ctx, page, {
+  drawInfoCard(ctx, page, {
     x: b.left,
     yTop: y,
     w: colW,
@@ -699,34 +682,21 @@ function drawStoreAndCreativePage(ctx: Ctx, data: ReportData) {
       { label: "Store Name", value: data.storeName },
       { label: "Address", value: data.address },
       { label: "SFO ID", value: data.sfoId },
-      { label: "Program", value: data.program },
-      { label: "Campaign", value: data.campaign },
+      { label: "Store Program", value: data.program },
     ],
   });
 
-  const creativeBottom = drawInfoCard(ctx, page, {
+  drawInfoCard(ctx, page, {
     x: b.left + colW + gap,
     yTop: y,
     w: colW,
-    title: "Creative Details",
-    icon: "tag",
+    title: "Program & Schedule",
+    icon: "calendar",
     rows: [
-      { label: "Program", value: data.creativeProgram || data.program },
-      { label: "Campaign", value: data.creativeCampaign || data.campaign },
-      { label: "Creative Name / Artwork", value: data.creativeName },
-      { label: "Creative Version", value: data.creativeVersion },
+      { label: "Program", value: data.seasonProgram },
+      { label: "Installation Date", value: formatDate(data.installationDate) },
+      { label: "No of Sites", value: String(data.sites.length) },
     ],
-  });
-
-  const notesTop = Math.min(storeBottom, creativeBottom) - mm(8);
-  drawTextCard(ctx, page, {
-    x: b.left,
-    yTop: notesTop,
-    w: b.right - b.left,
-    title: "Program Details",
-    icon: "clipboard",
-    text: data.programDetails,
-    minLines: 3,
   });
 }
 
@@ -800,6 +770,7 @@ async function drawSiteOverviewPage(ctx: Ctx, site: SiteEntry, index: number) {
       { label: "Material", value: site.material },
       { label: "Sign Type", value: site.signType },
       { label: "Size", value: site.size },
+      { label: "Creative", value: site.creativeName },
     ],
   });
 
@@ -810,7 +781,7 @@ async function drawSiteOverviewPage(ctx: Ctx, site: SiteEntry, index: number) {
     title: "Installation Schedule",
     icon: "calendar",
     rows: [
-      { label: "Installation Date", value: formatDate(site.dateOfInstallation) },
+      { label: "Installation Date", value: formatDate(ctx.installationDate) },
       { label: "Installation Team", value: site.installedByTeam },
       { label: "Installation Status", value: site.installationStatus },
       { label: "Installed Artwork", value: site.installedArtwork },
@@ -926,7 +897,16 @@ export async function buildInstallationReportPdf(data: ReportData): Promise<Blob
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
   const italic = await doc.embedFont(StandardFonts.HelveticaOblique);
-  const ctx: Ctx = { doc, font, bold, italic, storeName: data.storeName, sfoId: data.sfoId, pageNumber: 0 };
+  const ctx: Ctx = {
+    doc,
+    font,
+    bold,
+    italic,
+    storeName: data.storeName,
+    sfoId: data.sfoId,
+    installationDate: data.installationDate,
+    pageNumber: 0,
+  };
 
   drawCoverPage(ctx, data);
   drawStoreAndCreativePage(ctx, data);

@@ -9,25 +9,30 @@ const ADD_NEW = "__add_new__";
 
 /**
  * A <select> backed by one of the Installation Report master tables
- * (installation_report_fixture_types / _materials / _sign_types / _teams —
- * all shaped { id, name, active }). Picking a value stores its plain text
- * `name` in the form (not the row id) — the exported PDF just needs the
- * text, so there's no need to resolve foreign keys at export time, and it
- * keeps this component reusable across all four tables.
+ * (installation_report_fixture_types / _materials / _sign_types / _teams /
+ * _programs / _creatives — all shaped { id, <column>, active }). Picking a
+ * value stores its plain text in the form (not the row id) — the exported
+ * PDF just needs the text, so there's no need to resolve foreign keys at
+ * export time, and it keeps this component reusable across every table.
+ * Most tables name their text column "name"; Store Master and Creative
+ * Master use "store_name" / "creative_name" instead, hence the `column`
+ * prop.
  *
- * Includes an inline "+ Add new" flow so an installer who hits a fixture
- * type that isn't in the list yet doesn't have to leave the form and go to
+ * Includes an inline "+ Add new" flow so an installer who hits a value
+ * that isn't in the list yet doesn't have to leave the form and go to
  * Manage Master Data — it's saved to the master table right there and
  * immediately selected.
  */
 export function MasterPickSelect({
   label,
   table,
+  column = "name",
   value,
   onChange,
 }: {
   label: string;
   table: string;
+  column?: string;
   value: string;
   onChange: (value: string) => void;
 }) {
@@ -40,28 +45,28 @@ export function MasterPickSelect({
   function load() {
     supabase
       .from(table)
-      .select("name")
+      .select(column)
       .eq("active", true)
-      .order("name", { ascending: true })
+      .order(column, { ascending: true })
       .then(({ data, error }) => {
         if (error) {
           setOptions([]);
           return;
         }
-        setOptions(((data as { name: string }[]) ?? []).map((r) => r.name));
+        setOptions(((data as unknown as Record<string, string>[]) ?? []).map((r) => r[column]));
       });
   }
 
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [table]);
+  }, [table, column]);
 
   async function saveNew() {
     const name = newValue.trim();
     if (!name) return;
     setSaving(true);
-    const { error } = await supabase.from(table).insert({ name, active: true });
+    const { error } = await supabase.from(table).insert({ [column]: name, active: true });
     setSaving(false);
     if (error) {
       toast("danger", `Couldn't save "${name}": ${error.message}`);
