@@ -11,7 +11,7 @@ import type {
 } from "@/lib/supabase";
 import {
   CutOpt, SheetCalc, LEDCalc, DriverOpt, computeAccessoryDefaults, computePrint, computePricing,
-  toMM, fmtRupee, type AccessoryLine,
+  toMM, fmtRupee, type AccessoryLine, type CutBin,
 } from "@/lib/sign-estimator/calc";
 import { CATEGORY_LABELS, CATEGORY_TO_PROFILE_CATEGORY, type EstimateSnapshot } from "./types";
 
@@ -169,7 +169,15 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
   const profResult = useMemo(() => {
     if (!profile || !wMM || !hMM) return null;
     const cuts = [wMM, wMM, hMM, hMM];
-    const bins = CutOpt.pack(cuts, profile.stock_len);
+    // Labelled per-member (not just a flat [w,w,h,h] array) so the cutting
+    // diagram below can colour Width cuts differently from Height cuts.
+    const members = [
+      { length: wMM, label: "Width 1" },
+      { length: wMM, label: "Width 2" },
+      { length: hMM, label: "Height 1" },
+      { length: hMM, label: "Height 2" },
+    ];
+    const bins = CutOpt.packMembers(members, profile.stock_len);
     const analysis = CutOpt.analyse(bins, profile.stock_len, profile.cost);
     return { bins, analysis, cuts };
   }, [profile, wMM, hMM]);
@@ -403,7 +411,7 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
       {step === 3 && (
         <div className="space-y-6">
           <section>
-            <h3 className="mb-2 text-sm font-semibold text-ink">Profile Costing (FFD Bin-Pack Optimised)</h3>
+            <h3 className="mb-2 text-sm font-semibold text-ink">Profile Costing (Fabrication-Planned)</h3>
             {!profile ? (
               <Alert>No profile selected — go back to Step 1.</Alert>
             ) : profResult ? (
@@ -432,6 +440,7 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
                   </table>
                 </div>
                 <p className="mt-2 text-sm font-medium text-ink">Profile total: {fmtRupee(profResult.analysis.totalCost)}</p>
+                <CuttingDiagram bins={profResult.bins} stockLen={profile.stock_len} />
               </div>
             ) : (
               <Alert>Enter dimensions in Step 2 first.</Alert>
@@ -744,6 +753,81 @@ function Metric({ label, value, sub }: { label: string; value: string; sub?: str
 }
 function Alert({ children }: { children: React.ReactNode }) {
   return <div className="rounded-md border border-warning bg-warning-tint px-3 py-2 text-sm text-warning">{children}</div>;
+}
+
+// Diagonal-stripe overlay marking a segment that was cut from a REUSED
+// offcut rather than fresh stock -- same base colour (Width/Height), just
+// visually flagged so it's obvious at a glance which pieces are "free"
+// leftovers vs newly-purchased material.
+const OFFCUT_STRIPE =
+  "repeating-linear-gradient(135deg, rgba(255,255,255,0.5) 0px, rgba(255,255,255,0.5) 4px, rgba(255,255,255,0) 4px, rgba(255,255,255,0) 9px)";
+
+function segmentColorClass(label: string): string {
+  if (/^width/i.test(label)) return "bg-blue-600";
+  if (/^height/i.test(label)) return "bg-emerald-600";
+  return "bg-slate-500";
+}
+
+/**
+ * A simple visual cutting plan: one horizontal bar per stock bar, drawn to
+ * scale, with each cut segment coloured by which dimension it belongs to
+ * (Width vs Height) so it's easy to see at a glance how a bar was cut up --
+ * including when a segment was spliced in from an earlier bar's leftover
+ * offcut (diagonal stripe) rather than cut fresh. This is purely a reading
+ * aid on top of the table above; it doesn't change any numbers.
+ */
+function CuttingDiagram({ bins, stockLen }: { bins: CutBin[]; stockLen: number }) {
+  if (bins.length === 0) return null;
+  return (
+    <div className="mt-4">
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">Cutting plan</p>
+      <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-ink-secondary">
+        <span className="flex items-center gap-1.5">
+          <span className="h-3 w-3 rounded-sm bg-blue-600" /> Width cut
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="h-3 w-3 rounded-sm bg-emerald-600" /> Height cut
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="h-3 w-3 rounded-sm bg-slate-400" style={{ backgroundImage: OFFCUT_STRIPE }} /> Reused offcut
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="h-3 w-3 rounded-sm border border-dashed border-line-strong bg-surface" /> Unused leftover
+        </span>
+      </div>
+      <div className="space-y-3">
+        {bins.map((bin, i) => (
+          <div key={i}>
+            <div className="mb-1 flex items-center justify-between text-xs text-ink-secondary">
+              <span className="font-medium text-ink">Stock {i + 1}</span>
+              <span>{(stockLen / 1000).toFixed(2)}m bar</span>
+            </div>
+            <div className="flex h-9 w-full overflow-hidden rounded-md border border-line-strong bg-surface">
+              {bin.cutDetails.map((cut, j) => (
+                <div
+                  key={j}
+                  style={{ width: `${(cut.length / stockLen) * 100}%`, backgroundImage: cut.fromOffcut ? OFFCUT_STRIPE : undefined }}
+                  className={`flex shrink-0 items-center justify-center overflow-hidden whitespace-nowrap border-r border-white/50 text-[10px] font-medium text-white last:border-r-0 ${segmentColorClass(cut.label)}`}
+                  title={`${cut.label} — ${(cut.length / 1000).toFixed(2)}m${cut.fromOffcut ? " (reused offcut)" : " (fresh cut)"}`}
+                >
+                  {(cut.length / 1000).toFixed(2)}m
+                </div>
+              ))}
+              {bin.remaining > 1 && (
+                <div
+                  style={{ width: `${(bin.remaining / stockLen) * 100}%` }}
+                  className="flex shrink-0 items-center justify-center overflow-hidden whitespace-nowrap border-l border-dashed border-line-strong text-[10px] text-ink-muted"
+                  title={`${(bin.remaining / 1000).toFixed(2)}m unused leftover`}
+                >
+                  {(bin.remaining / 1000).toFixed(2)}m
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 function Row({ label, value, strong, big }: { label: string; value: string; strong?: boolean; big?: boolean }) {
   return (

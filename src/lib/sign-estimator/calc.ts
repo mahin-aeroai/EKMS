@@ -239,7 +239,17 @@ function planFabrication(
   let totalConnectors = 0;
 
   for (const member of sorted) {
-    let remaining = member.length + (opts.mitreEnabled ? 2 * opts.mitreAllowanceMM : 0);
+    const initialRequired = member.length + (opts.mitreEnabled ? 2 * opts.mitreAllowanceMM : 0);
+    // Whether this member is structurally too long for a single stock bar
+    // -- i.e. splicing it is unavoidable no matter what. This is decided
+    // ONCE, up front, from the member's own length, not from whatever the
+    // remaining need happens to be mid-loop (which shrinks every time a
+    // segment is added, but that doesn't change whether the member ever
+    // NEEDED to be spliced in the first place).
+    const nominalStockLen = chooseStockLen(initialRequired);
+    const isOversized = initialRequired > nominalStockLen + 1e-9;
+
+    let remaining = initialRequired;
     const segments: MemberAssembly["segments"] = [];
 
     while (remaining > 1e-9) {
@@ -252,7 +262,10 @@ function planFabrication(
 
       // (a) A single pooled offcut that fully covers what's left --
       // prefer the SMALLEST one that does, so a big reusable offcut
-      // isn't burned on a small remainder.
+      // isn't burned on a small remainder. Always allowed: swapping in
+      // one whole offcut instead of a fresh bar is a straight
+      // substitution, not a splice -- the member still ends up as ONE
+      // piece, just not a factory-fresh one.
       let best: OffcutPoolItem | null = null;
       for (const item of pool) {
         if (item.length + 1e-9 >= remaining && (!best || item.length < best.length)) best = item;
@@ -274,19 +287,30 @@ function planFabrication(
 
       // (b) No single offcut is big enough alone -- splice on the
       // LARGEST one available to make progress (fewest joins) and go
-      // around again for whatever's still needed.
-      let largest: OffcutPoolItem | null = null;
-      for (const item of pool) {
-        if (!largest || item.length > largest.length) largest = item;
-      }
-      if (largest) {
-        const { consumed } = trim(largest.length, largest.length, opts.kerfMM);
-        largest.bar.cuts.push({ length: largest.length, label: member.label, fromOffcut: true });
-        largest.bar.usedLength += consumed;
-        segments.push({ length: largest.length, barNumber: largest.bar.barNumber, fromOffcut: true });
-        remaining -= largest.length;
-        pool.splice(pool.indexOf(largest), 1);
-        continue;
+      // around again for whatever's still needed. ONLY for members that
+      // are already unavoidably being spliced (isOversized): a member
+      // that would otherwise fit cleanly in one fresh bar never enters
+      // this branch, because real fabrication doesn't introduce a
+      // connector into an otherwise-single-piece member just to shave a
+      // bit of material off an offcut lying around -- that's not how a
+      // workshop cuts aluminium. Once a member IS being spliced anyway,
+      // though, using multiple smaller offcuts for the remainder (instead
+      // of a whole extra bar) is exactly the behaviour a fabrication
+      // planner should prefer.
+      if (isOversized) {
+        let largest: OffcutPoolItem | null = null;
+        for (const item of pool) {
+          if (!largest || item.length > largest.length) largest = item;
+        }
+        if (largest) {
+          const { consumed } = trim(largest.length, largest.length, opts.kerfMM);
+          largest.bar.cuts.push({ length: largest.length, label: member.label, fromOffcut: true });
+          largest.bar.usedLength += consumed;
+          segments.push({ length: largest.length, barNumber: largest.bar.barNumber, fromOffcut: true });
+          remaining -= largest.length;
+          pool.splice(pool.indexOf(largest), 1);
+          continue;
+        }
       }
 
       // (c) Nothing usable in the pool -- open a fresh stock bar and cut
