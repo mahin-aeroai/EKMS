@@ -77,6 +77,13 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
   const [barCost, setBarCost] = useState<number | "">("");
   const [safetyPct, setSafetyPct] = useState(25);
   const [maxLoadPct, setMaxLoadPct] = useState(80);
+  // Manual overrides on top of the auto-selected driver (DriverOpt.optimise)
+  // -- "" means "use the auto-calculated value". Lets the shop correct the
+  // auto-pick when real-world constraints (stock on hand, derating, etc.)
+  // differ from the theoretical smallest-driver-above-threshold answer.
+  const [drvWattOverride, setDrvWattOverride] = useState<number | "">("");
+  const [drvQtyOverride, setDrvQtyOverride] = useState<number | "">("");
+  const [drvCostOverride, setDrvCostOverride] = useState<number | "">("");
 
   // ── Step 5 ──
   const [mediaId, setMediaId] = useState("");
@@ -222,6 +229,25 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
     return DriverOpt.optimise(totalWatt, safetyPct, maxLoadPct, masters.drivers);
   }, [isLit, masters, totalWatt, safetyPct, maxLoadPct]);
 
+  // Auto-picked driver, with any manual override layered on top -- this is
+  // what pricing/snapshot/UI should read from everywhere, so an override
+  // takes effect consistently instead of only in the Step 4 metrics.
+  const driverFinal = useMemo(() => {
+    if (!driverResult) return null;
+    const watt = drvWattOverride === "" ? driverResult.selected[0]?.drv.watt ?? 0 : drvWattOverride;
+    const qty = drvQtyOverride === "" ? driverResult.selected.reduce((s, x) => s + x.qty, 0) : drvQtyOverride;
+    const unitCost = drvCostOverride === "" ? driverResult.selected[0]?.drv.cost ?? 0 : drvCostOverride;
+    const totalCap = watt * qty;
+    return {
+      watt,
+      qty,
+      unitCost,
+      totalCost: Math.round(qty * unitCost),
+      util: totalCap > 0 ? +((totalWatt / totalCap) * 100).toFixed(1) : 0,
+      isOverridden: drvWattOverride !== "" || drvQtyOverride !== "" || drvCostOverride !== "",
+    };
+  }, [driverResult, drvWattOverride, drvQtyOverride, drvCostOverride, totalWatt]);
+
   const media = masters?.printing.find((p) => p.id === mediaId) ?? null;
   const printResult = useMemo(() => {
     if (!media || !wMM || !hMM) return null;
@@ -242,12 +268,12 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
         sheetCost: sheetResult?.chargedCost ?? 0,
         accCost,
         ledCost,
-        drvCost: driverResult?.totalCost ?? 0,
+        drvCost: driverFinal?.totalCost ?? 0,
         printCost: printResult?.printCost ?? 0,
       },
       { qty, labour, install, overheadPct, markupPct, discountPct, gstPct }
     );
-  }, [profResult, sheetResult, accCost, ledCost, driverResult, printResult, qty, labour, install, overheadPct, markupPct, discountPct, gstPct]);
+  }, [profResult, sheetResult, accCost, ledCost, driverFinal, printResult, qty, labour, install, overheadPct, markupPct, discountPct, gstPct]);
 
   function goStep(n: number) {
     if (n >= 2 && !category) { toast("danger", "Select a sign category first."); return; }
@@ -283,9 +309,9 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
         : isLit && ledMode === "bar" && barResult && ledBar
         ? { mode: "bar", modelName: ledBar.name, numBars: barResult.numBars, piecesPerCol: barResult.piecesPerCol, totalPieces: barResult.totalPieces, watt: barResult.watt, cost: ledCost }
         : null,
-      driver: driverResult ? {
-        requiredW: driverResult.required, count: driverResult.selected.reduce((s, x) => s + x.qty, 0),
-        driverWatt: driverResult.selected[0]?.drv.watt ?? 0, utilPct: driverResult.util, cost: driverResult.totalCost,
+      driver: driverFinal ? {
+        requiredW: driverResult?.required ?? 0, count: driverFinal.qty,
+        driverWatt: driverFinal.watt, utilPct: driverFinal.util, cost: driverFinal.totalCost,
       } : null,
       print: media && printResult ? {
         mediaName: media.name, sqFt: printResult.printSqFt, costPerSqFt: printResult.printCostPerSqFt,
@@ -351,6 +377,16 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
         ))}
       </div>
 
+      {step >= 2 && (
+        <SignSizeHeader
+          w={w} h={h} unit={unit}
+          onW={setW} onH={setH} onUnit={(v) => setUnit(v)}
+          sqft={wMM > 0 && hMM > 0 ? (wMM / 304.8) * (hMM / 304.8) : 0}
+          rft={(wMM * 2 + hMM * 2) / 304.8}
+          sheetLine={sheetResult ? `${sheetResult.chargeable.toFixed(2)} sq.ft · ${fmtRupee(sheetResult.chargedCost)}` : null}
+        />
+      )}
+
       {step === 1 && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -379,6 +415,28 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
               onChange={setProfileId}
               options={profilesForCategory.map((p) => ({ value: p.id, label: `${p.name} (${p.stock_len}mm stock · ₹${p.cost})` }))}
             />
+          )}
+          {isLit && (
+            <div>
+              <label className="mb-2 block text-xs font-medium text-ink-secondary">LED Build Type</label>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {(["module", "bar"] as const).map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => setLedMode(m)}
+                    className={`rounded-lg border p-3 text-left ${ledMode === m ? "border-primary bg-primary-tint" : "border-line hover:bg-surface-sunken"}`}
+                  >
+                    <div className="text-sm font-medium text-ink">{m === "module" ? "LED Modules" : "LED Bars (Vertical)"}</div>
+                    <div className="mt-0.5 text-xs text-ink-secondary">
+                      {m === "module" ? "Grid of LED modules across the sign face." : "Vertical strips — industry-standard for outdoor drainage."}
+                    </div>
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1 text-xs text-ink-muted">
+                Only the selected build type&apos;s fields will appear in Step 4 — Materials for the other type are hidden.
+              </p>
+            </div>
           )}
           <div className="flex justify-end">
             <Button onClick={() => goStep(2)}>Next: Dimensions</Button>
@@ -520,13 +578,12 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
             <Alert>This sign category is non-lit — no LED configuration needed.</Alert>
           ) : (
             <>
-              <div className="flex gap-1 border-b border-line">
-                {(["module", "bar"] as const).map((m) => (
-                  <button key={m} onClick={() => setLedMode(m)}
-                    className={`border-b-2 px-4 py-2 text-sm font-medium ${ledMode === m ? "border-primary text-primary" : "border-transparent text-ink-secondary"}`}>
-                    {m === "module" ? "LED Modules" : "LED Bars (Vertical)"}
-                  </button>
-                ))}
+              <div className="flex items-center justify-between border-b border-line pb-2">
+                <h3 className="text-sm font-semibold text-ink">{ledMode === "module" ? "LED Modules" : "LED Bars (Vertical)"}</h3>
+                <span className="text-xs text-ink-muted">
+                  Build type set in Step 1 ·{" "}
+                  <button onClick={() => goStep(1)} className="text-primary underline">change</button>
+                </span>
               </div>
 
               {ledMode === "module" ? (
@@ -578,15 +635,21 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
                   {driverResult ? (
                     <div>
                       <p className="mb-2 text-xs text-ink-secondary">
-                        LED load {totalWatt}W → +{safetyPct}% buffer: {driverResult.required}W → selected: {driverResult.totalCap}W
+                        LED load {totalWatt}W → +{safetyPct}% buffer: {driverResult.required}W → auto-selected: {driverResult.totalCap}W
+                        {driverFinal?.isOverridden && " (overridden below)"}
                       </p>
-                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                        <Metric label="Driver" value={`${driverResult.selected[0]?.drv.watt}W`} sub={driverResult.selected[0]?.drv.brand ?? ""} />
-                        <Metric label="Quantity" value={String(driverResult.selected.reduce((s, x) => s + x.qty, 0))} />
-                        <Metric label="Load %" value={`${driverResult.util}%`} />
-                        <Metric label="Driver Cost" value={fmtRupee(driverResult.totalCost)} />
+                      <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                        <NumberField label="Driver Watt Override" value={drvWattOverride} onChange={setDrvWattOverride} />
+                        <NumberField label="Quantity Override" value={drvQtyOverride} onChange={setDrvQtyOverride} />
+                        <NumberField label="Cost/Driver Override (₹)" value={drvCostOverride} onChange={setDrvCostOverride} />
                       </div>
-                      {driverResult.util > 85 && <Alert>Driver loading above 85% — consider the next size up.</Alert>}
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                        <Metric label="Driver" value={`${driverFinal?.watt ?? 0}W`} sub={drvWattOverride !== "" ? "manual override" : driverResult.selected[0]?.drv.brand ?? ""} />
+                        <Metric label="Quantity" value={String(driverFinal?.qty ?? 0)} />
+                        <Metric label="Load %" value={`${driverFinal?.util ?? 0}%`} />
+                        <Metric label="Driver Cost" value={fmtRupee(driverFinal?.totalCost ?? 0)} />
+                      </div>
+                      {(driverFinal?.util ?? 0) > 85 && <Alert>Driver loading above 85% — consider the next size up.</Alert>}
                     </div>
                   ) : <Alert>No active drivers in master, or no LED wattage yet.</Alert>}
                 </section>
@@ -606,7 +669,7 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <NumberField label="Bleed (mm)" value={bleed} onChange={(v) => setBleed(v || 0)} />
             <NumberField label="Waste % Override" value={printWaste} onChange={setPrintWaste} />
-            <NumberField label="Cost/sq.ft Override" value={printCost} onChange={setPrintCost} />
+            <NumberField label="Printing Rate (₹/sq.ft) — editable" value={printCost} onChange={setPrintCost} />
           </div>
           <div>
             <label className="mb-2 block text-xs font-medium text-ink-secondary">Finishing</label>
@@ -671,13 +734,46 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
 
           <div className="overflow-x-auto rounded-lg border border-line">
             <table className="w-full text-sm">
+              <thead className="bg-surface-sunken text-xs text-ink-secondary">
+                <tr><th className="p-2 text-left">Item</th><th className="p-2 text-left">Measure</th><th className="p-2 text-right">Amount</th></tr>
+              </thead>
               <tbody>
-                <Row label="Profile" value={fmtRupee(profResult?.analysis.totalCost ?? 0)} />
-                <Row label="Backing Sheet" value={fmtRupee(sheetResult?.chargedCost ?? 0)} />
-                <Row label="Accessories" value={fmtRupee(accCost)} />
-                <Row label={`LED ${ledMode === "bar" ? "Bars" : "Modules"}`} value={fmtRupee(ledCost)} />
-                <Row label="LED Drivers" value={fmtRupee(driverResult?.totalCost ?? 0)} />
-                <Row label="Printing & Finishing" value={fmtRupee(printResult?.printCost ?? 0)} />
+                <Row
+                  label="Profile"
+                  detail={profResult ? `${(profResult.analysis.totalUsed / 304.8).toFixed(1)} RFT · ${profResult.analysis.totalBars} bar(s)` : ""}
+                  value={fmtRupee(profResult?.analysis.totalCost ?? 0)}
+                />
+                <Row
+                  label="Backing Sheet"
+                  detail={sheetResult ? `${sheetResult.chargeable.toFixed(2)} sq.ft` : ""}
+                  value={fmtRupee(sheetResult?.chargedCost ?? 0)}
+                />
+                <Row
+                  label="Accessories"
+                  detail={`${accessories.filter((a) => a.qty > 0).length} item(s)`}
+                  value={fmtRupee(accCost)}
+                />
+                <Row
+                  label={`LED ${ledMode === "bar" ? "Bars" : "Modules"}`}
+                  detail={
+                    ledMode === "bar" && barResult
+                      ? `${barResult.totalPieces} pieces · ${barResult.numBars} bar(s)`
+                      : ledMode === "module" && moduleResult
+                      ? `${moduleResult.total} modules`
+                      : ""
+                  }
+                  value={fmtRupee(ledCost)}
+                />
+                <Row
+                  label="LED Drivers"
+                  detail={driverFinal ? `${driverFinal.qty} × ${driverFinal.watt}W` : ""}
+                  value={fmtRupee(driverFinal?.totalCost ?? 0)}
+                />
+                <Row
+                  label="Printing & Finishing"
+                  detail={printResult ? `${printResult.printSqFt} sq.ft` : ""}
+                  value={fmtRupee(printResult?.printCost ?? 0)}
+                />
                 <Row label="Raw Material Cost (per sign)" value={fmtRupee(pricing.raw)} strong />
                 <Row label={`Overhead (${overheadPct}%)`} value={fmtRupee(pricing.ovh)} />
                 <Row label="Labour" value={fmtRupee(labour)} />
@@ -829,11 +925,81 @@ function CuttingDiagram({ bins, stockLen }: { bins: CutBin[]; stockLen: number }
     </div>
   );
 }
-function Row({ label, value, strong, big }: { label: string; value: string; strong?: boolean; big?: boolean }) {
+function Row({ label, detail, value, strong, big }: { label: string; detail?: string; value: string; strong?: boolean; big?: boolean }) {
   return (
     <tr className={`border-t border-line ${strong ? "bg-surface-sunken" : ""}`}>
       <td className={`p-2 ${strong ? "font-semibold text-ink" : "text-ink-secondary"} ${big ? "text-base" : ""}`}>{label}</td>
+      <td className="p-2 text-xs text-ink-muted">{detail}</td>
       <td className={`p-2 text-right ${strong ? "font-semibold text-ink" : "text-ink-secondary"} ${big ? "text-base" : ""}`}>{value}</td>
     </tr>
+  );
+}
+
+/**
+ * Sticky, editable Width/Height/Unit summary shown on every step from
+ * Dimensions onward, so the user can adjust the sign size without paging
+ * back to Step 2 -- plus a running readout of Sign Area (SQFT), Frame RFT
+ * (perimeter-based running feet, the standard fabrication-quoting measure),
+ * and the current backing-sheet chargeable area/cost once one is selected.
+ */
+function SignSizeHeader({
+  w, h, unit, onW, onH, onUnit, sqft, rft, sheetLine,
+}: {
+  w: number | ""; h: number | ""; unit: "mm" | "feet" | "inches";
+  onW: (v: number | "") => void; onH: (v: number | "") => void; onUnit: (v: "mm" | "feet" | "inches") => void;
+  sqft: number; rft: number; sheetLine: string | null;
+}) {
+  return (
+    <div className="mb-4 flex flex-wrap items-end gap-x-6 gap-y-3 rounded-lg border border-line bg-surface-sunken p-3">
+      <div className="flex items-end gap-2">
+        <div>
+          <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-ink-muted">Width</label>
+          <input
+            type="number"
+            value={w}
+            onChange={(e) => onW(e.target.value === "" ? "" : Number(e.target.value))}
+            className="h-8 w-20 rounded border border-line-strong bg-surface px-2 text-sm text-ink outline-none"
+          />
+        </div>
+        <span className="pb-2 text-ink-muted">×</span>
+        <div>
+          <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-ink-muted">Height</label>
+          <input
+            type="number"
+            value={h}
+            onChange={(e) => onH(e.target.value === "" ? "" : Number(e.target.value))}
+            className="h-8 w-20 rounded border border-line-strong bg-surface px-2 text-sm text-ink outline-none"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-ink-muted">Unit</label>
+          <select
+            value={unit}
+            onChange={(e) => onUnit(e.target.value as "mm" | "feet" | "inches")}
+            className="h-8 rounded border border-line-strong bg-surface px-2 text-sm text-ink outline-none"
+          >
+            <option value="mm">mm</option>
+            <option value="feet">feet</option>
+            <option value="inches">inches</option>
+          </select>
+        </div>
+      </div>
+      {sqft > 0 && (
+        <>
+          <div className="hidden h-8 w-px bg-line sm:block" />
+          <HeaderStat label="Sign Area" value={`${sqft.toFixed(2)} sq.ft`} />
+          <HeaderStat label="Frame RFT" value={`${rft.toFixed(1)} ft`} />
+          {sheetLine && <HeaderStat label="Backing Sheet" value={sheetLine} />}
+        </>
+      )}
+    </div>
+  );
+}
+function HeaderStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-[10px] font-medium uppercase tracking-wide text-ink-muted">{label}</div>
+      <div className="text-sm font-semibold text-ink">{value}</div>
+    </div>
   );
 }
