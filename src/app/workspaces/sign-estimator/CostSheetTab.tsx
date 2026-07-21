@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Printer } from "lucide-react";
+import { Printer, Pencil, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase, type SignEstimateRow } from "@/lib/supabase";
-import { fmtRupee } from "@/lib/sign-estimator/calc";
+import { fmtRupee, computePricing } from "@/lib/sign-estimator/calc";
 import type { EstimateSnapshot } from "./types";
 
 // Re-renders a saved estimate's cost sheet from its stored `calc` JSON
@@ -21,6 +21,22 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
   // resolves -- avoids the "setState synchronously in an effect" pattern
   // while still distinguishing "still loading" from "loaded, nothing found".
   const [hasLoaded, setHasLoaded] = useState(false);
+
+  // Editable pricing terms (Labour / Installation / Overhead / Markup /
+  // Discount / GST) -- these are business terms that legitimately change
+  // after a quote is first generated (a customer negotiates, or the shop
+  // revises labour/overhead assumptions), so unlike the material-cost
+  // breakdown above (which is a frozen snapshot on purpose -- see the top
+  // comment) these six specifically need to stay adjustable on the saved
+  // cost sheet, not just once during the wizard.
+  const [editing, setEditing] = useState(false);
+  const [eLabour, setELabour] = useState(0);
+  const [eInstall, setEInstall] = useState(0);
+  const [eOverheadPct, setEOverheadPct] = useState(0);
+  const [eMarkupPct, setEMarkupPct] = useState(0);
+  const [eDiscountPct, setEDiscountPct] = useState(0);
+  const [eGstPct, setEGstPct] = useState(0);
+  const [savingEdit, setSavingEdit] = useState(false);
 
   useEffect(() => {
     const query = estimateRef
@@ -39,9 +55,79 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
 
   const c = row.calc as unknown as EstimateSnapshot;
 
+  function startEdit() {
+    setELabour(c.pricing.labour);
+    setEInstall(c.pricing.install);
+    setEOverheadPct(c.pricing.ovhPct);
+    setEMarkupPct(c.pricing.markupPct);
+    setEDiscountPct(c.pricing.discPct);
+    setEGstPct(c.pricing.gstPct);
+    setEditing(true);
+  }
+
+  // Re-runs the pricing formula with the edited terms, but against the SAME
+  // frozen raw material cost (c.pricing.raw) -- computePricing() only needs
+  // one number to reconstruct `raw` internally, so profCost carries the
+  // whole total and the other five cost buckets are zeroed out here.
+  // Plain (non-memoized) recompute -- deliberately NOT a useMemo/useState
+  // hook, since it's derived after this component's two early returns above
+  // (no row yet / still loading) and calling a hook there conditionally
+  // would violate the Rules of Hooks. computePricing() is cheap arithmetic,
+  // so recomputing it on every render while editing is fine.
+  const recalced = editing
+    ? computePricing(
+        { profCost: c.pricing.raw, sheetCost: 0, accCost: 0, ledCost: 0, drvCost: 0, printCost: 0 },
+        { qty: c.qty, labour: eLabour, install: eInstall, overheadPct: eOverheadPct, markupPct: eMarkupPct, discountPct: eDiscountPct, gstPct: eGstPct }
+      )
+    : null;
+
+  async function saveEdit() {
+    if (!row || !recalced) return;
+    setSavingEdit(true);
+    const newCalc: EstimateSnapshot = {
+      ...c,
+      pricing: {
+        ...c.pricing,
+        labour: eLabour,
+        install: eInstall,
+        ovhPct: eOverheadPct,
+        ovh: recalced.ovh,
+        costPer: recalced.costPer,
+        costAll: recalced.costAll,
+        sellBD: recalced.sellBD,
+        markupPct: eMarkupPct,
+        discPct: eDiscountPct,
+        discAmt: recalced.discAmt,
+        sell: recalced.sell,
+        gstPct: eGstPct,
+        gstAmt: recalced.gstAmt,
+        final: recalced.final,
+        margin: recalced.margin,
+        mgnAmt: recalced.mgnAmt,
+      },
+    };
+    const { error } = await supabase
+      .from("sign_estimates")
+      .update({ sell: recalced.sell, final_amount: recalced.final, margin: recalced.margin, calc: newCalc })
+      .eq("id", row.id);
+    setSavingEdit(false);
+    if (error) {
+      toast("danger", `Couldn't save pricing changes: ${error.message}`);
+      return;
+    }
+    setRow({ ...row, sell: recalced.sell, final_amount: recalced.final, margin: recalced.margin, calc: newCalc as unknown as Record<string, unknown> });
+    setEditing(false);
+    toast("success", "Pricing updated");
+  }
+
   return (
     <div>
-      <div className="mb-4 flex justify-end print:hidden">
+      <div className="mb-4 flex justify-end gap-2 print:hidden">
+        {!editing && (
+          <Button variant="secondary" onClick={startEdit}>
+            <Pencil size={14} /> Edit Pricing
+          </Button>
+        )}
         <Button variant="secondary" onClick={() => window.print()}>
           <Printer size={14} /> Print / PDF
         </Button>
@@ -155,16 +241,48 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
 
         <Card title="Cost Build-Up" full>
           <KV k="Raw Material Cost" v={fmtRupee(c.pricing.raw)} />
-          <KV k={`Overhead (${c.pricing.ovhPct}%)`} v={fmtRupee(c.pricing.ovh)} />
-          <KV k="Labour" v={fmtRupee(c.pricing.labour)} />
-          <KV k="Installation" v={fmtRupee(c.pricing.install)} />
-          <KV k="Total Production Cost" v={fmtRupee(c.pricing.costAll)} strong />
-          <KV k={`Markup (${c.pricing.markupPct}%)`} v={fmtRupee(c.pricing.sellBD - c.pricing.costAll)} />
-          {c.pricing.discAmt > 0 && <KV k={`Discount (${c.pricing.discPct}%)`} v={`−${fmtRupee(c.pricing.discAmt)}`} />}
-          <KV k="Selling Price (ex-GST)" v={fmtRupee(c.pricing.sell)} strong />
-          <KV k={`GST ${c.pricing.gstPct}%`} v={fmtRupee(c.pricing.gstAmt)} />
-          <KV k="Final Amount (incl. GST)" v={fmtRupee(c.pricing.final)} strong />
-          <KV k="Gross Margin" v={`${c.pricing.margin}% (${fmtRupee(c.pricing.mgnAmt)})`} />
+          {editing ? (
+            <>
+              <div className="grid grid-cols-2 gap-3 py-2 sm:grid-cols-3">
+                <EditField label="Overhead %" value={eOverheadPct} onChange={setEOverheadPct} />
+                <EditField label="Labour (₹)" value={eLabour} onChange={setELabour} />
+                <EditField label="Installation (₹)" value={eInstall} onChange={setEInstall} />
+                <EditField label="Markup %" value={eMarkupPct} onChange={setEMarkupPct} />
+                <EditField label="Discount %" value={eDiscountPct} onChange={setEDiscountPct} />
+                <EditField label="GST %" value={eGstPct} onChange={setEGstPct} />
+              </div>
+              {recalced && (
+                <>
+                  <KV k="Total Production Cost" v={fmtRupee(recalced.costAll)} strong />
+                  <KV k={`Markup (${eMarkupPct}%)`} v={fmtRupee(recalced.sellBD - recalced.costAll)} />
+                  {recalced.discAmt > 0 && <KV k={`Discount (${eDiscountPct}%)`} v={`−${fmtRupee(recalced.discAmt)}`} />}
+                  <KV k="Selling Price (ex-GST)" v={fmtRupee(recalced.sell)} strong />
+                  <KV k={`GST ${eGstPct}%`} v={fmtRupee(recalced.gstAmt)} />
+                  <KV k="Final Amount (incl. GST)" v={fmtRupee(recalced.final)} strong />
+                  <KV k="Gross Margin" v={`${recalced.margin}% (${fmtRupee(recalced.mgnAmt)})`} />
+                </>
+              )}
+              <div className="mt-3 flex justify-end gap-2 print:hidden">
+                <Button variant="secondary" onClick={() => setEditing(false)}>
+                  <X size={14} /> Cancel
+                </Button>
+                <Button onClick={saveEdit} loading={savingEdit}>Save Changes</Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <KV k={`Overhead (${c.pricing.ovhPct}%)`} v={fmtRupee(c.pricing.ovh)} />
+              <KV k="Labour" v={fmtRupee(c.pricing.labour)} />
+              <KV k="Installation" v={fmtRupee(c.pricing.install)} />
+              <KV k="Total Production Cost" v={fmtRupee(c.pricing.costAll)} strong />
+              <KV k={`Markup (${c.pricing.markupPct}%)`} v={fmtRupee(c.pricing.sellBD - c.pricing.costAll)} />
+              {c.pricing.discAmt > 0 && <KV k={`Discount (${c.pricing.discPct}%)`} v={`−${fmtRupee(c.pricing.discAmt)}`} />}
+              <KV k="Selling Price (ex-GST)" v={fmtRupee(c.pricing.sell)} strong />
+              <KV k={`GST ${c.pricing.gstPct}%`} v={fmtRupee(c.pricing.gstAmt)} />
+              <KV k="Final Amount (incl. GST)" v={fmtRupee(c.pricing.final)} strong />
+              <KV k="Gross Margin" v={`${c.pricing.margin}% (${fmtRupee(c.pricing.mgnAmt)})`} />
+            </>
+          )}
         </Card>
 
         <p className="mt-6 border-t border-line pt-3 text-center text-xs text-ink-muted">
@@ -188,6 +306,19 @@ function KV({ k, v, strong }: { k: string; v: string; strong?: boolean }) {
     <div className={`flex justify-between text-sm ${strong ? "font-semibold text-ink" : "text-ink-secondary"}`}>
       <span>{k}</span>
       <span>{v}</span>
+    </div>
+  );
+}
+function EditField({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+  return (
+    <div>
+      <label className="mb-1 block text-xs font-medium text-ink-secondary">{label}</label>
+      <input
+        type="number"
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value) || 0)}
+        className="h-9 w-full rounded-md border border-line-strong bg-surface px-2 text-sm text-ink outline-none"
+      />
     </div>
   );
 }
