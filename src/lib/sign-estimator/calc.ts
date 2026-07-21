@@ -797,27 +797,60 @@ export function computePrint(
 
 // ═══════════════════════════════════════════════════════════
 //  PRICING
-//  Ported from calcPricing() -- rolls every cost bucket up into overhead,
-//  labour, installation, markup, discount, and GST.
+//
+//  Sold as THREE separate commercial components, per the shop's real
+//  invoicing: Signage (the frame/structure), Printing, and Installation.
+//  Only Signage runs through the full cost-plus pipeline (raw material +
+//  overhead% + labour, marked up %, then discount %) -- Printing and
+//  Installation are each posted directly as a final selling price with no
+//  cost-plus math applied, because the shop prices those two however it
+//  sees fit (a print vendor rate, a flat site-visit fee, etc.) rather than
+//  computing them from cost. GST is still applied ONCE, on the combined
+//  total of all three, matching a single-invoice GST line.
+//
+//  `printCostRefPerSign` is carried through purely as a reference/margin
+//  figure (what printing would have cost on a cost-plus basis) -- it never
+//  feeds the selling price. Installation has no cost tracked at all (the
+//  shop doesn't cost it), so it contributes its full posted price to
+//  margin with no offsetting cost, same as any other pure-service line.
 // ═══════════════════════════════════════════════════════════
 export interface PricingInputs {
   qty: number;
   labour: number;
-  install: number;
   overheadPct: number;
   markupPct: number;
   discountPct: number;
   gstPct: number;
 }
 
+export interface SignageCostInputs {
+  profCost: number;
+  sheetCost: number;
+  accCost: number;
+  ledCost: number;
+  drvCost: number;
+}
+
 export interface PricingResult {
+  // Signage (frame) -- full cost-plus build-up, per sign unless noted.
   raw: number;
   ovh: number;
   costPer: number;
-  costAll: number;
-  sellBD: number;
+  costAll: number; // × qty
+  sellBD: number; // × qty, before discount
   discAmt: number;
-  sell: number;
+  signageSell: number; // × qty, after discount, ex-GST
+
+  // Printing -- posted selling price, no cost-plus. printCostRef is the
+  // computed cost-plus estimate, kept only for margin/reference.
+  printCostRef: number; // per sign
+  printSell: number; // total, as posted, ex-GST
+
+  // Installation -- posted selling price, no cost tracked at all.
+  installSell: number; // total, as posted, ex-GST
+
+  // Combined invoice total.
+  sell: number; // signageSell + printSell + installSell, ex-GST
   gstAmt: number;
   final: number;
   margin: number;
@@ -825,21 +858,33 @@ export interface PricingResult {
 }
 
 export function computePricing(
-  costs: { profCost: number; sheetCost: number; accCost: number; ledCost: number; drvCost: number; printCost: number },
+  signageCosts: SignageCostInputs,
+  printCostRefPerSign: number,
+  printSellTotal: number,
+  installSellTotal: number,
   p: PricingInputs
 ): PricingResult {
-  const raw = (costs.profCost || 0) + (costs.sheetCost || 0) + (costs.accCost || 0) + (costs.ledCost || 0) + (costs.drvCost || 0) + (costs.printCost || 0);
+  const raw = (signageCosts.profCost || 0) + (signageCosts.sheetCost || 0) + (signageCosts.accCost || 0) + (signageCosts.ledCost || 0) + (signageCosts.drvCost || 0);
   const ovh = Math.round(raw * (p.overheadPct / 100));
-  const costPer = raw + ovh + p.labour + p.install;
+  const costPer = raw + ovh + p.labour;
   const costAll = costPer * p.qty;
   const sellBD = Math.round(costAll * (1 + p.markupPct / 100));
   const discAmt = Math.round(sellBD * (p.discountPct / 100));
-  const sell = sellBD - discAmt;
+  const signageSell = sellBD - discAmt;
+
+  const printCostAll = (printCostRefPerSign || 0) * p.qty;
+  const sell = signageSell + (printSellTotal || 0) + (installSellTotal || 0);
   const gstAmt = Math.round(sell * (p.gstPct / 100));
   const final = sell + gstAmt;
-  const margin = sell > 0 ? Math.round(((sell - costAll) / sell) * 100) : 0;
-  const mgnAmt = sell - costAll;
-  return { raw, ovh, costPer, costAll, sellBD, discAmt, sell, gstAmt, final, margin, mgnAmt };
+  const trueCostAll = costAll + printCostAll; // installation has no tracked cost
+  const margin = sell > 0 ? Math.round(((sell - trueCostAll) / sell) * 100) : 0;
+  const mgnAmt = sell - trueCostAll;
+  return {
+    raw, ovh, costPer, costAll, sellBD, discAmt, signageSell,
+    printCostRef: printCostRefPerSign || 0, printSell: printSellTotal || 0,
+    installSell: installSellTotal || 0,
+    sell, gstAmt, final, margin, mgnAmt,
+  };
 }
 
 // ═══════════════════════════════════════════════════════════

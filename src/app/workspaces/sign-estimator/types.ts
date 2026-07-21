@@ -72,17 +72,29 @@ export interface PrintSnapshot {
 }
 
 export interface PricingSnapshot {
+  // Signage (frame) -- full cost-plus build-up.
   raw: number;
   ovh: number;
   ovhPct: number;
   labour: number;
-  install: number;
   costPer: number;
   costAll: number;
   sellBD: number;
   markupPct: number;
   discPct: number;
   discAmt: number;
+  signageSell: number;
+
+  // Printing -- posted selling price, no cost-plus (printCostRef is
+  // reference-only, computed on a cost-plus basis for margin visibility).
+  printCostRef: number;
+  printSell: number;
+
+  // Installation -- posted selling price, no cost tracked.
+  installSell: number;
+
+  // Combined invoice total (signageSell + printSell + installSell), GST
+  // applied once on that combined total.
   sell: number;
   gstPct: number;
   gstAmt: number;

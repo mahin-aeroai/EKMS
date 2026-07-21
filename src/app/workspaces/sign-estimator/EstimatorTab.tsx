@@ -100,12 +100,20 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
   const [finRate, setFinRate] = useState(80);
 
   // ── Step 6 ──
+  // Labour stays inside the signage cost-plus build-up (fabrication
+  // labour). Installation is sold as its own line item -- a final price
+  // posted directly, same as printing -- so it's intentionally NOT part of
+  // PricingInputs' cost-plus math below; it's summed in after markup.
   const [labour, setLabour] = useState(0);
   const [install, setInstall] = useState(0);
   const [overheadPct, setOverheadPct] = useState(10);
   const [markupPct, setMarkupPct] = useState(30);
   const [discountPct, setDiscountPct] = useState(0);
   const [gstPct, setGstPct] = useState(18);
+  // Printing selling price -- "" means "use the cost-plus estimate below as
+  // a starting suggestion"; once the shop posts their real quoted rate they
+  // type over it here, same no-costing-needed pattern as Installation.
+  const [printSellOverride, setPrintSellOverride] = useState<number | "">("");
 
   useEffect(() => {
     async function loadMasters() {
@@ -261,6 +269,11 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
     );
   }, [media, wMM, hMM, bleed, printWaste, printCost, isLit, finSeg, finHem, finEye, finWeld, finStitch, segRate, hemRate, finRate]);
 
+  // What printing would cost the shop on a cost-plus basis, × qty -- shown
+  // as a reference only; the actual printSell below is what gets invoiced.
+  const printSellDefault = Math.round((printResult?.printCost ?? 0) * qty);
+  const printSell = printSellOverride === "" ? printSellDefault : printSellOverride;
+
   const pricing = useMemo(() => {
     return computePricing(
       {
@@ -269,11 +282,13 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
         accCost,
         ledCost,
         drvCost: driverFinal?.totalCost ?? 0,
-        printCost: printResult?.printCost ?? 0,
       },
-      { qty, labour, install, overheadPct, markupPct, discountPct, gstPct }
+      printResult?.printCost ?? 0,
+      printSell,
+      install,
+      { qty, labour, overheadPct, markupPct, discountPct, gstPct }
     );
-  }, [profResult, sheetResult, accCost, ledCost, driverFinal, printResult, qty, labour, install, overheadPct, markupPct, discountPct, gstPct]);
+  }, [profResult, sheetResult, accCost, ledCost, driverFinal, printResult, printSell, install, qty, labour, overheadPct, markupPct, discountPct, gstPct]);
 
   function goStep(n: number) {
     if (n >= 2 && !category) { toast("danger", "Select a sign category first."); return; }
@@ -318,10 +333,13 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
         finishingLabel: printResult.finishingLabel, cost: printResult.printCost,
       } : null,
       pricing: {
-        raw: pricing.raw, ovh: pricing.ovh, ovhPct: overheadPct, labour, install,
+        raw: pricing.raw, ovh: pricing.ovh, ovhPct: overheadPct, labour,
         costPer: pricing.costPer, costAll: pricing.costAll, sellBD: pricing.sellBD,
-        markupPct, discPct: discountPct, discAmt: pricing.discAmt, sell: pricing.sell,
-        gstPct, gstAmt: pricing.gstAmt, final: pricing.final, margin: pricing.margin, mgnAmt: pricing.mgnAmt,
+        markupPct, discPct: discountPct, discAmt: pricing.discAmt, signageSell: pricing.signageSell,
+        printCostRef: pricing.printCostRef, printSell: pricing.printSell,
+        installSell: pricing.installSell,
+        sell: pricing.sell, gstPct, gstAmt: pricing.gstAmt, final: pricing.final,
+        margin: pricing.margin, mgnAmt: pricing.mgnAmt,
       },
     };
   }
@@ -723,13 +741,35 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
 
       {step === 6 && (
         <div className="space-y-4">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <NumberField label="Labour (₹)" value={labour} onChange={(v) => setLabour(v || 0)} />
-            <NumberField label="Installation (₹)" value={install} onChange={(v) => setInstall(v || 0)} />
-            <NumberField label="Overhead %" value={overheadPct} onChange={(v) => setOverheadPct(v || 0)} />
-            <NumberField label="Markup %" value={markupPct} onChange={(v) => setMarkupPct(v || 0)} />
-            <NumberField label="Discount %" value={discountPct} onChange={(v) => setDiscountPct(v || 0)} />
-            <NumberField label="GST %" value={gstPct} onChange={(v) => setGstPct(v || 0)} />
+          <div>
+            <p className="mb-2 text-xs font-medium text-ink-secondary">Signage cost-plus terms</p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
+              <NumberField label="Labour (₹)" value={labour} onChange={(v) => setLabour(v || 0)} />
+              <NumberField label="Overhead %" value={overheadPct} onChange={(v) => setOverheadPct(v || 0)} />
+              <NumberField label="Markup %" value={markupPct} onChange={(v) => setMarkupPct(v || 0)} />
+              <NumberField label="Discount %" value={discountPct} onChange={(v) => setDiscountPct(v || 0)} />
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-line bg-surface-sunken p-3">
+            <p className="mb-2 text-xs font-medium text-ink-secondary">
+              Printing and Installation are sold as separate components — post the final price directly, no cost-plus needed.
+            </p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <NumberField
+                label={printSellOverride === "" ? "Printing Selling Price (₹) — suggested" : "Printing Selling Price (₹)"}
+                value={printSellOverride === "" ? printSellDefault : printSellOverride}
+                onChange={setPrintSellOverride}
+              />
+              <NumberField label="Installation Selling Price (₹)" value={install} onChange={(v) => setInstall(v || 0)} />
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-2 text-xs font-medium text-ink-secondary">GST</p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
+              <NumberField label="GST %" value={gstPct} onChange={(v) => setGstPct(v || 0)} />
+            </div>
           </div>
 
           <div className="overflow-x-auto rounded-lg border border-line">
@@ -769,20 +809,25 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
                   detail={driverFinal ? `${driverFinal.qty} × ${driverFinal.watt}W` : ""}
                   value={fmtRupee(driverFinal?.totalCost ?? 0)}
                 />
-                <Row
-                  label="Printing & Finishing"
-                  detail={printResult ? `${printResult.printSqFt} sq.ft` : ""}
-                  value={fmtRupee(printResult?.printCost ?? 0)}
-                />
-                <Row label="Raw Material Cost (per sign)" value={fmtRupee(pricing.raw)} strong />
+                <Row label="Raw Material Cost — Signage (per sign)" value={fmtRupee(pricing.raw)} strong />
                 <Row label={`Overhead (${overheadPct}%)`} value={fmtRupee(pricing.ovh)} />
                 <Row label="Labour" value={fmtRupee(labour)} />
-                <Row label="Installation" value={fmtRupee(install)} />
                 {qty > 1 && <Row label={`Quantity (× ${qty})`} value={`× ${qty}`} />}
-                <Row label="Total Production Cost" value={fmtRupee(pricing.costAll)} strong />
+                <Row label="Signage Production Cost" value={fmtRupee(pricing.costAll)} strong />
                 <Row label={`Markup (${markupPct}%)`} value={fmtRupee(pricing.sellBD - pricing.costAll)} />
                 {pricing.discAmt > 0 && <Row label={`Discount (${discountPct}%)`} value={`−${fmtRupee(pricing.discAmt)}`} />}
-                <Row label="Selling Price (ex-GST)" value={fmtRupee(pricing.sell)} strong />
+                <Row label="Signage Selling Price (ex-GST)" value={fmtRupee(pricing.signageSell)} strong />
+
+                <Row
+                  label="Printing & Finishing (cost reference, per sign)"
+                  detail={printResult ? `${printResult.printSqFt} sq.ft — not used in pricing` : ""}
+                  value={fmtRupee(pricing.printCostRef)}
+                />
+                <Row label="Printing Selling Price (ex-GST)" value={fmtRupee(pricing.printSell)} strong />
+
+                <Row label="Installation Selling Price (ex-GST)" value={fmtRupee(pricing.installSell)} strong />
+
+                <Row label="Total Selling Price (ex-GST)" value={fmtRupee(pricing.sell)} strong big />
                 <Row label={`GST ${gstPct}%`} value={fmtRupee(pricing.gstAmt)} />
                 <Row label="Final Amount (incl. GST)" value={fmtRupee(pricing.final)} strong big />
                 <Row label="Gross Margin" value={`${pricing.margin}% (${fmtRupee(pricing.mgnAmt)})`} />

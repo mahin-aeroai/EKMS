@@ -31,7 +31,8 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
   // cost sheet, not just once during the wizard.
   const [editing, setEditing] = useState(false);
   const [eLabour, setELabour] = useState(0);
-  const [eInstall, setEInstall] = useState(0);
+  const [eInstallSell, setEInstallSell] = useState(0);
+  const [ePrintSell, setEPrintSell] = useState(0);
   const [eOverheadPct, setEOverheadPct] = useState(0);
   const [eMarkupPct, setEMarkupPct] = useState(0);
   const [eDiscountPct, setEDiscountPct] = useState(0);
@@ -57,7 +58,8 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
 
   function startEdit() {
     setELabour(c.pricing.labour);
-    setEInstall(c.pricing.install);
+    setEInstallSell(c.pricing.installSell ?? 0);
+    setEPrintSell(c.pricing.printSell ?? 0);
     setEOverheadPct(c.pricing.ovhPct);
     setEMarkupPct(c.pricing.markupPct);
     setEDiscountPct(c.pricing.discPct);
@@ -66,9 +68,10 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
   }
 
   // Re-runs the pricing formula with the edited terms, but against the SAME
-  // frozen raw material cost (c.pricing.raw) -- computePricing() only needs
-  // one number to reconstruct `raw` internally, so profCost carries the
-  // whole total and the other five cost buckets are zeroed out here.
+  // frozen signage raw material cost (c.pricing.raw) -- only Signage runs
+  // cost-plus; Printing and Installation are edited directly as posted
+  // selling prices, same split as the live Estimator's Step 6 (see
+  // calc.ts's computePricing doc comment for why).
   // Plain (non-memoized) recompute -- deliberately NOT a useMemo/useState
   // hook, since it's derived after this component's two early returns above
   // (no row yet / still loading) and calling a hook there conditionally
@@ -76,8 +79,11 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
   // so recomputing it on every render while editing is fine.
   const recalced = editing
     ? computePricing(
-        { profCost: c.pricing.raw, sheetCost: 0, accCost: 0, ledCost: 0, drvCost: 0, printCost: 0 },
-        { qty: c.qty, labour: eLabour, install: eInstall, overheadPct: eOverheadPct, markupPct: eMarkupPct, discountPct: eDiscountPct, gstPct: eGstPct }
+        { profCost: c.pricing.raw, sheetCost: 0, accCost: 0, ledCost: 0, drvCost: 0 },
+        c.pricing.printCostRef ?? 0,
+        ePrintSell,
+        eInstallSell,
+        { qty: c.qty, labour: eLabour, overheadPct: eOverheadPct, markupPct: eMarkupPct, discountPct: eDiscountPct, gstPct: eGstPct }
       )
     : null;
 
@@ -89,7 +95,6 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
       pricing: {
         ...c.pricing,
         labour: eLabour,
-        install: eInstall,
         ovhPct: eOverheadPct,
         ovh: recalced.ovh,
         costPer: recalced.costPer,
@@ -98,6 +103,10 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
         markupPct: eMarkupPct,
         discPct: eDiscountPct,
         discAmt: recalced.discAmt,
+        signageSell: recalced.signageSell,
+        printCostRef: recalced.printCostRef,
+        printSell: recalced.printSell,
+        installSell: recalced.installSell,
         sell: recalced.sell,
         gstPct: eGstPct,
         gstAmt: recalced.gstAmt,
@@ -239,29 +248,61 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
           </Card>
         )}
 
-        <Card title="Cost Build-Up" full>
+        <Card title="Signage — Cost-Plus Build-Up" full>
           <KV k="Raw Material Cost" v={fmtRupee(c.pricing.raw)} />
           {editing ? (
             <>
               <div className="grid grid-cols-2 gap-3 py-2 sm:grid-cols-3">
                 <EditField label="Overhead %" value={eOverheadPct} onChange={setEOverheadPct} />
                 <EditField label="Labour (₹)" value={eLabour} onChange={setELabour} />
-                <EditField label="Installation (₹)" value={eInstall} onChange={setEInstall} />
                 <EditField label="Markup %" value={eMarkupPct} onChange={setEMarkupPct} />
                 <EditField label="Discount %" value={eDiscountPct} onChange={setEDiscountPct} />
-                <EditField label="GST %" value={eGstPct} onChange={setEGstPct} />
               </div>
               {recalced && (
                 <>
-                  <KV k="Total Production Cost" v={fmtRupee(recalced.costAll)} strong />
+                  <KV k="Signage Production Cost" v={fmtRupee(recalced.costAll)} strong />
                   <KV k={`Markup (${eMarkupPct}%)`} v={fmtRupee(recalced.sellBD - recalced.costAll)} />
                   {recalced.discAmt > 0 && <KV k={`Discount (${eDiscountPct}%)`} v={`−${fmtRupee(recalced.discAmt)}`} />}
-                  <KV k="Selling Price (ex-GST)" v={fmtRupee(recalced.sell)} strong />
-                  <KV k={`GST ${eGstPct}%`} v={fmtRupee(recalced.gstAmt)} />
-                  <KV k="Final Amount (incl. GST)" v={fmtRupee(recalced.final)} strong />
-                  <KV k="Gross Margin" v={`${recalced.margin}% (${fmtRupee(recalced.mgnAmt)})`} />
+                  <KV k="Signage Selling Price (ex-GST)" v={fmtRupee(recalced.signageSell)} strong />
                 </>
               )}
+            </>
+          ) : (
+            <>
+              <KV k={`Overhead (${c.pricing.ovhPct}%)`} v={fmtRupee(c.pricing.ovh)} />
+              <KV k="Labour" v={fmtRupee(c.pricing.labour)} />
+              <KV k="Signage Production Cost" v={fmtRupee(c.pricing.costAll)} strong />
+              <KV k={`Markup (${c.pricing.markupPct}%)`} v={fmtRupee(c.pricing.sellBD - c.pricing.costAll)} />
+              {c.pricing.discAmt > 0 && <KV k={`Discount (${c.pricing.discPct}%)`} v={`−${fmtRupee(c.pricing.discAmt)}`} />}
+              <KV k="Signage Selling Price (ex-GST)" v={fmtRupee(c.pricing.signageSell ?? c.pricing.sell)} strong />
+            </>
+          )}
+        </Card>
+
+        <Card title="Printing & Installation — Posted Selling Price (no cost-plus)" full>
+          {editing ? (
+            <div className="grid grid-cols-1 gap-3 py-2 sm:grid-cols-2">
+              <EditField label="Printing Selling Price (₹)" value={ePrintSell} onChange={setEPrintSell} />
+              <EditField label="Installation Selling Price (₹)" value={eInstallSell} onChange={setEInstallSell} />
+            </div>
+          ) : (
+            <>
+              <KV k="Printing Selling Price" v={fmtRupee(c.pricing.printSell ?? 0)} />
+              <KV k="Installation Selling Price" v={fmtRupee(c.pricing.installSell ?? 0)} />
+            </>
+          )}
+        </Card>
+
+        <Card title="Invoice Total" full>
+          {editing && recalced ? (
+            <>
+              <KV k="Total Selling Price (ex-GST)" v={fmtRupee(recalced.sell)} strong />
+              <div className="grid grid-cols-2 gap-3 py-2 sm:grid-cols-3">
+                <EditField label="GST %" value={eGstPct} onChange={setEGstPct} />
+              </div>
+              <KV k={`GST ${eGstPct}%`} v={fmtRupee(recalced.gstAmt)} />
+              <KV k="Final Amount (incl. GST)" v={fmtRupee(recalced.final)} strong />
+              <KV k="Gross Margin" v={`${recalced.margin}% (${fmtRupee(recalced.mgnAmt)})`} />
               <div className="mt-3 flex justify-end gap-2 print:hidden">
                 <Button variant="secondary" onClick={() => setEditing(false)}>
                   <X size={14} /> Cancel
@@ -271,13 +312,7 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
             </>
           ) : (
             <>
-              <KV k={`Overhead (${c.pricing.ovhPct}%)`} v={fmtRupee(c.pricing.ovh)} />
-              <KV k="Labour" v={fmtRupee(c.pricing.labour)} />
-              <KV k="Installation" v={fmtRupee(c.pricing.install)} />
-              <KV k="Total Production Cost" v={fmtRupee(c.pricing.costAll)} strong />
-              <KV k={`Markup (${c.pricing.markupPct}%)`} v={fmtRupee(c.pricing.sellBD - c.pricing.costAll)} />
-              {c.pricing.discAmt > 0 && <KV k={`Discount (${c.pricing.discPct}%)`} v={`−${fmtRupee(c.pricing.discAmt)}`} />}
-              <KV k="Selling Price (ex-GST)" v={fmtRupee(c.pricing.sell)} strong />
+              <KV k="Total Selling Price (ex-GST)" v={fmtRupee(c.pricing.sell)} strong />
               <KV k={`GST ${c.pricing.gstPct}%`} v={fmtRupee(c.pricing.gstAmt)} />
               <KV k="Final Amount (incl. GST)" v={fmtRupee(c.pricing.final)} strong />
               <KV k="Gross Margin" v={`${c.pricing.margin}% (${fmtRupee(c.pricing.mgnAmt)})`} />
