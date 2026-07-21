@@ -69,51 +69,51 @@ export interface PrintingMediaMaster {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  CUT OPTIMIZER — Fabrication Planner (offcut-pool based)
+//  CUT OPTIMIZER — Fabrication Planner (two-phase: split, then pack)
 //
-//  V1 of this rewrite fixed the ">100% utilisation" bug (a member longer
-//  than the stock bar produced a bin with used > stockLen) by pre-cutting
-//  oversized members into evenly-sized connector pieces, then bin-packing
-//  everything with generic First Fit Decreasing. That's mathematically
-//  valid but doesn't match how the workshop actually fabricates a frame:
-//  a fitter doesn't pre-decide "cut this 6m member into two equal 3m+
-//  overlap pieces" -- they cut a full bar for the bulk of the length,
-//  then walk over to the offcut bin and see if anything left over from
-//  an EARLIER cut (for a different member entirely) can be spliced on to
-//  finish it, and only reach for a fresh bar if nothing usable is lying
-//  around. This version models exactly that process instead:
+//  Earlier versions of this rewrite went through two failure modes worth
+//  recording, because both came from real shop-floor feedback:
 //
-//   1. Generate every required member (2×Width, 2×Height per sign).
-//   2. Sort members longest-first ("cut long members first").
-//   3. Walk the members one at a time. To fill each member's length:
-//      a. If ANY single offcut already sitting in the shared pool (built
-//         up from every bar cut so far in this job) covers what's still
-//         needed, use the smallest one that does (best fit -- avoids
-//         chewing up a big reusable offcut on a small remainder).
-//      b. Otherwise, if the pool has offcuts at all, splice on the
-//         LARGEST one available (uses up material that would otherwise
-//         sit idle, and keeps the number of joins as small as possible)
-//         and loop back to (a) for whatever's still left.
-//      c. Only once the pool has nothing useful left does it open a
-//         fresh stock bar -- cutting off exactly what's still needed (or
-//         the whole bar, if the remaining need is >= stockLen) and
-//         pooling whatever's left over from THAT bar immediately, so a
-//         later member in the same pass can reuse it too.
-//   4. Every join between two segments of the same member consumes one
-//      connector (and optionally `connectorAllowanceMM` of extra material
-//      at the splice); every real cut (trimming a bar or an offcut down
-//      to less than its full length) optionally consumes `kerfMM`.
-//   5. Every stock bar is tracked by everything ever cut from it -- both
-//      the piece it was originally opened for AND any later member that
-//      reused its leftover -- so a bar's final `used`/`remaining` always
-//      reflects true end-of-job utilisation. This can never exceed the
-//      bar's own length by construction (see assertValidBin).
+//   1. The very first version summed raw member lengths straight into
+//      "bins" with no regard for whether a single member was longer than
+//      the stock bar -- a bin's `used` could exceed `stockLen`, producing
+//      nonsense like 122% utilisation on a 5.0m bar.
+//   2. The fix for that greedily spliced ANY member using whatever offcut
+//      happened to be sitting in the pool at that moment -- which reused
+//      material well, but meant two structurally IDENTICAL members (e.g.
+//      both Widths of a frame, which always share one length) could end
+//      up cut completely differently (one as 5.00m+1.10m, the other as
+//      3.90m+2.19m), including thin, awkward slivers as splice pieces. A
+//      real fabricator would never accept that -- it looks improvised,
+//      not planned, and a small sliver at a connector joint is a weak
+//      joint.
 //
-//  Net effect vs. the naive "sum required lengths" bug this replaced: a
-//  5.0m bar can never show 122% utilisation, AND two 1m offcuts left over
-//  from cutting a couple of 3m members can now get spliced together
-//  (1 connector) to help finish a 6m member instead of a whole extra bar
-//  being opened for 2m of it.
+//  This version separates the two concerns the shop actually cares about:
+//
+//   PHASE 1 -- decide WHAT to cut. Every member is looked at by its
+//   required length alone. A length that fits on one stock bar is always
+//   cut as ONE clean piece, never spliced just to save material. A length
+//   that's genuinely longer than the stock bar is split EVENLY into the
+//   minimum number of pieces (see evenSplit) -- e.g. 6000mm on 4000mm
+//   stock becomes two 3000mm pieces, not a lopsided 4000+2000. Crucially,
+//   this pattern is decided ONCE per distinct member length and reused
+//   for every member that shares it, so identical members are always cut
+//   identically.
+//
+//   PHASE 2 -- decide WHERE to cut it FROM. The full flat list of pieces
+//   from every member (now fixed, atomic lengths) is bin-packed together:
+//   before opening a fresh stock bar, check whether an offcut already
+//   left over from an earlier piece -- possibly from a completely
+//   different member -- is big enough to supply this one instead. This is
+//   where "reuse offcuts wherever possible" happens, and it can never
+//   distort the split patterns decided in Phase 1, only which physical
+//   bar (fresh or reused) ends up supplying each already-decided piece.
+//
+//  Every stock bar is tracked by everything ever cut from it -- both
+//  whatever it was originally opened for AND any later piece that reused
+//  its leftover -- so a bar's final `used`/`remaining` always reflects
+//  true end-of-job utilisation, and can never exceed the bar's own length
+//  by construction (see assertValidBin).
 //
 //  All of kerf / connector allowance / mitre allowance / minimum reusable
 //  offcut are configurable via an options object (all default to the
@@ -218,118 +218,127 @@ function trim(available: number, takeLength: number, kerfMM: number): { consumed
   return { consumed, leftover: Math.max(0, available - consumed) };
 }
 
-/** Runs the fabrication-planner pass described above. `chooseStockLen`
- *  picks the stock length for the NEXT fresh bar given how much is still
- *  needed at that moment -- `packMembers` always returns the one fixed
- *  length it's given; `packAuto` picks the smallest candidate that covers
- *  the need (or the largest candidate if none do, for an oversized
- *  remainder that will need further splicing). */
+/** Splits ONE oversized member into the minimum number of EQUAL(-ish)
+ *  pieces that each fit within maxPieceMM -- e.g. a 6000mm member on
+ *  4000mm stock becomes two 3000mm pieces, not a "full bar + small
+ *  remainder" (4000+2000, let alone something as lopsided as 4900+1100).
+ *  Real fabrication doesn't accept a thin sliver spliced onto the end of
+ *  a member -- an even split keeps every piece substantial and every
+ *  joint in a sensible, load-bearing position. Pieces may differ by at
+ *  most 1mm (integer rounding of the total across n pieces). */
+function evenSplit(lengthMM: number, maxPieceMM: number, connectorAllowanceMM: number): number[] {
+  if (lengthMM <= maxPieceMM) return [lengthMM];
+  // Guard against a misconfigured connector allowance that would consume
+  // an entire (or more than an entire) bar and loop forever below.
+  const connAllow = Math.min(Math.max(0, connectorAllowanceMM), Math.max(1, maxPieceMM - 1));
+  let n = Math.ceil(lengthMM / maxPieceMM);
+  while (n * maxPieceMM - (n - 1) * connAllow < lengthMM) n++;
+  const totalMaterial = lengthMM + (n - 1) * connAllow;
+  const base = Math.floor(totalMaterial / n);
+  const pieces = new Array(n).fill(base) as number[];
+  let extra = totalMaterial - base * n;
+  for (let i = 0; i < pieces.length && extra > 0; i++, extra--) pieces[i] += 1;
+  return pieces;
+}
+
+interface PlannedPiece {
+  length: number;
+  label: string;
+  memberIndex: number;
+}
+
+/** Runs the fabrication-planner pass described above, in two phases:
+ *
+ *  Phase 1 -- decide WHAT to cut. Every member with the same required
+ *  length (e.g. both Widths of a frame, which always share one length)
+ *  gets the exact same split pattern, decided once per distinct length
+ *  and reused -- never two different-looking combinations for what's
+ *  physically the same member length. Oversized members are split evenly
+ *  (see evenSplit), so no piece is ever a small, awkward sliver.
+ *
+ *  Phase 2 -- decide WHERE to cut it FROM. The full, flat list of pieces
+ *  from every member is bin-packed together: before opening a fresh
+ *  stock bar, check whether an offcut already sitting around (left over
+ *  from an earlier piece, possibly from a completely different member)
+ *  is big enough to cut this piece from instead. This is where "reuse
+ *  offcuts wherever possible" actually happens -- it never influences
+ *  the piece lengths decided in Phase 1, only which physical bar (fresh
+ *  or reused) supplies each one.
+ */
 function planFabrication(
   members: { length: number; label: string }[],
   chooseStockLen: (neededLen: number) => number,
   options: Partial<CutOptimizerOptions> | undefined
 ): { bars: BarInternal[]; assemblies: MemberAssembly[]; totalConnectors: number } {
   const opts: CutOptimizerOptions = { ...DEFAULT_CUT_OPTIONS, ...options };
-  const sorted = [...members].sort((a, b) => b.length - a.length); // longest first
+
+  // ---- Phase 1: one canonical piece pattern per distinct member length.
+  const patternCache = new Map<number, number[]>();
+  const memberPieces: PlannedPiece[][] = members.map((member, memberIndex) => {
+    const requiredLength = member.length + (opts.mitreEnabled ? 2 * opts.mitreAllowanceMM : 0);
+    const key = Math.round(requiredLength * 100); // robust to float noise, 0.01mm precision
+    let pattern = patternCache.get(key);
+    if (!pattern) {
+      const maxPieceMM = chooseStockLen(requiredLength);
+      pattern = evenSplit(requiredLength, maxPieceMM, opts.connectorAllowanceMM);
+      patternCache.set(key, pattern);
+    }
+    return pattern.map((length) => ({ length, label: member.label, memberIndex }));
+  });
+  const totalConnectors = memberPieces.reduce((s, pieces) => s + Math.max(0, pieces.length - 1), 0);
+
+  // ---- Phase 2: bin-pack every piece from every member, longest first,
+  // reusing any offcut already on hand before cutting a fresh bar. Each
+  // piece is atomic here -- Phase 1 already decided its exact length, so
+  // it's cut from ONE source (an offcut or a fresh bar), never stitched
+  // together from several smaller offcuts (that's what produced
+  // inconsistent, oddly-sized splices in an earlier version of this).
+  const allPieces = memberPieces.flat().sort((a, b) => b.length - a.length);
   const pool: OffcutPoolItem[] = [];
   const bars: BarInternal[] = [];
-  const assemblies: MemberAssembly[] = [];
+  const segmentsByMember: MemberAssembly["segments"][] = members.map(() => []);
   let nextBarNumber = 1;
   let nextOffcutId = 1;
-  let totalConnectors = 0;
 
-  for (const member of sorted) {
-    const initialRequired = member.length + (opts.mitreEnabled ? 2 * opts.mitreAllowanceMM : 0);
-    // Whether this member is structurally too long for a single stock bar
-    // -- i.e. splicing it is unavoidable no matter what. This is decided
-    // ONCE, up front, from the member's own length, not from whatever the
-    // remaining need happens to be mid-loop (which shrinks every time a
-    // segment is added, but that doesn't change whether the member ever
-    // NEEDED to be spliced in the first place).
-    const nominalStockLen = chooseStockLen(initialRequired);
-    const isOversized = initialRequired > nominalStockLen + 1e-9;
-
-    let remaining = initialRequired;
-    const segments: MemberAssembly["segments"] = [];
-
-    while (remaining > 1e-9) {
-      if (segments.length > 0) {
-        // Every 2nd+ segment needs a connector splice, which can itself
-        // eat a little extra material at the joint.
-        remaining += opts.connectorAllowanceMM;
-        totalConnectors += 1;
-      }
-
-      // (a) A single pooled offcut that fully covers what's left --
-      // prefer the SMALLEST one that does, so a big reusable offcut
-      // isn't burned on a small remainder. Always allowed: swapping in
-      // one whole offcut instead of a fresh bar is a straight
-      // substitution, not a splice -- the member still ends up as ONE
-      // piece, just not a factory-fresh one.
-      let best: OffcutPoolItem | null = null;
-      for (const item of pool) {
-        if (item.length + 1e-9 >= remaining && (!best || item.length < best.length)) best = item;
-      }
-
-      if (best) {
-        const { consumed, leftover } = trim(best.length, remaining, opts.kerfMM);
-        best.bar.cuts.push({ length: remaining, label: member.label, fromOffcut: true });
-        best.bar.usedLength += consumed;
-        segments.push({ length: remaining, barNumber: best.bar.barNumber, fromOffcut: true });
-        remaining = 0;
-        if (leftover > 1e-9) {
-          best.length = leftover;
-        } else {
-          pool.splice(pool.indexOf(best), 1);
-        }
-        continue;
-      }
-
-      // (b) No single offcut is big enough alone -- splice on the
-      // LARGEST one available to make progress (fewest joins) and go
-      // around again for whatever's still needed. ONLY for members that
-      // are already unavoidably being spliced (isOversized): a member
-      // that would otherwise fit cleanly in one fresh bar never enters
-      // this branch, because real fabrication doesn't introduce a
-      // connector into an otherwise-single-piece member just to shave a
-      // bit of material off an offcut lying around -- that's not how a
-      // workshop cuts aluminium. Once a member IS being spliced anyway,
-      // though, using multiple smaller offcuts for the remainder (instead
-      // of a whole extra bar) is exactly the behaviour a fabrication
-      // planner should prefer.
-      if (isOversized) {
-        let largest: OffcutPoolItem | null = null;
-        for (const item of pool) {
-          if (!largest || item.length > largest.length) largest = item;
-        }
-        if (largest) {
-          const { consumed } = trim(largest.length, largest.length, opts.kerfMM);
-          largest.bar.cuts.push({ length: largest.length, label: member.label, fromOffcut: true });
-          largest.bar.usedLength += consumed;
-          segments.push({ length: largest.length, barNumber: largest.bar.barNumber, fromOffcut: true });
-          remaining -= largest.length;
-          pool.splice(pool.indexOf(largest), 1);
-          continue;
-        }
-      }
-
-      // (c) Nothing usable in the pool -- open a fresh stock bar and cut
-      // exactly what's needed from it (or the whole bar, if more is
-      // needed than one bar holds).
-      const stockLen = chooseStockLen(remaining);
-      const bar: BarInternal = { barNumber: nextBarNumber++, stockLen, cuts: [], usedLength: 0 };
-      bars.push(bar);
-      const takeLength = Math.min(stockLen, remaining);
-      const { consumed, leftover } = trim(stockLen, takeLength, opts.kerfMM);
-      bar.cuts.push({ length: takeLength, label: member.label, fromOffcut: false });
-      bar.usedLength += consumed;
-      segments.push({ length: takeLength, barNumber: bar.barNumber, fromOffcut: false });
-      remaining -= takeLength;
-      if (leftover > 1e-9) pool.push({ id: nextOffcutId++, length: leftover, bar });
+  for (const piece of allPieces) {
+    // Best-fit: the smallest pooled offcut that's still big enough,
+    // so a big reusable offcut isn't burned on a small piece.
+    let best: OffcutPoolItem | null = null;
+    for (const item of pool) {
+      if (item.length + 1e-9 >= piece.length && (!best || item.length < best.length)) best = item;
     }
 
-    assemblies.push({ label: member.label, targetLength: member.length, segments, connectorsUsed: segments.length - 1 });
+    if (best) {
+      const { consumed, leftover } = trim(best.length, piece.length, opts.kerfMM);
+      best.bar.cuts.push({ length: piece.length, label: piece.label, fromOffcut: true });
+      best.bar.usedLength += consumed;
+      segmentsByMember[piece.memberIndex].push({ length: piece.length, barNumber: best.bar.barNumber, fromOffcut: true });
+      if (leftover > 1e-9) {
+        best.length = leftover;
+      } else {
+        pool.splice(pool.indexOf(best), 1);
+      }
+      continue;
+    }
+
+    // Nothing in the pool covers it -- open a fresh stock bar sized for
+    // this piece and cut it from there, pooling whatever's left over.
+    const stockLen = chooseStockLen(piece.length);
+    const bar: BarInternal = { barNumber: nextBarNumber++, stockLen, cuts: [], usedLength: 0 };
+    bars.push(bar);
+    const { consumed, leftover } = trim(stockLen, piece.length, opts.kerfMM);
+    bar.cuts.push({ length: piece.length, label: piece.label, fromOffcut: false });
+    bar.usedLength += consumed;
+    segmentsByMember[piece.memberIndex].push({ length: piece.length, barNumber: bar.barNumber, fromOffcut: false });
+    if (leftover > 1e-9) pool.push({ id: nextOffcutId++, length: leftover, bar });
   }
+
+  const assemblies: MemberAssembly[] = members.map((member, i) => ({
+    label: member.label,
+    targetLength: member.length,
+    segments: segmentsByMember[i],
+    connectorsUsed: segmentsByMember[i].length - 1,
+  }));
 
   return { bars, assemblies, totalConnectors };
 }
