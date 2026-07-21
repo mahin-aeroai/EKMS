@@ -69,66 +69,79 @@ export interface PrintingMediaMaster {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  CUT OPTIMIZER — 1D Cutting Stock (Bin Packing)
+//  CUT OPTIMIZER — Fabrication Planner (offcut-pool based)
 //
-//  Rewritten from the ground up. The previous version just summed raw
-//  member lengths into "bins" and never checked whether a single member
-//  was longer than the stock bar itself -- a bin's `used` could exceed
-//  `stockLen`, producing nonsense like 122% utilisation and negative
-//  leftover on a 5m bar (physically impossible: a 5.0m profile can never
-//  hold 6.1m of material).
+//  V1 of this rewrite fixed the ">100% utilisation" bug (a member longer
+//  than the stock bar produced a bin with used > stockLen) by pre-cutting
+//  oversized members into evenly-sized connector pieces, then bin-packing
+//  everything with generic First Fit Decreasing. That's mathematically
+//  valid but doesn't match how the workshop actually fabricates a frame:
+//  a fitter doesn't pre-decide "cut this 6m member into two equal 3m+
+//  overlap pieces" -- they cut a full bar for the bulk of the length,
+//  then walk over to the offcut bin and see if anything left over from
+//  an EARLIER cut (for a different member entirely) can be spliced on to
+//  finish it, and only reach for a fresh bar if nothing usable is lying
+//  around. This version models exactly that process instead:
 //
-//  This version makes that structurally impossible instead of just
-//  patching the symptom:
-//   1. Each sign contributes 4 raw frame members: 2×Width, 2×Height (mm).
-//   2. An optional 45° mitre allowance adds length to each member end
-//      that's mitre-cut (`mitreEnabled` + `mitreAllowanceMM`).
-//   3. Any member longer than the stock length is pre-split into multiple
-//      connector-joined pieces BEFORE packing even starts, so every piece
-//      handed to the bin packer is already guaranteed <= stockLen.
-//      `connectorAllowanceMM` models the extra material a connector
-//      sleeve consumes at each joint.
-//   4. The flat list of pieces is bin-packed with First Fit Decreasing
-//      (default) or Best Fit Decreasing, reusing any bin already opened
-//      -- and therefore any offcut already committed -- before starting a
-//      new stock bar, and reserving saw kerf between consecutive cuts on
-//      the same bar (`kerfMM`).
-//   5. Every bin is validated on the way out: used <= stockLen,
-//      remaining >= 0, utilisation <= 100%. A bin that fails this throws
-//      instead of silently shipping an impossible cutting plan (see
-//      assertValidBin) -- this should never fire given the construction
-//      above, but it's cheap insurance against a future regression.
+//   1. Generate every required member (2×Width, 2×Height per sign).
+//   2. Sort members longest-first ("cut long members first").
+//   3. Walk the members one at a time. To fill each member's length:
+//      a. If ANY single offcut already sitting in the shared pool (built
+//         up from every bar cut so far in this job) covers what's still
+//         needed, use the smallest one that does (best fit -- avoids
+//         chewing up a big reusable offcut on a small remainder).
+//      b. Otherwise, if the pool has offcuts at all, splice on the
+//         LARGEST one available (uses up material that would otherwise
+//         sit idle, and keeps the number of joins as small as possible)
+//         and loop back to (a) for whatever's still left.
+//      c. Only once the pool has nothing useful left does it open a
+//         fresh stock bar -- cutting off exactly what's still needed (or
+//         the whole bar, if the remaining need is >= stockLen) and
+//         pooling whatever's left over from THAT bar immediately, so a
+//         later member in the same pass can reuse it too.
+//   4. Every join between two segments of the same member consumes one
+//      connector (and optionally `connectorAllowanceMM` of extra material
+//      at the splice); every real cut (trimming a bar or an offcut down
+//      to less than its full length) optionally consumes `kerfMM`.
+//   5. Every stock bar is tracked by everything ever cut from it -- both
+//      the piece it was originally opened for AND any later member that
+//      reused its leftover -- so a bar's final `used`/`remaining` always
+//      reflects true end-of-job utilisation. This can never exceed the
+//      bar's own length by construction (see assertValidBin).
+//
+//  Net effect vs. the naive "sum required lengths" bug this replaced: a
+//  5.0m bar can never show 122% utilisation, AND two 1m offcuts left over
+//  from cutting a couple of 3m members can now get spliced together
+//  (1 connector) to help finish a 6m member instead of a whole extra bar
+//  being opened for 2m of it.
 //
 //  All of kerf / connector allowance / mitre allowance / minimum reusable
-//  offcut / algorithm are configurable via an options object (all default
-//  to the tool's historical values -- kerf 0, connector 0, mitre off --
-//  so existing estimates don't shift unless a caller opts in), and
+//  offcut are configurable via an options object (all default to the
+//  tool's historical values -- kerf 0, connector 0, mitre off -- so
+//  existing estimates don't shift unless a caller opts in), and
 //  `packMembers`/`packAuto` accept labelled, pooled member lists so
 //  multiple signs (or multiple candidate stock lengths) can be optimised
 //  together later without changing this module's shape again.
 // ═══════════════════════════════════════════════════════════
 
 export interface CutOptimizerOptions {
-  /** Saw blade width consumed between two consecutive cuts on the same
-   *  bar, in mm. Lost material per bar is (piecesInBin - 1) * kerfMM.
-   *  Default 0 (no kerf modelled) -- matches historical behaviour. */
+  /** Saw blade width consumed whenever a bar or offcut is trimmed down to
+   *  less than its full available length, in mm. Using a piece in full
+   *  (no trimming) costs no kerf. Default 0 (no kerf modelled) --
+   *  matches historical behaviour. */
   kerfMM: number;
-  /** Extra material consumed at each connector splice when an oversized
-   *  member is joined from multiple stock pieces, in mm. Default 0. */
+  /** Extra material consumed at each connector splice -- i.e. every time
+   *  a member needs a 2nd+ segment to reach its full length -- in mm.
+   *  Default 0. */
   connectorAllowanceMM: number;
-  /** A bar's leftover offcut only counts as reusable stock (vs. scrap)
-   *  once it's at least this long, in mm. Default 300mm. */
+  /** An unclaimed offcut only counts as reusable stock (vs. scrap) once
+   *  it's at least this long, in mm. Default 300mm. */
   minReusableOffcutMM: number;
   /** Whether every member gets extra length for a 45° mitred corner on
-   *  both ends before splitting/packing. Default off. */
+   *  both ends before planning. Default off. */
   mitreEnabled: boolean;
   /** Extra length added per mitred end when mitreEnabled is true, in mm. */
   mitreAllowanceMM: number;
-  /** First Fit Decreasing (places each cut in the first bin with room) or
-   *  Best Fit Decreasing (places each cut in whichever open bin leaves
-   *  the least leftover space) -- BFD packs tighter at the cost of a
-   *  little more work per cut. Default "FFD". */
-  algorithm: "FFD" | "BFD";
 }
 
 const DEFAULT_CUT_OPTIONS: CutOptimizerOptions = {
@@ -137,18 +150,18 @@ const DEFAULT_CUT_OPTIONS: CutOptimizerOptions = {
   minReusableOffcutMM: 300,
   mitreEnabled: false,
   mitreAllowanceMM: 0,
-  algorithm: "FFD",
 };
 
 export interface CutPiece {
-  /** Final cuttable length in mm -- always <= the stock length it's
-   *  packed against. */
+  /** Length of this segment as cut, in mm. */
   length: number;
-  /** e.g. "Member 1" or "Member 1 (piece 2/3)" for a split member. */
+  /** Which member this segment belongs to, e.g. "Member 1" or
+   *  "Member 1 (piece 2/2)" when it's one of several segments spliced
+   *  together to build up a member longer than one stock bar. */
   label: string;
-  /** True for every piece after the first from the same oversized member
-   *  -- i.e. it's joined to the previous piece by a connector. */
-  isSplice: boolean;
+  /** True if this segment came from an already-open offcut rather than
+   *  fresh stock cut specifically for it. */
+  fromOffcut: boolean;
 }
 
 export interface CutBin {
@@ -158,6 +171,15 @@ export interface CutBin {
   remaining: number;
   utilPct: number;
   isReusable: boolean;
+}
+
+export interface MemberAssembly {
+  label: string;
+  targetLength: number;
+  /** Every segment (bar-cuts and/or reused offcuts) spliced together to
+   *  build this member, in the order they were joined. */
+  segments: { length: number; barNumber: number; fromOffcut: boolean }[];
+  connectorsUsed: number;
 }
 
 export interface CutAnalysis {
@@ -173,31 +195,119 @@ export interface CutAnalysis {
   totalConnectors: number;
 }
 
-/** Splits one member into 1+ connector-joined pieces, each <= maxPieceMM.
- *  Returned pieces sum to (length + connectors * connectorAllowanceMM)
- *  since every splice consumes extra material at the joint. */
-function splitMember(lengthMM: number, maxPieceMM: number, connectorAllowanceMM: number): number[] {
-  if (lengthMM <= maxPieceMM) return [lengthMM];
-  // Guard against a misconfigured connector allowance that would consume
-  // an entire (or more than an entire) bar and loop forever below.
-  const connAllow = Math.min(Math.max(0, connectorAllowanceMM), Math.max(1, maxPieceMM - 1));
-  let n = Math.ceil(lengthMM / maxPieceMM);
-  while (n * maxPieceMM - (n - 1) * connAllow < lengthMM) n++;
-  const totalMaterial = lengthMM + (n - 1) * connAllow;
-  const base = Math.floor(totalMaterial / n);
-  const pieces = new Array(n).fill(base) as number[];
-  let extra = totalMaterial - base * n;
-  for (let i = 0; i < pieces.length && extra > 0; i++, extra--) pieces[i] += 1;
-  return pieces;
+interface BarInternal {
+  barNumber: number;
+  stockLen: number;
+  cuts: CutPiece[];
+  usedLength: number;
 }
 
-interface WorkingBin {
-  pieces: CutPiece[];
-  rawUsed: number;
+interface OffcutPoolItem {
+  id: number;
+  length: number;
+  bar: BarInternal;
 }
 
-function usedWithKerf(rawUsed: number, pieceCount: number, kerfMM: number): number {
-  return rawUsed + Math.max(0, pieceCount - 1) * kerfMM;
+/** One "cut" of `takeLength` off a piece that currently has `available`
+ *  mm on it. Returns the material actually consumed (takeLength + kerf,
+ *  but only if this isn't a full, no-trim use of the piece) and the
+ *  length left over afterwards. */
+function trim(available: number, takeLength: number, kerfMM: number): { consumed: number; leftover: number } {
+  const isFullUse = takeLength >= available - 1e-9;
+  const consumed = isFullUse ? available : takeLength + Math.min(kerfMM, Math.max(0, available - takeLength));
+  return { consumed, leftover: Math.max(0, available - consumed) };
+}
+
+/** Runs the fabrication-planner pass described above. `chooseStockLen`
+ *  picks the stock length for the NEXT fresh bar given how much is still
+ *  needed at that moment -- `packMembers` always returns the one fixed
+ *  length it's given; `packAuto` picks the smallest candidate that covers
+ *  the need (or the largest candidate if none do, for an oversized
+ *  remainder that will need further splicing). */
+function planFabrication(
+  members: { length: number; label: string }[],
+  chooseStockLen: (neededLen: number) => number,
+  options: Partial<CutOptimizerOptions> | undefined
+): { bars: BarInternal[]; assemblies: MemberAssembly[]; totalConnectors: number } {
+  const opts: CutOptimizerOptions = { ...DEFAULT_CUT_OPTIONS, ...options };
+  const sorted = [...members].sort((a, b) => b.length - a.length); // longest first
+  const pool: OffcutPoolItem[] = [];
+  const bars: BarInternal[] = [];
+  const assemblies: MemberAssembly[] = [];
+  let nextBarNumber = 1;
+  let nextOffcutId = 1;
+  let totalConnectors = 0;
+
+  for (const member of sorted) {
+    let remaining = member.length + (opts.mitreEnabled ? 2 * opts.mitreAllowanceMM : 0);
+    const segments: MemberAssembly["segments"] = [];
+
+    while (remaining > 1e-9) {
+      if (segments.length > 0) {
+        // Every 2nd+ segment needs a connector splice, which can itself
+        // eat a little extra material at the joint.
+        remaining += opts.connectorAllowanceMM;
+        totalConnectors += 1;
+      }
+
+      // (a) A single pooled offcut that fully covers what's left --
+      // prefer the SMALLEST one that does, so a big reusable offcut
+      // isn't burned on a small remainder.
+      let best: OffcutPoolItem | null = null;
+      for (const item of pool) {
+        if (item.length + 1e-9 >= remaining && (!best || item.length < best.length)) best = item;
+      }
+
+      if (best) {
+        const { consumed, leftover } = trim(best.length, remaining, opts.kerfMM);
+        best.bar.cuts.push({ length: remaining, label: member.label, fromOffcut: true });
+        best.bar.usedLength += consumed;
+        segments.push({ length: remaining, barNumber: best.bar.barNumber, fromOffcut: true });
+        remaining = 0;
+        if (leftover > 1e-9) {
+          best.length = leftover;
+        } else {
+          pool.splice(pool.indexOf(best), 1);
+        }
+        continue;
+      }
+
+      // (b) No single offcut is big enough alone -- splice on the
+      // LARGEST one available to make progress (fewest joins) and go
+      // around again for whatever's still needed.
+      let largest: OffcutPoolItem | null = null;
+      for (const item of pool) {
+        if (!largest || item.length > largest.length) largest = item;
+      }
+      if (largest) {
+        const { consumed } = trim(largest.length, largest.length, opts.kerfMM);
+        largest.bar.cuts.push({ length: largest.length, label: member.label, fromOffcut: true });
+        largest.bar.usedLength += consumed;
+        segments.push({ length: largest.length, barNumber: largest.bar.barNumber, fromOffcut: true });
+        remaining -= largest.length;
+        pool.splice(pool.indexOf(largest), 1);
+        continue;
+      }
+
+      // (c) Nothing usable in the pool -- open a fresh stock bar and cut
+      // exactly what's needed from it (or the whole bar, if more is
+      // needed than one bar holds).
+      const stockLen = chooseStockLen(remaining);
+      const bar: BarInternal = { barNumber: nextBarNumber++, stockLen, cuts: [], usedLength: 0 };
+      bars.push(bar);
+      const takeLength = Math.min(stockLen, remaining);
+      const { consumed, leftover } = trim(stockLen, takeLength, opts.kerfMM);
+      bar.cuts.push({ length: takeLength, label: member.label, fromOffcut: false });
+      bar.usedLength += consumed;
+      segments.push({ length: takeLength, barNumber: bar.barNumber, fromOffcut: false });
+      remaining -= takeLength;
+      if (leftover > 1e-9) pool.push({ id: nextOffcutId++, length: leftover, bar });
+    }
+
+    assemblies.push({ label: member.label, targetLength: member.length, segments, connectorsUsed: segments.length - 1 });
+  }
+
+  return { bars, assemblies, totalConnectors };
 }
 
 /** Throws if a bin violates the physical constraints every stock bar must
@@ -213,100 +323,39 @@ function assertValidBin(bin: CutBin, stockLen: number) {
   }
 }
 
-function finaliseBins(bins: WorkingBin[], stockLen: number, opts: CutOptimizerOptions): CutBin[] {
-  return bins.map((w) => {
-    const used = usedWithKerf(w.rawUsed, w.pieces.length, opts.kerfMM);
-    const remaining = stockLen - used;
+function toCutBins(bars: BarInternal[], opts: CutOptimizerOptions): CutBin[] {
+  return bars.map((bar) => {
+    const remaining = bar.stockLen - bar.usedLength;
     const bin: CutBin = {
-      cuts: w.pieces.map((p) => p.length),
-      cutDetails: w.pieces,
-      used,
+      cuts: bar.cuts.map((c) => c.length),
+      cutDetails: bar.cuts,
+      used: bar.usedLength,
       remaining,
-      utilPct: (used / stockLen) * 100,
+      utilPct: (bar.usedLength / bar.stockLen) * 100,
       isReusable: remaining >= opts.minReusableOffcutMM,
     };
-    assertValidBin(bin, stockLen);
+    assertValidBin(bin, bar.stockLen);
     return bin;
   });
 }
 
-function toPieces(members: { length: number; label: string }[], maxPieceMM: number, opts: CutOptimizerOptions): { pieces: CutPiece[]; totalConnectors: number } {
-  let totalConnectors = 0;
-  const pieces: CutPiece[] = [];
-  for (const member of members) {
-    const requiredLength = member.length + (opts.mitreEnabled ? 2 * opts.mitreAllowanceMM : 0);
-    const split = splitMember(requiredLength, maxPieceMM, opts.connectorAllowanceMM);
-    totalConnectors += split.length - 1;
-    split.forEach((len, i) => {
-      pieces.push({
-        length: len,
-        label: split.length > 1 ? `${member.label} (piece ${i + 1}/${split.length})` : member.label,
-        isSplice: i > 0,
-      });
-    });
-  }
-  return { pieces, totalConnectors };
-}
-
-/** First Fit Decreasing / Best Fit Decreasing over a single stock length.
- *  Every `piece.length` is assumed already <= stockLen (guaranteed by
- *  splitMember above) -- reuses any bin already opened before starting a
- *  new one, and accounts for kerf on every fit check. */
-function packPieces(pieces: CutPiece[], stockLen: number, kerfMM: number, algorithm: "FFD" | "BFD"): WorkingBin[] {
-  const sorted = [...pieces].sort((a, b) => b.length - a.length);
-  const bins: WorkingBin[] = [];
-
-  for (const piece of sorted) {
-    if (piece.length > stockLen) {
-      // Structurally shouldn't happen -- splitMember() caps every piece
-      // at maxPieceMM, which callers always pass as (at most) stockLen.
-      throw new Error(`Cut optimizer: a ${piece.length}mm piece cannot fit on ${stockLen}mm stock even alone.`);
-    }
-
-    let target: WorkingBin | null = null;
-    let bestSlack = Infinity;
-    for (const bin of bins) {
-      const candidate = usedWithKerf(bin.rawUsed + piece.length, bin.pieces.length + 1, kerfMM);
-      if (candidate > stockLen) continue;
-      if (algorithm === "FFD") {
-        target = bin;
-        break;
-      }
-      const slack = stockLen - candidate;
-      if (slack < bestSlack) {
-        bestSlack = slack;
-        target = bin;
-      }
-    }
-
-    if (target) {
-      target.pieces.push(piece);
-      target.rawUsed += piece.length;
-    } else {
-      bins.push({ pieces: [piece], rawUsed: piece.length });
-    }
-  }
-
-  return bins;
-}
-
-function attachConnectorCount<T extends object>(bins: T, totalConnectors: number): T {
+function attachExtras<T extends object>(bins: T, totalConnectors: number, assemblies: MemberAssembly[]): T {
   Object.defineProperty(bins, "__totalConnectors", { value: totalConnectors, enumerable: false });
+  Object.defineProperty(bins, "__assemblies", { value: assemblies, enumerable: false });
   return bins;
 }
 
 export const CutOpt = {
-  /** Lower-level entry point: pack an arbitrary, already-labelled list of
+  /** Lower-level entry point: plan an arbitrary, already-labelled list of
    *  members (e.g. pooled from several signs) against ONE stock length.
    *  `pack()` below is a thin wrapper over this for the existing
    *  single-sign call sites. */
   packMembers(members: { length: number; label: string }[], stockLen: number, options?: Partial<CutOptimizerOptions>): CutBin[] {
     if (stockLen <= 0) throw new Error(`Cut optimizer: stock length must be positive, got ${stockLen}`);
     const opts: CutOptimizerOptions = { ...DEFAULT_CUT_OPTIONS, ...options };
-    const { pieces, totalConnectors } = toPieces(members, stockLen, opts);
-    const working = packPieces(pieces, stockLen, opts.kerfMM, opts.algorithm);
-    const bins = finaliseBins(working, stockLen, opts);
-    return attachConnectorCount(bins, totalConnectors);
+    const { bars, assemblies, totalConnectors } = planFabrication(members, () => stockLen, options);
+    const bins = toCutBins(bars, opts);
+    return attachExtras(bins, totalConnectors, assemblies);
   },
 
   /** Backward-compatible entry point -- takes a flat array of raw member
@@ -318,50 +367,30 @@ export const CutOpt = {
   },
 
   /** Same idea as packMembers(), but tries every stock length in
-   *  `stockLengths` for each new bar and opens whichever one wastes the
-   *  least against the piece that triggered it -- e.g. a yard stocking
-   *  4m/5m/6m bar can minimise scrap instead of being locked to one
-   *  length. Oversized members are split against the LARGEST available
-   *  length, so a member only needs connectors if it's longer than every
-   *  candidate stock length. */
+   *  `stockLengths` for each new bar and opens whichever candidate is the
+   *  smallest one that still covers what's needed at that moment (or the
+   *  largest candidate, if the remainder needs more splicing regardless)
+   *  -- e.g. a yard stocking 4m/5m/6m bar can minimise scrap instead of
+   *  being locked to one length. */
   packAuto(members: { length: number; label: string }[], stockLengths: number[], options?: Partial<CutOptimizerOptions>): CutBin[] {
     if (stockLengths.length === 0) throw new Error("packAuto requires at least one stock length");
-    if (stockLengths.length === 1) return CutOpt.packMembers(members, stockLengths[0], options);
-
     const opts: CutOptimizerOptions = { ...DEFAULT_CUT_OPTIONS, ...options };
     const sortedLengths = [...stockLengths].sort((a, b) => a - b);
     const maxAvailable = sortedLengths[sortedLengths.length - 1];
-    const { pieces, totalConnectors } = toPieces(members, maxAvailable, opts);
-    const sortedPieces = [...pieces].sort((a, b) => b.length - a.length);
+    const chooseStockLen = (neededLen: number) => sortedLengths.find((len) => len >= neededLen) ?? maxAvailable;
+    const { bars, assemblies, totalConnectors } = planFabrication(members, chooseStockLen, options);
+    const bins = toCutBins(bars, opts);
+    return attachExtras(bins, totalConnectors, assemblies);
+  },
 
-    const bins: { stockLen: number; working: WorkingBin }[] = [];
-    for (const piece of sortedPieces) {
-      let target: { stockLen: number; working: WorkingBin } | null = null;
-      let bestSlack = Infinity;
-      for (const b of bins) {
-        const candidate = usedWithKerf(b.working.rawUsed + piece.length, b.working.pieces.length + 1, opts.kerfMM);
-        if (candidate > b.stockLen) continue;
-        if (opts.algorithm === "FFD") {
-          target = b;
-          break;
-        }
-        const slack = b.stockLen - candidate;
-        if (slack < bestSlack) {
-          bestSlack = slack;
-          target = b;
-        }
-      }
-      if (target) {
-        target.working.pieces.push(piece);
-        target.working.rawUsed += piece.length;
-      } else {
-        const chosen = sortedLengths.find((len) => len >= piece.length) ?? maxAvailable;
-        bins.push({ stockLen: chosen, working: { pieces: [piece], rawUsed: piece.length } });
-      }
-    }
-
-    const finalised: CutBin[] = bins.map(({ stockLen, working }) => finaliseBins([working], stockLen, opts)[0]);
-    return attachConnectorCount(finalised, totalConnectors);
+  /** Per-member breakdown of how it was assembled (which bar/offcut each
+   *  segment came from, and how many connectors it needed) -- attached to
+   *  whatever `pack()`/`packMembers()`/`packAuto()` last returned. Reads
+   *  the same hidden channel `analyse()` uses for totalConnectors, kept
+   *  as a separate accessor so today's callers (which only look at
+   *  `bins`/`analysis`) are unaffected. */
+  assembliesOf(bins: CutBin[]): MemberAssembly[] {
+    return (bins as CutBin[] & { __assemblies?: MemberAssembly[] }).__assemblies ?? [];
   },
 
   analyse(bins: CutBin[], stockLen: number, costPerStock: number): CutAnalysis {
