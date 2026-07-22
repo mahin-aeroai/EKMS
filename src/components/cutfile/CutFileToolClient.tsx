@@ -584,26 +584,43 @@ export default function CutFileToolClient() {
                   <div className="flex flex-col gap-4 pt-5 lg:flex-row">
                     <div className="w-full shrink-0 lg:w-64">
                       <div className="rounded-lg border border-line bg-surface p-3">
-                        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">Pieces</h3>
+                        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-muted">Pieces</h3>
+                        <p className="mb-2 text-xs text-ink-muted">
+                          Qty = how many copies of that PDF to place when nesting — bump it up instead of re-uploading
+                          the same file.
+                        </p>
                         <div className="flex flex-col gap-1">
                           {pieces.map((p) => (
-                            <button
+                            <div
                               key={p.id}
                               onClick={() => setSelectedId(p.id)}
-                              className={`flex items-center justify-between rounded-md px-2 py-1.5 text-left text-sm ${
+                              className={`flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm ${
                                 selectedId === p.id ? "bg-primary text-on-brand" : "text-ink hover:bg-surface-sunken"
                               }`}
                             >
-                              <span className="truncate">{p.fileName}</span>
+                              <span className="min-w-0 flex-1 truncate">{p.fileName}</span>
+                              <input
+                                type="number"
+                                min={0}
+                                value={p.quantity}
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={(e) => updatePiece(p.id, { quantity: Number(e.target.value) || 0 })}
+                                title="Copies to nest"
+                                className={`w-14 shrink-0 rounded border px-1.5 py-0.5 text-right text-xs outline-none ${
+                                  selectedId === p.id
+                                    ? "border-on-brand/40 bg-white/10 text-on-brand"
+                                    : "border-line-strong bg-surface text-ink"
+                                }`}
+                              />
                               <Trash2
                                 size={13}
-                                className="ml-2 shrink-0 opacity-60 hover:opacity-100"
+                                className="shrink-0 opacity-60 hover:opacity-100"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   removePiece(p.id);
                                 }}
                               />
-                            </button>
+                            </div>
                           ))}
                         </div>
                       </div>
