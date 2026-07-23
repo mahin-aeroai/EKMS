@@ -10,8 +10,8 @@ import { useToast } from "@/components/ui/Notifications";
 import { DotCanvas } from "@/components/cutfile/DotCanvas";
 import { OutlineCanvas } from "@/components/cutfile/OutlineCanvas";
 import { NestPreview } from "@/components/cutfile/NestPreview";
-import { computeDotLayout, rectPolygon, translatePolygon, type DotSpec, type Point } from "@/lib/cutfile/geometry";
-import { loadPdf, buildDotPlacementPdf, buildNestedPrintPdf, buildNestedCutPdf, downloadBlob, type RgbColor, type AddedBleedRect } from "@/lib/cutfile/pdfIO";
+import { computeDotLayout, polygonBounds, rectPolygon, translatePolygon, type DotSpec, type Point } from "@/lib/cutfile/geometry";
+import { loadPdf, buildDotPlacementPdf, buildNestedPrintPdf, buildNestedCutPdf, downloadBlob, type RgbColor, type AddedBleedRect, type OverallDots } from "@/lib/cutfile/pdfIO";
 import { traceOutlineFromPdf, sampleEdgeColorFromDataUrl } from "@/lib/cutfile/trace";
 import { nestPieces, suggestSheetHeight, suggestSheetSize, type NestResult } from "@/lib/cutfile/nesting";
 
@@ -163,6 +163,84 @@ function recomputeLayout(widthMm: number, heightMm: number, params: DotParams) {
   };
 }
 
+/** Settings for the "Overall Layout" dot ring — same shape as a piece's
+ *  DotParams minus the two bleed fields, which are meaningless for a ring
+ *  drawn around a whole nested group rather than one design. Kept as its
+ *  own independent state (not shared with any piece's dotParams) so tuning
+ *  it never affects, or gets affected by, an individual piece's own dots. */
+interface RingDotParams {
+  dotDiameterMm: number;
+  dotHaloMm: number;
+  haloClearanceMm: number;
+  marginMm: number;
+  topCount: number;
+  bottomCount: number;
+  leftCount: number;
+  rightCount: number;
+}
+
+const DEFAULT_RING_DOT_PARAMS: RingDotParams = {
+  dotDiameterMm: 6,
+  dotHaloMm: 2,
+  haloClearanceMm: 4,
+  marginMm: 6,
+  topCount: 4,
+  bottomCount: 4,
+  leftCount: 3,
+  rightCount: 3,
+};
+
+/**
+ * Computes ONE ring of registration dots around the combined bounding box
+ * of every placement in a completed nest — the "Overall Layout" dot mode's
+ * core geometry. Reuses computeDotLayout() (the same function that lays out
+ * a ring around a single piece's content) by treating the whole placed
+ * group as if it were "the content": the group's bounding box becomes
+ * trimWidthMm/trimHeightMm, and the dots that come back (in a canvas-local
+ * frame starting at 0,0) get shifted so that local content rectangle lands
+ * exactly on the group's real position in sheet coordinates. Returns null
+ * if nothing has been placed yet.
+ */
+function computeOverallDots(
+  result: NestResult,
+  params: RingDotParams
+): { dots: DotSpec[]; ringMinX: number; ringMinY: number; ringMaxX: number; ringMaxY: number } | null {
+  if (result.placements.length === 0) return null;
+  let gMinX = Infinity, gMinY = Infinity, gMaxX = -Infinity, gMaxY = -Infinity;
+  for (const p of result.placements) {
+    const b = polygonBounds(p.outline);
+    if (b.minX < gMinX) gMinX = b.minX;
+    if (b.minY < gMinY) gMinY = b.minY;
+    if (b.maxX > gMaxX) gMaxX = b.maxX;
+    if (b.maxY > gMaxY) gMaxY = b.maxY;
+  }
+  const layout = computeDotLayout({
+    trimWidthMm: gMaxX - gMinX,
+    trimHeightMm: gMaxY - gMinY,
+    bleedMm: 0,
+    dotDiameterMm: params.dotDiameterMm,
+    dotHaloMm: params.dotHaloMm,
+    haloClearanceMm: params.haloClearanceMm,
+    marginMm: params.marginMm,
+    topCount: params.topCount,
+    bottomCount: params.bottomCount,
+    leftCount: params.leftCount,
+    rightCount: params.rightCount,
+  });
+  // Shift from the ring's own canvas-local frame into sheet coordinates, so
+  // its "content" rectangle (where computeDotLayout assumed the design
+  // sits) lines up with the group's actual bounds on the sheet.
+  const shiftX = gMinX - layout.contentOffsetMm;
+  const shiftY = gMinY - layout.contentOffsetMm;
+  return {
+    dots: layout.dots.map((d) => ({ ...d, x: d.x + shiftX, y: d.y + shiftY })),
+    ringMinX: shiftX,
+    ringMinY: shiftY,
+    ringMaxX: shiftX + layout.canvasWidthMm,
+    ringMaxY: shiftY + layout.canvasHeightMm,
+  };
+}
+
 export default function CutFileToolClient() {
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -205,7 +283,24 @@ export default function CutFileToolClient() {
   const [optimizeWidthToo, setOptimizeWidthToo] = useState(false);
   const [tracingId, setTracingId] = useState<string | null>(null);
 
+  // Registration-dot placement for the NESTED exports only (the standalone
+  // per-piece "Export PDF" button in the Bleed & Cut Dots tab always uses
+  // that piece's own dots — there's no "overall layout" without a nest).
+  // "perPiece" (default) matches existing behavior: every placed copy keeps
+  // its own ring. "overall" draws one ring around the whole nested group
+  // instead, using the independent ringParams below.
+  const [dotMode, setDotMode] = useState<"perPiece" | "overall">("perPiece");
+  const [ringParams, setRingParams] = useState<RingDotParams>({ ...DEFAULT_RING_DOT_PARAMS });
+
   const selected = pieces.find((p) => p.id === selectedId) ?? null;
+  const overallDotsInfo = dotMode === "overall" && nestResult ? computeOverallDots(nestResult, ringParams) : null;
+  const ringOverflowsSheet =
+    !!overallDotsInfo &&
+    !!nestResult &&
+    (overallDotsInfo.ringMinX < -1e-6 ||
+      overallDotsInfo.ringMinY < -1e-6 ||
+      overallDotsInfo.ringMaxX > nestResult.sheetWidthMm + 1e-6 ||
+      overallDotsInfo.ringMaxY > nestResult.sheetHeightMm + 1e-6);
 
   function updatePiece(id: string, patch: Partial<UploadedPiece>) {
     setPieces((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
@@ -410,6 +505,16 @@ export default function CutFileToolClient() {
     }));
   }
 
+  /** Built fresh at export time (not memoized in state) so it always
+   *  reflects the CURRENT ringParams/dotMode, same as everything else these
+   *  export functions read live except the frozen nestSources snapshot. */
+  function overallDotsForExport(): OverallDots | null {
+    if (dotMode !== "overall" || !nestResult) return null;
+    const info = computeOverallDots(nestResult, ringParams);
+    if (!info) return null;
+    return { dots: info.dots, dotDiameterMm: ringParams.dotDiameterMm, dotHaloMm: ringParams.dotHaloMm };
+  }
+
   async function exportPrintPdf() {
     if (!nestResult || !nestSources) return;
     try {
@@ -418,6 +523,7 @@ export default function CutFileToolClient() {
         sheetHeightMm: nestResult.sheetHeightMm,
         placements: nestResult.placements,
         sources: nestSources,
+        overallDots: overallDotsForExport(),
       });
       downloadBlob(blob, "nested_sheet_PRINT.pdf");
       toast("success", "Print file exported — download started");
@@ -434,6 +540,7 @@ export default function CutFileToolClient() {
         sheetHeightMm: nestResult.sheetHeightMm,
         placements: nestResult.placements,
         sources: nestSources,
+        overallDots: overallDotsForExport(),
       });
       downloadBlob(blob, "nested_sheet_CUT.pdf");
       toast("success", "Cut file exported — download started");
@@ -781,6 +888,51 @@ export default function CutFileToolClient() {
                         )}
                       </div>
 
+                      <div className="mt-4 flex flex-col gap-3 rounded-lg border border-line bg-surface p-3">
+                        <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Registration dots</h3>
+                        <div className="flex gap-1 rounded-md bg-surface-sunken p-1">
+                          {(["perPiece", "overall"] as const).map((m) => (
+                            <button
+                              key={m}
+                              onClick={() => setDotMode(m)}
+                              className={`flex-1 rounded px-2 py-1.5 text-xs font-medium ${
+                                dotMode === m ? "bg-primary text-on-brand" : "text-ink-secondary hover:bg-surface"
+                              }`}
+                            >
+                              {m === "perPiece" ? "Around each piece" : "Around overall layout"}
+                            </button>
+                          ))}
+                        </div>
+                        <p className="text-xs text-ink-muted">
+                          {dotMode === "perPiece"
+                            ? "Every placed copy gets its own ring of dots (today's default)."
+                            : "One ring of dots is placed around the whole nested layout, replacing the per-piece rings in the exported Print/Cut PDFs."}
+                        </p>
+                        {dotMode === "overall" && (
+                          <>
+                            <NumberField label="Dot diameter (mm)" value={ringParams.dotDiameterMm} onChange={(v) => setRingParams((r) => ({ ...r, dotDiameterMm: v }))} />
+                            <NumberField label="White halo under dot (mm)" value={ringParams.dotHaloMm} onChange={(v) => setRingParams((r) => ({ ...r, dotHaloMm: v }))} />
+                            <NumberField label="Clearance between layout and halo (mm)" value={ringParams.haloClearanceMm} onChange={(v) => setRingParams((r) => ({ ...r, haloClearanceMm: v }))} />
+                            <NumberField label="Extra margin beyond dot (mm)" value={ringParams.marginMm} onChange={(v) => setRingParams((r) => ({ ...r, marginMm: v }))} />
+                            <div className="grid grid-cols-2 gap-2">
+                              <NumberField label="Top dots" value={ringParams.topCount} onChange={(v) => setRingParams((r) => ({ ...r, topCount: v }))} />
+                              <NumberField label="Bottom dots" value={ringParams.bottomCount} onChange={(v) => setRingParams((r) => ({ ...r, bottomCount: v }))} />
+                              <NumberField label="Left dots" value={ringParams.leftCount} onChange={(v) => setRingParams((r) => ({ ...r, leftCount: v }))} />
+                              <NumberField label="Right dots" value={ringParams.rightCount} onChange={(v) => setRingParams((r) => ({ ...r, rightCount: v }))} />
+                            </div>
+                            {!nestResult && <p className="text-xs text-ink-muted">Run nesting to preview the ring and check it fits the sheet.</p>}
+                            {ringOverflowsSheet && overallDotsInfo && (
+                              <p className="rounded-md bg-warning-tint p-2 text-xs text-warning">
+                                This ring needs about {Math.ceil(overallDotsInfo.ringMaxX - overallDotsInfo.ringMinX)} ×{" "}
+                                {Math.ceil(overallDotsInfo.ringMaxY - overallDotsInfo.ringMinY)}mm, which is bigger than the current{" "}
+                                {sheetWidthMm} × {sheetHeightMm}mm sheet — increase the sheet size (or reduce margin/clearance
+                                above) so the outer dots land on the printable area.
+                              </p>
+                            )}
+                          </>
+                        )}
+                      </div>
+
                       <div className="mt-4 flex flex-col gap-3">
                         <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Pieces to nest</h3>
                         {pieces.map((p) => (
@@ -879,6 +1031,7 @@ export default function CutFileToolClient() {
                         <NestPreview
                           result={nestResult}
                           onChange={(placements) => setNestResult((prev) => (prev ? { ...prev, placements } : prev))}
+                          overlayDots={overallDotsInfo?.dots}
                         />
                       ) : (
                         <div className="rounded-lg border border-line bg-surface p-10 text-center text-sm text-ink-muted">

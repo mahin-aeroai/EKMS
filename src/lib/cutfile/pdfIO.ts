@@ -280,8 +280,9 @@ async function buildNestedSheetPdfInternal(opts: {
   placements: NestPlacement[];
   sources: NestSourceFile[];
   mode: "print" | "cut";
+  overallDots?: OverallDots | null;
 }): Promise<Blob> {
-  const { sheetWidthMm, sheetHeightMm, placements, sources, mode } = opts;
+  const { sheetWidthMm, sheetHeightMm, placements, sources, mode, overallDots } = opts;
   const outDoc = await PDFDocument.create();
   const page = outDoc.addPage([mmToPt(sheetWidthMm), mmToPt(sheetHeightMm)]);
 
@@ -343,9 +344,14 @@ async function buildNestedSheetPdfInternal(opts: {
 
     // Marks: identical in both files by construction (same src.dots, same
     // toSheet transform, same drawDot call) so registration lines up.
-    for (const dot of src.dots) {
-      const dp = toSheet({ x: dot.x, y: dot.y });
-      drawDot(page, dp.x, dp.y, src.dotDiameterMm, src.dotHaloMm ?? 2);
+    // Skipped entirely when overallDots is set — one ring around the whole
+    // layout replaces a ring around every individual placement instead of
+    // supplementing it.
+    if (!overallDots) {
+      for (const dot of src.dots) {
+        const dp = toSheet({ x: dot.x, y: dot.y });
+        drawDot(page, dp.x, dp.y, src.dotDiameterMm, src.dotHaloMm ?? 2);
+      }
     }
 
     if (mode === "cut") {
@@ -353,8 +359,28 @@ async function buildNestedSheetPdfInternal(opts: {
     }
   }
 
+  // One ring of dots around the whole nested group, already in sheet-space
+  // mm (computed from the placements' combined bounds) — drawn once, after
+  // every placement's own artwork/cut-path, same as the per-piece dots this
+  // replaces sat "on top" in the original per-piece loop.
+  if (overallDots) {
+    for (const dot of overallDots.dots) {
+      drawDot(page, dot.x, dot.y, overallDots.dotDiameterMm, overallDots.dotHaloMm);
+    }
+  }
+
   const bytes = await outDoc.save();
   return new Blob([bytes as unknown as BlobPart], { type: "application/pdf" });
+}
+
+/** A single ring of registration dots around the WHOLE nested layout, in
+ *  sheet-space mm already (no per-placement transform needed) — used in
+ *  place of each piece drawing its own dots, when the operator wants one
+ *  outer ring instead of a ring around every individual copy. */
+export interface OverallDots {
+  dots: DotSpec[];
+  dotDiameterMm: number;
+  dotHaloMm: number;
 }
 
 export interface BuildNestedPdfOpts {
@@ -362,6 +388,9 @@ export interface BuildNestedPdfOpts {
   sheetHeightMm: number;
   placements: NestPlacement[];
   sources: NestSourceFile[];
+  // When set, draw ONE ring of dots around the whole layout instead of each
+  // placement's own `src.dots` — see OverallDots above.
+  overallDots?: OverallDots | null;
 }
 
 /** Print file: original full-resolution artwork + printed registration dots, no cut path. */

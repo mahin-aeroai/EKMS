@@ -22,9 +22,13 @@ const PALETTE = ["#2563EB", "#059669", "#D97706", "#DC2626", "#7C3AED", "#0891B2
 export function NestPreview({
   result,
   onChange,
+  overlayDots,
 }: {
   result: NestResult;
   onChange?: (placements: NestPlacement[]) => void;
+  // Optional preview of an "Overall Layout" registration-dot ring, in the
+  // same sheet-space mm as `result` — purely visual, doesn't affect export.
+  overlayDots?: { x: number; y: number }[];
 }) {
   const { sheetWidthMm, sheetHeightMm, placements } = result;
   const svgRef = useRef<SVGSVGElement>(null);
@@ -176,6 +180,15 @@ export function NestPreview({
             </g>
           );
         })}
+        {overlayDots?.map((d, i) => (
+          <circle
+            key={`ring-dot-${i}`}
+            cx={d.x}
+            cy={sheetHeightMm - d.y}
+            r={Math.max(sheetWidthMm / 220, 1)}
+            fill="#111827"
+          />
+        ))}
       </svg>
       {onChange && (
         <p className="border-t border-line bg-surface px-3 py-1.5 text-xs text-ink-muted">
