@@ -467,7 +467,14 @@ export default function CutFileToolClient() {
           outline: p.outline,
           quantity: p.quantity,
           allowRotationsDeg: p.rotations,
-          reserveCircles: dotReserveCircles(p),
+          // In "Overall Layout" mode no per-piece dot ring gets drawn, so
+          // there's nothing to keep clear around each individual piece —
+          // reserving that space anyway only wastes sheet area and, worse,
+          // makes identical pieces land at slightly different offsets
+          // (the bottom-left-fill scan finds the first gap AROUND each
+          // piece's dot bumps, not a clean rectangle, so same-size pieces
+          // can end up a few mm off from each other instead of lining up).
+          reserveCircles: dotMode === "perPiece" ? dotReserveCircles(p) : [],
         })),
         onProgress: (msg) => setNestStatus(msg),
       });
@@ -563,7 +570,8 @@ export default function CutFileToolClient() {
         outline: p.outline,
         quantity: p.quantity,
         allowRotationsDeg: p.rotations,
-        reserveCircles: dotReserveCircles(p),
+        // Same reasoning as runNesting() above — keep this in sync with it.
+        reserveCircles: dotMode === "perPiece" ? dotReserveCircles(p) : [],
       }));
 
       if (optimizeWidthToo) {
@@ -905,8 +913,8 @@ export default function CutFileToolClient() {
                         </div>
                         <p className="text-xs text-ink-muted">
                           {dotMode === "perPiece"
-                            ? "Every placed copy gets its own ring of dots (today's default)."
-                            : "One ring of dots is placed around the whole nested layout, replacing the per-piece rings in the exported Print/Cut PDFs."}
+                            ? "Every placed copy gets its own ring of dots (today's default). Nesting keeps a little extra clearance around each piece for that ring."
+                            : "One ring of dots is placed around the whole nested layout instead. Pieces also nest tighter and line up more consistently, since there's no per-piece dot zone to work around anymore. Re-run nesting after switching to see this take effect."}
                         </p>
                         {dotMode === "overall" && (
                           <>
