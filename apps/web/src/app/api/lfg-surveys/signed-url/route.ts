@@ -76,6 +76,26 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
+  // Confirm a survey row actually exists with this exact relative_path before
+  // signing anything -- same check knowledge-files/signed-url already does.
+  //
+  // Without it this route signs whatever `path` the caller sends: presigning a
+  // GetObjectCommand succeeds for any key, since R2 does not verify existence
+  // at signing time and has no row-level concept of its own. That made every
+  // object in the bucket reachable by an authenticated viewer who could guess
+  // or enumerate keys, with the role/group check above the only gate -- and it
+  // gates the ROUTE, not the object. Verified by probing with a nonsense path:
+  // this route returned 200 and a working signed URL where the knowledge route
+  // correctly returned 404.
+  const { data: row, error: rowErr } = await supabase
+    .from("apple_lfg_site_surveys")
+    .select("id")
+    .eq("relative_path", path)
+    .maybeSingle();
+  if (rowErr || !row) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+
   try {
     const command = new GetObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: path });
     // 60 seconds is plenty for the client to receive this response and
