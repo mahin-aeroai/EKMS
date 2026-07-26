@@ -1,35 +1,16 @@
 {
-  "name": "mmdi-one-design-system",
+  "name": "mmdi-one",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
-  },
-  "dependencies": {
-    "@anthropic-ai/sdk": "^0.111.0",
-    "@aws-sdk/client-s3": "^3.1088.0",
-    "@aws-sdk/s3-request-presigner": "^3.1088.0",
-    "@supabase/ssr": "^0.12.3",
-    "@supabase/supabase-js": "^2.110.5",
-    "clsx": "^2.1.1",
-    "lucide-react": "^1.24.0",
-    "next": "16.2.10",
-    "pdf-lib": "^1.17.1",
-    "pdfjs-dist": "^6.1.200",
-    "react": "19.2.4",
-    "react-dom": "19.2.4"
-  },
-  "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.2.10",
-    "tailwindcss": "^4",
-    "typescript": "^5"
+    "dev": "npm run dev -w apps/web",
+    "build": "npm run build -w apps/web",
+    "start": "npm run start -w apps/web",
+    "lint": "npm run lint -w apps/web",
+    "typecheck": "npm run typecheck -w apps/web"
   }
 }

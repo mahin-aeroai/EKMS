@@ -1,0 +1,564 @@
+// packages/shared/src/rows.ts
+//
+// Row/type shapes for every Supabase table this app reads, plus the small
+// shared status-literal types layered on top of them (e.g. BadgeStatus).
+// Kept framework-free (no React, no Supabase client) so both apps/web and
+// apps/mobile can import these as plain types.
+
+export type BadgeStatus = "success" | "warning" | "danger" | "info" | "neutral";
+
+export interface ApplelfgSiteSurveyRow {
+  id: string;
+  chain: string;
+  relative_path: string;
+  file_name: string;
+  apple_store_id: string | null;
+  store_name: string | null;
+  file_size_bytes: number | null;
+  uploaded_at: string;
+}
+
+export interface PurchaseTransactionRow {
+  id: string;
+  grn_no: string;
+  grn_date: string | null;
+  location: string | null;
+  po_no: string | null;
+  po_date: string | null;
+  bill_no: string | null;
+  bill_date: string | null;
+  supplier_name: string;
+  item_name: string;
+  item_code: string | null;
+  item_type: string | null;
+  product_category: string | null;
+  raw_material_id: string | null;
+  quantity: number | null;
+  rate: number | null;
+  taxable_value: number;
+  cgst: number | null;
+  sgst: number | null;
+  igst: number | null;
+  net_amount_line: number | null;
+  created_at: string;
+}
+
+export interface CustomerRow {
+  id: string;
+  code: string;
+  name: string;
+  region: string | null;
+  tier: string | null;
+  payment_terms: string | null;
+  account_owner: string | null;
+  status: string;
+  lifetime_value: number;
+  open_orders: number;
+  on_time_delivery: number;
+  health_score: number;
+  tags: string[];
+  created_at: string;
+}
+
+export interface CustomerContactRow {
+  id: string;
+  customer_id: string;
+  name: string;
+  role: string | null;
+  email: string | null;
+}
+
+export interface CustomerCommentRow {
+  id: string;
+  customer_id: string;
+  author: string;
+  content: string;
+  resolved: boolean;
+  created_at: string;
+}
+
+export interface CustomerApprovalRow {
+  id: string;
+  customer_id: string;
+  title: string;
+  requested_by: string;
+  value: string;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+}
+
+export interface MachineRow {
+  id: string;
+  code: string;
+  name: string;
+  line: string | null;
+  status: string;
+  maintenance_lead: string | null;
+  oee: number;
+  mtbf_hours: number;
+  mttr_hours: number;
+  uptime: number;
+  model: string | null;
+  clamping_force: string | null;
+  shot_weight_max: string | null;
+  last_pm: string | null;
+  installed_year: number | null;
+  vendor: string | null;
+  tags: string[];
+  created_at: string;
+}
+
+export interface MachineCommentRow {
+  id: string;
+  machine_id: string;
+  author: string;
+  content: string;
+  resolved: boolean;
+  created_at: string;
+}
+
+export interface MachineApprovalRow {
+  id: string;
+  machine_id: string;
+  title: string;
+  requested_by: string;
+  value: string;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+}
+
+export interface RawMaterialRow {
+  id: string;
+  code: string;
+  name: string;
+  category: string | null;
+  status: string;
+  category_owner: string | null;
+  current_stock: number;
+  reorder_point: number;
+  lead_time_days: number;
+  approved_suppliers: number;
+  compatible_substrates: string | null;
+  unit_cost: number;
+  moq: string | null;
+  storage_class: string | null;
+  tags: string[];
+  created_at: string;
+}
+
+export interface RawMaterialCommentRow {
+  id: string;
+  raw_material_id: string;
+  author: string;
+  content: string;
+  resolved: boolean;
+  created_at: string;
+}
+
+export interface RawMaterialApprovalRow {
+  id: string;
+  raw_material_id: string;
+  title: string;
+  requested_by: string;
+  value: string;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+}
+
+export interface ProjectRow {
+  id: string;
+  code: string;
+  name: string;
+  customer: string | null;
+  project_manager: string | null;
+  status: string;
+  completion_pct: number;
+  budget_utilization: number;
+  schedule_health: string;
+  open_risks: number;
+  sponsor: string | null;
+  kickoff: string | null;
+  target_completion: string | null;
+  primary_line: string | null;
+  budget: number;
+  tags: string[];
+  created_at: string;
+}
+
+export interface ProjectCommentRow {
+  id: string;
+  project_id: string;
+  author: string;
+  content: string;
+  resolved: boolean;
+  created_at: string;
+}
+
+export interface ProjectApprovalRow {
+  id: string;
+  project_id: string;
+  title: string;
+  requested_by: string;
+  value: string;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+}
+
+// Job Orders — replaces the "Projects" concept above, which never matched
+// how MMDI actually works (job orders, not sponsor/budget/schedule-health
+// projects). The projects/* tables and types above are kept for now (see
+// PROJECT_STATUS.md) but the workspace itself now points here.
+export interface JobOrderRow {
+  id: string;
+  code: string;
+  name: string;
+  customer_name: string;
+  customer_id: string | null;
+  location: string | null;
+  sales_person: string | null;
+  application: string | null;
+  status: string;
+  order_date: string | null;
+  production_start: string | null;
+  production_end: string | null;
+  primary_machine: string | null;
+  primary_machine_group: string | null;
+  line_item_count: number;
+  total_qty: number;
+  total_sqft: number;
+  total_value: number;
+  tags: string[];
+  created_at: string;
+}
+
+export interface JobOrderCommentRow {
+  id: string;
+  job_order_id: string;
+  author: string;
+  content: string;
+  resolved: boolean;
+  created_at: string;
+}
+
+export interface JobOrderApprovalRow {
+  id: string;
+  job_order_id: string;
+  title: string;
+  requested_by: string;
+  value: string;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+}
+
+export interface CrmAccountRow {
+  id: string;
+  name: string;
+  region: string | null;
+  owner: string | null;
+  value: string | null;
+  status: BadgeStatus;
+}
+
+export interface QuoteRow {
+  id: string;
+  number: string;
+  customer: string | null;
+  value: string | null;
+  status: BadgeStatus;
+  status_label: string | null;
+}
+
+export interface ContractRow {
+  id: string;
+  customer: string;
+  type: string | null;
+  value: string | null;
+  status: BadgeStatus;
+  status_label: string | null;
+}
+
+export interface WorkOrderRow {
+  id: string;
+  title: string;
+  meta: string | null;
+  column_id: string;
+  ai_suggested_column: string | null;
+}
+
+export interface MaintenanceEventRow {
+  id: string;
+  day: number;
+  title: string;
+  type: "pm" | "installation" | "personal" | "conflict";
+}
+
+export interface InstallationSiteRow {
+  id: string;
+  site: string;
+  customer: string | null;
+  status: BadgeStatus;
+  status_label: string | null;
+}
+
+export interface InventorySkuRow {
+  id: string;
+  code: string;
+  name: string;
+  stock: string | null;
+  status: BadgeStatus;
+  status_label: string | null;
+}
+
+export interface PurchaseOrderRow {
+  id: string;
+  title: string;
+  meta: string | null;
+  column_id: string;
+  ai_suggested_column: string | null;
+}
+
+export interface SupplierRow {
+  id: string;
+  name: string;
+  category: string | null;
+  on_time: string | null;
+  status: BadgeStatus;
+  status_label: string | null;
+}
+
+export interface DocumentRow {
+  id: string;
+  title: string;
+  summary: string | null;
+  tags: string[];
+  superseded: boolean;
+  category: string | null;
+  file_name: string | null;
+  relative_path: string | null;
+  source_url: string | null;
+  file_size_bytes: number | null;
+  mime_type: string | null;
+  content_text: string | null;
+  uploaded_at: string | null;
+}
+
+export interface DrawingRow {
+  id: string;
+  number: string;
+  title: string;
+  status: BadgeStatus;
+  status_label: string | null;
+  category: string | null;
+  file_name: string | null;
+  relative_path: string | null;
+  source_url: string | null;
+  file_size_bytes: number | null;
+  mime_type: string | null;
+  content_text: string | null;
+  uploaded_at: string | null;
+}
+
+export interface SopRow {
+  id: string;
+  title: string;
+  summary: string | null;
+  tags: string[];
+  category: string | null;
+  file_name: string | null;
+  relative_path: string | null;
+  source_url: string | null;
+  file_size_bytes: number | null;
+  mime_type: string | null;
+  content_text: string | null;
+  uploaded_at: string | null;
+}
+
+export interface LessonLearnedRow {
+  id: string;
+  type: "Lesson Learned" | "Engineering Note" | "FAQ";
+  title: string;
+  content: string;
+  source: string | null;
+}
+
+export interface EmployeeRow {
+  id: string;
+  name: string;
+  role: string | null;
+  department: string | null;
+  status: BadgeStatus;
+  status_label: string | null;
+  employee_code: string | null;
+  location: string | null;
+  off_email: string | null;
+  off_phone: string | null;
+  personal_email: string | null;
+  personal_phone: string | null;
+  date_of_joining: string | null;
+  date_of_birth: string | null;
+  gender: string | null;
+}
+
+export interface ComplianceFindingRow {
+  id: string;
+  item: string;
+  area: string | null;
+  status: BadgeStatus;
+  status_label: string | null;
+  category: string | null;
+  chapter: string | null;
+  frequency: string | null;
+  baseline_date: string | null;
+  due_date: string | null;
+  responsible: string | null;
+}
+
+export interface AccessRequestRow {
+  id: string;
+  user_label: string;
+  requested: string | null;
+  status: BadgeStatus;
+  status_label: string | null;
+}
+
+export type UserRole = "admin" | "editor" | "viewer";
+
+export interface ProfileRow {
+  id: string;
+  email: string;
+  role: UserRole;
+  created_at: string;
+  // NULL = unrestricted (sees every module). See
+  // supabase-module-access-migration.sql and
+  // apps/web/src/lib/UserGroupsContext.tsx.
+  allowed_groups: string[] | null;
+}
+
+// ── Sign Estimator (React rewrite of SignERP_v2.html) ──────────────────────
+// See supabase-sign-estimator-schema.sql for the table definitions + RLS.
+// Field names mirror the DB columns (snake_case) rather than the original
+// tool's camelCase localStorage fields, kept consistent with every other
+// row type in this file.
+
+export interface SignProfileRow {
+  id: string;
+  name: string;
+  category: "nonlit" | "seg-indoor" | "seg-outdoor";
+  width: number | null;
+  depth: number | null;
+  stock_len: number;
+  usage: string | null;
+  cost: number;
+  sku: string | null;
+  supplier: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SignLedModuleRow {
+  id: string;
+  name: string;
+  mod_w: number;
+  mod_h: number;
+  h_gap: number;
+  v_gap: number;
+  watt: number;
+  ip: string | null;
+  usage: string | null;
+  cost: number;
+  sku: string | null;
+  supplier: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SignLedBarRow {
+  id: string;
+  name: string;
+  bar_len: number;
+  bar_width: number;
+  watt: number;
+  ip: string | null;
+  usage: string | null;
+  cost: number;
+  sku: string | null;
+  supplier: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SignLedDriverRow {
+  id: string;
+  watt: number;
+  brand: string | null;
+  volt: number;
+  cost: number;
+  sku: string | null;
+  supplier: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SignSheetRow {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  thickness: number | null;
+  cost_per_sheet: number;
+  wastage: number;
+  sku: string | null;
+  supplier: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SignPrintingMediaRow {
+  id: string;
+  name: string;
+  print_types: string[];
+  cost_per_sqft: number;
+  wastage: number;
+  sku: string | null;
+  supplier: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SignAccessoryRow {
+  id: string;
+  name: string;
+  unit: string;
+  mandatory: boolean;
+  unit_cost: number;
+  sku: string | null;
+  supplier: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SignEstimateRow {
+  id: string;
+  ref: string;
+  client: string | null;
+  category: string | null;
+  dim_w: number | null;
+  dim_h: number | null;
+  dim_unit: string | null;
+  width_mm: number;
+  height_mm: number;
+  qty: number;
+  sell: number;
+  final_amount: number;
+  margin: number;
+  calc: Record<string, unknown>;
+  created_by: string | null;
+  created_at: string;
+}
