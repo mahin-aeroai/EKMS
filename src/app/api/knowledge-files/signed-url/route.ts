@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { createServerSupabaseClient } from "@/lib/supabase-server";
+import { createRouteSupabaseClient } from "@/lib/supabase-route";
 
 export const dynamic = "force-dynamic";
 
@@ -56,7 +56,7 @@ export async function GET(request: Request) {
     );
   }
 
-  const supabase = await createServerSupabaseClient();
+  const supabase = await createRouteSupabaseClient(request);
   const {
     data: { user },
   } = await supabase.auth.getUser();

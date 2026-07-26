@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import type { MessageParam, Tool, ToolResultBlockParam } from "@anthropic-ai/sdk/resources/messages";
-import { createServerSupabaseClient } from "@/lib/supabase-server";
+import { createRouteSupabaseClient } from "@/lib/supabase-route";
 
 export const dynamic = "force-dynamic";
 
@@ -264,7 +264,7 @@ const TOOLS: Tool[] = [
   },
 ];
 
-type Supabase = Awaited<ReturnType<typeof createServerSupabaseClient>>;
+type Supabase = Awaited<ReturnType<typeof createRouteSupabaseClient>>;
 
 // IMPORTANT: Supabase/PostgREST enforces its own server-side "max rows" setting
 // (project default: 1000) that silently clamps a response to that many rows
@@ -858,7 +858,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const supabase = await createServerSupabaseClient();
+  const supabase = await createRouteSupabaseClient(request);
   const {
     data: { user },
   } = await supabase.auth.getUser();
