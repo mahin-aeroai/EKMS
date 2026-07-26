@@ -240,7 +240,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: "find_site_survey",
-    description: "Look up whether a site survey PDF report exists for an Apple LFG site -- matches store name, chain (APP/APR/Mono AAR/Multi AAR/Reliance/Vijay Sales/Wireless Chain/Croma/Tribe by Croma), or Apple store ID (partial match). This CANNOT show or read the PDF's contents in chat -- chat is text-only. It only confirms a survey exists and gives its file name; to actually view the original PDF, point the person to the Site Surveys workspace page (/workspaces/site-surveys, under the Customers nav section), where they can search and open it directly.",
+    description: "Look up whether a site survey PDF report exists for an Apple LFG site -- matches store name, chain (APP/APR/Mono AAR/Multi AAR/Reliance/Vijay Sales/Wireless Chain/Croma/Tribe by Croma), or Apple store ID (partial match). This CANNOT show or read the PDF's contents in chat -- chat is text-only. It confirms a survey exists and returns its file name and relative_path; the client renders that as an openable link, so do NOT tell the person to navigate anywhere -- there is no URL bar on mobile.",
     input_schema: {
       type: "object",
       properties: {
@@ -881,6 +881,12 @@ export async function POST(request: Request) {
   const anthropic = new Anthropic({ apiKey });
   const messages: MessageParam[] = incoming.map((m) => ({ role: m.role, content: m.content }));
   const citations = new Set<string>();
+  // Structured tool output, kept alongside the prose citations. The web app
+  // only renders `content`, but the iOS app needs the underlying rows to draw
+  // tappable result cards -- a citation string like `Site survey search: "a"`
+  // cannot be turned back into a record. Same call, no extra queries: these
+  // are the results already being fed to the model.
+  const toolCalls: { tool: string; input: unknown; result: unknown }[] = [];
 
   try {
     for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
@@ -911,10 +917,10 @@ export async function POST(request: Request) {
             response.stop_reason === "max_tokens"
               ? "That answer would have been too long to fit in one reply. Try asking for a summary (price range/average) instead of every row, or narrow the request to one branch, month, category, or customer."
               : "I couldn't find a clear answer to that.";
-          return NextResponse.json({ content, citations: Array.from(citations) });
+          return NextResponse.json({ content, citations: Array.from(citations), results: toolCalls });
         }
         const content = response.stop_reason === "max_tokens" ? `${text}\n\n(This answer was cut short — ask for a narrower breakdown to see the rest.)` : text;
-        return NextResponse.json({ content, citations: Array.from(citations) });
+        return NextResponse.json({ content, citations: Array.from(citations), results: toolCalls });
       }
 
       const toolResults: ToolResultBlockParam[] = [];
@@ -922,6 +928,7 @@ export async function POST(request: Request) {
         if (block.type !== "tool_use") continue;
         const { result, citation } = await executeToolCall(block.name, block.input as Record<string, unknown>, supabase);
         if (citation) citations.add(citation);
+        toolCalls.push({ tool: block.name, input: block.input, result });
         toolResults.push({
           type: "tool_result",
           tool_use_id: block.id,
@@ -933,6 +940,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       content: "That question needed more lookups than I could complete — try narrowing it down.",
+      results: toolCalls,
       citations: Array.from(citations),
     });
   } catch (err) {

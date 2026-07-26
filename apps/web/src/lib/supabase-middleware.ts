@@ -13,12 +13,37 @@ function isPublicPath(pathname: string) {
 }
 
 /**
+ * Route handlers authenticate themselves via createRouteSupabaseClient, which
+ * accepts either a session cookie (browser) or an Authorization: Bearer header
+ * (iOS app). Middleware must not touch them.
+ *
+ * Two reasons. A Bearer request carries no cookie, so this middleware sees no
+ * user and 307s to /login -- the mobile client never reaches the handler.
+ * And even for the browser, redirecting an API call to an HTML login page is
+ * the wrong failure: fetch() follows the redirect and the caller gets 200 plus
+ * a page of markup instead of a 401 it can act on.
+ *
+ * This is not "make /api public" -- every handler still checks auth and
+ * returns 401 itself. It moves the check to the layer that can express the
+ * right answer.
+ */
+function isApiPath(pathname: string) {
+  return pathname.startsWith("/api");
+}
+
+/**
  * Refreshes the Supabase auth session cookie on every request (required by
  * @supabase/ssr so the session doesn't expire mid-visit) and redirects
  * signed-out users to /login for every route except the public ones above.
  * Called from the root middleware.ts.
  */
 export async function updateSession(request: NextRequest) {
+  // Skip before the getUser() round trip -- no point resolving a cookie
+  // session for a request that authenticates by header.
+  if (isApiPath(request.nextUrl.pathname)) {
+    return NextResponse.next({ request });
+  }
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
