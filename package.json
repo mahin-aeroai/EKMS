@@ -12,5 +12,8 @@
     "start": "npm run start -w apps/web",
     "lint": "npm run lint -w apps/web",
     "typecheck": "npm run typecheck -w apps/web"
+  },
+  "dependencies": {
+    "expo-router": "~57.0.8"
   }
 }

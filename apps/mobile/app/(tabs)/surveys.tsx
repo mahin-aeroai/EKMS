@@ -9,7 +9,7 @@ import {
   View,
   useColorScheme,
 } from "react-native";
-import * as FileSystem from "expo-file-system";
+import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import { supabase } from "../../lib/supabase";
 import { getSignedUrl } from "../../lib/copilot";
@@ -74,10 +74,13 @@ export default function SurveysScreen() {
     setOpeningId(row.id);
     try {
       const url = await getSignedUrl("survey", { path: row.relative_path });
-      const target = `${FileSystem.cacheDirectory}${row.file_name}`;
-      const { uri } = await FileSystem.downloadAsync(url, target);
+      const destination = new File(Paths.cache, row.file_name);
+      // idempotent: true -- re-opening the same survey twice in a session must
+      // overwrite the cached copy, not throw (the default behaviour of the
+      // new File API, unlike the old FileSystem.downloadAsync it replaces).
+      const file = await File.downloadFileAsync(url, destination, { idempotent: true });
       if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(uri, { mimeType: "application/pdf", UTI: "com.adobe.pdf" });
+        await Sharing.shareAsync(file.uri, { mimeType: "application/pdf", UTI: "com.adobe.pdf" });
       }
     } finally {
       setOpeningId(null);
