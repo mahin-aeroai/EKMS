@@ -787,7 +787,7 @@ async function executeToolCall(
       const filter = `store_name.ilike.%${query}%,chain.ilike.%${query}%,apple_store_id.ilike.%${query}%,file_name.ilike.%${query}%`;
       const { data, error } = await supabase
         .from("apple_lfg_site_surveys")
-        .select("chain, store_name, apple_store_id, file_name, uploaded_at")
+        .select("chain, store_name, apple_store_id, file_name, uploaded_at, relative_path")
         .or(filter)
         .limit(20);
       if (error) return { result: { error: error.message } };
