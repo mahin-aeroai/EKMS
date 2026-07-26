@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
 
 /**
  * Per-request Supabase client for Route Handlers that must serve BOTH the web
@@ -81,3 +82,41 @@ export async function createRouteSupabaseClient(req: Request): Promise<SupabaseC
  * Leave supabase-server.ts alone. Server Components still use it and they
  * genuinely only ever see cookies.
  */
+
+/**
+ * Resolve the caller and enforce the MFA step-up that the middleware used to.
+ *
+ * supabase-middleware.ts checks getAuthenticatorAssuranceLevel() and bounces an
+ * aal1 session to /login?mfa=1 -- but it now skips /api entirely (so Bearer
+ * requests are not redirected to an HTML page), and no route ever checked aal2
+ * itself. Net effect without this: anyone holding a password-only session,
+ * browser or device, can call these routes and never be asked for their TOTP
+ * code, even though the account has an authenticator enrolled.
+ *
+ * 403 rather than 401 is deliberate: the credentials are valid, the assurance
+ * level is not, so a client should prompt for a code rather than for a
+ * password. The mobile app has no TOTP screen yet, so it should surface the
+ * message and send the person to the web app to complete the step-up.
+ */
+export async function requireVerifiedUser(supabase: SupabaseClient) {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { user: null, response: NextResponse.json({ error: "unauthorized" }, { status: 401 }) };
+  }
+
+  const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (aal && aal.nextLevel === "aal2" && aal.nextLevel !== aal.currentLevel) {
+    return {
+      user: null,
+      response: NextResponse.json(
+        { error: "mfa_required", message: "This account has an authenticator enrolled. Complete the code prompt before using the API." },
+        { status: 403 }
+      ),
+    };
+  }
+
+  return { user, response: null };
+}

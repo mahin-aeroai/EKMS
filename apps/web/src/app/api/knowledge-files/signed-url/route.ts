@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { createRouteSupabaseClient } from "@/lib/supabase-route";
+import { createRouteSupabaseClient, requireVerifiedUser } from "@/lib/supabase-route";
 
 export const dynamic = "force-dynamic";
 
@@ -57,12 +57,8 @@ export async function GET(request: Request) {
   }
 
   const supabase = await createRouteSupabaseClient(request);
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
+  const { user, response: authError } = await requireVerifiedUser(supabase);
+  if (authError) return authError;
 
   // Manual role/group check -- see header comment for why this can't just be
   // a Postgres RLS policy like the rest of the app.

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import type { MessageParam, Tool, ToolResultBlockParam } from "@anthropic-ai/sdk/resources/messages";
-import { createRouteSupabaseClient } from "@/lib/supabase-route";
+import { createRouteSupabaseClient, requireVerifiedUser } from "@/lib/supabase-route";
 
 export const dynamic = "force-dynamic";
 
@@ -861,12 +861,8 @@ export async function POST(request: Request) {
   }
 
   const supabase = await createRouteSupabaseClient(request);
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
+  const { user, response: authError } = await requireVerifiedUser(supabase);
+  if (authError) return authError;
 
   let body: { messages?: { role: "user" | "assistant"; content: string }[] };
   try {
