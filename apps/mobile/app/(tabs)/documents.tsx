@@ -23,8 +23,9 @@ import type { DocumentRow } from "@mmdi/shared/rows";
  * Note "Drawings" is a category value inside `documents`, not the separate
  * drawings table; that is deliberate in the web app and mirrored here.
  *
- * Rows without relative_path have no file attached, so there is nothing to
- * download -- they render without the chevron rather than failing on tap.
+ * Rows without relative_path have no file attached -- there is nothing to
+ * download or share for those, so the query filters them out entirely
+ * rather than listing a dead-end row per document.
  */
 
 const CATEGORIES = ["IKEA IWAY", "FSC COC Audit", "ISO 9001", "Statutory Documents", "Drawings", "Other"] as const;
@@ -46,6 +47,7 @@ export default function DocumentsScreen() {
         .from("documents")
         .select("*")
         .eq("superseded", false)
+        .not("relative_path", "is", null)
         .order("uploaded_at", { ascending: false });
       if (cancelled) return;
       setRows(error ? [] : (data as DocumentRow[]));
@@ -84,34 +86,26 @@ export default function DocumentsScreen() {
       {visible === null ? (
         <ActivityIndicator style={s.pad} color={t.primary} />
       ) : visible.length === 0 ? (
-        <Text style={s.empty}>No documents in this category yet.</Text>
+        <Text style={s.empty}>No documents with files uploaded yet.</Text>
       ) : (
         <FlatList
           data={visible}
           keyExtractor={(r) => r.id}
           contentInsetAdjustmentBehavior="automatic"
           ItemSeparatorComponent={() => <View style={s.sep} />}
-          renderItem={({ item }) => {
-            const hasFile = Boolean(item.relative_path);
-            return (
-              <Pressable
-                onPress={() => open(item)}
-                disabled={!hasFile || opening === item.id}
-                style={({ pressed }) => [s.row, pressed && hasFile && { backgroundColor: t.surfaceSunken }]}
-              >
-                <View style={{ flex: 1 }}>
-                  <Text style={s.title}>{item.title}</Text>
-                  {item.category ? <Text style={s.meta}>{item.category}</Text> : null}
-                  {!hasFile ? <Text style={s.noFile}>No file attached</Text> : null}
-                </View>
-                {opening === item.id ? (
-                  <ActivityIndicator color={t.primary} />
-                ) : hasFile ? (
-                  <Text style={s.chev}>›</Text>
-                ) : null}
-              </Pressable>
-            );
-          }}
+          renderItem={({ item }) => (
+            <Pressable
+              onPress={() => open(item)}
+              disabled={opening === item.id}
+              style={({ pressed }) => [s.row, pressed && { backgroundColor: t.surfaceSunken }]}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={s.title}>{item.title}</Text>
+                {item.category ? <Text style={s.meta}>{item.category}</Text> : null}
+              </View>
+              {opening === item.id ? <ActivityIndicator color={t.primary} /> : <Text style={s.chev}>›</Text>}
+            </Pressable>
+          )}
         />
       )}
     </View>
@@ -129,7 +123,6 @@ const styles = (t: Theme) =>
     row: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: 44, paddingVertical: 12, paddingHorizontal: 16 },
     title: { fontSize: 17, color: t.ink },
     meta: { fontSize: 15, color: t.inkSecondary, marginTop: 2 },
-    noFile: { fontSize: 13, color: t.inkMuted, marginTop: 2 },
     chev: { fontSize: 22, color: t.inkMuted },
     sep: { height: StyleSheet.hairlineWidth, backgroundColor: t.line, marginLeft: 16 },
     empty: { padding: 24, textAlign: "center", fontSize: 15, color: t.inkMuted },

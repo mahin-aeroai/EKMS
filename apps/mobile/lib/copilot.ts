@@ -5,7 +5,12 @@ import { supabase } from "./supabase";
  *
  * The route returns a single JSON object, not a stream:
  *
- *   { "content": "...", "citations": ["Site survey search: \"a\"", ...] }
+ *   { "content": "...", "citations": [...], "results": [{ tool, input, result }] }
+ *
+ * `results` is the structured tool output alongside the prose -- what lets
+ * the Copilot screen render tappable/informational cards instead of just
+ * text, since a citation string like `Site survey search: "a"` can't be
+ * turned back into a record. See CARD_REGISTRY in app/(tabs)/index.tsx.
  *
  * So plain fetch is correct here and expo/fetch is unnecessary. If the route
  * is ever converted to stream token-by-token, switch to
@@ -17,9 +22,16 @@ import { supabase } from "./supabase";
  * routes: 401 without the header, 200 with it.
  */
 
+export interface ToolCall {
+  tool: string;
+  input: unknown;
+  result: unknown;
+}
+
 export interface CopilotReply {
   content: string;
   citations: string[];
+  results: ToolCall[];
 }
 
 const API_BASE = process.env.EXPO_PUBLIC_API_BASE ?? "";
@@ -46,7 +58,7 @@ export async function askCopilot(
   if (!res.ok) throw new Error(`Copilot returned ${res.status}`);
 
   const json = (await res.json()) as Partial<CopilotReply>;
-  return { content: json.content ?? "", citations: json.citations ?? [] };
+  return { content: json.content ?? "", citations: json.citations ?? [], results: json.results ?? [] };
 }
 
 /**
@@ -76,19 +88,3 @@ export async function getSignedUrl(
   const json = await res.json();
   return json.url ?? json.signedUrl;
 }
-
-/**
- * TODO on the server, not here.
- *
- * `citations` comes back as prose strings, so the app can only render the
- * answer as text. For tappable result cards -- open this survey, open this job
- * order -- the route needs to return the structured tool results alongside the
- * prose, e.g.
- *
- *   { content, citations, results: [{ tool, rows }] }
- *
- * Also worth fixing: find_site_survey's description tells the model to send
- * people to /workspaces/site-surveys, which it did in testing. On mobile there
- * is no URL to visit. Return relative_path in the result and drop that
- * sentence from the description.
- */
