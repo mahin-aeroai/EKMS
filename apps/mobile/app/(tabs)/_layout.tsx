@@ -4,8 +4,11 @@ import { useColorScheme } from "react-native";
 import { themes } from "@mmdi/shared/theme";
 
 /**
- * Four tabs. Installation reports are deliberately absent -- report generation
- * depends on pdf-lib + canvas and stays on the web app.
+ * Five tabs. Installation report *capture* lives here (Reports tab + the
+ * report/[id] wizard outside this group); PDF *generation* stays on the web
+ * app (depends on pdf-lib + canvas, out of scope for native) -- see plan
+ * section 5, not built yet. A submitted report is reviewed and turned into a
+ * PDF from the web tool once section 5 lands.
  *
  * SF Symbols via expo-symbols rather than an icon font: they align to the text
  * baseline, respond to weight, and pick the right optical size automatically.
@@ -61,6 +64,13 @@ export default function TabLayout() {
         options={{
           title: "Documents",
           tabBarIcon: ({ color }) => <SymbolView name="folder" tintColor={color} size={26} />,
+        }}
+      />
+      <Tabs.Screen
+        name="reports"
+        options={{
+          title: "Reports",
+          tabBarIcon: ({ color }) => <SymbolView name="list.clipboard" tintColor={color} size={26} />,
         }}
       />
     </Tabs>
