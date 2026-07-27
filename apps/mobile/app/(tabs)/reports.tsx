@@ -179,10 +179,13 @@ export default function ReportsScreen() {
       const { data, error } = await supabase.from("installation_reports").delete().eq("id", id).select("id");
       if (error) throw new Error(error.message);
       // RLS-filtered deletes return 200 with zero rows, not an error -- a
-      // silent no-op that would otherwise look identical to success. See
-      // installation_report_*'s _delete_by_role policy (admin only): a
-      // non-admin tapping Discard gets a real error here instead of a report
-      // that quietly never left the list.
+      // silent no-op that would otherwise look identical to success. Delete
+      // succeeds for an admin (installation_reports_delete_by_role) or for
+      // the report's own creator while it's still status = 'draft' (see
+      // supabase-installation-reports-own-draft-delete-migration.sql) --
+      // this branch is a defensive fallback for anything outside both
+      // (e.g. this row somehow isn't this signed-in user's own), which the
+      // UI shouldn't normally offer Discard on in the first place.
       if (!data || data.length === 0) {
         throw new Error("Nothing was deleted -- you may not have permission to discard this report.");
       }
