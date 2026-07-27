@@ -36,7 +36,8 @@ export interface SubmitProgress {
   photosDone: number;
 }
 
-function allPhotos(draft: DraftReport): { photo: DraftPhoto; siteEntryId: string | null }[] {
+/** Exported for reports.tsx -- computing "expected" photo count for a stuck report's progress display. */
+export function allPhotos(draft: DraftReport): { photo: DraftPhoto; siteEntryId: string | null }[] {
   const out: { photo: DraftPhoto; siteEntryId: string | null }[] = [];
   for (const kind of STORE_LEVEL_KINDS) {
     const p = draft.storePhotos[kind];
