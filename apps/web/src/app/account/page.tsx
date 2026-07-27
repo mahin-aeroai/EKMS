@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { KeyRound, ShieldCheck, ShieldOff, Smartphone } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { KeyRound, Mail, ShieldCheck, ShieldOff, Smartphone } from "lucide-react";
 import type { Factor } from "@supabase/supabase-js";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
@@ -15,6 +16,23 @@ interface PendingEnrollment {
   qrCode: string;
   secret: string;
 }
+
+interface GoogleConnection {
+  email: string;
+  connectedAt: string;
+}
+
+const GMAIL_ERROR_MESSAGES: Record<string, string> = {
+  mfa_required: "Set up an authenticator app below before connecting Gmail.",
+  denied: "Gmail connection cancelled.",
+  invalid_state: "That connection attempt expired or didn't match this browser — try again.",
+  unauthorized: "Your session expired — sign in again and retry.",
+  token_exchange_failed: "Google didn't accept the connection request. Try again.",
+  no_refresh_token: "Google didn't grant a refresh token — try disconnecting any prior grant in your Google Account and reconnecting.",
+  userinfo_failed: "Couldn't read the connected Google account's email.",
+  storage_failed: "Couldn't save the connection. Try again.",
+  wrong_domain: "That's not an mmdi.in Google Workspace account.",
+};
 
 /**
  * Self-service account settings: change your own password, and enroll or
@@ -31,6 +49,7 @@ interface PendingEnrollment {
  */
 export default function AccountPage() {
   const { toast } = useToast();
+  const router = useRouter();
   const [email, setEmail] = useState<string | null>(null);
 
   const [factors, setFactors] = useState<Factor[] | null>(null);
@@ -46,6 +65,43 @@ export default function AccountPage() {
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [savingPassword, setSavingPassword] = useState(false);
+
+  // undefined = still loading; null = not connected.
+  const [googleConnection, setGoogleConnection] = useState<GoogleConnection | null | undefined>(undefined);
+  const [connectingGoogle, setConnectingGoogle] = useState(false);
+  const [disconnectingGoogle, setDisconnectingGoogle] = useState(false);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+
+  async function loadGoogleConnection() {
+    const { data, error } = await supabase.from("google_tokens").select("email, connected_at").maybeSingle();
+    if (error) {
+      toast("danger", "Couldn't load your Gmail connection status");
+      setGoogleConnection(null);
+      return;
+    }
+    setGoogleConnection(data ? { email: data.email, connectedAt: data.connected_at } : null);
+  }
+
+  // Google redirects back to THIS page after oauth/callback finishes --
+  // gmail_connected / gmail_error land as query params on a plain page
+  // load, not a fetch response. Read them once on mount (via
+  // window.location directly rather than useSearchParams, which would force
+  // this whole page into a Suspense boundary just for a one-time read),
+  // toast, then strip them from the URL so refreshing doesn't re-toast.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const connected = params.get("gmail_connected");
+    const errorCode = params.get("gmail_error");
+    if (!connected && !errorCode) return;
+
+    if (connected) {
+      toast("success", "Gmail connected.");
+    } else if (errorCode) {
+      toast("danger", GMAIL_ERROR_MESSAGES[errorCode] ?? "Couldn't connect Gmail.");
+    }
+    router.replace("/account");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // listFactors()'s per-type arrays (data.totp etc.) only ever contain
   // VERIFIED factors — `data.all` is the one place a just-enrolled,
@@ -73,10 +129,39 @@ export default function AccountPage() {
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setEmail(data.user?.email ?? null));
     supabase.auth.mfa.listFactors().then(({ data, error }) => applyFactorsResult(data, error));
+    loadGoogleConnection();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const verifiedFactor = factors?.find((f) => f.status === "verified") ?? null;
+
+  function connectGoogle() {
+    setConnectingGoogle(true);
+    // A real top-level navigation, not fetch -- Google's consent screen
+    // can't be loaded via XHR, and oauth/start itself redirects there.
+    window.location.href = "/api/google/oauth/start";
+  }
+
+  async function disconnectGoogle() {
+    setDisconnectingGoogle(true);
+    try {
+      const res = await fetch("/api/google/disconnect", { method: "POST" });
+      const json = await res.json();
+      if (res.ok && json.revoked) {
+        toast("success", "Gmail disconnected and access revoked at Google.");
+      } else if (res.ok) {
+        toast("warning", json.message ?? "Disconnected, but Google didn't confirm revocation.");
+      } else {
+        toast("danger", json.message ?? "Couldn't disconnect Gmail.");
+      }
+    } catch {
+      toast("danger", "Couldn't reach the server to disconnect Gmail.");
+    } finally {
+      setDisconnectingGoogle(false);
+      setConfirmDisconnect(false);
+      loadGoogleConnection();
+    }
+  }
 
   async function startEnroll() {
     setEnrolling(true);
@@ -319,6 +404,49 @@ export default function AccountPage() {
             </div>
           )}
         </div>
+
+        <div className="rounded-lg border border-line bg-surface p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Mail size={16} className="text-ink-secondary" />
+              <h3 className="text-sm font-semibold text-ink">Gmail</h3>
+            </div>
+            {googleConnection !== undefined && (
+              <Badge status={googleConnection ? "success" : "neutral"}>
+                {googleConnection ? "Connected" : "Not connected"}
+              </Badge>
+            )}
+          </div>
+
+          {googleConnection === undefined ? (
+            <p className="py-6 text-center text-sm text-ink-muted">Loading…</p>
+          ) : googleConnection ? (
+            <div className="flex flex-col gap-3">
+              <p className="text-sm text-ink-secondary">
+                Connected as <span className="font-medium text-ink">{googleConnection.email}</span> — read and draft
+                access only, no send.
+              </p>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="self-start text-danger"
+                onClick={() => setConfirmDisconnect(true)}
+              >
+                Disconnect Gmail
+              </Button>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              <p className="text-sm text-ink-secondary">
+                Connect your Gmail account for the Copilot to search and draft emails on your behalf — read and draft
+                only, it will never send. Requires an authenticator app set up above.
+              </p>
+              <Button size="sm" onClick={connectGoogle} loading={connectingGoogle} className="self-start">
+                Connect Gmail
+              </Button>
+            </div>
+          )}
+        </div>
       </div>
 
       <Dialog
@@ -332,6 +460,19 @@ export default function AccountPage() {
       >
         Signing in will no longer require a verification code. You can set up a new authenticator app again at any
         time.
+      </Dialog>
+
+      <Dialog
+        open={confirmDisconnect}
+        onClose={() => setConfirmDisconnect(false)}
+        title="Disconnect Gmail?"
+        variant="confirm"
+        destructive
+        confirmLabel={disconnectingGoogle ? "Disconnecting…" : "Disconnect"}
+        onConfirm={disconnectGoogle}
+      >
+        This revokes MMDI ONE&apos;s access at Google and removes the connection. The Copilot will no longer be able
+        to search or draft in this mailbox until you reconnect.
       </Dialog>
     </div>
   );
