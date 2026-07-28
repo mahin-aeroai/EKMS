@@ -50,6 +50,7 @@ import { useToast } from "@/components/ui/Notifications";
 import { useEffect, useState } from "react";
 import { Drawer } from "@/components/ui/Drawer";
 import { AIConversation, type ChatTurn } from "@/components/ui/AIConversation";
+import { ContactPicker, type PickedContact } from "@/components/ui/ContactPicker";
 import { supabase } from "@/lib/supabase";
 import type { UserRole } from "@mmdi/shared/rows";
 import { UserRoleContext } from "@/lib/UserRoleContext";
@@ -169,8 +170,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { toast } = useToast();
   const [aiOpen, setAiOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
+  // Same recipient concept as the dedicated AI Copilot workspace page --
+  // lives in the drawer, not the conversation (gmail-plan-v2.md section 4).
+  const [recipient, setRecipient] = useState<PickedContact | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<UserRole | null>(null);
   const [allowedGroups, setAllowedGroups] = useState<string[] | null>(null);
@@ -210,6 +216,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     });
     return () => subscription.subscription.unsubscribe();
   }, []);
+
+  // Safety net beyond Sidebar's own close-on-navigate: covers back/forward
+  // and any programmatic navigation that doesn't go through a nav-item click.
+  useEffect(() => {
+    setNavOpen(false);
+  }, [pathname]);
 
   async function handleSignOut() {
     await supabase.auth.signOut();
@@ -271,7 +283,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       const res = await fetch("/api/ai-copilot", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: history.map((t) => ({ role: t.role, content: t.content })) }),
+        body: JSON.stringify({
+          messages: history.map((t) => ({ role: t.role, content: t.content })),
+          to: recipient ? { contactId: recipient.contactId } : undefined,
+        }),
       });
       const data = await res.json();
 
@@ -300,6 +315,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <UserGroupsContext.Provider value={allowedGroups}>
       <div className="flex h-screen flex-col">
         <TopNav
+          onOpenNav={() => setNavOpen(true)}
+          onOpenSearch={() => setPaletteOpen(true)}
           onOpenAI={() => setAiOpen(true)}
           notificationCount={3}
           userEmail={userEmail}
@@ -308,16 +325,30 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           onOpenAccount={() => router.push("/account")}
         />
         <div className="flex flex-1 overflow-hidden">
-          <Sidebar sections={visibleNav} activeId={activeId} onNavigate={(id) => {
-            const item = NAV.flatMap((s) => s.items).find((i) => i.id === id);
-            if (item) router.push(item.href);
-          }} />
-          <main className="flex-1 overflow-y-auto bg-surface-sunken p-6">
+          <Sidebar
+            sections={visibleNav}
+            activeId={activeId}
+            onNavigate={(id) => {
+              const item = NAV.flatMap((s) => s.items).find((i) => i.id === id);
+              if (item) router.push(item.href);
+            }}
+            mobileOpen={navOpen}
+            onMobileClose={() => setNavOpen(false)}
+          />
+          <main className="flex-1 overflow-y-auto bg-surface-sunken p-4 sm:p-6">
             <div className="mx-auto max-w-6xl">{children}</div>
           </main>
         </div>
-        <CommandPalette commands={commands} onAskAI={(q) => { setAiOpen(true); if (q) handleSend(q); }} />
+        <CommandPalette
+          commands={commands}
+          onAskAI={(q) => { setAiOpen(true); if (q) handleSend(q); }}
+          open={paletteOpen}
+          onOpenChange={setPaletteOpen}
+        />
         <Drawer open={aiOpen} onClose={() => setAiOpen(false)} title="AI Assistant" wide>
+          <div className="mb-3 flex items-center justify-end">
+            <ContactPicker selected={recipient} onSelect={setRecipient} />
+          </div>
           <AIConversation turns={turns} onSend={handleSend} loading={aiLoading} />
         </Drawer>
       </div>

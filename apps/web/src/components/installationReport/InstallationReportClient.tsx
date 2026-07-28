@@ -368,17 +368,21 @@ export default function InstallationReportClient() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        {/* flex-col on mobile: three buttons this wide (esp. "Manage Master
+            Data") don't fit one row at phone width without each one's own
+            label wrapping to two cramped lines -- stacking full-width reads
+            far better than a squeezed row that never actually overflows. */}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <Link
             href="/workspaces/installation-report/master-data"
-            className="flex items-center gap-1.5 rounded-md border border-line-strong px-3 py-2 text-sm font-medium text-ink-secondary hover:bg-surface-sunken"
+            className="flex w-full items-center justify-center gap-1.5 rounded-md border border-line-strong px-3 py-2 text-sm font-medium text-ink-secondary hover:bg-surface-sunken sm:w-auto"
           >
             <Settings size={14} /> Manage Master Data
           </Link>
-          <Button variant="secondary" onClick={startNewReport}>
+          <Button variant="secondary" onClick={startNewReport} className="w-full sm:w-auto">
             <FilePlus2 size={14} className="mr-1.5" /> New Report
           </Button>
-          <Button onClick={handleExport} loading={exporting}>
+          <Button onClick={handleExport} loading={exporting} className="w-full sm:w-auto">
             <Download size={14} className="mr-1.5" /> Export PDF
           </Button>
         </div>

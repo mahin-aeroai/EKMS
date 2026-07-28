@@ -22,11 +22,21 @@ export interface Command {
 export function CommandPalette({
   commands,
   onAskAI,
+  open: openProp,
+  onOpenChange,
 }: {
   commands: Command[];
   onAskAI?: (query: string) => void;
+  // Controlled/uncontrolled hybrid: AppShell needs to open this from a
+  // mobile hamburger-menu search button (there's no ⌘K on a phone
+  // keyboard), which a purely-internal open state can't support. Omit both
+  // props and it behaves exactly as before (⌘K-only, internal state).
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = openProp ?? internalOpen;
+  const setOpen = onOpenChange ?? setInternalOpen;
   const [query, setQuery] = useState("");
   const [activeIdx, setActiveIdx] = useState(0);
 
@@ -34,13 +44,15 @@ export function CommandPalette({
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        setOpen((o) => !o);
+        // Not the `(o) => !o` updater form -- setOpen may be onOpenChange, a
+        // plain (open: boolean) => void that can't accept a function.
+        setOpen(!open);
       }
       if (e.key === "Escape") setOpen(false);
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, []);
+  }, [open, setOpen]);
 
   const filtered = useMemo(
     () => commands.filter((c) => c.label.toLowerCase().includes(query.toLowerCase())),

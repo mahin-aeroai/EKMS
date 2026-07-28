@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Image,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -19,7 +21,7 @@ import { useHeaderHeight } from "expo-router/react-navigation";
 import { themes, radius, type Theme } from "@mmdi/shared/theme";
 import { supabase } from "@/lib/supabase";
 import { loadDraft, saveDraft } from "@/lib/installationReports/draftStore";
-import { capturePhoto } from "@/lib/installationReports/photo";
+import { capturePhoto, PhotoPermissionDeniedError } from "@/lib/installationReports/photo";
 import { submitReport, type SubmitProgress } from "@/lib/installationReports/submit";
 import {
   emptyDraftReport,
@@ -524,6 +526,16 @@ function PhotoSlot({
     setBusy(true);
     try {
       await onPick(source);
+    } catch (err) {
+      if (err instanceof PhotoPermissionDeniedError) {
+        Alert.alert(
+          err.source === "camera" ? "Camera access needed" : "Photo library access needed",
+          err.message,
+          [{ text: "Cancel", style: "cancel" }, { text: "Open Settings", onPress: () => Linking.openSettings() }]
+        );
+      } else {
+        Alert.alert("Couldn't add photo", err instanceof Error ? err.message : "Unknown error");
+      }
     } finally {
       setBusy(false);
     }

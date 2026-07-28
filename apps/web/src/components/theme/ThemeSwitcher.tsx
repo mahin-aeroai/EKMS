@@ -16,7 +16,10 @@ export function ThemeSwitcher() {
     <div
       role="radiogroup"
       aria-label="Theme"
-      className="flex items-center gap-1 rounded-full border border-line bg-surface p-1"
+      // flex-wrap: harmless in the header (always has room, never wraps
+      // there) but load-bearing inside TopNav's mobile account-menu fallback
+      // -- a 224px-wide dropdown can't fit all three pill buttons on one line.
+      className="flex flex-wrap items-center gap-1 rounded-full border border-line bg-surface p-1"
     >
       {OPTIONS.map((opt) => {
         const Icon = opt.icon;

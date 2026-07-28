@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Tag } from "@/components/ui/Tag";
 import { StatCard } from "@/components/ui/Card";
 import { AIConversation, type ChatTurn } from "@/components/ui/AIConversation";
+import { ContactPicker, type PickedContact } from "@/components/ui/ContactPicker";
 import { useToast } from "@/components/ui/Notifications";
 import { getCount, getCountWhere } from "@/lib/dashboard-queries";
 
@@ -21,6 +22,11 @@ export default function AICopilotPage() {
   const [context, setContext] = useState<CopilotContext | null>(null);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [loading, setLoading] = useState(false);
+  // Drafting recipient (gmail-plan-v2.md section 4) -- lives in the composer,
+  // not in the conversation, since it's not something the model should ever
+  // see or influence. Sent on every request; draft_email is a no-op without
+  // it, but search and every other tool works identically either way.
+  const [recipient, setRecipient] = useState<PickedContact | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -45,7 +51,10 @@ export default function AICopilotPage() {
       const res = await fetch("/api/ai-copilot", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: history.map((t) => ({ role: t.role, content: t.content })) }),
+        body: JSON.stringify({
+          messages: history.map((t) => ({ role: t.role, content: t.content })),
+          to: recipient ? { contactId: recipient.contactId } : undefined,
+        }),
       });
       const data = await res.json();
 
@@ -97,11 +106,20 @@ export default function AICopilotPage() {
         <StatCard label="Compliance Findings on Record" value={context ? String(context.openComplianceFindings) : "—"} trend="flat" trendLabel="Live count" />
       </div>
 
+      {/* Recipient lives here, above the conversation, not as a turn inside
+          it -- gmail-plan-v2.md section 4 wants this decided in the UI, not
+          something the model is ever asked about or can influence. Applies
+          to every message sent below, but only draft_email actually reads
+          it; search and everything else ignores it entirely. */}
+      <div className="mb-3 flex items-center justify-end">
+        <ContactPicker selected={recipient} onSelect={setRecipient} />
+      </div>
+
       {/* Fills most of the viewport instead of a fixed 520px -- a 20-item
           sales breakdown answer needs a lot more room to read comfortably
           than a couple of short turns did. min-h keeps it usable on short
           viewports too. */}
-      <div className="h-[calc(100vh-260px)] min-h-[420px] rounded-lg border border-line bg-surface p-2">
+      <div className="h-[calc(100vh-300px)] min-h-[420px] rounded-lg border border-line bg-surface p-2">
         <AIConversation turns={turns} onSend={handleSend} contextLabel="Enterprise-wide" loading={loading} />
       </div>
     </div>

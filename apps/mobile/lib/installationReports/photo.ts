@@ -31,9 +31,47 @@ import { isPhotoKind, type DraftPhoto, type PhotoKind } from "./types";
 const MAX_EDGE = 1600;
 const JPEG_QUALITY = 0.7;
 
-export async function requestCameraPermission(): Promise<boolean> {
-  const { status } = await ImagePicker.requestCameraPermissionsAsync();
-  return status === "granted";
+/**
+ * Thrown by ensurePermission when camera/library access isn't granted --
+ * callers (the PhotoSlot UI) catch this specifically to show a message
+ * pointing at Settings instead of letting a raw native exception surface
+ * as an unhandled rejection (the exact failure this replaces: launching
+ * the camera with no permission granted throws
+ * MissingCameraPermissionException from ImagePickerModule.swift with no
+ * prior prompt, since nothing had ever requested permission first).
+ */
+export class PhotoPermissionDeniedError extends Error {
+  constructor(
+    public readonly source: "camera" | "library",
+    // false once the OS will no longer show its own prompt (denied twice on
+    // iOS, or "don't ask again" on Android) -- re-requesting at that point
+    // just silently re-resolves to denied, so the UI should send the person
+    // to Settings instead of retrying.
+    public readonly canAskAgain: boolean
+  ) {
+    super(
+      source === "camera"
+        ? "Camera access is off for this app. Turn it on in Settings to take photos."
+        : "Photo library access is off for this app. Turn it on in Settings to choose photos."
+    );
+    this.name = "PhotoPermissionDeniedError";
+  }
+}
+
+// Checks current status first and only calls the request*Async variant when
+// canAskAgain is true -- once denied permanently, requesting again shows no
+// system prompt at all and just re-resolves to denied, so there's no point
+// re-asking (and doing so anyway would mask that Settings is now the only
+// way forward).
+async function ensurePermission(source: "camera" | "library"): Promise<void> {
+  const current =
+    source === "camera" ? await ImagePicker.getCameraPermissionsAsync() : await ImagePicker.getMediaLibraryPermissionsAsync();
+  if (current.granted) return;
+  if (!current.canAskAgain) throw new PhotoPermissionDeniedError(source, false);
+
+  const requested =
+    source === "camera" ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
+  if (!requested.granted) throw new PhotoPermissionDeniedError(source, requested.canAskAgain);
 }
 
 async function pickAsset(source: "camera" | "library"): Promise<ImagePicker.ImagePickerAsset | null> {
@@ -97,6 +135,12 @@ export async function capturePhoto(
   if (!isPhotoKind(kind)) {
     throw new Error(`capturePhoto: "${kind}" is not one of the ten allowed photo kinds -- refusing to proceed.`);
   }
+
+  // Web has no OS-level permission prompt for either source (camera isn't
+  // supported there at all; the library path is a plain browser file input) --
+  // this only matters on native, where iOS/Android both require an explicit
+  // grant before launchCameraAsync/launchImageLibraryAsync will succeed.
+  if (Platform.OS !== "web") await ensurePermission(source);
 
   const asset = await pickAsset(source);
   if (!asset) return null;

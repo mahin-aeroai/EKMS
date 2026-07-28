@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Bell, LogOut, Search, ShieldCheck, Sparkles } from "lucide-react";
+import { Bell, LogOut, Menu, Search, ShieldCheck, Sparkles } from "lucide-react";
 import { ThemeSwitcher } from "@/components/theme/ThemeSwitcher";
 import { Badge, type BadgeStatus } from "./Badge";
 import type { UserRole } from "@mmdi/shared/rows";
@@ -33,6 +33,7 @@ function initialsFromEmail(email: string) {
  * Usage rule: identical across every workspace — never customized per module.
  */
 export function TopNav({
+  onOpenNav,
   onOpenSearch,
   onOpenAI,
   notificationCount = 0,
@@ -41,6 +42,7 @@ export function TopNav({
   onSignOut,
   onOpenAccount,
 }: {
+  onOpenNav?: () => void;
   onOpenSearch?: () => void;
   onOpenAI?: () => void;
   notificationCount?: number;
@@ -52,30 +54,51 @@ export function TopNav({
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line bg-surface px-4">
+    <header
+      className="flex h-14 shrink-0 items-center gap-2 border-b border-line bg-surface px-3 sm:gap-3 sm:px-4"
+      // Installed standalone on iOS (viewportFit: "cover" in the root
+      // layout), the header would otherwise sit directly under the notch/
+      // Dynamic Island with no clearance. env() resolves to 0 in a normal
+      // browser tab, so this is a no-op outside standalone display.
+      style={{ paddingTop: "env(safe-area-inset-top)", height: "calc(3.5rem + env(safe-area-inset-top))" }}
+    >
+      <button
+        onClick={onOpenNav}
+        aria-label="Open menu"
+        className="rounded-md p-2 text-ink-secondary hover:bg-surface-sunken md:hidden"
+      >
+        <Menu size={18} />
+      </button>
+
       <span className="font-semibold text-ink">MMDI ONE</span>
-      <span className="text-ink-muted">/</span>
-      <span className="text-sm text-ink-secondary">Design System</span>
+      {/* Below md there's no room for the breadcrumb once the hamburger and a
+          usable search target are both in the row -- the brand mark alone is
+          enough chrome at phone width. */}
+      <span className="hidden text-ink-muted sm:inline">/</span>
+      <span className="hidden text-sm text-ink-secondary sm:inline">Design System</span>
 
       <button
         onClick={onOpenSearch}
-        className="ml-4 flex flex-1 max-w-md items-center gap-2 rounded-md border border-line-strong bg-surface-sunken px-3 py-1.5 text-sm text-ink-muted hover:border-primary"
+        aria-label="Search MMDI ONE"
+        className="ml-1 flex items-center gap-2 rounded-md border border-line-strong bg-surface-sunken p-2 text-sm text-ink-muted hover:border-primary sm:ml-4 sm:flex-1 sm:max-w-md sm:px-3 sm:py-1.5"
       >
         <Search size={15} />
-        Search MMDI ONE…
-        <kbd className="ml-auto rounded border border-line-strong bg-surface px-1.5 py-0.5 text-[10px] font-medium">
+        <span className="hidden sm:inline">Search MMDI ONE…</span>
+        <kbd className="ml-auto hidden rounded border border-line-strong bg-surface px-1.5 py-0.5 text-[10px] font-medium sm:inline-block">
           ⌘K
         </kbd>
       </button>
 
-      <div className="ml-auto flex items-center gap-2">
-        <ThemeSwitcher />
+      <div className="ml-auto flex items-center gap-1 sm:gap-2">
+        <div className="hidden md:flex">
+          <ThemeSwitcher />
+        </div>
         <button
           onClick={onOpenAI}
-          className="flex items-center gap-1.5 rounded-md bg-ai-tint px-3 py-1.5 text-sm font-medium text-ai hover:opacity-90"
+          className="flex items-center gap-1.5 rounded-md bg-ai-tint px-2.5 py-1.5 text-sm font-medium text-ai hover:opacity-90 sm:px-3"
         >
           <Sparkles size={15} />
-          Ask AI
+          <span className="hidden sm:inline">Ask AI</span>
         </button>
         <button aria-label="Notifications" className="relative rounded-md p-2 text-ink-secondary hover:bg-surface-sunken">
           <Bell size={18} />
@@ -107,6 +130,12 @@ export function TopNav({
                     )}
                   </div>
                 )}
+                {/* Theme has nowhere else to live below md -- the pill switcher
+                    in the header itself is hidden there for space, so it's
+                    folded into this menu instead of just disappearing. */}
+                <div className="border-b border-line px-3 py-2 md:hidden">
+                  <ThemeSwitcher />
+                </div>
                 <button
                   onClick={() => {
                     setMenuOpen(false);

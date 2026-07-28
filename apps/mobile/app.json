@@ -40,7 +40,15 @@
         }
       ],
       "expo-secure-store",
-      "expo-sharing"
+      "expo-sharing",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "MMDI ONE uses your camera to photograph installation sites for your installation report.",
+          "photosPermission": "MMDI ONE lets you attach photos from your library to your installation report.",
+          "microphonePermission": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

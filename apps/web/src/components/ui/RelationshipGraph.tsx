@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export interface GraphNode {
   id: string;
@@ -31,7 +31,16 @@ export function RelationshipGraph({
   edges: GraphEdge[];
   onRecenter?: (nodeId: string) => void;
 }) {
+  // Always starts false so server and first client render match (no
+  // `window` at SSR time) -- then flips to the list view immediately after
+  // mount on a narrow screen. The graph itself scales fine via viewBox, but
+  // 24px node circles with 10px labels packed into real phone width are
+  // cramped and hard to tap; the list view has always been the documented
+  // mobile default here, it just was never actually wired up.
   const [listView, setListView] = useState(false);
+  useEffect(() => {
+    if (window.innerWidth < 640) setListView(true);
+  }, []);
   const radius = 110;
   const cx = 180;
   const cy = 150;
