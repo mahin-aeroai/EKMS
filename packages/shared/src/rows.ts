@@ -349,10 +349,18 @@ export interface EstimateRow {
   job_completion_time: string | null;
   delivery_commitment: string | null;
   payment_terms_days: number | null;
+  payment_terms_type: EstimatePaymentTermsType;
   created_by: string | null;
   created_at: string;
   updated_at: string;
 }
+
+// "net_days" is the original days-from-supply term (the only kind this
+// used to support). "advance" and "against_delivery" are fixed terms with
+// no day count attached -- added per the user's request to offer them as
+// real options rather than forcing every estimate into a "Net N days"
+// shape.
+export type EstimatePaymentTermsType = "net_days" | "advance" | "against_delivery";
 
 export type EstimateCalcMode = "nos" | "sqft";
 

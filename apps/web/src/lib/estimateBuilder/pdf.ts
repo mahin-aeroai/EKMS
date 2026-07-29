@@ -38,6 +38,7 @@
 
 import { PDFDocument, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
+import type { EstimatePaymentTermsType } from "@mmdi/shared/rows";
 
 const PT_PER_MM = 72 / 25.4;
 const mm = (v: number) => v * PT_PER_MM;
@@ -114,6 +115,7 @@ export interface EstimatePdfData {
   gstPercent: number;
   jobCompletionTime: string | null;
   deliveryCommitment: string | null;
+  paymentTermsType: EstimatePaymentTermsType;
   paymentTermsDays: number | null;
   notes: string | null;
   lines: EstimatePdfLine[];
@@ -438,7 +440,14 @@ export async function generateEstimatePdf(data: EstimatePdfData): Promise<Blob> 
   ensure(ctx, state, 30);
   state.page.drawText("Payment Schedule:", { x: MARGIN, y: state.y, size, font: bold, color: INK });
   state.y -= 13;
-  const paymentLine = data.paymentTermsDays ? `${data.paymentTermsDays} days from the date of supply.` : "To be confirmed.";
+  const paymentLine =
+    data.paymentTermsType === "advance"
+      ? "100% advance payment before commencement of work."
+      : data.paymentTermsType === "against_delivery"
+        ? "Payment against delivery."
+        : data.paymentTermsDays
+          ? `${data.paymentTermsDays} days from the date of supply.`
+          : "To be confirmed.";
   state.page.drawText(paymentLine, { x: MARGIN, y: state.y, size, font, color: INK });
   state.y -= 20;
 

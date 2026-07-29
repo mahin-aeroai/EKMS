@@ -9,7 +9,7 @@ import { Card, StatCard } from "@/components/ui/Card";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
-import type { CustomerRow, CustomerContactRow, ContractRow, IkeaRateCardRow, AppleRateCardRow, EstimateRow, EstimateCalcMode, EstimateLineItemRow } from "@mmdi/shared/rows";
+import type { CustomerRow, CustomerContactRow, ContractRow, IkeaRateCardRow, AppleRateCardRow, EstimateRow, EstimateCalcMode, EstimateLineItemRow, EstimatePaymentTermsType } from "@mmdi/shared/rows";
 import { generateEstimatePdf, downloadBlob, type EstimatePdfLine } from "@/lib/estimateBuilder/pdf";
 import { fetchAllRows } from "@/lib/dashboard-queries";
 
@@ -176,6 +176,7 @@ export default function EstimateBuilderPage() {
   const [customerGstin, setCustomerGstin] = useState("");
   const [jobCompletionTime, setJobCompletionTime] = useState("");
   const [deliveryCommitment, setDeliveryCommitment] = useState("");
+  const [paymentTermsType, setPaymentTermsType] = useState<EstimatePaymentTermsType>("net_days");
   const [paymentTermsDays, setPaymentTermsDays] = useState<number | "">("");
   const [saving, setSaving] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
@@ -266,6 +267,7 @@ export default function EstimateBuilderPage() {
         gstPercent: estimate.gst_percent,
         jobCompletionTime: estimate.job_completion_time,
         deliveryCommitment: estimate.delivery_commitment,
+        paymentTermsType: estimate.payment_terms_type ?? "net_days",
         paymentTermsDays: estimate.payment_terms_days,
         notes: estimate.notes,
         lines: pdfLinesFrom((items as EstimateLineItemRow[]) ?? []),
@@ -301,6 +303,7 @@ export default function EstimateBuilderPage() {
       setCustomerGstin(estimate.customer_gstin ?? "");
       setJobCompletionTime(estimate.job_completion_time ?? "");
       setDeliveryCommitment(estimate.delivery_commitment ?? "");
+      setPaymentTermsType(estimate.payment_terms_type ?? "net_days");
       setPaymentTermsDays(estimate.payment_terms_days ?? "");
       setLines(
         ((items as EstimateLineItemRow[]) ?? []).map((i) => ({
@@ -454,6 +457,7 @@ export default function EstimateBuilderPage() {
     void loadCustomerContacts(id, { autofill: true });
     void loadSalesHistory(id);
     const name = customer?.name?.toLowerCase() ?? "";
+    setPaymentTermsType("net_days");
     if (name.includes("ikea")) setPaymentTermsDays(30);
     else if (name.includes("apple")) setPaymentTermsDays(45);
     else setPaymentTermsDays("");
@@ -627,7 +631,11 @@ export default function EstimateBuilderPage() {
           customer_gstin: customerGstin || null,
           job_completion_time: jobCompletionTime || null,
           delivery_commitment: deliveryCommitment || null,
-          payment_terms_days: paymentTermsDays === "" ? null : paymentTermsDays,
+          payment_terms_type: paymentTermsType,
+          // Only 'net_days' ever carries a day count -- 'advance'/'against_delivery'
+          // are fixed terms with nothing to count (see the migration's check
+          // constraint invariant).
+          payment_terms_days: paymentTermsType === "net_days" && paymentTermsDays !== "" ? paymentTermsDays : null,
           created_by: userData.user?.id ?? null,
         })
         .select()
@@ -676,7 +684,8 @@ export default function EstimateBuilderPage() {
         gstPercent,
         jobCompletionTime: jobCompletionTime || null,
         deliveryCommitment: deliveryCommitment || null,
-        paymentTermsDays: paymentTermsDays === "" ? null : paymentTermsDays,
+        paymentTermsType,
+        paymentTermsDays: paymentTermsType === "net_days" && paymentTermsDays !== "" ? paymentTermsDays : null,
         notes: notes || null,
         lines: lines.map((l) => ({
           productNo: l.productNo || null,
@@ -1181,15 +1190,27 @@ export default function EstimateBuilderPage() {
           />
         </label>
         <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
-          Payment terms (days)
-          {isIkea && <span className="font-normal normal-case text-ink-muted"> — defaults to 30 for IKEA</span>}
-          {isApple && <span className="font-normal normal-case text-ink-muted"> — defaults to 45 for Apple</span>}
-          <input
-            type="number"
-            value={paymentTermsDays}
-            onChange={(e) => setPaymentTermsDays(e.target.value === "" ? "" : Number(e.target.value))}
+          Payment terms
+          {isIkea && paymentTermsType === "net_days" && <span className="font-normal normal-case text-ink-muted"> — defaults to 30 for IKEA</span>}
+          {isApple && paymentTermsType === "net_days" && <span className="font-normal normal-case text-ink-muted"> — defaults to 45 for Apple</span>}
+          <select
+            value={paymentTermsType}
+            onChange={(e) => setPaymentTermsType(e.target.value as EstimatePaymentTermsType)}
             className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
-          />
+          >
+            <option value="net_days">Net terms (days from date of supply)</option>
+            <option value="advance">Advance Payment</option>
+            <option value="against_delivery">Against Delivery</option>
+          </select>
+          {paymentTermsType === "net_days" && (
+            <input
+              type="number"
+              value={paymentTermsDays}
+              onChange={(e) => setPaymentTermsDays(e.target.value === "" ? "" : Number(e.target.value))}
+              placeholder="Number of days"
+              className="mt-1 h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
+            />
+          )}
         </label>
         <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
           Notes (optional)

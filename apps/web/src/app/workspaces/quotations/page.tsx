@@ -102,6 +102,7 @@ export default function QuotationsPage() {
         gstPercent: estimate.gst_percent,
         jobCompletionTime: estimate.job_completion_time,
         deliveryCommitment: estimate.delivery_commitment,
+        paymentTermsType: estimate.payment_terms_type ?? "net_days",
         paymentTermsDays: estimate.payment_terms_days,
         notes: estimate.notes,
         lines,
