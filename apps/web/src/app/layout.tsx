@@ -5,6 +5,7 @@ import { ToastProvider } from "@/components/ui/Notifications";
 import { AppShell } from "@/components/AppShell";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
 import { InstallPrompt } from "@/components/InstallPrompt";
+import { IosInstallHint } from "@/components/IosInstallHint";
 
 export const metadata: Metadata = {
   title: "MMDI ONE — Product Design System",
@@ -52,6 +53,7 @@ export default function RootLayout({
             <AppShell>{children}</AppShell>
             <ServiceWorkerRegister />
             <InstallPrompt />
+            <IosInstallHint />
           </ToastProvider>
         </ThemeProvider>
       </body>

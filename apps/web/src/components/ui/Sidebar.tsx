@@ -45,9 +45,19 @@ export function Sidebar({
   // markup isn't maintained twice -- `expanded` controls label visibility
   // since the rail can collapse to icon-only but the mobile drawer never
   // does (there's no icon-rail equivalent worth showing full-screen).
+  // paddingBottom/Left below are additive via env() -- 0 outside
+  // standalone/notched devices, so they only matter for the mobile drawer
+  // variant below: clearing the home indicator, and the left sensor-housing
+  // inset in landscape.
   function navList(expanded: boolean) {
     return (
-      <nav className="flex-1 overflow-y-auto px-2 py-4">
+      <nav
+        className="flex-1 overflow-y-auto px-2 py-4"
+        style={{
+          paddingBottom: "calc(1rem + env(safe-area-inset-bottom))",
+          paddingLeft: "calc(0.5rem + env(safe-area-inset-left))",
+        }}
+      >
         {sections.map((section) => (
           <div key={section.title} className="mb-4">
             {expanded && (
@@ -122,7 +132,17 @@ export function Sidebar({
             mobileOpen ? "translate-x-0" : "-translate-x-full"
           )}
         >
-          <div className="flex items-center justify-between border-b border-line px-4 py-3">
+          {/* Panel is left-anchored (absolute left-0 top-0 h-full) -- in
+              standalone iOS this sits under the notch/Dynamic Island, and in
+              landscape with the device rotated so the sensor housing is on
+              the left, under that too. env() is 0 everywhere else. */}
+          <div
+            className="flex items-center justify-between border-b border-line px-4 py-3"
+            style={{
+              paddingTop: "calc(0.75rem + env(safe-area-inset-top))",
+              paddingLeft: "calc(1rem + env(safe-area-inset-left))",
+            }}
+          >
             <span className="text-sm font-semibold text-ink">Menu</span>
             <button aria-label="Close menu" onClick={onMobileClose} className="rounded p-1 text-ink-muted hover:bg-surface-sunken">
               <X size={16} />

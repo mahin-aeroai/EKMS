@@ -56,7 +56,15 @@ export function InstallPrompt() {
   if (!visible) return null;
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-50 flex items-center gap-3 border-t border-line bg-surface-overlay px-4 py-3 shadow-4 sm:inset-x-auto sm:bottom-4 sm:left-4 sm:max-w-sm sm:rounded-lg sm:border">
+    // Below sm this is full-bleed (inset-x-0 bottom-0) -- in standalone iOS
+    // that means the home indicator (bottom) and, in landscape, the sensor-
+    // housing inset (left or right depending on rotation) both cut directly
+    // into it, so padding gets the safe-area env() added on those sides. At
+    // sm+ it's a floating card instead (sm:bottom-.../sm:left-...), where the
+    // POSITION already clears the inset, so padding there reverts to plain
+    // values rather than double-counting the same inset as both an offset
+    // and padding. env() is 0 outside standalone/notched devices either way.
+    <div className="fixed inset-x-0 bottom-0 z-50 flex items-center gap-3 border-t border-line bg-surface-overlay pt-3 pb-[calc(0.75rem_+_env(safe-area-inset-bottom))] pl-[calc(1rem_+_env(safe-area-inset-left))] pr-[calc(1rem_+_env(safe-area-inset-right))] shadow-4 sm:inset-x-auto sm:bottom-[calc(1rem_+_env(safe-area-inset-bottom))] sm:left-[calc(1rem_+_env(safe-area-inset-left))] sm:max-w-sm sm:rounded-lg sm:border sm:pb-3 sm:pl-4 sm:pr-4">
       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary-tint text-primary">
         <Download size={16} />
       </span>

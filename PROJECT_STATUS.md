@@ -1,9 +1,11 @@
 # MMDI ONE — Project Status
 
-Last updated: 15 July 2026 (session: auth + role-based access control +
-all 6 dashboards + all 4 flagship workspaces wired, plus real customer/
-revenue/machine/raw-material/finished-goods/job-order data imported;
-"Projects" replaced with a real "Job Orders" workspace)
+Last updated: 29 July 2026 (session: Bearer auth for mobile clients, the
+monorepo split into apps/web + apps/mobile + packages/shared, custom-domain
++ middleware fixes, the Gmail integration end to end (OAuth, search, draft
+with a recipient picker), the Expo mobile app built and running on a
+physical device, and the web app's PWA layer + mobile-shell responsive
+fixes)
 
 This file exists so a new chat session (or a new contributor) can pick up this
 project without re-deriving context. Read this before making changes.
@@ -46,248 +48,54 @@ over what the code actually does again.
 
 ## Current state (done, verified working)
 
-1. **Design system**: 42 reusable UI components (`src/components/ui/`), 3 themes
-   (Light/Dark/Enterprise), full style-guide showcase app under `/components/*`
-   and `/foundations`.
-2. **Authentication (new this session)**: Supabase Auth, email + password,
-   no self-signup — accounts are created by an admin via the Supabase
-   dashboard (Authentication → Users → Add user). Built with `@supabase/ssr`:
-   - `src/lib/supabase.ts` — browser client (`createBrowserClient`), used by
-     every "use client" component. Same export name/path as before
-     (`supabase`), so none of the 20+ client-side workspace modules needed
-     changes.
-   - `src/lib/supabase-server.ts` — `createServerSupabaseClient()`, an async
-     per-request client for Server Components. Currently only
-     `src/app/workspaces/customer/page.tsx` uses this (the only real Server
-     Component fetch in the app).
-   - `middleware.ts` + `src/lib/supabase-middleware.ts` — refreshes the
-     session cookie on every request and redirects signed-out users to
-     `/login` (except `/login` itself and static assets).
-   - `src/app/login/page.tsx` — email/password sign-in form.
-   - `src/components/AppShell.tsx` / `src/components/ui/TopNav.tsx` — track
-     the signed-in user client-side (`supabase.auth.getUser()` +
-     `onAuthStateChange`), show their initials in the top-right avatar with a
-     sign-out menu, and skip the sidebar/topnav chrome entirely on `/login`.
-3. **4 flagship workspaces** — Customer, Machine, Raw Material, Job Orders
-   (renamed from "Projects" this session — see below) — each uses the full
-   6-tab Universal Workspace Pattern (Overview / Insights / Timeline /
-   Documents / Relationships / Activity), with a Server/Client split
-   matching the Customer workspace's original pattern (see
-   `src/lib/supabase-server.ts`). The stat row, a real spec/info panel, and
-   the Activity tab (comments + approvals, writable) are real for all 4.
-   Insights/Timeline/Documents remain illustrative sample content on all 4
-   (no sensor telemetry, consumption/downtime log, budget ledger, or
-   document-storage schema exists to back them) — **except** Job Orders'
-   Timeline tab, which is real (order date / production start / production
-   end are genuine columns).
-   - **"Projects" → "Job Orders"**: the generic `projects` table
-     (sponsor/budget_utilization/schedule_health/open_risks) never matched
-     how MMDI actually works — the user clarified they run job orders, not
-     projects in that sense. Replaced with a purpose-built `job_orders`
-     table (customer, machine, substrate application, qty/sqft/value,
-     status, dates — see `supabase-job-orders-schema.sql`), imported from a
-     real production report (`import-job-orders.sql`, from "Production
-     Report FY2026_Q1.xlsx" — 2,072 job orders aggregated from 10,055
-     production line items, Hyderabad plant, Apr–Jun 2026). The route moved
-     from `/workspaces/project` to `/workspaces/job-orders`; the old route
-     now just redirects there (old links/bookmarks still work). The old
-     `projects`/`project_comments`/`project_approvals` tables and
-     `ProjectRow`/`ProjectCommentRow`/`ProjectApprovalRow` types are left in
-     place, unused, rather than dropped — `ProjectWorkspaceClient.tsx` was
-     deleted since nothing routes to it anymore.
-   - Server pages (`src/app/workspaces/{customer,machine,raw-material,job-orders}/page.tsx`)
-     fetch a specific real record by code (Customer/Machine/Raw
-     Material/Job Orders all now do this — see below) rather than "most
-     recently created row" everywhere.
-   - `machines` (73 rows) and `raw_materials` (1,558 rows) have real
-     imported data. `job_orders` has 2,072 rows (see above).
-   - Customer workspace specifically is pointed at a real imported customer
-     — `C03739` (Apple India Pvt Ltd - Bangalore, the real customer with the
-     highest Q1 revenue and a real contact on file) — not the original
-     fictional "Reliance Retail Ltd" demo record, which is still sitting in
-     the table under code `CUST-MU-002104` unused.
-   - Machine, Raw Material, and Job Orders workspaces are now also pointed
-     at specific real demo records (same pattern): `MC-HYD-001` (Vutek GS
-     3250 LX Pro, Unit 1, Hyderabad), `RM-11001` (Frontlit Flex, a core
-     signage substrate), and Job Order `7455` (Shark Shopfits Private
-     Limited, ₹14.7L — the highest-value job order that isn't an internal
-     "BASIL"/"CASH SALES" bucket and has a confident customer_id link, for
-     the fullest demo).
-4. **22 lighter workspace modules** covering the rest of the MDI-ONE IA
-   (Executive, Customers, Operations, Manufacturing, Knowledge, People,
-   Finance, Compliance, Administration groups in the sidebar nav). Pattern:
-   header + stat row + one AI insight card + one real domain widget (table,
-   kanban, calendar, tree, etc.) — not the full 6-tab pattern.
-   - **16 of these are wired to real Supabase data** (simple `useEffect` +
-     `useState` fetch, no Server/Client split needed): CRM, Quotations,
-     Contracts, Production, Maintenance, Installation, Inventory, Procurement,
-     Suppliers, Documents, Drawings, SOPs, Lessons Learned, People,
-     Compliance, Administration.
-   - The 6 cross-module aggregation/dashboard pages (Command Center,
-     Analytics, Costing, AI Knowledge, Finance, AI Copilot) were also wired
-     this session — see item 8 below for what "wired" means for these
-     specifically, since none of them have a single natural backing table.
-5. **Backend**: Supabase project `mahin-aeroai's Project`
-   (`https://vzyrvzgtjcodxkjydxxn.supabase.co`), free tier. Browser-safe
-   client uses the anon/publishable key (safe to expose — protected by RLS,
-   not a secret). All row-type TypeScript interfaces live in
-   `src/lib/supabase.ts`.
-6. **RLS**: two migrations, layered.
-   `supabase-auth-rls-migration.sql` (earlier this session) first replaced
-   every table's wide-open `using (true)` policies with `TO authenticated`
-   policies (any signed-in user, full access). Confirmed run in production.
-   `supabase-role-based-rls-migration.sql` (later, **confirmed run in
-   production on 15 July 2026**) supersedes those policies with a real
-   3-tier role model:
-   - A `profiles` table (`id`/`email`/`role`, role = admin/editor/viewer,
-     default 'viewer'), a `public.user_role()` security-definer function,
-     an `auth.users` insert trigger that auto-creates a profile for every
-     new user, a backfill for users created before the migration, and a
-     bootstrap step. **Correction**: the file originally bootstrapped
-     `srinivas@mmdi.in` to admin, assuming that was the account signed
-     into the Supabase project — it wasn't (the real accounts are
-     `m.nandipa@icloud.com`, `mahin.nandipa@gmail.com`,
-     `nandipa@icloud.com`), so the bootstrap `UPDATE` matched zero rows
-     and nobody got promoted. Fixed by running the correct `UPDATE`
-     directly (`m.nandipa@icloud.com` → admin) and updating the file to
-     match. Confirmed via `select email, role, created_at from
-     public.profiles`: 3 real users, all with profile rows (the Supabase
-     dashboard's "10 users (estimated)" figure around the same time was
-     inaccurate — there was an active platform incident at the time).
-   - Every table from the previous migration gets replaced policies:
-     SELECT allowed for all 3 roles, INSERT/UPDATE for admin+editor only,
-     DELETE for admin only.
-   - Validated against a real local Postgres instance with a stub
-     `auth.users`/`auth.uid()` before handoff — confirmed viewers can read
-     but not write, editors can read/write but not delete, admins can do
-     everything, a signed-in user with no profile row is locked out
-     everywhere (fail-closed), the auto-create trigger fires correctly,
-     and the whole file is idempotent.
-   - App code reads the current user's role client-side (tolerant fetch —
-     if `profiles` doesn't exist yet, or the row's missing, the UI just
-     doesn't restrict anything; the database RLS is the real boundary
-     either way) via `UserRoleContext` (`src/lib/UserRoleContext.tsx`),
-     provided by `AppShell`. `TopNav` shows a role badge next to the
-     signed-in user's email. The 4 flagship workspaces' Comment composer
-     and Approve/Reject/Delegate buttons are hidden for viewers (`canWrite`
-     prop on `Comments`, `canDecide` prop on `ApprovalPanel` — both default
-     `true`, so every other caller is unaffected).
-   User accounts exist in the Supabase dashboard (Authentication → Users);
-   confirmed live by visiting ekms.vercel.app and observing the redirect to
-   `/login`.
-7. Build and lint both verified clean on every change (`npm run build`,
-   `npm run lint` — 0 errors). All routes render as expected (static for the
-   22 lighter modules + `/login`, dynamic/force-rendered for
-   `/workspaces/customer`).
-8. **6 aggregation dashboards wired this session** (Command Center,
-   Analytics, Costing, Finance, AI Knowledge, AI Copilot) — with an
-   important caveat: the schema has **no real financial/cost data anywhere**
-   (quote/contract/CRM `value` fields are pre-formatted display strings like
-   `"₹4.92 Cr"`, not numbers) and **no timestamps on the 16 lighter-module
-   tables** (only Customer's tables have `created_at`). So instead of
-   faking revenue/margin/DSO/cost-variance numbers, each dashboard was
-   rebuilt around what's genuinely real:
-   - **Command Center**: live counts (customers, pending approvals, open
-     compliance findings, pending access requests), customers-by-region bar
-     chart, avg on-time-delivery / avg health-score gauges (real numeric
-     columns on `customers`), and a real activity feed merged from
-     `customer_comments` + `customer_approvals` sorted by `created_at`.
-   - **Analytics**: live customer/CRM/quote/contract counts, customers-by-
-     tier, quotes-by-status, contracts-by-status, approvals-by-status — all
-     real distributions, explicitly labeled as a snapshot (no trend lines,
-     since there's no historical data to chart).
-   - **Costing**: reframed around what's real — supplier count, purchase
-     orders in progress, at-risk inventory SKUs, POs-by-stage,
-     suppliers-by-status. A visible `Tag` tells the user cost variance needs
-     a costing ledger schema that doesn't exist yet.
-   - **Finance**: real numbers this time — `customers.lifetime_value` and
-     `customers.open_orders` ARE numeric columns, so total portfolio LTV
-     (summed, formatted with the same `₹X.XX Cr` convention as the Customer
-     workspace), total open orders, active/expiring contract counts, and
-     lifetime-value-by-region are all genuinely computed. A `Tag` flags that
-     revenue/margin/DSO need a finance ledger that doesn't exist yet.
-   - **AI Knowledge**: `Indexed Records` is a real summed row count across
-     20 live tables; the relationship graph is no longer a hardcoded sample
-     — it's built from the same real demo customer
-     (`C03739`, Apple India Pvt Ltd - Bangalore) the Customer workspace
-     uses, tracing their real contacts/comments/approvals.
-   - **AI Copilot**: originally an illustrative demo; **now genuinely real**
-     (see item 20 in session history) — real Claude API calls grounded in
-     live Supabase data via tool use, not a canned response. Its 3 stat
-     cards still show real cross-table counts.
-   - New shared helper: `src/lib/dashboard-queries.ts` (`getCount`,
-     `getCountWhere`, `groupCount`, `groupSum`, `statusDonutData`,
-     `formatCrore`) — used by all 6 pages to avoid re-implementing the same
-     count/group-by logic six times.
+**Deployed and verified**
+
+- `app.mmdi.in` — Next.js 16, 56 routes total per `next build`'s own output
+  (verified against a fresh build, not estimated — see item 52's
+  established convention), 33 workspace modules under `/workspaces/*` (32
+  real + `project`, confirmed a pure redirect stub to job-orders),
+  installable as a PWA on both iOS and Android
+- Supabase Postgres, RLS on every table, roles `admin | editor | viewer`,
+  MFA enforced at `aal2` on all API routes
+- Cloudflare R2 for files, always via short-lived presigned URLs
+- Copilot with 19 tools (counted directly from the `TOOLS` array in
+  `src/app/api/ai-copilot/route.ts`) including Gmail search and draft
+- iOS app running on a physical device: five tabs (Copilot, Surveys,
+  Estimate, Documents, Reports — confirmed against
+  `apps/mobile/app/(tabs)/_layout.tsx`), sign-in, downloads, estimator,
+  installation report capture with drafts and idempotent submit
+
+**Monorepo**
+
+`apps/web` · `apps/mobile` · `packages/shared` (`@mmdi/shared`) under npm
+workspaces. The estimator's `calc.ts` and ~45 row types are shared verbatim.
 
 ## What's NOT done yet (known gaps)
 
-- ~~No role/permission granularity~~ — closed and confirmed live:
-  `supabase-role-based-rls-migration.sql` adds admin/editor/viewer roles
-  (see item 6 above; `m.nandipa@icloud.com` is the current admin). ~~No
-  department/region scoping~~ — partially closed, see item 24: a second,
-  independent axis (module access, scoped to the 8 real sidebar groups)
-  now exists on top of role, so e.g. a salesperson can be limited to
-  Customers-group data regardless of their role. ~~No admin UI for
-  managing roles yet~~ — closed, see item 23: the Administration workspace
-  now has a real "Users & roles" panel (extended in item 24 to also manage
-  module access).
-- **No real financial/costing data in the schema at all.** Quote/contract/
-  CRM `value` fields are pre-formatted display strings, not numbers; the 16
-  lighter-module tables have no timestamps. The Costing and Finance
-  dashboards were rebuilt around what's genuinely real (see item 8 above)
-  rather than faking revenue/margin/DSO/cost-variance — if MMDI wants those
-  numbers to be real, that needs an actual costing/finance ledger schema
-  first.
-- The 4 flagship workspaces' Insights/Documents/Relationships tabs are
-  sample content everywhere — there's no telemetry/consumption/downtime/
-  budget-ledger/document-storage schema to back them with yet. (Job
-  Orders' Timeline tab is the one exception — it's real.)
-- ~~Customer Workspace always showed one hardcoded demo customer~~ — closed,
-  see item 27: `/workspaces/customer` is now a real searchable list, and
-  any customer opens at `/workspaces/customer/[code]`. Machine, Raw
-  Material, and Job Orders still work the old way (one fixed demo record
-  each, `MC-HYD-001` / `RM-11001` / Job Order `7455`) — not yet extended to
-  a list+detail pattern, only Customer was requested so far.
-- Only 598 of 2,072 job orders (29%) are linked to a real `customers` row
-  via `customer_id` — the rest keep `customer_name` as text only. This
-  wasn't fuzzy-matched on purpose (branch-suffix and naming variants like
-  "Pvt Ltd" vs "PRIVATE LIMITED" made that too risky to guess at scale —
-  see `import-job-orders.sql`'s header comment). Revisit if MMDI wants a
-  cleaner match — likely needs either a real code-based join key from the
-  production system, or manual reconciliation of the ~187 distinct
-  unmatched customer names.
-- `job_orders.status` ('Completed' / 'In Progress') is inferred from the
-  source file's single-letter Job Status code ('C'/'I') — the column is
-  literally named "Job Status (Lost Hold transfer)", implying more codes
-  exist in other exports that don't appear in this one. Not confirmed with
-  the user.
-- Only Hyderabad plant data has been imported into `job_orders` (that's
-  all "Production Report FY2026_Q1.xlsx" covered) — other plant cities
-  (Chennai, Bangalore, Mumbai, Noida, Kochi, Vizag, Kolkata, per the
-  machines import) have no job order data yet.
-- Every "AI insight" card (the purple "AI recommendation" boxes with
-  Accept/Dismiss) is still static/lightly-templated copy, not generated by
-  a model — that's unchanged. Every "Ask [about/AI]" free-text box IS now
-  real, though: the AI Copilot workspace chat, the global Ask AI drawer,
-  AND the 4 flagship workspaces' "Ask about this record" boxes all call
-  the same `/api/ai-copilot` route (see items 20, 25, 26 in session
-  history). Requires `ANTHROPIC_API_KEY` set in Vercel — without it, every
-  one of these surfaces shows a clear "not configured" message rather than
-  crashing.
-- The AI Copilot could only answer sales questions shaped like "how much
-  did customer X buy" (via `customers.lifetime_value` / `job_orders.
-  total_value`) — it had no way to break sales down by material/product
-  category, sales person, or time period, because that line-item detail
-  was never imported anywhere (only per-customer Q1 totals existed). Closed
-  by item 28: a new `sales_transactions` table (9,274 real line items) plus
-  two new AI Copilot tools (`sales_summary`, `search_sale_items`).
-- No file upload / document storage wired (Documents, Drawings, SOPs pages
-  read metadata rows from Supabase but don't handle actual file storage).
-- No tests.
-- ~~No password reset entry point on `/login`~~ — closed: a "Forgot
-  password?" link now calls `supabase.auth.resetPasswordForEmail()`
-  directly from the sign-in form (see session history).
+**Blocked on a decision**
+
+- **Individual vs Organization Apple enrollment.** Currently Individual, so
+  an App Store listing would publish under a personal name rather than
+  MMDI. Organization needs a D-U-N-S number and a separate membership; it
+  is not a conversion.
+- **Android.** Team uses both platforms. The PWA covers Android today; a
+  native Android build would need its own Play Console account and review.
+
+**Known gaps**
+
+- `app.json` still has `name: "mobile"` and `bundleIdentifier:
+  "com.ekms.mobile"` — the identifier is effectively permanent once a build
+  reaches App Store Connect
+- Knowledge tables (`documents`, `drawings`, `sops`) have zero rows with a
+  non-null `relative_path` — the Documents tab is correct but empty until
+  `upload-knowledge-files.mjs` is run with real files and metadata sidecars
+- No Supabase backups configured (free tier, no PITR)
+- Mobile Copilot has no card renderers for Gmail results — email answers
+  render as prose
+- The Gmail label allowlist is global config while labels are per-mailbox;
+  fine as a superset that surfaces gaps, but undecided as a design
+- Installation report PDF generation remains web-only (`pdfBuild.ts` is
+  canvas-bound); mobile captures, web renders
 
 ## Key files to know
 
@@ -388,6 +196,18 @@ over what the code actually does again.
   `<Suspense>` or `next build` fails prerendering it (hit this on
   `/login`; fixed by splitting into an outer `LoginPage` + inner
   `LoginForm`).
+- **`returning` on any hand-run UPDATE or DELETE against production.** A
+  statement matching zero rows is indistinguishable from one that worked.
+  This cost five rounds on a single role update.
+- **Never test authorization by changing your own role in production.**
+  Insert a row owned by a different UUID instead. Doing otherwise caused
+  two lockouts.
+- **Credentials go to a file, never to a terminal that prints them.**
+  `> /tmp/tok.json`, then hand over the path.
+- **Two security checks were written, believed correct, and did not
+  fire** — the middleware `/api` gap and the Gmail address-matching check.
+  Both were caught by testing, neither by reading. Prefer schema-level
+  enforcement to prompt-level or comment-level assurance.
 
 ## Natural next steps (not started, pick one)
 
@@ -1851,3 +1671,212 @@ over what the code actually does again.
     and sign-estimator, are backed indirectly via the Copilot's API route
     and sign-estimator's own tab subcomponents respectively). `npm run
     build` and `npx eslint src` both still pass clean after these changes.
+
+53. **Bearer auth on API routes (the gate on everything mobile).**
+    All three API routes resolved the session from cookies via
+    `createServerSupabaseClient()`, which works for a browser but not for a
+    React Native client — it holds the session in Keychain and sends
+    `Authorization: Bearer`. Added `src/lib/supabase-route.ts` with
+    `createRouteSupabaseClient(request)`: header first, cookies as fallback,
+    so browser behaviour is unchanged. Still the anon key, so RLS applies as
+    before. A third edit in `ai-copilot/route.ts` was easy to miss — line 267's
+    `type Supabase = Awaited<ReturnType<typeof createServerSupabaseClient>>`
+    references the removed import and fails the build without it.
+    Verified 401 without the header, 200 with it.
+
+54. **Monorepo split.**
+    Restructured to `apps/web`, `apps/mobile`, `packages/shared` under npm
+    workspaces. `sign-estimator/calc.ts` (894 lines, zero imports — kept
+    dependency-free deliberately) moved to `packages/shared` and runs
+    unmodified under Hermes. The ~45 row interfaces split out of
+    `supabase.ts` into `packages/shared/src/rows.ts`; the client stays
+    per-platform. The 137 design tokens transcribed into
+    `packages/shared/src/theme.ts` as a JS object, since React Native has no
+    CSS custom properties. Shadows deliberately excluded — CSS box-shadow
+    strings don't map onto the iOS shadow model.
+    Vercel's Root Directory had to move to `apps/web`, with "include files
+    outside the root directory" enabled, or the build resolves `@mmdi/shared`
+    and fails.
+
+55. **Custom domain and the middleware gap.**
+    Added `app.mmdi.in`. Vercel's Standard Protection exempts production
+    *custom* domains but not `*.vercel.app`, so this is what makes the API
+    reachable from a device at all.
+    Then found that `supabase-middleware.ts` redirected every unauthenticated
+    request to `/login`, including `/api/*` — so a Bearer request was bounced
+    before reaching the handler. Middleware now skips `/api` entirely; every
+    route authenticates itself, and an API client gets a 401 rather than a
+    redirect to an HTML page.
+
+56. **MFA enforcement restored on API routes (regression fix).**
+    Item 55's middleware change removed the only `aal2` check in the system —
+    no route checked it independently. Any password-only session, browser or
+    device, could call all three routes and bypass the TOTP step-up.
+    Added `requireVerifiedUser()` to `supabase-route.ts`, returning 403
+    `mfa_required` rather than 401 (credentials valid, assurance level not).
+    Verified against the installed `@supabase/supabase-js` type declarations
+    rather than the docs.
+
+57. **R2 signed-URL vulnerability closed.**
+    `lfg-surveys/signed-url` passed the caller's `path` straight to
+    `GetObjectCommand` without checking it corresponded to a real row.
+    Presigning succeeds for any key — R2 doesn't verify existence at signing
+    time — so any authenticated viewer could obtain a signed URL for any
+    object in the bucket by guessing keys. `knowledge-files/signed-url`
+    already did this check, which is why it 404'd where surveys returned 200.
+    Added the same row lookup. Verified: fake path now 404s, real path still
+    resolves.
+
+58. **Copilot returns structured tool results.**
+    The route returned `{ content, citations }` where citations were prose
+    strings — a client couldn't turn `Site survey search: "a"` back into a
+    record. Now returns `results: [{ tool, input, result }]` alongside, so
+    the app can render tappable cards.
+    Also found `find_site_survey`'s `.select()` never included
+    `relative_path`, despite the tool description, the system prompt and the
+    result's own `note` field all claiming it did — three places describing
+    behaviour that never existed, because they were edited as documentation
+    rather than derived from the query.
+
+59. **Client-agnostic prompt.**
+    `SYSTEM_PROMPT` told the model to send people to `/workspaces/...` paths.
+    Meaningless on mobile. Reworded across six places: files are named and
+    the client renders them openable; genuine page-only features (CSV export,
+    filterable reports) are named in words as desktop features.
+
+60. **Expo app scaffolded and built (`apps/mobile`).**
+    SDK 57, expo-router, five tabs: Copilot, Surveys, Estimate, Documents,
+    Reports. Sign-in via `context/auth.tsx` with `Stack.Protected` guards.
+    Non-obvious requirements that cost time: `react-native-url-polyfill/auto`
+    must be the first import (Hermes has no WHATWG URL); `expo-secure-store`
+    rather than localStorage; and the Supabase client must be created lazily
+    or platform-gated — building it at module scope with the SecureStore
+    adapter crashes expo-router's Node-side SSR validation pass, which
+    presents as "dev server unreachable" rather than as an error.
+    `metro.config.js` should be a bare `getDefaultConfig(__dirname)` — SDK 52+
+    auto-configures monorepo resolution, and manual `watchFolders` /
+    `disableHierarchicalLookup` overrides break transitive dependency
+    resolution.
+
+61. **Copilot tool-result cards.**
+    Replaced the single survey extractor with a registry keyed by tool name.
+    Three entries: `find_site_survey` (tappable, opens the PDF),
+    `search_lfg_sites` and `search_job_orders`/`get_job_order` (informational,
+    no chevron — a chevron that navigates nowhere teaches people the app is
+    broken). Capped at 4 per tool call with an "and N more" line. Status shown
+    as a coloured dot plus a text label, never colour alone.
+
+62. **Installation report capture — schema and upload route.**
+    Found that the web tool persists *nothing*: `InstallationReportClient.tsx`
+    holds the whole report in React state and hands it to `pdfBuild.ts`.
+    There was no `installation_reports` table. So this wasn't a port; the
+    persistence layer never existed on either platform.
+    Added three tables (`installation_reports`,
+    `installation_report_site_entries`, `installation_report_photos`), with
+    store fields snapshotted rather than only FK'd — master data changes, and
+    a filed report should read as it was on the day.
+    `POST /api/installation-photos/upload-url` issues presigned PUTs, with the
+    same ownership check the surveys route was missing.
+    An AWS SDK v3 quirk broke every upload until found:
+    `requestChecksumCalculation: "WHEN_REQUIRED"` is needed, since newer SDK
+    versions attach CRC32 params to presigned PUTs that R2 rejects.
+
+63. **Installation report capture — mobile flow.**
+    Drafts to `Paths.document` (not `Paths.cache` — iOS evicts cache under
+    pressure, which is the exact data loss this prevents), photos resized to
+    ~1600px / JPEG 0.7 before upload, idempotent per-photo submit with disk
+    checkpointing. Reports list merges local drafts with server state across
+    three visually distinct states, with Resume for partial submits and
+    Discard for unresumable ones.
+    `installation_reports` DELETE was admin-only, so Discard didn't work for
+    the supervisors who own the orphans — added a narrow policy allowing a
+    user to delete their own `draft` reports only. Verified with a real
+    non-admin account across three isolated cases.
+
+64. **`expo-file-system` migration.**
+    `cacheDirectory` and `downloadAsync` were removed in SDK 54. Migrated all
+    three screens to `new File(Paths.cache, name)` +
+    `File.downloadFileAsync(...)`. Also removed `headerLargeTitle` from the
+    tab layout — not a stale API so much as one that never existed on
+    `BottomTabNavigationOptions`; large titles are native-stack only.
+
+65. **Gmail integration — OAuth foundation.**
+    `mmdi.in` is a Google Workspace domain, so the OAuth consent screen is
+    **Internal** and Gmail's restricted scopes need no third-party security
+    assessment. Scopes: `gmail.readonly` and `gmail.compose`.
+    Refresh tokens in Supabase Vault via three `SECURITY DEFINER` wrappers
+    that derive the user from `auth.uid()` with no user-id parameter — Vault's
+    own `create_secret` has privileges revoked from `PUBLIC`, so the client
+    can't call it directly. `google_tokens` exposes only a `vault_secret_id`.
+    Connect gated behind `aal2`. Disconnect calls Google's revoke endpoint,
+    not just a local delete — verified by reading the token before
+    disconnecting and confirming Google returned `invalid_grant: Token has
+    been expired or revoked` afterwards.
+    Domain restricted to `@mmdi.in` via `hd` plus server-side re-verification.
+    Address matching (Google address must equal the MMDI ONE login) was built
+    and then **deliberately removed** — MMDI ONE logins may be on any domain
+    while mailboxes must be `@mmdi.in`, so the two can't be compared
+    meaningfully. Removed rather than disabled: dead code that looks like a
+    security control is worse than none.
+
+66. **Gmail — search, audit log, prompt hardening.**
+    `search_email` returns sender, subject, date, thread link and a
+    300-character excerpt, capped at 10 — never full bodies. Scoped to an
+    allowlist of labels (`FollowUP`, `FSC COC`, `IKEA Purchase Order`,
+    `MMDI/Customers`) held in config, not tool parameters, so the model picks
+    among permitted labels and cannot widen the set.
+    Gmail label matching is case-sensitive, and a config label that doesn't
+    exist in the mailbox originally produced an empty result indistinguishable
+    from "nothing matched" — now surfaced as `unresolved_labels`.
+    `gmail_activity_log` records action, query, label and hit count. **Never
+    message content** — there is no column for it. Insert-own, select-admin,
+    no update or delete policy at all.
+    Tested against a real injected instruction filed under an allow-listed
+    label: the model summarised the legitimate content, named the injection
+    attempt as untrusted, and neither complied nor acted silently. Confirmed
+    on two independent runs.
+
+67. **Gmail — draft, with the recipient constraint.**
+    `draft_email`'s `input_schema` contains only `subject` and `body`. There
+    is **no recipient field for the model to populate**, so an injected
+    instruction has nowhere to write an address. The recipient comes from a
+    `customer_contacts` lookup resolved server-side before the model is
+    invoked, keyed on `contactId` from a request field structurally separate
+    from the messages array.
+    Tested with the plan's own adversarial scenario verbatim in an email body:
+    no draft was created, and the model named the suspicious domain rather
+    than acting on it. Zero draft actions logged across all test rounds.
+    Recipient *selection state* (name and company, never the address) is
+    passed into the model's context so it can prompt for a recipient up front
+    rather than gathering content and failing at the end.
+    Contact picker UI added on both the workspace page and the global drawer.
+
+68. **PWA, and the mobile shell fix underneath it.**
+    The real finding was that `AppShell` had no mobile behaviour at all —
+    `Sidebar`'s own doc comment promised a slide-out drawer that was never
+    built, and `TopNav` didn't wrap, so at phone width the nav consumed the
+    viewport and every page looked broken regardless of its own breakpoints.
+    That, not the individual workspaces, is why `job-orders`, `machine` and
+    `raw-material` appeared unusable.
+    Added a real off-canvas drawer, a collapsing top bar, a controllable
+    command palette, and `RelationshipGraph`'s documented-but-unimplemented
+    mobile list view.
+    Then the PWA layer: manifest, icons from brand tokens, app-shell service
+    worker (`/api/*` and Supabase deliberately excluded — caching business
+    data means showing stale numbers with no way to tell), install prompt.
+    Next 16's `appleWebApp` metadata only emits the unprefixed
+    `mobile-web-app-capable`; iOS requires the `apple-` prefixed tag, added
+    explicitly. Safe-area insets applied additively as
+    `calc(original + env(safe-area-inset-*))` so desktop is unaffected.
+
+69. **Apple Developer enrollment and first device build.**
+    Individual enrollment, team `DR9HATVRF7`. Development build installed on a
+    physical iPhone; Developer Mode required for non-App-Store builds.
+    Verified on hardware for the first time: sign-in persistence, survey
+    download through Bearer auth → signed URL → `File`/`Paths` → share sheet,
+    Copilot with tool-result cards, estimator, Dynamic Type.
+    Camera failed with `MissingCameraPermissionException` — root cause was
+    that `expo-image-picker` was absent from the `plugins` array entirely, so
+    `NSCameraUsageDescription` was never written to Info.plist. Added the
+    plugin with explanatory strings and `microphonePermission: false` (the app
+    only ever picks images).

@@ -42,13 +42,37 @@ export function Drawer({
           open ? "translate-x-0" : "translate-x-full"
         )}
       >
-        <div className="flex items-center justify-between border-b border-line px-5 py-4">
+        {/* This panel is edge-to-edge (right/top/bottom) at phone width --
+            "full-screen sheet on Mobile" per this component's own doc
+            comment -- so in standalone iOS it sits directly under the
+            notch/Dynamic Island and butts against the right-side sensor
+            housing in landscape. env() resolves to 0 everywhere else, so
+            these are additive, not a visual change outside standalone. */}
+        <div
+          className="flex items-center justify-between border-b border-line px-5 py-4"
+          style={{
+            paddingTop: "calc(1rem + env(safe-area-inset-top))",
+            paddingRight: "calc(1.25rem + env(safe-area-inset-right))",
+          }}
+        >
           <h3 className="text-sm font-semibold text-ink">{title}</h3>
           <button aria-label="Close" onClick={onClose} className="rounded p-1 text-ink-muted hover:bg-surface-sunken">
             <X size={16} />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
+        {/* The bottom edge here is the one that actually matters most: this
+            is where the AI Assistant drawer's chat input (AIConversation ->
+            PromptInput) lands, right at the physical bottom edge -- without
+            this, it sits under the home-indicator gesture bar in standalone. */}
+        <div
+          className="flex-1 overflow-y-auto px-5 py-4"
+          style={{
+            paddingBottom: "calc(1rem + env(safe-area-inset-bottom))",
+            paddingRight: "calc(1.25rem + env(safe-area-inset-right))",
+          }}
+        >
+          {children}
+        </div>
       </div>
     </div>
   );

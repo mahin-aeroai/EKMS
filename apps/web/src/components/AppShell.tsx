@@ -219,7 +219,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   // Safety net beyond Sidebar's own close-on-navigate: covers back/forward
   // and any programmatic navigation that doesn't go through a nav-item click.
+  // Deliberately synchronizing UI state to a route change, not a render-time
+  // derivation -- there's no prop/state combination to compute this from.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setNavOpen(false);
   }, [pathname]);
 

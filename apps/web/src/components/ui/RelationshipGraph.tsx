@@ -39,6 +39,9 @@ export function RelationshipGraph({
   // mobile default here, it just was never actually wired up.
   const [listView, setListView] = useState(false);
   useEffect(() => {
+    // Reads window.innerWidth, which doesn't exist at SSR time -- can't be
+    // derived at render, has to happen after mount.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (window.innerWidth < 640) setListView(true);
   }, []);
   const radius = 110;

@@ -52,7 +52,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={{ toast }}>
       {children}
-      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
+      {/* bottom-4/right-4 are fixed offsets from the physical screen edge --
+          in standalone iOS those 16px can sit inside the home-indicator
+          gesture area (bottom) or the sensor-housing inset (right, in
+          landscape). env() adds the real inset on top; it's 0 elsewhere. */}
+      <div
+        className="fixed z-50 flex flex-col gap-2"
+        style={{
+          bottom: "calc(1rem + env(safe-area-inset-bottom))",
+          right: "calc(1rem + env(safe-area-inset-right))",
+        }}
+      >
         {toasts.map((t) => {
           const Icon = ICONS[t.kind];
           return (
