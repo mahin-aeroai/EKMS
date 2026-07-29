@@ -1,5 +1,23 @@
 import type { Metadata, Viewport } from "next";
+import { Roboto } from "next/font/google";
 import "./globals.css";
+
+// Roboto was already named as a fallback in globals.css's --font-sans stack,
+// but never actually loaded -- it only rendered on OSes that happen to ship
+// it as a system font (Android/ChromeOS), so most users saw Segoe UI/San
+// Francisco instead. next/font self-hosts it (no external request, no
+// layout-shift flash) and exposes it as --font-roboto, which --font-sans
+// now references first. Free/OFL-licensed, so no licensing concern (unlike
+// Cambria for the estimate PDF elsewhere in this app). Weights: 400/500/700
+// cover font-normal/font-medium/font-bold; Roboto has no 600 cut at all
+// (Google never released one), so font-semibold falls back to the nearest
+// weight the browser can match -- a minor, purely cosmetic tradeoff.
+const roboto = Roboto({
+  subsets: ["latin"],
+  weight: ["400", "500", "700"],
+  variable: "--font-roboto",
+  display: "swap",
+});
 import { ThemeProvider } from "@/components/theme/ThemeProvider";
 import { ToastProvider } from "@/components/ui/Notifications";
 import { AppShell } from "@/components/AppShell";
@@ -46,7 +64,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="h-full antialiased">
+    <html lang="en" className={`h-full antialiased ${roboto.variable}`}>
       <body className="min-h-full flex flex-col">
         <ThemeProvider>
           <ToastProvider>
