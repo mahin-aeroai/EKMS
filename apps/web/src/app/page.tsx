@@ -12,21 +12,33 @@ import { NAV } from "@/components/AppShell";
 // already on, so it's the one section skipped here.
 const GROUPS = NAV.filter((section) => section.title !== "Home");
 
-// One consistent icon-tile color per section, cycling through the app's 6
-// existing semantic role colors (all 3 themes already define these -- see
-// globals.css -- so this never needs its own color values). Solid fill +
-// on-brand (white) icon, like an app-icon glyph, not a pale tint -- that's
-// what makes these read as colorful and distinct rather than generic.
-// Literal class strings on purpose: Tailwind only generates classes it can
-// see written out in source, not ones assembled via `${}` template
-// interpolation.
+// One consistent icon-tile color per section, cycling through 6 dedicated
+// "category" tokens (globals.css, all 3 themes) -- deliberately NOT the
+// red/green/blue semantic role colors (success/warning/danger/info) used
+// elsewhere for actual status, so groups here read as classic and
+// muted rather than like traffic-light status chips. Solid fill +
+// on-brand (white) icon, like an app-icon glyph. Literal class strings on
+// purpose: Tailwind only generates classes it can see written out in
+// source, not ones assembled via `${}` template interpolation.
 const TILE_COLORS = [
-  "bg-primary text-on-brand",
-  "bg-info text-on-brand",
-  "bg-ai text-on-brand",
-  "bg-success text-on-brand",
-  "bg-warning text-on-brand",
-  "bg-danger text-on-brand",
+  "bg-cat-navy text-on-brand",
+  "bg-cat-bronze text-on-brand",
+  "bg-cat-teal text-on-brand",
+  "bg-cat-plum text-on-brand",
+  "bg-cat-olive text-on-brand",
+  "bg-cat-slate text-on-brand",
+];
+
+// Each section also sits in its own pale-tint background block (same color
+// family as its tiles' icons) so the groups themselves are visually
+// separated at a glance, not just distinguishable icon-by-icon.
+const BLOCK_STYLES = [
+  { block: "bg-cat-navy-tint", heading: "text-cat-navy" },
+  { block: "bg-cat-bronze-tint", heading: "text-cat-bronze" },
+  { block: "bg-cat-teal-tint", heading: "text-cat-teal" },
+  { block: "bg-cat-plum-tint", heading: "text-cat-plum" },
+  { block: "bg-cat-olive-tint", heading: "text-cat-olive" },
+  { block: "bg-cat-slate-tint", heading: "text-cat-slate" },
 ];
 
 export default function HomePage() {
@@ -79,16 +91,17 @@ export default function HomePage() {
 
       {GROUPS.map((section, sectionIndex) => {
         const color = TILE_COLORS[sectionIndex % TILE_COLORS.length];
+        const { block, heading } = BLOCK_STYLES[sectionIndex % BLOCK_STYLES.length];
         return (
-          <div key={section.title} className="mb-8">
-            <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-muted">{section.title}</h2>
+          <div key={section.title} className={`mb-6 rounded-2xl p-5 ${block}`}>
+            <h2 className={`mb-3 text-xs font-bold uppercase tracking-wide ${heading}`}>{section.title}</h2>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
               {section.items.map((item) => (
                 <button
                   key={item.id}
                   type="button"
                   onClick={() => router.push(item.href)}
-                  className="group flex flex-col items-center gap-2.5 rounded-xl border border-line bg-surface p-4 text-center transition-shadow hover:shadow-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  className="group flex flex-col items-center gap-2.5 rounded-xl border border-line bg-surface p-4 text-center shadow-1 transition-shadow hover:shadow-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 >
                   <span
                     className={`flex h-14 w-14 items-center justify-center rounded-2xl shadow-1 transition-transform group-hover:scale-105 ${color}`}
