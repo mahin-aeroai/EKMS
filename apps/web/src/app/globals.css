@@ -56,24 +56,6 @@
   --ai: #6941c6;
   --ai-tint: #f2ecfc;
 
-  /* Category colors -- purely for telling groups of things apart visually
-     (e.g. the home page's section blocks/icon tiles), never for status or
-     meaning. Deliberately NOT the same hues as the semantic roles above
-     (no red/green/blue) so a category color is never mistaken for a
-     danger/success/info state -- muted, classic tones instead. */
-  --cat-navy: #2c3e60;
-  --cat-navy-tint: #e6eaf1;
-  --cat-bronze: #8a5a2b;
-  --cat-bronze-tint: #f3e8db;
-  --cat-teal: #1f6f6a;
-  --cat-teal-tint: #e0efee;
-  --cat-plum: #7a3352;
-  --cat-plum-tint: #f5e8ef;
-  --cat-olive: #6b7a2e;
-  --cat-olive-tint: #eef2e0;
-  --cat-slate: #3f4550;
-  --cat-slate-tint: #ececed;
-
   /* Elevation (shadows) */
   --shadow-1: 0 1px 2px rgba(20, 24, 33, 0.06), 0 1px 1px rgba(20, 24, 33, 0.04);
   --shadow-2: 0 4px 8px rgba(20, 24, 33, 0.08), 0 1px 2px rgba(20, 24, 33, 0.05);
@@ -122,19 +104,6 @@
   --ai: #b09aef;
   --ai-tint: rgba(176, 154, 239, 0.16);
 
-  --cat-navy: #7f9bcf;
-  --cat-navy-tint: rgba(127, 155, 207, 0.16);
-  --cat-bronze: #c98f4e;
-  --cat-bronze-tint: rgba(201, 143, 78, 0.16);
-  --cat-teal: #4fa39c;
-  --cat-teal-tint: rgba(79, 163, 156, 0.16);
-  --cat-plum: #c07299;
-  --cat-plum-tint: rgba(192, 114, 153, 0.16);
-  --cat-olive: #a3b569;
-  --cat-olive-tint: rgba(163, 181, 105, 0.16);
-  --cat-slate: #9aa1ac;
-  --cat-slate-tint: rgba(154, 161, 172, 0.16);
-
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-2: 0 4px 10px rgba(0, 0, 0, 0.45);
   --shadow-3: 0 10px 26px rgba(0, 0, 0, 0.5);
@@ -170,19 +139,6 @@
   --ai: #c3aaff;
   --ai-tint: rgba(195, 170, 255, 0.18);
 
-  --cat-navy: #8fabdf;
-  --cat-navy-tint: rgba(143, 171, 223, 0.18);
-  --cat-bronze: #dd9d5c;
-  --cat-bronze-tint: rgba(221, 157, 92, 0.18);
-  --cat-teal: #5cbdb5;
-  --cat-teal-tint: rgba(92, 189, 181, 0.18);
-  --cat-plum: #d383ac;
-  --cat-plum-tint: rgba(211, 131, 172, 0.18);
-  --cat-olive: #bdd17e;
-  --cat-olive-tint: rgba(189, 209, 126, 0.18);
-  --cat-slate: #b8c0cc;
-  --cat-slate-tint: rgba(184, 192, 204, 0.18);
-
   --shadow-1: none;
   --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.6);
   --shadow-3: 0 8px 20px rgba(0, 0, 0, 0.65);
@@ -216,19 +172,6 @@
   --color-info-tint: var(--info-tint);
   --color-ai: var(--ai);
   --color-ai-tint: var(--ai-tint);
-
-  --color-cat-navy: var(--cat-navy);
-  --color-cat-navy-tint: var(--cat-navy-tint);
-  --color-cat-bronze: var(--cat-bronze);
-  --color-cat-bronze-tint: var(--cat-bronze-tint);
-  --color-cat-teal: var(--cat-teal);
-  --color-cat-teal-tint: var(--cat-teal-tint);
-  --color-cat-plum: var(--cat-plum);
-  --color-cat-plum-tint: var(--cat-plum-tint);
-  --color-cat-olive: var(--cat-olive);
-  --color-cat-olive-tint: var(--cat-olive-tint);
-  --color-cat-slate: var(--cat-slate);
-  --color-cat-slate-tint: var(--cat-slate-tint);
 
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
