@@ -36,6 +36,7 @@ import {
   Scissors,
   Camera,
   QrCode,
+  FileSpreadsheet,
 } from "lucide-react";
 import { Sidebar, type SidebarSection } from "@/components/ui/Sidebar";
 import { TopNav } from "@/components/ui/TopNav";
@@ -154,6 +155,7 @@ export const NAV: SidebarSection[] = [
       { id: "installation-report", label: "Installation Report", icon: <Camera size={16} />, href: "/workspaces/installation-report" },
       { id: "cut-file-tool", label: "Cut File Tool", icon: <Scissors size={16} />, href: "/workspaces/cut-file-tool" },
       { id: "qr-label-tool", label: "QR Label Tool", icon: <QrCode size={16} />, href: "/workspaces/qr-label-tool" },
+      { id: "estimate-builder", label: "Estimate Builder", icon: <FileSpreadsheet size={16} />, href: "/workspaces/estimate-builder" },
     ],
   },
 ];

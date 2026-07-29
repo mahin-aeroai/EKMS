@@ -277,6 +277,69 @@ export interface ContractRow {
   status_label: string | null;
 }
 
+// ── Estimate Builder (see supabase-estimate-builder-schema.sql) ──
+
+export interface CustomerSiteRow {
+  id: string;
+  customer_id: string;
+  site_name: string;
+  legal_entity_name: string | null;
+  address: string;
+  gstin: string | null;
+  created_at: string;
+}
+
+export interface IkeaRateCardRow {
+  scope: string | null;
+  material_category: string | null;
+  product: string;
+  description: string | null;
+  uom: string | null;
+  revised_rate: number;
+  remarks: string | null;
+}
+
+export type EstimateStatus = "draft" | "sent" | "won" | "lost";
+
+export interface EstimateRow {
+  id: string;
+  quote_number: string | null;
+  customer_id: string;
+  contract_id: string | null;
+  site_id: string | null;
+  status: EstimateStatus;
+  gst_percent: number;
+  subtotal: number;
+  transportation_total: number;
+  installation_total: number;
+  taxable_total: number;
+  gst_amount: number;
+  grand_total: number;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EstimateLineItemRow {
+  id: string;
+  estimate_id: string;
+  sort_order: number;
+  is_contract_item: boolean;
+  rate_card_source: string | null;
+  product_name: string;
+  description: string | null;
+  additional_description: string | null;
+  uom: string | null;
+  unit_rate: number;
+  quantity: number;
+  transportation_rate: number;
+  installation_rate: number;
+  line_subtotal: number;
+  line_total: number;
+  created_at: string;
+}
+
 export interface WorkOrderRow {
   id: string;
   title: string;
