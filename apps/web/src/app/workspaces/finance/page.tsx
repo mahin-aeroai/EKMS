@@ -10,7 +10,7 @@ import { BarChart, DonutChart } from "@/components/ui/Charts";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
 import type { CustomerRow, ContractRow } from "@mmdi/shared/rows";
-import { groupSum, statusDonutData, formatCrore } from "@/lib/dashboard-queries";
+import { groupSum, statusDonutData, formatCrore, fetchAllRows } from "@/lib/dashboard-queries";
 
 interface FinanceStats {
   totalLifetimeValue: number;
@@ -23,12 +23,16 @@ interface FinanceStats {
 }
 
 async function loadStats(): Promise<FinanceStats> {
-  const [{ data: customers }, { data: contracts }] = await Promise.all([
-    supabase.from("customers").select("*"),
+  // customers can exceed PostgREST's 1000-row default cap — a plain
+  // .select("*") here was silently truncating the table alphabetically,
+  // which meant totalLifetimeValue/totalOpenOrders (both plain sums over
+  // this array) were undercounting once the table passed 1000 rows.
+  // fetchAllRows pages through with .range() to get every row.
+  const [customerRows, { data: contracts }] = await Promise.all([
+    fetchAllRows<CustomerRow>("customers", "name"),
     supabase.from("contracts").select("*"),
   ]);
 
-  const customerRows = (customers ?? []) as CustomerRow[];
   const contractRows = (contracts ?? []) as ContractRow[];
 
   const ltvByRegion = groupSum(

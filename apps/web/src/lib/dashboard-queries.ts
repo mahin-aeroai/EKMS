@@ -26,6 +26,32 @@ export async function getCountWhere(table: string, column: string, value: string
   return count ?? 0;
 }
 
+/**
+ * Fetches every row of a table, paging past PostgREST's default 1000-row
+ * cap via .range(). A plain `.select("*")` silently truncates once a table
+ * grows past 1000 rows — which is exactly what hid customers alphabetically
+ * past "T" (e.g. "Unicorn Infosolutions") from the Estimate Builder's
+ * customer dropdown, and was quietly under-counting the tier/region
+ * breakdowns on Analytics, Finance, and Command Center once the customers
+ * table passed 1000 rows. Use this instead of a bare `.select("*")` for any
+ * dashboard aggregation that needs the whole table, not just a count.
+ */
+export async function fetchAllRows<T>(table: string, orderColumn = "id"): Promise<T[]> {
+  const pageSize = 1000;
+  const all: T[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from(table)
+      .select("*")
+      .order(orderColumn)
+      .range(from, from + pageSize - 1);
+    if (error || !data) break;
+    all.push(...(data as T[]));
+    if (data.length < pageSize) break;
+  }
+  return all;
+}
+
 /** Groups an already-fetched array of rows by a string key, counting occurrences. */
 export function groupCount<T>(
   rows: T[],

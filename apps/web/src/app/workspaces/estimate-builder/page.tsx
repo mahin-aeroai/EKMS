@@ -11,6 +11,7 @@ import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
 import type { CustomerRow, CustomerContactRow, ContractRow, IkeaRateCardRow, AppleRateCardRow, EstimateRow, EstimateCalcMode, EstimateLineItemRow } from "@mmdi/shared/rows";
 import { generateEstimatePdf, downloadBlob, type EstimatePdfLine } from "@/lib/estimateBuilder/pdf";
+import { fetchAllRows } from "@/lib/dashboard-queries";
 
 // MMDI ONE Estimate Builder — scoped to IKEA first per the user's request
 // to "start with it," then extended to Apple (apple_rate_card, 117 SKUs
@@ -178,14 +179,16 @@ export default function EstimateBuilderPage() {
   };
   const [recent, setRecent] = useState<RecentEstimate[] | null>(null);
 
-  // Customers + contracts loaded once — small enough tables to fetch
-  // whole, same pattern as Sales by Rep's sales-person dropdown.
+  // Customers + contracts loaded once. Supabase/PostgREST caps any
+  // unpaginated select at 1000 rows — with 1500+ customers now on file,
+  // a plain .select("*") silently cut off everything alphabetically past
+  // "T" or so (e.g. "Unicorn Infosolutions" never made it into this
+  // dropdown). fetchAllRows (src/lib/dashboard-queries.ts) pages through
+  // with .range() until a fetch comes back short of a full page, so the
+  // dropdown always has the complete list no matter how large the table
+  // grows.
   useEffect(() => {
-    supabase
-      .from("customers")
-      .select("*")
-      .order("name")
-      .then(({ data }) => setCustomers((data as CustomerRow[]) ?? []));
+    fetchAllRows<CustomerRow>("customers", "name").then(setCustomers);
     supabase
       .from("contracts")
       .select("*")

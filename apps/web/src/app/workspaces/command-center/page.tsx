@@ -11,7 +11,7 @@ import { ActivityFeed, type ActivityItem } from "@/components/ui/ActivityFeed";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
 import type { CustomerRow, CustomerCommentRow, CustomerApprovalRow } from "@mmdi/shared/rows";
-import { getCount, getCountWhere, groupCount } from "@/lib/dashboard-queries";
+import { getCount, getCountWhere, groupCount, fetchAllRows } from "@/lib/dashboard-queries";
 import { timeAgo } from "@/lib/timeAgo";
 
 interface CommandCenterStats {
@@ -30,7 +30,7 @@ async function loadStats(): Promise<CommandCenterStats> {
     customerCount,
     pendingApprovals,
     pendingAccessRequests,
-    { data: customers },
+    customerRows,
     { data: compliance },
     { data: comments },
     { data: approvals },
@@ -38,7 +38,12 @@ async function loadStats(): Promise<CommandCenterStats> {
     getCount("customers"),
     getCountWhere("customer_approvals", "status", "pending"),
     getCountWhere("access_requests", "status", "warning"),
-    supabase.from("customers").select("*"),
+    // customers can exceed PostgREST's 1000-row default cap — a plain
+    // .select("*") was silently truncating the table, which meant
+    // avgOnTimeDelivery/avgHealthScore/customersByRegion below (and the
+    // customerById lookup used for the activity feed) were all computed
+    // over an incomplete set once the table passed 1000 rows.
+    fetchAllRows<CustomerRow>("customers", "name"),
     supabase.from("compliance_findings").select("status"),
     supabase
       .from("customer_comments")
@@ -52,7 +57,6 @@ async function loadStats(): Promise<CommandCenterStats> {
       .limit(5),
   ]);
 
-  const customerRows = (customers ?? []) as CustomerRow[];
   const customerById = new Map(customerRows.map((c) => [c.id, c]));
   const openComplianceFindings = (compliance ?? []).filter((c) => c.status !== "success").length;
 

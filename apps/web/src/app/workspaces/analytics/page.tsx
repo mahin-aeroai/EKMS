@@ -10,7 +10,7 @@ import { BarChart, DonutChart } from "@/components/ui/Charts";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
 import type { CustomerRow, QuoteRow, ContractRow } from "@mmdi/shared/rows";
-import { getCount, groupCount, statusDonutData } from "@/lib/dashboard-queries";
+import { getCount, groupCount, statusDonutData, fetchAllRows } from "@/lib/dashboard-queries";
 
 interface AnalyticsStats {
   customerCount: number;
@@ -28,20 +28,23 @@ async function loadStats(): Promise<AnalyticsStats> {
   const [
     customerCount,
     crmAccountCount,
-    { data: customers },
+    customerRows,
     { data: quotes },
     { data: contracts },
     { data: approvals },
   ] = await Promise.all([
     getCount("customers"),
     getCount("crm_accounts"),
-    supabase.from("customers").select("*"),
+    // customers can now exceed PostgREST's 1000-row default cap — fetchAllRows
+    // pages through so the tier/region breakdowns below don't silently
+    // undercount once the table passes 1000 rows (see estimate-builder/page.tsx
+    // for the dropdown bug this same cap caused).
+    fetchAllRows<CustomerRow>("customers", "name"),
     supabase.from("quotes").select("*"),
     supabase.from("contracts").select("*"),
     supabase.from("customer_approvals").select("status"),
   ]);
 
-  const customerRows = (customers ?? []) as CustomerRow[];
   const quoteRows = (quotes ?? []) as QuoteRow[];
   const contractRows = (contracts ?? []) as ContractRow[];
   const byRegion = groupCount(customerRows, (c) => c.region);
