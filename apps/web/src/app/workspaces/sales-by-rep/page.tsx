@@ -9,7 +9,7 @@ import { Dropdown } from "@/components/ui/Dropdown";
 import { Table, type TableColumn } from "@/components/ui/Table";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
-import { formatCrore } from "@/lib/dashboard-queries";
+import { formatCrore, fetchAllRows } from "@/lib/dashboard-queries";
 
 // Real "sales by rep, with all their customers, for a period" report — the
 // user asked for exactly this after finding the AI Copilot chat can already
@@ -30,20 +30,6 @@ interface CustomerBreakdownRow {
   customer_name: string;
   transaction_count: number;
   total_taxable_value: number;
-}
-
-async function fetchAllRows<T>(buildPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>): Promise<T[]> {
-  const rows: T[] = [];
-  let from = 0;
-  const pageSize = 1000;
-  while (true) {
-    const { data, error } = await buildPage(from, from + pageSize - 1);
-    if (error || !data) break;
-    rows.push(...data);
-    if (data.length < pageSize) break;
-    from += pageSize;
-  }
-  return rows;
 }
 
 export default function SalesByRepPage() {
