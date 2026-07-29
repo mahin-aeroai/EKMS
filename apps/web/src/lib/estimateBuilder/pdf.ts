@@ -62,7 +62,6 @@ const MMDI = {
   phone: "+91 40 2726 7777 / 8888",
   email: "info@mmdi.in",
   web: "www.mmdi.in",
-  signatoryName: "Naresh Kumar D",
   signOffLine: "For MACROMEDIA DIGITAL IMAGING PVT. LTD.",
 };
 
@@ -118,6 +117,10 @@ export interface EstimatePdfData {
   paymentTermsType: EstimatePaymentTermsType;
   paymentTermsDays: number | null;
   notes: string | null;
+  salespersonName: string | null;
+  salespersonDesignation: string | null;
+  salespersonPhone: string | null;
+  salespersonEmail: string | null;
   lines: EstimatePdfLine[];
 }
 
@@ -475,10 +478,27 @@ export async function generateEstimatePdf(data: EstimatePdfData): Promise<Blob> 
   state.y -= 26;
 
   // ---- Signing block ----
+  // Prints this estimate's own sales person (name/designation/mobile/
+  // email, snapshotted on save from public.employees at pick time) instead
+  // of a hardcoded default name -- and no blank gap above it: that gap
+  // used to hold space for a wet/e-signature above a bare printed name,
+  // but there's nothing to leave room for now that this is a full
+  // business-card-style block instead of just a name. An estimate with no
+  // sales person picked just shows the sign-off line with nothing below.
   ensure(ctx, state, 60);
   state.page.drawText(MMDI.signOffLine, { x: MARGIN, y: state.y, size, font: bold, color: INK });
-  state.y -= 36; // blank space for a wet/e-signature above the printed name
-  state.page.drawText(`(${MMDI.signatoryName})`, { x: MARGIN, y: state.y, size, font, color: INK });
+  state.y -= 14;
+  const signatoryLines = [
+    data.salespersonName,
+    data.salespersonDesignation,
+    data.salespersonPhone ? `Mobile: ${data.salespersonPhone}` : null,
+    data.salespersonEmail ? `Email: ${data.salespersonEmail}` : null,
+  ].filter((l): l is string => !!l);
+  for (const line of signatoryLines) {
+    ensure(ctx, state, 12);
+    state.page.drawText(line, { x: MARGIN, y: state.y, size, font, color: INK });
+    state.y -= 12;
+  }
 
   const bytes = await doc.save();
   return new Blob([bytes as unknown as BlobPart], { type: "application/pdf" });

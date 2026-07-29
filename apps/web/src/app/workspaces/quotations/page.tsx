@@ -105,6 +105,10 @@ export default function QuotationsPage() {
         paymentTermsType: estimate.payment_terms_type ?? "net_days",
         paymentTermsDays: estimate.payment_terms_days,
         notes: estimate.notes,
+        salespersonName: estimate.salesperson_name,
+        salespersonDesignation: estimate.salesperson_designation,
+        salespersonPhone: estimate.salesperson_phone,
+        salespersonEmail: estimate.salesperson_email,
         lines,
       });
       downloadBlob(blob, `${estimate.quote_number ?? "estimate"}.pdf`);

@@ -350,6 +350,15 @@ export interface EstimateRow {
   delivery_commitment: string | null;
   payment_terms_days: number | null;
   payment_terms_type: EstimatePaymentTermsType;
+  // Snapshotted at save time (same convention as customer_address/
+  // customer_gstin/attention_person) so a PDF re-downloaded later still
+  // shows exactly what it showed on save -- not a live join to
+  // public.employees. Replaces the old hardcoded "Naresh Kumar D" default
+  // in the PDF's sign-off block.
+  salesperson_name: string | null;
+  salesperson_designation: string | null;
+  salesperson_phone: string | null;
+  salesperson_email: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;

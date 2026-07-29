@@ -9,7 +9,7 @@ import { Card, StatCard } from "@/components/ui/Card";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
-import type { CustomerRow, CustomerContactRow, ContractRow, IkeaRateCardRow, AppleRateCardRow, EstimateRow, EstimateCalcMode, EstimateLineItemRow, EstimatePaymentTermsType } from "@mmdi/shared/rows";
+import type { CustomerRow, CustomerContactRow, ContractRow, IkeaRateCardRow, AppleRateCardRow, EstimateRow, EstimateCalcMode, EstimateLineItemRow, EstimatePaymentTermsType, EmployeeRow } from "@mmdi/shared/rows";
 import { generateEstimatePdf, downloadBlob, type EstimatePdfLine } from "@/lib/estimateBuilder/pdf";
 import { fetchAllRows } from "@/lib/dashboard-queries";
 
@@ -178,6 +178,16 @@ export default function EstimateBuilderPage() {
   const [deliveryCommitment, setDeliveryCommitment] = useState("");
   const [paymentTermsType, setPaymentTermsType] = useState<EstimatePaymentTermsType>("net_days");
   const [paymentTermsDays, setPaymentTermsDays] = useState<number | "">("");
+  // Sales person for the PDF's sign-off block -- replaces the old
+  // hardcoded "Naresh Kumar D" default. No default person here either:
+  // every estimate starts blank and picks (or types) whoever actually
+  // built it, same "snapshot at save time, stays editable" pattern as
+  // Attention person.
+  const [employees, setEmployees] = useState<EmployeeRow[] | null>(null);
+  const [salespersonName, setSalespersonName] = useState("");
+  const [salespersonDesignation, setSalespersonDesignation] = useState("");
+  const [salespersonPhone, setSalespersonPhone] = useState("");
+  const [salespersonEmail, setSalespersonEmail] = useState("");
   const [saving, setSaving] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
@@ -214,6 +224,7 @@ export default function EstimateBuilderPage() {
       .from("contracts")
       .select("*")
       .then(({ data }) => setContracts((data as ContractRow[]) ?? []));
+    fetchAllRows<EmployeeRow>((from, to) => supabase.from("employees").select("*").order("name").range(from, to)).then(setEmployees);
     loadRecent();
   }, []);
 
@@ -270,6 +281,10 @@ export default function EstimateBuilderPage() {
         paymentTermsType: estimate.payment_terms_type ?? "net_days",
         paymentTermsDays: estimate.payment_terms_days,
         notes: estimate.notes,
+        salespersonName: estimate.salesperson_name,
+        salespersonDesignation: estimate.salesperson_designation,
+        salespersonPhone: estimate.salesperson_phone,
+        salespersonEmail: estimate.salesperson_email,
         lines: pdfLinesFrom((items as EstimateLineItemRow[]) ?? []),
       });
       downloadBlob(blob, `${estimate.quote_number ?? "estimate"}.pdf`);
@@ -305,6 +320,10 @@ export default function EstimateBuilderPage() {
       setDeliveryCommitment(estimate.delivery_commitment ?? "");
       setPaymentTermsType(estimate.payment_terms_type ?? "net_days");
       setPaymentTermsDays(estimate.payment_terms_days ?? "");
+      setSalespersonName(estimate.salesperson_name ?? "");
+      setSalespersonDesignation(estimate.salesperson_designation ?? "");
+      setSalespersonPhone(estimate.salesperson_phone ?? "");
+      setSalespersonEmail(estimate.salesperson_email ?? "");
       setLines(
         ((items as EstimateLineItemRow[]) ?? []).map((i) => ({
           key: crypto.randomUUID(),
@@ -636,6 +655,10 @@ export default function EstimateBuilderPage() {
           // are fixed terms with nothing to count (see the migration's check
           // constraint invariant).
           payment_terms_days: paymentTermsType === "net_days" && paymentTermsDays !== "" ? paymentTermsDays : null,
+          salesperson_name: salespersonName || null,
+          salesperson_designation: salespersonDesignation || null,
+          salesperson_phone: salespersonPhone || null,
+          salesperson_email: salespersonEmail || null,
           created_by: userData.user?.id ?? null,
         })
         .select()
@@ -687,6 +710,10 @@ export default function EstimateBuilderPage() {
         paymentTermsType,
         paymentTermsDays: paymentTermsType === "net_days" && paymentTermsDays !== "" ? paymentTermsDays : null,
         notes: notes || null,
+        salespersonName: salespersonName || null,
+        salespersonDesignation: salespersonDesignation || null,
+        salespersonPhone: salespersonPhone || null,
+        salespersonEmail: salespersonEmail || null,
         lines: lines.map((l) => ({
           productNo: l.productNo || null,
           productName: l.productName,
@@ -1217,6 +1244,74 @@ export default function EstimateBuilderPage() {
           <input
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
+            className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
+          />
+        </label>
+      </Card>
+
+      {/* Sales person — prints in the PDF's sign-off block ("For MACROMEDIA
+          DIGITAL IMAGING PVT. LTD." followed by whoever's picked here). No
+          default person: every estimate starts blank, same "pick from a
+          list, then freely edit" pattern as Attention person above. */}
+      <Card interactive={false} className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary sm:col-span-2 lg:col-span-4">
+          Sales person (for the sign-off block)
+          {employees && employees.length > 0 && (
+            <select
+              value=""
+              onChange={(e) => {
+                const p = employees.find((x) => x.id === e.target.value);
+                if (!p) return;
+                setSalespersonName(p.name);
+                setSalespersonDesignation(p.role ?? "");
+                setSalespersonPhone(p.off_phone || p.personal_phone || "");
+                setSalespersonEmail(p.off_email || p.personal_email || "");
+              }}
+              className="h-8 rounded-md border border-line-strong bg-surface px-2 text-xs text-ink outline-none"
+            >
+              <option value="">Pick from employees on file ({employees.length})…</option>
+              {employees.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                  {p.role ? ` — ${p.role}` : ""}
+                </option>
+              ))}
+            </select>
+          )}
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
+          Name
+          <input
+            value={salespersonName}
+            onChange={(e) => setSalespersonName(e.target.value)}
+            placeholder="e.g. Priya Sharma"
+            className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
+          Designation
+          <input
+            value={salespersonDesignation}
+            onChange={(e) => setSalespersonDesignation(e.target.value)}
+            placeholder="e.g. Sales Manager"
+            className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
+          Mobile number
+          <input
+            value={salespersonPhone}
+            onChange={(e) => setSalespersonPhone(e.target.value)}
+            placeholder="e.g. +91 90000 00000"
+            className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
+          Email ID
+          <input
+            value={salespersonEmail}
+            onChange={(e) => setSalespersonEmail(e.target.value)}
+            placeholder="e.g. priya@mmdi.in"
             className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
           />
         </label>
