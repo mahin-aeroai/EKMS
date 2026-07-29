@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { FileSpreadsheet, Plus, Trash2 } from "lucide-react";
+import { Download, FileSpreadsheet, Plus, Trash2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -9,7 +9,8 @@ import { Card, StatCard } from "@/components/ui/Card";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
-import type { CustomerRow, CustomerSiteRow, ContractRow, IkeaRateCardRow, EstimateRow, EstimateCalcMode } from "@mmdi/shared/rows";
+import type { CustomerRow, CustomerSiteRow, ContractRow, IkeaRateCardRow, EstimateRow, EstimateCalcMode, EstimateLineItemRow } from "@mmdi/shared/rows";
+import { generateEstimatePdf, downloadBlob, type EstimatePdfLine } from "@/lib/estimateBuilder/pdf";
 
 // MMDI ONE Estimate Builder — scoped to IKEA first per the user's request
 // to "start with it." Pulls real products/pricing straight from
@@ -143,7 +144,12 @@ export default function EstimateBuilderPage() {
   const [deliveryCommitment, setDeliveryCommitment] = useState("");
   const [paymentTermsDays, setPaymentTermsDays] = useState<number | "">("");
   const [saving, setSaving] = useState(false);
-  const [recent, setRecent] = useState<(EstimateRow & { customers: { name: string } | null; customer_sites: { site_name: string } | null })[] | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  type RecentEstimate = EstimateRow & {
+    customers: { name: string } | null;
+    customer_sites: { site_name: string; legal_entity_name: string | null; address: string | null; gstin: string | null } | null;
+  };
+  const [recent, setRecent] = useState<RecentEstimate[] | null>(null);
 
   // Customers + contracts loaded once — small enough tables to fetch
   // whole, same pattern as Sales by Rep's sales-person dropdown.
@@ -163,10 +169,61 @@ export default function EstimateBuilderPage() {
   function loadRecent() {
     supabase
       .from("estimates")
-      .select("*, customers(name), customer_sites(site_name)")
+      .select("*, customers(name), customer_sites(site_name, legal_entity_name, address, gstin)")
       .order("created_at", { ascending: false })
       .limit(10)
       .then(({ data }) => setRecent((data as never) ?? []));
+  }
+
+  function pdfLinesFrom(items: EstimateLineItemRow[]): EstimatePdfLine[] {
+    return items.map((i) => ({
+      productName: i.product_name,
+      designName: i.design_name,
+      description: i.description,
+      uom: i.uom,
+      calcMode: i.calc_mode,
+      widthCm: i.width_cm,
+      heightCm: i.height_cm,
+      quantity: i.quantity,
+      sqftTotal: i.sqft_total,
+      unitRate: i.unit_rate,
+      transportationRate: i.transportation_rate,
+      installationRate: i.installation_rate,
+    }));
+  }
+
+  async function downloadRecentPdf(estimate: RecentEstimate) {
+    setDownloadingId(estimate.id);
+    try {
+      const { data: items, error } = await supabase
+        .from("estimate_line_items")
+        .select("*")
+        .eq("estimate_id", estimate.id)
+        .order("sort_order");
+      if (error) throw error;
+      const blob = await generateEstimatePdf({
+        quoteNumber: estimate.quote_number ?? estimate.id,
+        createdAt: estimate.created_at,
+        customerName: estimate.customers?.name ?? "Customer",
+        siteLegalEntityName: estimate.customer_sites?.legal_entity_name ?? null,
+        siteAddress: estimate.customer_sites?.address ?? null,
+        siteGstin: estimate.customer_sites?.gstin ?? null,
+        attentionPerson: estimate.attention_person,
+        quoteSubject: estimate.quote_subject,
+        gstPercent: estimate.gst_percent,
+        jobCompletionTime: estimate.job_completion_time,
+        deliveryCommitment: estimate.delivery_commitment,
+        paymentTermsDays: estimate.payment_terms_days,
+        notes: estimate.notes,
+        lines: pdfLinesFrom((items as EstimateLineItemRow[]) ?? []),
+      });
+      downloadBlob(blob, `${estimate.quote_number ?? "estimate"}.pdf`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Couldn't build this PDF";
+      toast("danger", message);
+    } finally {
+      setDownloadingId(null);
+    }
   }
 
   const selectedCustomer = customers?.find((c) => c.id === selectedCustomerId) ?? null;
@@ -197,6 +254,7 @@ export default function EstimateBuilderPage() {
     setSites(null);
     setRateCard(null);
     setRateCardPick("");
+    setAttentionPerson("");
     const name = customers?.find((c) => c.id === id)?.name?.toLowerCase() ?? "";
     if (name.includes("ikea")) setPaymentTermsDays(30);
     else if (name.includes("apple")) setPaymentTermsDays(45);
@@ -212,6 +270,14 @@ export default function EstimateBuilderPage() {
       .order("site_name")
       .then(({ data }) => setSites((data as CustomerSiteRow[]) ?? []));
   }, [selectedCustomerId]);
+
+  // Each site has its own on-file contact (e.g. IKEA Worli -> Ms. Riya
+  // Patil) -- picking a site loads it straight into the Attention person
+  // field instead of retyping it every time, still editable afterwards.
+  function onSiteChange(id: string) {
+    setSelectedSiteId(id);
+    setAttentionPerson(sites?.find((s) => s.id === id)?.attention_person ?? "");
+  }
 
   useEffect(() => {
     if (!isIkea) return;
@@ -332,7 +398,39 @@ export default function EstimateBuilderPage() {
       );
       if (linesError) throw linesError;
 
-      toast("success", `Saved ${quoteNumberData}`);
+      const site = sites?.find((s) => s.id === selectedSiteId) ?? null;
+      const blob = await generateEstimatePdf({
+        quoteNumber: quoteNumberData,
+        createdAt: estimate.created_at,
+        customerName: selectedCustomer.name,
+        siteLegalEntityName: site?.legal_entity_name ?? null,
+        siteAddress: site?.address ?? null,
+        siteGstin: site?.gstin ?? null,
+        attentionPerson: attentionPerson || null,
+        quoteSubject: quoteSubject || null,
+        gstPercent,
+        jobCompletionTime: jobCompletionTime || null,
+        deliveryCommitment: deliveryCommitment || null,
+        paymentTermsDays: paymentTermsDays === "" ? null : paymentTermsDays,
+        notes: notes || null,
+        lines: lines.map((l) => ({
+          productName: l.productName,
+          designName: l.designName || null,
+          description: l.description || null,
+          uom: l.uom || null,
+          calcMode: l.calcMode,
+          widthCm: l.widthCm || null,
+          heightCm: l.heightCm || null,
+          quantity: l.quantity,
+          sqftTotal: l.calcMode === "sqft" ? sqftTotal(l) : null,
+          unitRate: l.unitRate,
+          transportationRate: l.transportationRate,
+          installationRate: l.installationRate,
+        })),
+      });
+      downloadBlob(blob, `${quoteNumberData}.pdf`);
+
+      toast("success", `Saved ${quoteNumberData} — PDF downloaded`);
       setLines([]);
       setNotes("");
       loadRecent();
@@ -382,7 +480,7 @@ export default function EstimateBuilderPage() {
           placeholder={!selectedCustomerId ? "Select a customer first" : sites && sites.length === 0 ? "No sites on file" : "Select a site"}
           options={(sites ?? []).map((s) => ({ value: s.id, label: s.site_name }))}
           value={selectedSiteId}
-          onChange={(v) => setSelectedSiteId(v as string)}
+          onChange={(v) => onSiteChange(v as string)}
         />
       </Card>
 
@@ -749,6 +847,7 @@ export default function EstimateBuilderPage() {
                 <th className="px-3 py-2">Site</th>
                 <th className="px-3 py-2">Status</th>
                 <th className="px-3 py-2">Grand total</th>
+                <th className="px-3 py-2" />
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
@@ -761,11 +860,17 @@ export default function EstimateBuilderPage() {
                     <Badge status="neutral">{e.status}</Badge>
                   </td>
                   <td className="px-3 py-2.5">{rupee(e.grand_total)}</td>
+                  <td className="px-3 py-2.5">
+                    <Button variant="secondary" size="sm" loading={downloadingId === e.id} onClick={() => downloadRecentPdf(e)}>
+                      <Download size={14} />
+                      PDF
+                    </Button>
+                  </td>
                 </tr>
               ))}
               {recent !== null && recent.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-3 py-8 text-center text-ink-muted">
+                  <td colSpan={6} className="px-3 py-8 text-center text-ink-muted">
                     No estimates saved yet.
                   </td>
                 </tr>

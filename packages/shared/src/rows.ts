@@ -286,6 +286,7 @@ export interface CustomerSiteRow {
   legal_entity_name: string | null;
   address: string;
   gstin: string | null;
+  attention_person: string | null;
   created_at: string;
 }
 
