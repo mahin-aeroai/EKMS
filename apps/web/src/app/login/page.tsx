@@ -171,6 +171,16 @@ function LoginForm() {
     e.preventDefault();
     setError(null);
 
+    // Fast, friendly check before even hitting the network -- the real
+    // enforcement is a Postgres trigger on auth.users (see
+    // supabase-restrict-signup-domain-migration.sql), which blocks this
+    // regardless of what the browser does. This is just so someone typing
+    // the wrong address sees a clear message instantly instead of a raw
+    // database error after a round trip.
+    if (!/^[^\s@]+@mmdi\.in$/i.test(email.trim())) {
+      setError("Registration is restricted to @mmdi.in email addresses.");
+      return;
+    }
     if (password.length < 8) {
       setError("Password must be at least 8 characters.");
       return;

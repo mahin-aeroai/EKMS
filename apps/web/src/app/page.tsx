@@ -1,5 +1,6 @@
 "use client";
 
+import { cloneElement, type ReactElement } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { Sparkles } from "lucide-react";
@@ -10,6 +11,23 @@ import { NAV } from "@/components/AppShell";
 // this page) -- no reason to render a tile that links to the page you're
 // already on, so it's the one section skipped here.
 const GROUPS = NAV.filter((section) => section.title !== "Home");
+
+// One consistent icon-tile color per section, cycling through the app's 6
+// existing semantic role colors (all 3 themes already define these -- see
+// globals.css -- so this never needs its own color values). Solid fill +
+// on-brand (white) icon, like an app-icon glyph, not a pale tint -- that's
+// what makes these read as colorful and distinct rather than generic.
+// Literal class strings on purpose: Tailwind only generates classes it can
+// see written out in source, not ones assembled via `${}` template
+// interpolation.
+const TILE_COLORS = [
+  "bg-primary text-on-brand",
+  "bg-info text-on-brand",
+  "bg-ai text-on-brand",
+  "bg-success text-on-brand",
+  "bg-warning text-on-brand",
+  "bg-danger text-on-brand",
+];
 
 export default function HomePage() {
   const router = useRouter();
@@ -24,37 +42,31 @@ export default function HomePage() {
 
   return (
     <div>
-      {/* Hero banner -- brand gradient sampled from the MMDI logo (red at
-          top-left through orange to gold at bottom-right), styled like a
-          classic Apple hero: one confident headline, huge negative space,
-          minimal supporting copy. The dark scrim on top guarantees the
-          white text stays legible over every part of the gradient,
-          including the paler gold corner. */}
-      <div
-        className="relative mb-8 overflow-hidden rounded-2xl px-8 py-14 text-center sm:px-12 sm:py-20"
-        style={{ background: "linear-gradient(135deg, #FB050D 0%, #F97A2A 55%, #FBCB3F 100%)" }}
-      >
+      {/* Small classic masthead -- logo + wordmark, left-to-right, black on
+          white, no restated tagline (the logo already carries the brand).
+          The gradient accent bar and soft corner glow -- both sampled from
+          the logo's orange/gold, no red -- are what keep it from reading as
+          a plain empty box while staying small and restrained. */}
+      <div className="relative mb-8 flex items-center gap-4 overflow-hidden rounded-xl border border-line bg-surface py-4 pl-6 pr-5">
         <div
-          className="pointer-events-none absolute inset-0"
-          style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0) 40%, rgba(0,0,0,0.18) 100%)" }}
+          className="pointer-events-none absolute inset-y-0 left-0 w-1.5"
+          style={{ background: "linear-gradient(to bottom, #F97A2A, #FBCB4A)" }}
         />
-        {/* Soft glow, an understated nod to Apple's glossy hero backdrops. */}
-        <div className="pointer-events-none absolute -top-24 left-1/2 h-72 w-72 -translate-x-1/2 rounded-full bg-white/20 blur-3xl" />
-
-        <div className="relative mx-auto max-w-2xl">
-          <Image
-            src="/brand/mmdi-logo.jpg"
-            alt="MMDI"
-            width={64}
-            height={64}
-            className="mx-auto mb-6 rounded-xl shadow-lg"
-            priority
-          />
-          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-white/80">MMDI ONE</p>
-          <h1 className="mt-3 text-4xl font-bold tracking-tight text-white sm:text-5xl">Bringing Brands Alive.</h1>
-          <p className="mx-auto mt-4 max-w-lg text-base text-white/90 sm:text-lg">
-            Signage, graphics, displays &amp; decor — run end to end from one enterprise operating platform.
-          </p>
+        <div
+          className="pointer-events-none absolute -right-8 -top-10 h-32 w-32 rounded-full opacity-25 blur-3xl"
+          style={{ background: "radial-gradient(circle, #FBCB4A, transparent 70%)" }}
+        />
+        <Image
+          src="/brand/mmdi-logo.jpg"
+          alt="MMDI"
+          width={48}
+          height={48}
+          className="relative rounded-lg shadow-2"
+          priority
+        />
+        <div className="relative">
+          <p className="text-lg font-bold tracking-tight text-ink">MMDI ONE</p>
+          <p className="text-xs text-ink-secondary">Enterprise operating platform</p>
         </div>
       </div>
 
@@ -65,26 +77,31 @@ export default function HomePage() {
         <PromptInput onSubmit={handleAsk} />
       </div>
 
-      {GROUPS.map((section) => (
-        <div key={section.title} className="mb-8">
-          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-muted">{section.title}</h2>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
-            {section.items.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => router.push(item.href)}
-                className="flex flex-col items-center gap-2 rounded-lg border border-line bg-surface p-4 text-center transition-shadow hover:shadow-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              >
-                <span className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary-tint text-primary">
-                  {item.icon}
-                </span>
-                <span className="text-xs font-medium text-ink">{item.label}</span>
-              </button>
-            ))}
+      {GROUPS.map((section, sectionIndex) => {
+        const color = TILE_COLORS[sectionIndex % TILE_COLORS.length];
+        return (
+          <div key={section.title} className="mb-8">
+            <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-muted">{section.title}</h2>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+              {section.items.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => router.push(item.href)}
+                  className="group flex flex-col items-center gap-2.5 rounded-xl border border-line bg-surface p-4 text-center transition-shadow hover:shadow-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                >
+                  <span
+                    className={`flex h-14 w-14 items-center justify-center rounded-2xl shadow-1 transition-transform group-hover:scale-105 ${color}`}
+                  >
+                    {cloneElement(item.icon as ReactElement<{ size?: number }>, { size: 24 })}
+                  </span>
+                  <span className="text-xs font-medium text-ink">{item.label}</span>
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
