@@ -9,7 +9,7 @@ import { Card, StatCard } from "@/components/ui/Card";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
-import type { CustomerRow, ContractRow, IkeaRateCardRow, AppleRateCardRow, EstimateRow, EstimateCalcMode, EstimateLineItemRow } from "@mmdi/shared/rows";
+import type { CustomerRow, CustomerContactRow, ContractRow, IkeaRateCardRow, AppleRateCardRow, EstimateRow, EstimateCalcMode, EstimateLineItemRow } from "@mmdi/shared/rows";
 import { generateEstimatePdf, downloadBlob, type EstimatePdfLine } from "@/lib/estimateBuilder/pdf";
 
 // MMDI ONE Estimate Builder — scoped to IKEA first per the user's request
@@ -142,6 +142,14 @@ export default function EstimateBuilderPage() {
   const [notes, setNotes] = useState("");
   const [jobNumber, setJobNumber] = useState("");
   const [attentionPerson, setAttentionPerson] = useState("");
+  // Active contacts on file for the selected customer (see the Customer
+  // workspace's contact management) -- the quick-pick list next to
+  // Attention person below. Deliberately NOT read from customers.
+  // default_attention_person: that flat field goes stale the moment
+  // someone's deactivated/added in the real contacts table, which is
+  // exactly the bug this replaces (an estimate kept showing a contact who
+  // had already been marked as having left).
+  const [customerContacts, setCustomerContacts] = useState<CustomerContactRow[] | null>(null);
   const [quoteSubject, setQuoteSubject] = useState("");
   const [customerAddress, setCustomerAddress] = useState("");
   const [customerGstin, setCustomerGstin] = useState("");
@@ -263,6 +271,7 @@ export default function EstimateBuilderPage() {
       setNotes(estimate.notes ?? "");
       setJobNumber(estimate.job_number ?? "");
       setAttentionPerson(estimate.attention_person ?? "");
+      void loadCustomerContacts(estimate.customer_id, { autofill: false });
       setQuoteSubject(estimate.quote_subject ?? "");
       setCustomerAddress(estimate.customer_address ?? "");
       setCustomerGstin(estimate.customer_gstin ?? "");
@@ -338,16 +347,37 @@ export default function EstimateBuilderPage() {
   // request: one default address/contact per customer, not one per
   // store). Job No. below is what now identifies which specific job/site
   // this estimate is for.
+  // Fetches this customer's ACTIVE contacts (never the deactivated ones --
+  // see supabase-customer-contacts-mobile-active-migration.sql) for the
+  // quick-pick list. `autofill` only runs when a person is actively
+  // changing the customer in the dropdown -- NOT when loading an existing
+  // estimate for editing, where the saved attentionPerson must win as-is
+  // regardless of who's active today.
+  async function loadCustomerContacts(customerId: string, opts: { autofill: boolean }) {
+    const { data } = await supabase
+      .from("customer_contacts")
+      .select("*")
+      .eq("customer_id", customerId)
+      .eq("is_active", true)
+      .order("name");
+    const list = (data as CustomerContactRow[]) ?? [];
+    setCustomerContacts(list);
+    if (opts.autofill) {
+      setAttentionPerson(list.length === 1 ? list[0].name : "");
+    }
+  }
+
   function onCustomerChange(id: string) {
     setSelectedCustomerId(id);
     setSelectedContractId("");
     setRateCard(null);
     setAppleRateCard(null);
     setRateCardPick("");
+    setCustomerContacts(null);
     const customer = customers?.find((c) => c.id === id);
     setCustomerAddress(customer?.address ?? "");
     setCustomerGstin(customer?.gstin ?? "");
-    setAttentionPerson(customer?.default_attention_person ?? "");
+    void loadCustomerContacts(id, { autofill: true });
     const name = customer?.name?.toLowerCase() ?? "";
     if (name.includes("ikea")) setPaymentTermsDays(30);
     else if (name.includes("apple")) setPaymentTermsDays(45);
@@ -670,6 +700,24 @@ export default function EstimateBuilderPage() {
         </label>
         <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
           Attention person
+          {customerContacts && customerContacts.length > 0 && (
+            <select
+              value=""
+              onChange={(e) => {
+                const c = customerContacts.find((x) => x.id === e.target.value);
+                if (c) setAttentionPerson(c.name);
+              }}
+              className="h-8 rounded-md border border-line-strong bg-surface px-2 text-xs text-ink outline-none"
+            >
+              <option value="">Pick from contacts on file ({customerContacts.length})…</option>
+              {customerContacts.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                  {c.role ? ` — ${c.role}` : ""}
+                </option>
+              ))}
+            </select>
+          )}
           <input
             value={attentionPerson}
             onChange={(e) => setAttentionPerson(e.target.value)}
