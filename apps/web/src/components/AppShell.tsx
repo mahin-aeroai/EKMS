@@ -2,16 +2,9 @@
 
 import { useRouter, usePathname } from "next/navigation";
 import {
-  Palette,
-  MousePointerClick,
-  IdCard,
-  Database,
-  Navigation as NavIcon,
   Users,
   Bell,
-  Sparkles,
   FileStack,
-  Columns2,
   Home,
   Building2,
   Wrench,
@@ -58,42 +51,42 @@ import { UserRoleContext } from "@/lib/UserRoleContext";
 import { UserGroupsContext, canAccessGroup } from "@/lib/UserGroupsContext";
 
 // Maps a NAV section's title to the group id used in profiles.allowed_groups
-// (supabase-module-access-migration.sql). Sections not listed here (Overview,
-// Foundations, Components, Executive) are never restricted -- see that
-// migration's header comment for why Executive specifically stays ungated.
+// (supabase-module-access-migration.sql). Sections not listed here (Home,
+// Executive, Tools) are never restricted -- see that migration's header
+// comment for why Executive specifically stays ungated; Tools follows the
+// same reasoning (a grab-bag of standalone browser utilities that don't map
+// to one business-data group, same as Executive already didn't).
+//
+// The old Design System Home / Foundations / Components sections (the
+// component-library showcase, not a business feature -- see PROJECT_STATUS.md
+// "What MMDI ONE is") were removed from this nav entirely per Srinivas's
+// request. Their page files are untouched, just unlinked -- reachable at
+// /design-system, /foundations, /components/* if ever needed again.
+//
+// People/Finance/Compliance/Administration used to be 4 separate
+// single-item sections, each independently gated. They're now one visual
+// "Admin" section, so they share one gating key ("administration", the
+// most privileged of the four) -- there's no per-item gating within a
+// section in this filter, only per-section. In practice this is a no-op
+// today: nobody has allowed_groups configured yet (fail-open / everyone
+// unrestricted), so flag this if that changes before someone relies on
+// People/Finance/Compliance being independently restrictable again.
 const SECTION_GROUP: Record<string, string> = {
   Customers: "customers",
   Operations: "operations",
   Manufacturing: "manufacturing",
   Knowledge: "knowledge",
-  People: "people",
-  Finance: "finance",
-  Compliance: "compliance",
-  Administration: "administration",
+  Admin: "administration",
 };
 
-const NAV: SidebarSection[] = [
+// Exported so the icon-grid home page (src/app/page.tsx) can render every
+// workspace as a tile from this exact same data -- one source of truth for
+// "what workspaces exist and which group they're in," instead of a second
+// hardcoded list that could drift out of sync with the sidebar.
+export const NAV: SidebarSection[] = [
   {
-    title: "Overview",
-    items: [{ id: "home", label: "Design System Home", icon: <Home size={16} />, href: "/" }],
-  },
-  {
-    title: "Foundations",
-    items: [{ id: "foundations", label: "Tokens & Foundations", icon: <Palette size={16} />, href: "/foundations" }],
-  },
-  {
-    title: "Components",
-    items: [
-      { id: "inputs", label: "Inputs & Actions", icon: <MousePointerClick size={16} />, href: "/components/inputs" },
-      { id: "cards", label: "Cards", icon: <IdCard size={16} />, href: "/components/cards" },
-      { id: "data", label: "Data & Structure", icon: <Database size={16} />, href: "/components/data" },
-      { id: "navigation", label: "Navigation", icon: <NavIcon size={16} />, href: "/components/navigation" },
-      { id: "collaboration", label: "Collaboration", icon: <Users size={16} />, href: "/components/collaboration" },
-      { id: "feedback", label: "Feedback & Overlays", icon: <Bell size={16} />, href: "/components/feedback" },
-      { id: "ai", label: "AI-Native", icon: <Sparkles size={16} />, href: "/components/ai" },
-      { id: "viewers", label: "Document & Media Viewers", icon: <FileStack size={16} />, href: "/components/viewers" },
-      { id: "layout", label: "Layout Primitives", icon: <Columns2 size={16} />, href: "/components/layout" },
-    ],
+    title: "Home",
+    items: [{ id: "home", label: "Home", icon: <Home size={16} />, href: "/" }],
   },
   {
     title: "Executive",
@@ -108,11 +101,9 @@ const NAV: SidebarSection[] = [
     items: [
       { id: "workspace-customer", label: "Customer Workspace", icon: <Building2 size={16} />, href: "/workspaces/customer" },
       { id: "sales-by-rep", label: "Sales by Rep", icon: <Target size={16} />, href: "/workspaces/sales-by-rep" },
-      { id: "site-surveys", label: "Site Surveys", icon: <FileText size={16} />, href: "/workspaces/site-surveys" },
       { id: "crm", label: "CRM", icon: <Users size={16} />, href: "/workspaces/crm" },
-      { id: "quotations", label: "Quotations", icon: <FileText size={16} />, href: "/workspaces/quotations" },
-      { id: "sign-estimator", label: "Sign Estimator", icon: <Ruler size={16} />, href: "/workspaces/sign-estimator" },
       { id: "contracts", label: "Contracts", icon: <FileSignature size={16} />, href: "/workspaces/contracts" },
+      { id: "quotations", label: "Quotations", icon: <FileText size={16} />, href: "/workspaces/quotations" },
     ],
   },
   {
@@ -123,7 +114,6 @@ const NAV: SidebarSection[] = [
       { id: "workspace-machine", label: "Machines", icon: <Wrench size={16} />, href: "/workspaces/machine" },
       { id: "maintenance", label: "Maintenance", icon: <ClipboardList size={16} />, href: "/workspaces/maintenance" },
       { id: "installation", label: "Installation", icon: <Truck size={16} />, href: "/workspaces/installation" },
-      { id: "installation-report", label: "Installation Report", icon: <Camera size={16} />, href: "/workspaces/installation-report" },
     ],
   },
   {
@@ -135,8 +125,6 @@ const NAV: SidebarSection[] = [
       { id: "purchase-register", label: "Purchase Register", icon: <Receipt size={16} />, href: "/workspaces/purchase-register" },
       { id: "suppliers", label: "Suppliers", icon: <Handshake size={16} />, href: "/workspaces/suppliers" },
       { id: "costing", label: "Costing", icon: <Calculator size={16} />, href: "/workspaces/costing" },
-      { id: "cut-file-tool", label: "Cut File Tool", icon: <Scissors size={16} />, href: "/workspaces/cut-file-tool" },
-      { id: "qr-label-tool", label: "QR Label Tool", icon: <QrCode size={16} />, href: "/workspaces/qr-label-tool" },
     ],
   },
   {
@@ -150,20 +138,23 @@ const NAV: SidebarSection[] = [
     ],
   },
   {
-    title: "People",
-    items: [{ id: "people", label: "People", icon: <UserRound size={16} />, href: "/workspaces/people" }],
+    title: "Admin",
+    items: [
+      { id: "people", label: "People", icon: <UserRound size={16} />, href: "/workspaces/people" },
+      { id: "finance", label: "Finance", icon: <Landmark size={16} />, href: "/workspaces/finance" },
+      { id: "compliance", label: "Compliance", icon: <ShieldCheck size={16} />, href: "/workspaces/compliance" },
+      { id: "administration", label: "Administration", icon: <Settings size={16} />, href: "/workspaces/administration" },
+    ],
   },
   {
-    title: "Finance",
-    items: [{ id: "finance", label: "Finance", icon: <Landmark size={16} />, href: "/workspaces/finance" }],
-  },
-  {
-    title: "Compliance",
-    items: [{ id: "compliance", label: "Compliance", icon: <ShieldCheck size={16} />, href: "/workspaces/compliance" }],
-  },
-  {
-    title: "Administration",
-    items: [{ id: "administration", label: "Administration", icon: <Settings size={16} />, href: "/workspaces/administration" }],
+    title: "Tools",
+    items: [
+      { id: "site-surveys", label: "Site Surveys", icon: <FileText size={16} />, href: "/workspaces/site-surveys" },
+      { id: "sign-estimator", label: "Sign Estimator", icon: <Ruler size={16} />, href: "/workspaces/sign-estimator" },
+      { id: "installation-report", label: "Installation Report", icon: <Camera size={16} />, href: "/workspaces/installation-report" },
+      { id: "cut-file-tool", label: "Cut File Tool", icon: <Scissors size={16} />, href: "/workspaces/cut-file-tool" },
+      { id: "qr-label-tool", label: "QR Label Tool", icon: <QrCode size={16} />, href: "/workspaces/qr-label-tool" },
+    ],
   },
 ];
 

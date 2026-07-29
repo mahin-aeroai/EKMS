@@ -41,6 +41,21 @@ export default function AICopilotPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Auto-send a question handed off from the home page's "Ask AI Copilot"
+  // box (?q=...). Read via window.location directly rather than
+  // useSearchParams -- this page is fully client-rendered already, so this
+  // avoids the Suspense-boundary requirement useSearchParams imposes on
+  // statically-generated pages for no benefit here. Runs once on mount,
+  // then strips the param via replaceState so refreshing doesn't re-send.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get("q");
+    if (q) {
+      window.history.replaceState(null, "", "/workspaces/ai-copilot");
+      handleSend(q);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function handleSend(message: string) {
     const userTurn: ChatTurn = { id: crypto.randomUUID(), role: "user", content: message };
     const history = [...turns, userTurn];
