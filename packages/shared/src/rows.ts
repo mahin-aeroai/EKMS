@@ -316,10 +316,17 @@ export interface EstimateRow {
   gst_amount: number;
   grand_total: number;
   notes: string | null;
+  attention_person: string | null;
+  quote_subject: string | null;
+  job_completion_time: string | null;
+  delivery_commitment: string | null;
+  payment_terms_days: number | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
 }
+
+export type EstimateCalcMode = "nos" | "sqft";
 
 export interface EstimateLineItemRow {
   id: string;
@@ -328,9 +335,16 @@ export interface EstimateLineItemRow {
   is_contract_item: boolean;
   rate_card_source: string | null;
   product_name: string;
+  design_name: string | null;
   description: string | null;
   additional_description: string | null;
   uom: string | null;
+  calc_mode: EstimateCalcMode;
+  width_cm: number | null;
+  height_cm: number | null;
+  width_in: number | null;
+  height_in: number | null;
+  sqft_total: number | null;
   unit_rate: number;
   quantity: number;
   transportation_rate: number;
