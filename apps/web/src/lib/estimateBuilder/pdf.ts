@@ -3,12 +3,12 @@
 // src/lib/installationReport/pdfBuild.ts) — no server round-trip.
 //
 // Layout is modeled on two real sample quotes the user shared (IKEA Worli
-// and an Apple Q4 estimate): Date / To / Attn / SUB / Quote No. block, a
-// line-items table (Design/Product, Width×Height, Qty, SQFT, Rate,
-// Amount, Tax, Grand Total per line), fixed "Prices" / "JOB Completion
-// Time" / "Delivery time" / "Payment Schedule" paragraphs (exact wording
-// supplied by the user — see BOILERPLATE below), a closing paragraph, and
-// a signing block.
+// and an Apple Q4 estimate): Date / To / Attn / SUB / Quote No. / Job No.
+// block, a line-items table (Product No., Design/Product, Width×Height,
+// Qty, SQFT, Rate, Amount, Tax, Grand Total per line), fixed "Prices" /
+// "JOB Completion Time" / "Delivery time" / "Payment Schedule" paragraphs
+// (exact wording supplied by the user — see BOILERPLATE below), a closing
+// paragraph, and a signing block.
 //
 // Typography: Caladea at 9pt throughout, one size for the whole document
 // (only bold/regular weight varies, e.g. table header vs body) per the
@@ -85,6 +85,7 @@ export const DEFAULT_DELIVERY_COMMITMENT =
   "Same day delivery within Hyderabad city, out station deliveries based on logistics with effect from the provided conditions are true.";
 
 export interface EstimatePdfLine {
+  productNo: string | null;
   productName: string;
   designName: string | null;
   description: string | null;
@@ -105,6 +106,7 @@ export interface EstimatePdfData {
   createdAt: string;
   customerName: string;
   siteLegalEntityName: string | null;
+  jobNumber: string | null;
   customerAddress: string | null;
   customerGstin: string | null;
   attentionPerson: string | null;
@@ -227,14 +229,15 @@ function ensure(ctx: Ctx, state: { page: PDFPage; y: number }, need: number) {
 // (rather than separate cm + inch columns) so everything still fits
 // comfortably at 9pt instead of the ~6.5pt a full cm+inch table would need.
 const TABLE_COLS = [
-  { label: "Design / Product", width: mm(42) },
-  { label: "W × H (cm)", width: mm(26) },
-  { label: "Qty", width: mm(12) },
-  { label: "SQFT", width: mm(16) },
-  { label: "Rate", width: mm(16) },
-  { label: "Amount", width: mm(18) },
-  { label: "Tax", width: mm(16) },
-  { label: "Grand Total", width: mm(24) },
+  { label: "Product No.", width: mm(18) },
+  { label: "Design / Product", width: mm(40) },
+  { label: "W × H (cm)", width: mm(22) },
+  { label: "Qty", width: mm(10) },
+  { label: "SQFT", width: mm(14) },
+  { label: "Rate", width: mm(14) },
+  { label: "Amount", width: mm(16) },
+  { label: "Tax", width: mm(14) },
+  { label: "Grand Total", width: mm(22) },
 ] as const;
 
 function tableWidth() {
@@ -339,7 +342,12 @@ export async function generateEstimatePdf(data: EstimatePdfData): Promise<Blob> 
     }
   }
   state.page.drawText(`Quote No.: ${data.quoteNumber}${versionLabel}`, { x: MARGIN, y: state.y, size, font: bold, color: INK });
-  state.y -= 19;
+  state.y -= 12;
+  if (data.jobNumber) {
+    state.page.drawText(`Job No.: ${data.jobNumber}`, { x: MARGIN, y: state.y, size, font: bold, color: INK });
+    state.y -= 12;
+  }
+  state.y -= 7;
 
   const intro =
     "With reference to the above subject requirement, we hereby feel pleasure in submitting our proposal for the supply of the below items as per the given specifications. Please find below quote for your kind approval.";
@@ -362,6 +370,7 @@ export async function generateEstimatePdf(data: EstimatePdfData): Promise<Blob> 
     installTotal += l.installationRate;
     const tax = (amount * data.gstPercent) / 100;
     drawTableRow(ctx, state, [
+      l.productNo || "—",
       [l.designName, l.productName].filter(Boolean).join(" — ") || l.productName,
       l.calcMode === "sqft" && l.widthCm && l.heightCm ? `${l.widthCm} × ${l.heightCm}` : "—",
       // The SQFT column already carries the area-priced total, so the
@@ -380,7 +389,7 @@ export async function generateEstimatePdf(data: EstimatePdfData): Promise<Blob> 
   const taxableTotal = subtotal + transportTotal + installTotal;
   const gstAmount = (taxableTotal * data.gstPercent) / 100;
   const grandTotal = taxableTotal + gstAmount;
-  drawTableRow(ctx, state, ["", "", "", "", "Totals", rupee(taxableTotal), rupee(gstAmount), rupee(grandTotal)], { bold: true });
+  drawTableRow(ctx, state, ["", "", "", "", "", "Totals", rupee(taxableTotal), rupee(gstAmount), rupee(grandTotal)], { bold: true });
   state.y -= 14;
 
   ensure(ctx, state, 18);

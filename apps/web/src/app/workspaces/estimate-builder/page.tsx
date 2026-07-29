@@ -9,19 +9,21 @@ import { Card, StatCard } from "@/components/ui/Card";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
-import type { CustomerRow, CustomerSiteRow, ContractRow, IkeaRateCardRow, EstimateRow, EstimateCalcMode, EstimateLineItemRow } from "@mmdi/shared/rows";
+import type { CustomerRow, ContractRow, IkeaRateCardRow, AppleRateCardRow, EstimateRow, EstimateCalcMode, EstimateLineItemRow } from "@mmdi/shared/rows";
 import { generateEstimatePdf, downloadBlob, type EstimatePdfLine } from "@/lib/estimateBuilder/pdf";
 
 // MMDI ONE Estimate Builder — scoped to IKEA first per the user's request
-// to "start with it." Pulls real products/pricing straight from
-// ikea_rate_card (the contract's actual rate card, already used by AI
-// Copilot's search_ikea_rate_card tool) so line items aren't hand-typed
-// against a real contract, while still allowing a "non-contract / unlisted
-// product" line for anything genuinely outside the rate card. One customer
-// + one contract can have many billing sites (IKEA's stores below all
-// share ONE contract, only the ship-to/bill-to address differs) — see
-// supabase-estimate-builder-schema.sql for the schema and the IKEA site
-// seed data.
+// to "start with it," then extended to Apple (apple_rate_card, 117 SKUs
+// already used by AI Copilot's search_apple_rate_card tool). Pulls real
+// products/pricing straight from the customer's own rate card so line
+// items aren't hand-typed against a real contract, while still allowing a
+// "non-contract / unlisted product" line for anything genuinely outside
+// it. Address/GSTIN/attention person are ONE default per customer (see
+// customers.address/gstin/default_attention_person) — there is no more
+// per-site picker; Job No. (user-typed, permanent, searchable) is what
+// now identifies which specific store/job an estimate is for. See
+// supabase-estimate-builder-schema.sql + supabase-estimate-builder-jobno-
+// productno-migration.sql.
 //
 // The header fields (Attention person, Quote subject, Job completion time,
 // Delivery commitment, Payment terms) and the line-item shape (Design,
@@ -31,8 +33,8 @@ import { generateEstimatePdf, downloadBlob, type EstimatePdfLine } from "@/lib/e
 //
 // Design decisions locked in with the user along the way:
 // - GST is one flat % applied to (subtotal + transportation + installation)
-//   -- no CGST/SGST/IGST split, even though IKEA's sites span several GST
-//   states -- that split was explicitly declined in favor of simplicity.
+//   -- no CGST/SGST/IGST split -- that split was explicitly declined in
+//   favor of simplicity.
 // - Transportation/installation are entered PER LINE ITEM, as a flat
 //   amount for that line (not multiplied by quantity) -- "per site/job",
 //   matching how a signage installation job is actually costed.
@@ -55,6 +57,7 @@ type DraftSource = "contract" | "custom";
 interface DraftLine {
   key: string;
   isContractItem: boolean;
+  productNo: string;
   productName: string;
   designName: string;
   description: string;
@@ -72,6 +75,7 @@ interface DraftLine {
 function emptyDraft(): Omit<DraftLine, "key"> {
   return {
     isContractItem: false,
+    productNo: "",
     productName: "",
     designName: "",
     description: "",
@@ -126,10 +130,8 @@ export default function EstimateBuilderPage() {
   const [contracts, setContracts] = useState<ContractRow[] | null>(null);
   const [selectedContractId, setSelectedContractId] = useState("");
 
-  const [sites, setSites] = useState<CustomerSiteRow[] | null>(null);
-  const [selectedSiteId, setSelectedSiteId] = useState("");
-
   const [rateCard, setRateCard] = useState<IkeaRateCardRow[] | null>(null);
+  const [appleRateCard, setAppleRateCard] = useState<AppleRateCardRow[] | null>(null);
 
   const [source, setSource] = useState<DraftSource>("contract");
   const [rateCardPick, setRateCardPick] = useState("");
@@ -138,6 +140,7 @@ export default function EstimateBuilderPage() {
 
   const [gstPercent, setGstPercent] = useState(18);
   const [notes, setNotes] = useState("");
+  const [jobNumber, setJobNumber] = useState("");
   const [attentionPerson, setAttentionPerson] = useState("");
   const [quoteSubject, setQuoteSubject] = useState("");
   const [customerAddress, setCustomerAddress] = useState("");
@@ -193,6 +196,7 @@ export default function EstimateBuilderPage() {
 
   function pdfLinesFrom(items: EstimateLineItemRow[]): EstimatePdfLine[] {
     return items.map((i) => ({
+      productNo: i.product_no,
       productName: i.product_name,
       designName: i.design_name,
       description: i.description,
@@ -223,6 +227,7 @@ export default function EstimateBuilderPage() {
         createdAt: estimate.created_at,
         customerName: estimate.customers?.name ?? "Customer",
         siteLegalEntityName: estimate.customer_sites?.site_name ?? null,
+        jobNumber: estimate.job_number,
         customerAddress: estimate.customer_address,
         customerGstin: estimate.customer_gstin,
         attentionPerson: estimate.attention_person,
@@ -254,9 +259,9 @@ export default function EstimateBuilderPage() {
 
       setSelectedCustomerId(estimate.customer_id);
       setSelectedContractId(estimate.contract_id ?? "");
-      setSelectedSiteId(estimate.site_id ?? "");
       setGstPercent(estimate.gst_percent);
       setNotes(estimate.notes ?? "");
+      setJobNumber(estimate.job_number ?? "");
       setAttentionPerson(estimate.attention_person ?? "");
       setQuoteSubject(estimate.quote_subject ?? "");
       setCustomerAddress(estimate.customer_address ?? "");
@@ -268,6 +273,7 @@ export default function EstimateBuilderPage() {
         ((items as EstimateLineItemRow[]) ?? []).map((i) => ({
           key: crypto.randomUUID(),
           isContractItem: i.is_contract_item,
+          productNo: i.product_no ?? "",
           productName: i.product_name,
           designName: i.design_name ?? "",
           description: i.description ?? "",
@@ -302,6 +308,7 @@ export default function EstimateBuilderPage() {
     setEditingBaseQuoteNumber(null);
     setEditingVersion(1);
     setLines([]);
+    setJobNumber("");
   }
 
   const selectedCustomer = customers?.find((c) => c.id === selectedCustomerId) ?? null;
@@ -321,56 +328,30 @@ export default function EstimateBuilderPage() {
   const effectiveContractId = selectedContractId || (matchingContracts.length === 1 ? matchingContracts[0].id : "");
 
   // Selecting a different customer invalidates the previously-picked
-  // contract/site/rate-card selections, and resets payment terms to that
+  // contract/rate-card selections, and resets payment terms to that
   // customer's default (IKEA 30 / Apple 45 / anyone else blank -- fill in
   // manually) -- handled directly in this onChange (an event, not an
   // effect) so there's no synchronous setState inside a useEffect body.
+  //
+  // Address/GSTIN/attention person now come from the customer record
+  // ONLY -- there's no more Billing Site picker (removed per the user's
+  // request: one default address/contact per customer, not one per
+  // store). Job No. below is what now identifies which specific job/site
+  // this estimate is for.
   function onCustomerChange(id: string) {
     setSelectedCustomerId(id);
     setSelectedContractId("");
-    setSelectedSiteId("");
-    setSites(null);
     setRateCard(null);
+    setAppleRateCard(null);
     setRateCardPick("");
-    setAttentionPerson("");
     const customer = customers?.find((c) => c.id === id);
-    // Customer's own registered address/GST is the fallback the moment no
-    // billing site has data on file (previously this just came up blank
-    // for every customer except IKEA, since only IKEA has customer_sites
-    // rows) -- picking a site below still overrides this with that site's
-    // more specific address/GST.
     setCustomerAddress(customer?.address ?? "");
     setCustomerGstin(customer?.gstin ?? "");
+    setAttentionPerson(customer?.default_attention_person ?? "");
     const name = customer?.name?.toLowerCase() ?? "";
     if (name.includes("ikea")) setPaymentTermsDays(30);
     else if (name.includes("apple")) setPaymentTermsDays(45);
     else setPaymentTermsDays("");
-  }
-
-  useEffect(() => {
-    if (!selectedCustomerId) return;
-    supabase
-      .from("customer_sites")
-      .select("*")
-      .eq("customer_id", selectedCustomerId)
-      .order("site_name")
-      .then(({ data }) => setSites((data as CustomerSiteRow[]) ?? []));
-  }, [selectedCustomerId]);
-
-  // Each site has its own on-file contact (e.g. IKEA Worli -> Ms. Riya
-  // Patil) -- picking a site loads it straight into the Attention person
-  // field instead of retyping it every time, still editable afterwards.
-  function onSiteChange(id: string) {
-    setSelectedSiteId(id);
-    const site = sites?.find((s) => s.id === id);
-    setAttentionPerson(site?.attention_person ?? "");
-    // A site's own address/GSTIN is more specific than the customer-level
-    // fallback set in onCustomerChange -- overrides it once a site is
-    // picked, still editable either way.
-    if (site) {
-      setCustomerAddress(site.address ?? "");
-      setCustomerGstin(site.gstin ?? "");
-    }
   }
 
   useEffect(() => {
@@ -382,18 +363,50 @@ export default function EstimateBuilderPage() {
       .then(({ data }) => setRateCard((data as IkeaRateCardRow[]) ?? []));
   }, [isIkea]);
 
-  function pickRateCardRow(idx: string) {
+  useEffect(() => {
+    if (!isApple) return;
+    supabase
+      .from("apple_rate_card")
+      .select("sku_id, sku_description, category, program, substrate, unit, bill_rate, rate_inr_each, start_date, end_date, sqft")
+      .order("sku_id")
+      .then(({ data }) => setAppleRateCard((data as AppleRateCardRow[]) ?? []));
+  }, [isApple]);
+
+  // IKEA's rate card has no real serial-number column of its own -- the
+  // picked row's position in this (name-ordered) list is used as a best-
+  // guess Product No., always editable afterwards to match the real
+  // contract document's numbering if it differs.
+  function pickIkeaRateCardRow(idx: string) {
     setRateCardPick(idx);
     const row = rateCard?.[Number(idx)];
     if (!row) return;
     setDraft((d) => ({
       ...d,
       isContractItem: true,
+      productNo: String(Number(idx) + 1),
       productName: row.product,
       description: row.description ?? "",
       uom: row.uom ?? "",
       calcMode: inferCalcMode(row.uom),
       unitRate: row.revised_rate,
+    }));
+  }
+
+  // Apple's rate card DOES have a real per-item identifier (sku_id) --
+  // that's the contract's own "product number", used as-is.
+  function pickAppleRateCardRow(idx: string) {
+    setRateCardPick(idx);
+    const row = appleRateCard?.[Number(idx)];
+    if (!row) return;
+    setDraft((d) => ({
+      ...d,
+      isContractItem: true,
+      productNo: row.sku_id,
+      productName: row.sku_description || row.sku_id,
+      description: [row.category, row.program, row.substrate].filter(Boolean).join(" / "),
+      uom: row.unit ?? (row.sqft ? "SQFT" : "Nos"),
+      calcMode: inferCalcMode(row.unit),
+      unitRate: row.rate_inr_each ?? row.bill_rate,
     }));
   }
 
@@ -425,6 +438,10 @@ export default function EstimateBuilderPage() {
   async function saveEstimate() {
     if (!selectedCustomer) {
       toast("danger", "Select a customer first");
+      return;
+    }
+    if (!jobNumber.trim()) {
+      toast("danger", "Enter a Job No. — every estimate needs one so it can be searched later");
       return;
     }
     if (lines.length === 0) {
@@ -465,11 +482,11 @@ export default function EstimateBuilderPage() {
         .from("estimates")
         .insert({
           quote_number: quoteNumberData,
+          job_number: jobNumber.trim(),
           version,
           root_estimate_id: rootEstimateId,
           customer_id: selectedCustomer.id,
           contract_id: effectiveContractId || null,
-          site_id: selectedSiteId || null,
           gst_percent: gstPercent,
           subtotal,
           transportation_total: transportationTotal,
@@ -496,7 +513,8 @@ export default function EstimateBuilderPage() {
           estimate_id: estimate.id,
           sort_order: i,
           is_contract_item: l.isContractItem,
-          rate_card_source: l.isContractItem ? "ikea_rate_card" : null,
+          rate_card_source: l.isContractItem ? (isApple ? "apple_rate_card" : "ikea_rate_card") : null,
+          product_no: l.productNo || null,
           product_name: l.productName,
           design_name: l.designName || null,
           description: l.description || null,
@@ -518,13 +536,13 @@ export default function EstimateBuilderPage() {
       );
       if (linesError) throw linesError;
 
-      const site = sites?.find((s) => s.id === selectedSiteId) ?? null;
       const blob = await generateEstimatePdf({
         quoteNumber: quoteNumberData,
         version,
         createdAt: estimate.created_at,
         customerName: selectedCustomer.name,
-        siteLegalEntityName: site?.legal_entity_name ?? null,
+        siteLegalEntityName: null,
+        jobNumber: jobNumber.trim() || null,
         customerAddress: customerAddress || null,
         customerGstin: customerGstin || null,
         attentionPerson: attentionPerson || null,
@@ -535,6 +553,7 @@ export default function EstimateBuilderPage() {
         paymentTermsDays: paymentTermsDays === "" ? null : paymentTermsDays,
         notes: notes || null,
         lines: lines.map((l) => ({
+          productNo: l.productNo || null,
           productName: l.productName,
           designName: l.designName || null,
           description: l.description || null,
@@ -578,8 +597,8 @@ export default function EstimateBuilderPage() {
         <div>
           <h1 className="text-xl font-semibold text-ink">Estimate Builder</h1>
           <p className="mt-0.5 text-sm text-ink-secondary">
-            Tools — build a customer estimate from their contract&rsquo;s real pricing, pick a billing site, add anything not on
-            the contract as an unlisted line, and get GST-ready totals
+            Tools — build a customer estimate from their contract&rsquo;s real pricing, add anything not on the contract as an
+            unlisted line, and get GST-ready totals
           </p>
         </div>
       </div>
@@ -597,7 +616,7 @@ export default function EstimateBuilderPage() {
         </div>
       )}
 
-      {/* Customer / contract / site */}
+      {/* Customer / contract */}
       <Card interactive={false} className="my-6 flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
         <Dropdown
           label="Customer"
@@ -613,37 +632,24 @@ export default function EstimateBuilderPage() {
           value={effectiveContractId}
           onChange={(v) => setSelectedContractId(v as string)}
         />
-        <Dropdown
-          label="Billing site"
-          placeholder={!selectedCustomerId ? "Select a customer first" : sites && sites.length === 0 ? "No sites on file" : "Select a site"}
-          options={(sites ?? []).map((s) => ({ value: s.id, label: s.site_name }))}
-          value={selectedSiteId}
-          onChange={(v) => onSiteChange(v as string)}
-        />
       </Card>
 
-      {selectedSiteId && sites && (
-        <p className="-mt-4 mb-6 rounded-md bg-surface-sunken px-3 py-2 text-xs text-ink-secondary">
-          {(() => {
-            const s = sites.find((x) => x.id === selectedSiteId);
-            if (!s) return null;
-            return (
-              <>
-                <span className="font-medium text-ink">{s.legal_entity_name ?? selectedCustomer?.name}</span> — {s.address}
-                {s.gstin && <> · GSTIN {s.gstin}</>}
-              </>
-            );
-          })()}
-        </p>
-      )}
-
       {/* Quote header — matches the "To, / Attn / SUB / Quote No." block on
-          the real sample quotes. Address/GST auto-fill from the picked
-          site (or the customer's own record if no site has one) but stay
-          editable so they're never silently blank -- that was the actual
-          bug: most customers besides IKEA have no site/address on file
-          yet. */}
+          the real sample quotes. Job No. is user-typed and permanent —
+          the primary way estimates get searched later (see the
+          Quotations page). Address/GST/attention person auto-fill from
+          the customer's own record the moment it's picked, and stay
+          editable so they're never silently blank. */}
       <Card interactive={false} className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
+          Job No. <span className="text-danger">*</span>
+          <input
+            value={jobNumber}
+            onChange={(e) => setJobNumber(e.target.value)}
+            placeholder="e.g. JOB-2026-0143"
+            className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
+          />
+        </label>
         <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary sm:col-span-2">
           Customer address (for the &ldquo;To,&rdquo; block)
           <input
@@ -706,11 +712,7 @@ export default function EstimateBuilderPage() {
 
         {source === "contract" && (
           <>
-            {!isIkea ? (
-              <p className="text-sm text-ink-muted">
-                {selectedCustomerId ? "No rate card is wired up for this customer yet — use “Non-contract / unlisted product” for now." : "Select a customer to search their contract catalog."}
-              </p>
-            ) : (
+            {isIkea ? (
               <Dropdown
                 label="Product (IKEA rate card)"
                 placeholder={rateCard === null ? "Loading…" : "Search products"}
@@ -719,8 +721,23 @@ export default function EstimateBuilderPage() {
                   label: `${r.product} — ${rupee(r.revised_rate)}/${r.uom ?? "unit"} (${r.scope ?? "—"})`,
                 }))}
                 value={rateCardPick}
-                onChange={(v) => pickRateCardRow(v as string)}
+                onChange={(v) => pickIkeaRateCardRow(v as string)}
               />
+            ) : isApple ? (
+              <Dropdown
+                label="Product (Apple rate card)"
+                placeholder={appleRateCard === null ? "Loading…" : "Search SKUs"}
+                options={(appleRateCard ?? []).map((r, i) => ({
+                  value: String(i),
+                  label: `${r.sku_id} — ${r.sku_description ?? ""} — ${rupee(r.rate_inr_each ?? r.bill_rate)}/${r.unit ?? "unit"}`,
+                }))}
+                value={rateCardPick}
+                onChange={(v) => pickAppleRateCardRow(v as string)}
+              />
+            ) : (
+              <p className="text-sm text-ink-muted">
+                {selectedCustomerId ? "No rate card is wired up for this customer yet — use “Non-contract / unlisted product” for now." : "Select a customer to search their contract catalog."}
+              </p>
             )}
           </>
         )}
@@ -747,6 +764,19 @@ export default function EstimateBuilderPage() {
                 </label>
               </>
             )}
+
+            {/* Product No. — the contract's own item/serial number for
+                this line (auto-filled from the picked rate-card row, but
+                always editable to match the real contract paperwork). */}
+            <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
+              Product No.
+              <input
+                value={draft.productNo}
+                onChange={(e) => setDraft((d) => ({ ...d, productNo: e.target.value }))}
+                placeholder="Contract's item/serial no."
+                className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
+              />
+            </label>
 
             {/* Design, Width/Height, UOM, Qty — same order for a contract
                 pick or a custom line, matching the sample quotes' column
@@ -873,6 +903,7 @@ export default function EstimateBuilderPage() {
           <table className="w-full text-left text-sm">
             <thead className="text-xs font-semibold uppercase tracking-wide text-ink-secondary">
               <tr>
+                <th className="px-3 py-2">Product No.</th>
                 <th className="px-3 py-2">Product / Design</th>
                 <th className="px-3 py-2">Width × Height</th>
                 <th className="px-3 py-2">Qty</th>
@@ -890,6 +921,7 @@ export default function EstimateBuilderPage() {
                 const tax = (amount * gstPercent) / 100;
                 return (
                   <tr key={l.key}>
+                    <td className="px-3 py-2.5 text-ink-secondary">{l.productNo || "—"}</td>
                     <td className="px-3 py-2.5">
                       <div className="flex items-center gap-2">
                         <Badge status={l.isContractItem ? "info" : "warning"}>{l.isContractItem ? "Contract" : "Unlisted"}</Badge>
@@ -920,7 +952,7 @@ export default function EstimateBuilderPage() {
               })}
               {lines.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-3 py-8 text-center text-ink-muted">
+                  <td colSpan={10} className="px-3 py-8 text-center text-ink-muted">
                     No line items yet — add one above.
                   </td>
                 </tr>
@@ -1006,9 +1038,9 @@ export default function EstimateBuilderPage() {
             <thead className="text-xs font-semibold uppercase tracking-wide text-ink-secondary">
               <tr>
                 <th className="px-3 py-2">Quote #</th>
+                <th className="px-3 py-2">Job No.</th>
                 <th className="px-3 py-2">Version</th>
                 <th className="px-3 py-2">Customer</th>
-                <th className="px-3 py-2">Site</th>
                 <th className="px-3 py-2">Status</th>
                 <th className="px-3 py-2">Grand total</th>
                 <th className="px-3 py-2" />
@@ -1018,11 +1050,11 @@ export default function EstimateBuilderPage() {
               {(recent ?? []).map((e) => (
                 <tr key={e.id}>
                   <td className="px-3 py-2.5 font-medium text-ink">{e.quote_number}</td>
+                  <td className="px-3 py-2.5">{e.job_number ?? "—"}</td>
                   <td className="px-3 py-2.5">
                     <Badge status={e.version > 1 ? "info" : "neutral"}>{`V${e.version}`}</Badge>
                   </td>
                   <td className="px-3 py-2.5">{e.customers?.name ?? "—"}</td>
-                  <td className="px-3 py-2.5">{e.customer_sites?.site_name ?? "—"}</td>
                   <td className="px-3 py-2.5">
                     <Badge status="neutral">{e.status}</Badge>
                   </td>
@@ -1043,7 +1075,7 @@ export default function EstimateBuilderPage() {
               ))}
               {recent !== null && recent.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-3 py-8 text-center text-ink-muted">
+                  <td colSpan={8} className="px-3 py-8 text-center text-ink-muted">
                     No estimates saved yet.
                   </td>
                 </tr>

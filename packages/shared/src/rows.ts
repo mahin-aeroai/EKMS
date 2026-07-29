@@ -59,6 +59,7 @@ export interface CustomerRow {
   tags: string[];
   address: string | null;
   gstin: string | null;
+  default_attention_person: string | null;
   created_at: string;
 }
 
@@ -302,11 +303,26 @@ export interface IkeaRateCardRow {
   remarks: string | null;
 }
 
+export interface AppleRateCardRow {
+  sku_id: string;
+  sku_description: string | null;
+  category: string | null;
+  program: string | null;
+  substrate: string | null;
+  unit: string | null;
+  bill_rate: number;
+  rate_inr_each: number | null;
+  start_date: string | null;
+  end_date: string | null;
+  sqft: number | null;
+}
+
 export type EstimateStatus = "draft" | "sent" | "won" | "lost";
 
 export interface EstimateRow {
   id: string;
   quote_number: string | null;
+  job_number: string | null;
   version: number;
   root_estimate_id: string | null;
   customer_id: string;
@@ -341,6 +357,7 @@ export interface EstimateLineItemRow {
   sort_order: number;
   is_contract_item: boolean;
   rate_card_source: string | null;
+  product_no: string | null;
   product_name: string;
   design_name: string | null;
   description: string | null;
