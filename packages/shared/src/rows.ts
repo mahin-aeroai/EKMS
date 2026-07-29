@@ -60,6 +60,8 @@ export interface CustomerRow {
   address: string | null;
   gstin: string | null;
   default_attention_person: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
   created_at: string;
 }
 
