@@ -42,6 +42,7 @@ import {
   Ruler,
   Scissors,
   Camera,
+  QrCode,
 } from "lucide-react";
 import { Sidebar, type SidebarSection } from "@/components/ui/Sidebar";
 import { TopNav } from "@/components/ui/TopNav";
@@ -135,6 +136,7 @@ const NAV: SidebarSection[] = [
       { id: "suppliers", label: "Suppliers", icon: <Handshake size={16} />, href: "/workspaces/suppliers" },
       { id: "costing", label: "Costing", icon: <Calculator size={16} />, href: "/workspaces/costing" },
       { id: "cut-file-tool", label: "Cut File Tool", icon: <Scissors size={16} />, href: "/workspaces/cut-file-tool" },
+      { id: "qr-label-tool", label: "QR Label Tool", icon: <QrCode size={16} />, href: "/workspaces/qr-label-tool" },
     ],
   },
   {
