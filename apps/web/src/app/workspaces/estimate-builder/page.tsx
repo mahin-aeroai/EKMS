@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Download, FileSpreadsheet, Plus, Trash2 } from "lucide-react";
+import { Download, FileSpreadsheet, Pencil, Plus, Trash2, X } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -140,14 +140,30 @@ export default function EstimateBuilderPage() {
   const [notes, setNotes] = useState("");
   const [attentionPerson, setAttentionPerson] = useState("");
   const [quoteSubject, setQuoteSubject] = useState("");
+  const [customerAddress, setCustomerAddress] = useState("");
+  const [customerGstin, setCustomerGstin] = useState("");
   const [jobCompletionTime, setJobCompletionTime] = useState("");
   const [deliveryCommitment, setDeliveryCommitment] = useState("");
   const [paymentTermsDays, setPaymentTermsDays] = useState<number | "">("");
   const [saving, setSaving] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+
+  // Editing an existing estimate never overwrites it -- Save always
+  // inserts a new row (see supabase-estimate-builder-versions-migration.sql)
+  // linked back to this lineage via root_estimate_id, with an incremented
+  // version + "-Vn" suffix on the quote number. `editingRootId` is the
+  // very first version's id (itself, if you're editing V1); `editingBase
+  // QuoteNumber` is that first version's quote number with any existing
+  // "-Vn" suffix stripped back off, so V3 built from editing V2 still gets
+  // "<base>-V3", not "<base>-V2-V3".
+  const [editingEstimateId, setEditingEstimateId] = useState<string | null>(null);
+  const [editingRootId, setEditingRootId] = useState<string | null>(null);
+  const [editingBaseQuoteNumber, setEditingBaseQuoteNumber] = useState<string | null>(null);
+  const [editingVersion, setEditingVersion] = useState(1);
+
   type RecentEstimate = EstimateRow & {
     customers: { name: string } | null;
-    customer_sites: { site_name: string; legal_entity_name: string | null; address: string | null; gstin: string | null } | null;
+    customer_sites: { site_name: string } | null;
   };
   const [recent, setRecent] = useState<RecentEstimate[] | null>(null);
 
@@ -169,7 +185,7 @@ export default function EstimateBuilderPage() {
   function loadRecent() {
     supabase
       .from("estimates")
-      .select("*, customers(name), customer_sites(site_name, legal_entity_name, address, gstin)")
+      .select("*, customers(name), customer_sites(site_name)")
       .order("created_at", { ascending: false })
       .limit(10)
       .then(({ data }) => setRecent((data as never) ?? []));
@@ -203,11 +219,12 @@ export default function EstimateBuilderPage() {
       if (error) throw error;
       const blob = await generateEstimatePdf({
         quoteNumber: estimate.quote_number ?? estimate.id,
+        version: estimate.version,
         createdAt: estimate.created_at,
         customerName: estimate.customers?.name ?? "Customer",
-        siteLegalEntityName: estimate.customer_sites?.legal_entity_name ?? null,
-        siteAddress: estimate.customer_sites?.address ?? null,
-        siteGstin: estimate.customer_sites?.gstin ?? null,
+        siteLegalEntityName: estimate.customer_sites?.site_name ?? null,
+        customerAddress: estimate.customer_address,
+        customerGstin: estimate.customer_gstin,
         attentionPerson: estimate.attention_person,
         quoteSubject: estimate.quote_subject,
         gstPercent: estimate.gst_percent,
@@ -224,6 +241,67 @@ export default function EstimateBuilderPage() {
     } finally {
       setDownloadingId(null);
     }
+  }
+
+  async function loadEstimateForEdit(estimate: RecentEstimate) {
+    try {
+      const { data: items, error } = await supabase
+        .from("estimate_line_items")
+        .select("*")
+        .eq("estimate_id", estimate.id)
+        .order("sort_order");
+      if (error) throw error;
+
+      setSelectedCustomerId(estimate.customer_id);
+      setSelectedContractId(estimate.contract_id ?? "");
+      setSelectedSiteId(estimate.site_id ?? "");
+      setGstPercent(estimate.gst_percent);
+      setNotes(estimate.notes ?? "");
+      setAttentionPerson(estimate.attention_person ?? "");
+      setQuoteSubject(estimate.quote_subject ?? "");
+      setCustomerAddress(estimate.customer_address ?? "");
+      setCustomerGstin(estimate.customer_gstin ?? "");
+      setJobCompletionTime(estimate.job_completion_time ?? "");
+      setDeliveryCommitment(estimate.delivery_commitment ?? "");
+      setPaymentTermsDays(estimate.payment_terms_days ?? "");
+      setLines(
+        ((items as EstimateLineItemRow[]) ?? []).map((i) => ({
+          key: crypto.randomUUID(),
+          isContractItem: i.is_contract_item,
+          productName: i.product_name,
+          designName: i.design_name ?? "",
+          description: i.description ?? "",
+          additionalDescription: i.additional_description ?? "",
+          uom: i.uom ?? "",
+          calcMode: i.calc_mode,
+          widthCm: i.width_cm ?? 0,
+          heightCm: i.height_cm ?? 0,
+          unitRate: i.unit_rate,
+          quantity: i.quantity,
+          transportationRate: i.transportation_rate,
+          installationRate: i.installation_rate,
+        }))
+      );
+
+      const rootId = estimate.root_estimate_id ?? estimate.id;
+      setEditingEstimateId(estimate.id);
+      setEditingRootId(rootId);
+      setEditingVersion(estimate.version);
+      setEditingBaseQuoteNumber((estimate.quote_number ?? "").replace(/-V\d+$/, ""));
+      toast("info", `Loaded ${estimate.quote_number} for editing — saving will create the next version`);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Couldn't load this estimate for editing";
+      toast("danger", message);
+    }
+  }
+
+  function cancelEdit() {
+    setEditingEstimateId(null);
+    setEditingRootId(null);
+    setEditingBaseQuoteNumber(null);
+    setEditingVersion(1);
+    setLines([]);
   }
 
   const selectedCustomer = customers?.find((c) => c.id === selectedCustomerId) ?? null;
@@ -255,7 +333,15 @@ export default function EstimateBuilderPage() {
     setRateCard(null);
     setRateCardPick("");
     setAttentionPerson("");
-    const name = customers?.find((c) => c.id === id)?.name?.toLowerCase() ?? "";
+    const customer = customers?.find((c) => c.id === id);
+    // Customer's own registered address/GST is the fallback the moment no
+    // billing site has data on file (previously this just came up blank
+    // for every customer except IKEA, since only IKEA has customer_sites
+    // rows) -- picking a site below still overrides this with that site's
+    // more specific address/GST.
+    setCustomerAddress(customer?.address ?? "");
+    setCustomerGstin(customer?.gstin ?? "");
+    const name = customer?.name?.toLowerCase() ?? "";
     if (name.includes("ikea")) setPaymentTermsDays(30);
     else if (name.includes("apple")) setPaymentTermsDays(45);
     else setPaymentTermsDays("");
@@ -276,7 +362,15 @@ export default function EstimateBuilderPage() {
   // field instead of retyping it every time, still editable afterwards.
   function onSiteChange(id: string) {
     setSelectedSiteId(id);
-    setAttentionPerson(sites?.find((s) => s.id === id)?.attention_person ?? "");
+    const site = sites?.find((s) => s.id === id);
+    setAttentionPerson(site?.attention_person ?? "");
+    // A site's own address/GSTIN is more specific than the customer-level
+    // fallback set in onCustomerChange -- overrides it once a site is
+    // picked, still editable either way.
+    if (site) {
+      setCustomerAddress(site.address ?? "");
+      setCustomerGstin(site.gstin ?? "");
+    }
   }
 
   useEffect(() => {
@@ -340,15 +434,39 @@ export default function EstimateBuilderPage() {
     setSaving(true);
     try {
       const { data: userData } = await supabase.auth.getUser();
-      const { data: quoteNumberData, error: quoteNumberError } = await supabase.rpc("generate_quote_number", {
-        p_customer_code: selectedCustomer.code,
-      });
-      if (quoteNumberError) throw quoteNumberError;
+
+      // Editing an existing estimate never updates that row -- it always
+      // inserts the NEXT version, linked back via root_estimate_id, so
+      // every version ever generated stays in the database untouched.
+      let quoteNumberData: string;
+      let version = 1;
+      let rootEstimateId: string | null = null;
+      if (editingEstimateId && editingRootId && editingBaseQuoteNumber) {
+        const { data: latest, error: latestError } = await supabase
+          .from("estimates")
+          .select("version")
+          .or(`id.eq.${editingRootId},root_estimate_id.eq.${editingRootId}`)
+          .order("version", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (latestError) throw latestError;
+        version = (latest?.version ?? editingVersion) + 1;
+        rootEstimateId = editingRootId;
+        quoteNumberData = `${editingBaseQuoteNumber}-V${version}`;
+      } else {
+        const { data: generated, error: quoteNumberError } = await supabase.rpc("generate_quote_number", {
+          p_customer_code: selectedCustomer.code,
+        });
+        if (quoteNumberError) throw quoteNumberError;
+        quoteNumberData = generated;
+      }
 
       const { data: estimate, error: estimateError } = await supabase
         .from("estimates")
         .insert({
           quote_number: quoteNumberData,
+          version,
+          root_estimate_id: rootEstimateId,
           customer_id: selectedCustomer.id,
           contract_id: effectiveContractId || null,
           site_id: selectedSiteId || null,
@@ -362,6 +480,8 @@ export default function EstimateBuilderPage() {
           notes: notes || null,
           attention_person: attentionPerson || null,
           quote_subject: quoteSubject || null,
+          customer_address: customerAddress || null,
+          customer_gstin: customerGstin || null,
           job_completion_time: jobCompletionTime || null,
           delivery_commitment: deliveryCommitment || null,
           payment_terms_days: paymentTermsDays === "" ? null : paymentTermsDays,
@@ -401,11 +521,12 @@ export default function EstimateBuilderPage() {
       const site = sites?.find((s) => s.id === selectedSiteId) ?? null;
       const blob = await generateEstimatePdf({
         quoteNumber: quoteNumberData,
+        version,
         createdAt: estimate.created_at,
         customerName: selectedCustomer.name,
         siteLegalEntityName: site?.legal_entity_name ?? null,
-        siteAddress: site?.address ?? null,
-        siteGstin: site?.gstin ?? null,
+        customerAddress: customerAddress || null,
+        customerGstin: customerGstin || null,
         attentionPerson: attentionPerson || null,
         quoteSubject: quoteSubject || null,
         gstPercent,
@@ -433,6 +554,10 @@ export default function EstimateBuilderPage() {
       toast("success", `Saved ${quoteNumberData} — PDF downloaded`);
       setLines([]);
       setNotes("");
+      setEditingEstimateId(null);
+      setEditingRootId(null);
+      setEditingBaseQuoteNumber(null);
+      setEditingVersion(1);
       loadRecent();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Couldn't save this estimate";
@@ -458,6 +583,19 @@ export default function EstimateBuilderPage() {
           </p>
         </div>
       </div>
+
+      {editingEstimateId && (
+        <div className="mt-4 flex items-center justify-between gap-3 rounded-lg border border-warning/30 bg-warning-tint px-4 py-3 text-sm text-warning">
+          <span className="flex items-center gap-2">
+            <Pencil size={15} />
+            Editing {editingBaseQuoteNumber} — saving will create <strong>Version {editingVersion + 1}</strong> as a new row; nothing gets overwritten.
+          </span>
+          <Button variant="ghost" size="sm" onClick={cancelEdit}>
+            <X size={14} />
+            Cancel edit
+          </Button>
+        </div>
+      )}
 
       {/* Customer / contract / site */}
       <Card interactive={false} className="my-6 flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
@@ -500,8 +638,30 @@ export default function EstimateBuilderPage() {
       )}
 
       {/* Quote header — matches the "To, / Attn / SUB / Quote No." block on
-          the real sample quotes */}
+          the real sample quotes. Address/GST auto-fill from the picked
+          site (or the customer's own record if no site has one) but stay
+          editable so they're never silently blank -- that was the actual
+          bug: most customers besides IKEA have no site/address on file
+          yet. */}
       <Card interactive={false} className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary sm:col-span-2">
+          Customer address (for the &ldquo;To,&rdquo; block)
+          <input
+            value={customerAddress}
+            onChange={(e) => setCustomerAddress(e.target.value)}
+            placeholder="Registered/billing address"
+            className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary sm:col-span-2">
+          Customer GSTIN
+          <input
+            value={customerGstin}
+            onChange={(e) => setCustomerGstin(e.target.value)}
+            placeholder="e.g. 07AADCI3006N1ZM"
+            className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
+          />
+        </label>
         <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
           Attention person
           <input
@@ -788,14 +948,17 @@ export default function EstimateBuilderPage() {
       </div>
 
       {/* Job completion / delivery / payment terms — matches the sample
-          quotes' closing sections */}
+          quotes' closing sections. Left blank, the PDF prints the user's
+          standard wording (DEFAULT_JOB_COMPLETION_TIME / DEFAULT_DELIVERY_
+          COMMITMENT in pdf.ts) -- typing something here overrides it for
+          this estimate only. */}
       <Card interactive={false} className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary sm:col-span-1 lg:col-span-2">
           Job completion time
           <input
             value={jobCompletionTime}
             onChange={(e) => setJobCompletionTime(e.target.value)}
-            placeholder="e.g. 5-6 working days from the date of PO"
+            placeholder="Default: The overall job is expected to be completed according to the given Schedule."
             className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
           />
         </label>
@@ -804,7 +967,7 @@ export default function EstimateBuilderPage() {
           <input
             value={deliveryCommitment}
             onChange={(e) => setDeliveryCommitment(e.target.value)}
-            placeholder="e.g. Same day delivery within Hyderabad city…"
+            placeholder="Default: Same day delivery within Hyderabad city, out station deliveries based on logistics…"
             className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
           />
         </label>
@@ -831,7 +994,7 @@ export default function EstimateBuilderPage() {
 
       <div className="mb-8 flex justify-end">
         <Button variant="primary" size="lg" loading={saving} onClick={saveEstimate}>
-          Save estimate
+          {editingEstimateId ? `Save as Version ${editingVersion + 1}` : "Save estimate"}
         </Button>
       </div>
 
@@ -843,6 +1006,7 @@ export default function EstimateBuilderPage() {
             <thead className="text-xs font-semibold uppercase tracking-wide text-ink-secondary">
               <tr>
                 <th className="px-3 py-2">Quote #</th>
+                <th className="px-3 py-2">Version</th>
                 <th className="px-3 py-2">Customer</th>
                 <th className="px-3 py-2">Site</th>
                 <th className="px-3 py-2">Status</th>
@@ -854,6 +1018,9 @@ export default function EstimateBuilderPage() {
               {(recent ?? []).map((e) => (
                 <tr key={e.id}>
                   <td className="px-3 py-2.5 font-medium text-ink">{e.quote_number}</td>
+                  <td className="px-3 py-2.5">
+                    <Badge status={e.version > 1 ? "info" : "neutral"}>{`V${e.version}`}</Badge>
+                  </td>
                   <td className="px-3 py-2.5">{e.customers?.name ?? "—"}</td>
                   <td className="px-3 py-2.5">{e.customer_sites?.site_name ?? "—"}</td>
                   <td className="px-3 py-2.5">
@@ -861,16 +1028,22 @@ export default function EstimateBuilderPage() {
                   </td>
                   <td className="px-3 py-2.5">{rupee(e.grand_total)}</td>
                   <td className="px-3 py-2.5">
-                    <Button variant="secondary" size="sm" loading={downloadingId === e.id} onClick={() => downloadRecentPdf(e)}>
-                      <Download size={14} />
-                      PDF
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button variant="secondary" size="sm" onClick={() => loadEstimateForEdit(e)}>
+                        <Pencil size={14} />
+                        Edit
+                      </Button>
+                      <Button variant="secondary" size="sm" loading={downloadingId === e.id} onClick={() => downloadRecentPdf(e)}>
+                        <Download size={14} />
+                        PDF
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               ))}
               {recent !== null && recent.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-3 py-8 text-center text-ink-muted">
+                  <td colSpan={7} className="px-3 py-8 text-center text-ink-muted">
                     No estimates saved yet.
                   </td>
                 </tr>

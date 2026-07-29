@@ -57,6 +57,8 @@ export interface CustomerRow {
   on_time_delivery: number;
   health_score: number;
   tags: string[];
+  address: string | null;
+  gstin: string | null;
   created_at: string;
 }
 
@@ -305,6 +307,8 @@ export type EstimateStatus = "draft" | "sent" | "won" | "lost";
 export interface EstimateRow {
   id: string;
   quote_number: string | null;
+  version: number;
+  root_estimate_id: string | null;
   customer_id: string;
   contract_id: string | null;
   site_id: string | null;
@@ -319,6 +323,8 @@ export interface EstimateRow {
   notes: string | null;
   attention_person: string | null;
   quote_subject: string | null;
+  customer_address: string | null;
+  customer_gstin: string | null;
   job_completion_time: string | null;
   delivery_commitment: string | null;
   payment_terms_days: number | null;

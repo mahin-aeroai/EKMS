@@ -2,26 +2,42 @@
 // philosophy as Cut File Tool / Installation Report — see
 // src/lib/installationReport/pdfBuild.ts) — no server round-trip.
 //
-// Layout is modeled directly on two real sample quotes the user shared
-// (39_MMDI_IKEA_Worli_Mumbai_Quote... and 107_Quote_MMDI_Apple_Q4_2026...):
-// Date / To / Attn / SUB / Quote No. block, a line-items table (Design,
-// Product, Width/Height in cm AND inches, Qty, SQFT, Rate, Amount, Tax,
-// Grand Total per line), "Prices" notes, Job Completion Time, Delivery
-// time, Payment Schedule, a closing paragraph, and a signing block. The
-// MMDI address/phone/email/web below and the "Naresh Kumar D" signatory
-// name are transcribed straight out of that sample's own footer/signature
-// block (word/footer1.xml + the signature image next to it) — these are
-// MMDI's own fixed letterhead details, not something the customer/estimate
-// varies, so they live here as constants rather than as form fields.
+// Layout is modeled on two real sample quotes the user shared (IKEA Worli
+// and an Apple Q4 estimate): Date / To / Attn / SUB / Quote No. block, a
+// line-items table (Design/Product, Width×Height, Qty, SQFT, Rate,
+// Amount, Tax, Grand Total per line), fixed "Prices" / "JOB Completion
+// Time" / "Delivery time" / "Payment Schedule" paragraphs (exact wording
+// supplied by the user — see BOILERPLATE below), a closing paragraph, and
+// a signing block.
 //
-// NOTE: the sample doc has an actual scanned signature image sitting next
-// to "(Naresh Kumar D)" — deliberately NOT reproduced here (a real
-// person's handwritten signature getting auto-stamped onto every generated
-// PDF is a different risk than it appearing once in a hand-made Word doc);
-// this leaves a blank signature line above the printed name instead. Add
-// an embedded signature image later if that's actually wanted.
+// Typography: Caladea at 9pt throughout, one size for the whole document
+// (only bold/regular weight varies, e.g. table header vs body) per the
+// user's request for a smaller, uniform font. Caladea, not Cambria: the
+// user asked for Cambria, but Cambria is a Microsoft-licensed font that
+// can't legally be bundled/redistributed by us, and PDF generation needs
+// real font bytes embedded (a visitor's OS-installed fonts aren't
+// reachable from JS). Caladea is Google's purpose-built, OFL-licensed,
+// metric-compatible substitute for Cambria (what LibreOffice itself
+// substitutes when Cambria isn't installed) — user confirmed this
+// tradeoff. Font files: public/fonts/Caladea-{Regular,Bold}.ttf,
+// converted from the official @fontsource/caladea npm package's WOFF2s;
+// public/fonts/Caladea-OFL-LICENSE.txt is the required license notice.
+//
+// MMDI's own letterhead details (address/phone/email/web, signatory name)
+// are transcribed from the sample quote's own footer/signature block
+// (word/footer1.xml) — MMDI's fixed details, not user input, so they live
+// here as constants. The sample's scanned signature image is deliberately
+// NOT reproduced (user confirmed): a blank line sits above the printed
+// name for a wet/e-signature instead of auto-stamping a real person's
+// handwriting onto every generated PDF.
+//
+// Versioning: every save creates a new row in `estimates` rather than
+// updating one in place (see supabase-estimate-builder-versions-
+// migration.sql) — `version`/`quoteNumber` here are just for display,
+// e.g. quoteNumber "IKEA-EST-0001-V2" with version 2.
 
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
+import { PDFDocument, rgb, type PDFFont, type PDFPage } from "pdf-lib";
+import fontkit from "@pdf-lib/fontkit";
 
 const PT_PER_MM = 72 / 25.4;
 const mm = (v: number) => v * PT_PER_MM;
@@ -29,7 +45,8 @@ const mm = (v: number) => v * PT_PER_MM;
 const PAGE_WIDTH = mm(210); // A4
 const PAGE_HEIGHT = mm(297);
 const MARGIN = mm(20);
-const FOOTER_H = mm(14);
+const FOOTER_H = mm(13);
+const FONT_SIZE = 9;
 
 const INK = rgb(0.08, 0.09, 0.11);
 const MUTED = rgb(0.4, 0.42, 0.46);
@@ -48,6 +65,25 @@ const MMDI = {
   signOffLine: "For MACROMEDIA DIGITAL IMAGING PVT. LTD.",
 };
 
+// Exact wording supplied by the user — kept as fixed boilerplate rather
+// than derived from the per-estimate job-completion/delivery/payment
+// inputs, which now just PREFILL these fields (still editable) instead of
+// being spliced into a different fixed sentence.
+const BOILERPLATE = {
+  priceNotes: [
+    "The quoted amount is only for supply in all respects as per details given above in accordance with the BOQ items.",
+    "Installation charges are included, for detailed specifications please check enclosure of BOQ sheet.",
+  ],
+  jobCompletionTrailer: "Any sort of delay shall be intimated accordingly the expected time for completion given may vary.",
+  closing:
+    "We trust our offer is in line with your requirements. Further if you may feel like, contact us for any sort of clarification or assistance required. It shall be our pleasure to fulfill your requirements in the best possible manner always.",
+  thanking: "Thanking and assuring you of our best services at all the times.",
+};
+
+export const DEFAULT_JOB_COMPLETION_TIME = "The overall job is expected to be completed according to the given Schedule.";
+export const DEFAULT_DELIVERY_COMMITMENT =
+  "Same day delivery within Hyderabad city, out station deliveries based on logistics with effect from the provided conditions are true.";
+
 export interface EstimatePdfLine {
   productName: string;
   designName: string | null;
@@ -65,11 +101,12 @@ export interface EstimatePdfLine {
 
 export interface EstimatePdfData {
   quoteNumber: string;
+  version: number;
   createdAt: string;
   customerName: string;
   siteLegalEntityName: string | null;
-  siteAddress: string | null;
-  siteGstin: string | null;
+  customerAddress: string | null;
+  customerGstin: string | null;
   attentionPerson: string | null;
   quoteSubject: string | null;
   gstPercent: number;
@@ -106,10 +143,6 @@ function rupee(n: number): string {
   return n.toLocaleString("en-IN", { maximumFractionDigits: 2, minimumFractionDigits: 2 });
 }
 
-function cmToIn(cm: number): number {
-  return cm / 2.54;
-}
-
 function lineAmount(l: EstimatePdfLine): number {
   const base = l.calcMode === "sqft" ? (l.sqftTotal ?? 0) * l.unitRate : l.quantity * l.unitRate;
   return base + l.transportationRate + l.installationRate;
@@ -133,29 +166,46 @@ function wrapText(font: PDFFont, text: string, size: number, maxWidth: number): 
   return lines;
 }
 
+interface Logo {
+  image: Awaited<ReturnType<PDFDocument["embedJpg"]>>;
+  w: number;
+  h: number;
+}
+
 interface Ctx {
   doc: PDFDocument;
   font: PDFFont;
   bold: PDFFont;
-  logo: Awaited<ReturnType<PDFDocument["embedJpg"]>> | null;
+  logo: Logo | null;
   quoteNumber: string;
   pageNumber: number;
+}
+
+const LOGO_H = mm(12);
+
+function drawLogoTopRight(ctx: Ctx, page: PDFPage) {
+  if (!ctx.logo) return;
+  const w = (ctx.logo.w / ctx.logo.h) * LOGO_H;
+  page.drawImage(ctx.logo.image, { x: PAGE_WIDTH - MARGIN - w, y: PAGE_HEIGHT - MARGIN - LOGO_H + mm(4), width: w, height: LOGO_H });
 }
 
 function drawFooter(ctx: Ctx, page: PDFPage) {
   const y = FOOTER_H;
   page.drawLine({ start: { x: MARGIN, y }, end: { x: PAGE_WIDTH - MARGIN, y }, thickness: 0.75, color: BORDER });
-  const line = `${MMDI.legalName}   |   ${MMDI.address}   |   Ph.: ${MMDI.phone}   |   ${MMDI.email}   |   ${MMDI.web}`;
-  const size = 7;
-  page.drawText(line, { x: MARGIN, y: y - 12, size, font: ctx.font, color: MUTED });
+  const size = FONT_SIZE - 1.5;
+  const line1 = `${MMDI.legalName}, ${MMDI.address}`;
+  const line2 = `Ph.: ${MMDI.phone}   |   ${MMDI.email}   |   ${MMDI.web}`;
+  page.drawText(line1, { x: MARGIN, y: y - 11, size, font: ctx.font, color: MUTED });
+  page.drawText(line2, { x: MARGIN, y: y - 22, size, font: ctx.font, color: MUTED });
   const right = `${ctx.quoteNumber}  ·  Page ${ctx.pageNumber}`;
   const rw = ctx.font.widthOfTextAtSize(right, size);
-  page.drawText(right, { x: PAGE_WIDTH - MARGIN - rw, y: y - 12, size, font: ctx.font, color: MUTED });
+  page.drawText(right, { x: PAGE_WIDTH - MARGIN - rw, y: y - 22, size, font: ctx.font, color: MUTED });
 }
 
 function newPage(ctx: Ctx): { page: PDFPage; y: number } {
   const page = ctx.doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
   ctx.pageNumber += 1;
+  drawLogoTopRight(ctx, page);
   drawFooter(ctx, page);
   return { page, y: PAGE_HEIGHT - MARGIN };
 }
@@ -172,117 +222,132 @@ function ensure(ctx: Ctx, state: { page: PDFPage; y: number }, need: number) {
 }
 
 // Widths sum to exactly 170mm = PAGE_WIDTH(210mm) - MARGIN(20mm) * 2, so
-// the table always lands flush with both margins regardless of column
-// count changes — recompute this sum if the column list is edited.
+// the table always lands flush with both margins — recompute this sum if
+// the column list changes. Width/Height collapses cm-only into one column
+// (rather than separate cm + inch columns) so everything still fits
+// comfortably at 9pt instead of the ~6.5pt a full cm+inch table would need.
 const TABLE_COLS = [
-  { key: "product", label: "Design / Product", width: mm(38) },
-  { key: "wcm", label: "W (cm)", width: mm(11) },
-  { key: "hcm", label: "H (cm)", width: mm(11) },
-  { key: "win", label: "W (in)", width: mm(11) },
-  { key: "hin", label: "H (in)", width: mm(11) },
-  { key: "qty", label: "Qty", width: mm(9) },
-  { key: "sqft", label: "SQFT", width: mm(13) },
-  { key: "rate", label: "Rate", width: mm(13) },
-  { key: "amount", label: "Amount", width: mm(17) },
-  { key: "tax", label: "Tax", width: mm(17) },
-  { key: "grand", label: "Grand Total", width: mm(19) },
+  { label: "Design / Product", width: mm(42) },
+  { label: "W × H (cm)", width: mm(26) },
+  { label: "Qty", width: mm(12) },
+  { label: "SQFT", width: mm(16) },
+  { label: "Rate", width: mm(16) },
+  { label: "Amount", width: mm(18) },
+  { label: "Tax", width: mm(16) },
+  { label: "Grand Total", width: mm(24) },
 ] as const;
 
 function tableWidth() {
   return TABLE_COLS.reduce((s, c) => s + c.width, 0);
 }
 
+const ROW_H = mm(7);
+
 function drawTableHeader(ctx: Ctx, state: { page: PDFPage; y: number }) {
-  const h = mm(9);
-  ensure(ctx, state, h);
+  ensure(ctx, state, ROW_H);
   let x = MARGIN;
-  state.page.drawRectangle({ x: MARGIN, y: state.y - h, width: tableWidth(), height: h, color: HEADER_BG });
-  const size = 6.5;
+  state.page.drawRectangle({ x: MARGIN, y: state.y - ROW_H, width: tableWidth(), height: ROW_H, color: HEADER_BG });
+  const size = FONT_SIZE - 1;
   for (const col of TABLE_COLS) {
-    state.page.drawText(col.label, { x: x + 3, y: state.y - h + h / 2 - size / 2, size, font: ctx.bold, color: INK });
+    state.page.drawText(col.label, { x: x + 3, y: state.y - ROW_H / 2 - size / 2 + 1, size, font: ctx.bold, color: INK });
     x += col.width;
   }
-  state.page.drawRectangle({ x: MARGIN, y: state.y - h, width: tableWidth(), height: h, borderColor: BORDER, borderWidth: 0.75 });
-  state.y -= h;
+  state.page.drawRectangle({ x: MARGIN, y: state.y - ROW_H, width: tableWidth(), height: ROW_H, borderColor: BORDER, borderWidth: 0.75 });
+  state.y -= ROW_H;
 }
 
 function drawTableRow(ctx: Ctx, state: { page: PDFPage; y: number }, cells: string[], opts?: { bold?: boolean }) {
-  const h = mm(8);
-  ensure(ctx, state, h);
-  if (state.y === PAGE_HEIGHT - MARGIN) drawTableHeader(ctx, state); // fresh page mid-table: repeat header first
+  const yBefore = state.y;
+  ensure(ctx, state, ROW_H);
+  if (state.y !== yBefore) {
+    // `ensure` just started a fresh page mid-table -- repeat the header
+    // before this row so a page break never leaves an unlabeled table.
+    drawTableHeader(ctx, state);
+  }
   let x = MARGIN;
-  const size = 6.5;
+  const size = FONT_SIZE - 1;
   const font = opts?.bold ? ctx.bold : ctx.font;
   cells.forEach((text, i) => {
     const col = TABLE_COLS[i];
     const lines = wrapText(font, text, size, col.width - 6);
-    state.page.drawText(lines[0] ?? "", { x: x + 3, y: state.y - h / 2 - size / 2 + 1, size, font, color: INK });
+    state.page.drawText(lines[0] ?? "", { x: x + 3, y: state.y - ROW_H / 2 - size / 2 + 1, size, font, color: INK });
     x += col.width;
   });
-  state.page.drawRectangle({ x: MARGIN, y: state.y - h, width: tableWidth(), height: h, borderColor: BORDER, borderWidth: 0.5 });
-  state.y -= h;
+  state.page.drawRectangle({ x: MARGIN, y: state.y - ROW_H, width: tableWidth(), height: ROW_H, borderColor: BORDER, borderWidth: 0.5 });
+  state.y -= ROW_H;
 }
 
 export async function generateEstimatePdf(data: EstimatePdfData): Promise<Blob> {
   const doc = await PDFDocument.create();
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  doc.registerFontkit(fontkit);
 
-  let logo: Awaited<ReturnType<PDFDocument["embedJpg"]>> | null = null;
+  const [regularBytes, boldBytes] = await Promise.all([
+    fetch("/fonts/Caladea-Regular.ttf").then((r) => r.arrayBuffer()),
+    fetch("/fonts/Caladea-Bold.ttf").then((r) => r.arrayBuffer()),
+  ]);
+  const font = await doc.embedFont(regularBytes);
+  const bold = await doc.embedFont(boldBytes);
+
+  let logo: Logo | null = null;
   try {
     const res = await fetch("/brand/mmdi-logo.jpg");
-    if (res.ok) logo = await doc.embedJpg(await res.arrayBuffer());
+    if (res.ok) {
+      const image = await doc.embedJpg(await res.arrayBuffer());
+      logo = { image, w: image.width, h: image.height };
+    }
   } catch {
     // Logo is cosmetic — a missing/blocked fetch shouldn't stop the PDF.
   }
 
+  const versionLabel = data.version > 1 ? ` (Version ${data.version})` : " (Version 1)";
   const ctx: Ctx = { doc, font, bold, logo, quoteNumber: data.quoteNumber || "—", pageNumber: 0 };
   const state = newPage(ctx);
   const contentW = PAGE_WIDTH - MARGIN * 2;
+  const size = FONT_SIZE;
 
   // ---- Date / To / Attn / SUB / Quote No. ----
-  state.page.drawText(`Date: ${formatLongDate(data.createdAt)}`, { x: MARGIN, y: state.y, size: 10, font, color: INK });
-  state.y -= 24;
-
-  state.page.drawText("To,", { x: MARGIN, y: state.y, size: 10, font, color: INK });
-  state.y -= 14;
-  state.page.drawText(data.siteLegalEntityName || data.customerName, { x: MARGIN, y: state.y, size: 10, font: bold, color: INK });
-  state.y -= 13;
-  if (data.siteAddress) {
-    for (const line of wrapText(font, data.siteAddress, 10, contentW)) {
-      state.page.drawText(line, { x: MARGIN, y: state.y, size: 10, font, color: INK });
-      state.y -= 13;
-    }
-  }
-  if (data.siteGstin) {
-    state.page.drawText(`GST: ${data.siteGstin}`, { x: MARGIN, y: state.y, size: 10, font, color: INK });
-    state.y -= 13;
-  }
-  state.y -= 10;
-
-  state.page.drawText("Dear Sir/Madam,", { x: MARGIN, y: state.y, size: 10, font, color: INK });
+  state.page.drawText(`Date: ${formatLongDate(data.createdAt)}`, { x: MARGIN, y: state.y, size, font, color: INK });
   state.y -= 20;
 
-  if (data.attentionPerson) {
-    state.page.drawText(`Attn: ${data.attentionPerson},`, { x: MARGIN, y: state.y, size: 10, font: bold, color: INK });
-    state.y -= 14;
-  }
-  if (data.quoteSubject) {
-    for (const line of wrapText(bold, `SUB: ${data.quoteSubject}`, 10, contentW)) {
-      state.page.drawText(line, { x: MARGIN, y: state.y, size: 10, font: bold, color: INK });
-      state.y -= 14;
+  state.page.drawText("To,", { x: MARGIN, y: state.y, size, font, color: INK });
+  state.y -= 13;
+  state.page.drawText(data.siteLegalEntityName || data.customerName, { x: MARGIN, y: state.y, size, font: bold, color: INK });
+  state.y -= 12;
+  if (data.customerAddress) {
+    for (const line of wrapText(font, data.customerAddress, size, contentW)) {
+      state.page.drawText(line, { x: MARGIN, y: state.y, size, font, color: INK });
+      state.y -= 12;
     }
   }
-  state.page.drawText(`Quote No.: ${data.quoteNumber}`, { x: MARGIN, y: state.y, size: 10, font: bold, color: INK });
-  state.y -= 22;
+  if (data.customerGstin) {
+    state.page.drawText(`GST: ${data.customerGstin}`, { x: MARGIN, y: state.y, size, font, color: INK });
+    state.y -= 12;
+  }
+  state.y -= 8;
+
+  state.page.drawText("Dear Sir/Madam,", { x: MARGIN, y: state.y, size, font, color: INK });
+  state.y -= 17;
+
+  if (data.attentionPerson) {
+    state.page.drawText(`Attn: ${data.attentionPerson},`, { x: MARGIN, y: state.y, size, font: bold, color: INK });
+    state.y -= 12;
+  }
+  if (data.quoteSubject) {
+    for (const line of wrapText(bold, `SUB: ${data.quoteSubject}`, size, contentW)) {
+      state.page.drawText(line, { x: MARGIN, y: state.y, size, font: bold, color: INK });
+      state.y -= 12;
+    }
+  }
+  state.page.drawText(`Quote No.: ${data.quoteNumber}${versionLabel}`, { x: MARGIN, y: state.y, size, font: bold, color: INK });
+  state.y -= 19;
 
   const intro =
     "With reference to the above subject requirement, we hereby feel pleasure in submitting our proposal for the supply of the below items as per the given specifications. Please find below quote for your kind approval.";
-  for (const line of wrapText(font, intro, 10, contentW)) {
-    state.page.drawText(line, { x: MARGIN, y: state.y, size: 10, font, color: INK });
-    state.y -= 13;
+  for (const line of wrapText(font, intro, size, contentW)) {
+    state.page.drawText(line, { x: MARGIN, y: state.y, size, font, color: INK });
+    state.y -= 12;
   }
-  state.y -= 8;
+  state.y -= 6;
 
   // ---- Line items table ----
   drawTableHeader(ctx, state);
@@ -298,11 +363,12 @@ export async function generateEstimatePdf(data: EstimatePdfData): Promise<Blob> 
     const tax = (amount * data.gstPercent) / 100;
     drawTableRow(ctx, state, [
       [l.designName, l.productName].filter(Boolean).join(" — ") || l.productName,
-      l.calcMode === "sqft" && l.widthCm ? l.widthCm.toFixed(1) : "—",
-      l.calcMode === "sqft" && l.heightCm ? l.heightCm.toFixed(1) : "—",
-      l.calcMode === "sqft" && l.widthCm ? cmToIn(l.widthCm).toFixed(2) : "—",
-      l.calcMode === "sqft" && l.heightCm ? cmToIn(l.heightCm).toFixed(2) : "—",
-      `${l.quantity} ${l.uom ?? ""}`.trim(),
+      l.calcMode === "sqft" && l.widthCm && l.heightCm ? `${l.widthCm} × ${l.heightCm}` : "—",
+      // The SQFT column already carries the area-priced total, so the
+      // Qty column just shows the bare count there instead of repeating
+      // the unit a second time (e.g. "4" not "4 SQFT") -- the unit still
+      // shows for "nos" lines, where there's no other column carrying it.
+      l.calcMode === "sqft" ? String(l.quantity) : `${l.quantity} ${l.uom ?? ""}`.trim(),
       l.calcMode === "sqft" ? (l.sqftTotal ?? 0).toFixed(2) : "—",
       rupee(l.unitRate),
       rupee(amount),
@@ -314,94 +380,87 @@ export async function generateEstimatePdf(data: EstimatePdfData): Promise<Blob> 
   const taxableTotal = subtotal + transportTotal + installTotal;
   const gstAmount = (taxableTotal * data.gstPercent) / 100;
   const grandTotal = taxableTotal + gstAmount;
-  drawTableRow(
-    ctx,
-    state,
-    ["", "", "", "", "", "", "", "Totals", rupee(taxableTotal), rupee(gstAmount), rupee(grandTotal)],
-    { bold: true }
-  );
-  state.y -= 16;
+  drawTableRow(ctx, state, ["", "", "", "", "Totals", rupee(taxableTotal), rupee(gstAmount), rupee(grandTotal)], { bold: true });
+  state.y -= 14;
 
-  ensure(ctx, state, 20);
-  state.page.drawText(`Grand Total (INR): ${rupee(grandTotal)}`, { x: MARGIN, y: state.y, size: 11, font: bold, color: INK });
-  state.y -= 26;
+  ensure(ctx, state, 18);
+  state.page.drawText(`Grand Total (INR): ${rupee(grandTotal)}`, { x: MARGIN, y: state.y, size: size + 1, font: bold, color: INK });
+  state.y -= 22;
 
-  // ---- Prices / Job completion / Delivery / Payment schedule ----
-  const hasInstallation = data.lines.some((l) => l.installationRate > 0);
-  ensure(ctx, state, 60);
-  state.page.drawText("Prices:", { x: MARGIN, y: state.y, size: 10.5, font: bold, color: INK });
-  state.y -= 15;
-  const priceNotes = [
-    "The quoted amount is only for supply in all respects as per details given above.",
-    hasInstallation
-      ? "Installation charges are included, itemized per line above."
-      : "Installation charges are not included unless itemized separately above.",
-  ];
-  for (const note of priceNotes) {
-    for (const line of wrapText(font, `•  ${note}`, 10, contentW)) {
-      ensure(ctx, state, 13);
-      state.page.drawText(line, { x: MARGIN, y: state.y, size: 10, font, color: INK });
-      state.y -= 13;
+  // ---- Prices / Job completion / Delivery / Payment schedule — exact
+  // wording the user specified, kept fixed rather than derived. ----
+  ensure(ctx, state, 50);
+  state.page.drawText("Prices:", { x: MARGIN, y: state.y, size, font: bold, color: INK });
+  state.y -= 13;
+  for (const note of BOILERPLATE.priceNotes) {
+    for (const line of wrapText(font, `•  ${note}`, size, contentW)) {
+      ensure(ctx, state, 12);
+      state.page.drawText(line, { x: MARGIN, y: state.y, size, font, color: INK });
+      state.y -= 12;
     }
   }
-  state.y -= 10;
+  state.y -= 8;
 
-  const closingBlocks: { heading: string; body: string }[] = [
-    { heading: "JOB Completion Time:", body: data.jobCompletionTime || "To be confirmed on order confirmation." },
-    { heading: "Delivery time:", body: data.deliveryCommitment || "To be confirmed on order confirmation." },
-    {
-      heading: "Payment Schedule:",
-      body: data.paymentTermsDays ? `${data.paymentTermsDays} days from the date of supply.` : "To be confirmed.",
-    },
-  ];
-  for (const block of closingBlocks) {
-    ensure(ctx, state, 30);
-    state.page.drawText(block.heading, { x: MARGIN, y: state.y, size: 10.5, font: bold, color: INK });
-    state.y -= 14;
-    for (const line of wrapText(font, block.body, 10, contentW)) {
-      ensure(ctx, state, 13);
-      state.page.drawText(line, { x: MARGIN, y: state.y, size: 10, font, color: INK });
-      state.y -= 13;
-    }
-    state.y -= 8;
+  ensure(ctx, state, 40);
+  state.page.drawText("JOB Completion Time:", { x: MARGIN, y: state.y, size, font: bold, color: INK });
+  state.y -= 13;
+  for (const line of wrapText(font, data.jobCompletionTime || DEFAULT_JOB_COMPLETION_TIME, size, contentW)) {
+    ensure(ctx, state, 12);
+    state.page.drawText(line, { x: MARGIN, y: state.y, size, font, color: INK });
+    state.y -= 12;
   }
+  for (const line of wrapText(font, BOILERPLATE.jobCompletionTrailer, size, contentW)) {
+    ensure(ctx, state, 12);
+    state.page.drawText(line, { x: MARGIN, y: state.y, size, font, color: INK });
+    state.y -= 12;
+  }
+  state.y -= 8;
+
+  ensure(ctx, state, 30);
+  state.page.drawText("Delivery time:", { x: MARGIN, y: state.y, size, font: bold, color: INK });
+  state.y -= 13;
+  for (const line of wrapText(font, data.deliveryCommitment || DEFAULT_DELIVERY_COMMITMENT, size, contentW)) {
+    ensure(ctx, state, 12);
+    state.page.drawText(line, { x: MARGIN, y: state.y, size, font, color: INK });
+    state.y -= 12;
+  }
+  state.y -= 8;
+
+  ensure(ctx, state, 30);
+  state.page.drawText("Payment Schedule:", { x: MARGIN, y: state.y, size, font: bold, color: INK });
+  state.y -= 13;
+  const paymentLine = data.paymentTermsDays ? `${data.paymentTermsDays} days from the date of supply.` : "To be confirmed.";
+  state.page.drawText(paymentLine, { x: MARGIN, y: state.y, size, font, color: INK });
+  state.y -= 20;
 
   if (data.notes) {
     ensure(ctx, state, 30);
-    state.page.drawText("Notes:", { x: MARGIN, y: state.y, size: 10.5, font: bold, color: INK });
-    state.y -= 14;
-    for (const line of wrapText(font, data.notes, 10, contentW)) {
-      ensure(ctx, state, 13);
-      state.page.drawText(line, { x: MARGIN, y: state.y, size: 10, font, color: INK });
-      state.y -= 13;
+    state.page.drawText("Notes:", { x: MARGIN, y: state.y, size, font: bold, color: INK });
+    state.y -= 13;
+    for (const line of wrapText(font, data.notes, size, contentW)) {
+      ensure(ctx, state, 12);
+      state.page.drawText(line, { x: MARGIN, y: state.y, size, font, color: INK });
+      state.y -= 12;
     }
     state.y -= 8;
   }
 
-  const closing =
-    "We trust our offer is in line with your requirements. Further if you may feel like, contact us for any sort of clarification or assistance required. It shall be our pleasure to fulfill your requirements in the best possible manner always.";
   ensure(ctx, state, 40);
-  for (const line of wrapText(font, closing, 10, contentW)) {
-    ensure(ctx, state, 13);
-    state.page.drawText(line, { x: MARGIN, y: state.y, size: 10, font, color: INK });
-    state.y -= 13;
+  for (const line of wrapText(font, BOILERPLATE.closing, size, contentW)) {
+    ensure(ctx, state, 12);
+    state.page.drawText(line, { x: MARGIN, y: state.y, size, font, color: INK });
+    state.y -= 12;
   }
-  state.y -= 8;
-  ensure(ctx, state, 15);
-  state.page.drawText("Thanking and assuring you of our best services at all times.", { x: MARGIN, y: state.y, size: 10, font, color: INK });
-  state.y -= 30;
+  state.y -= 6;
+  ensure(ctx, state, 12);
+  state.page.drawText(BOILERPLATE.thanking, { x: MARGIN, y: state.y, size, font, color: INK });
+  state.y -= 26;
 
   // ---- Signing block ----
-  ensure(ctx, state, 90);
-  if (ctx.logo) {
-    const logoH = mm(15);
-    const logoW = (ctx.logo.width / ctx.logo.height) * logoH;
-    state.page.drawImage(ctx.logo, { x: MARGIN, y: state.y - logoH, width: logoW, height: logoH });
-    state.y -= logoH + 6;
-  }
-  state.page.drawText(MMDI.signOffLine, { x: MARGIN, y: state.y, size: 10, font: bold, color: INK });
-  state.y -= 40; // blank space for a wet/e-signature above the printed name
-  state.page.drawText(`(${MMDI.signatoryName})`, { x: MARGIN, y: state.y, size: 10, font, color: INK });
+  ensure(ctx, state, 60);
+  state.page.drawText(MMDI.signOffLine, { x: MARGIN, y: state.y, size, font: bold, color: INK });
+  state.y -= 36; // blank space for a wet/e-signature above the printed name
+  state.page.drawText(`(${MMDI.signatoryName})`, { x: MARGIN, y: state.y, size, font, color: INK });
 
   const bytes = await doc.save();
   return new Blob([bytes as unknown as BlobPart], { type: "application/pdf" });
