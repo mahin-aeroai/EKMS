@@ -43,7 +43,7 @@ async function loadStats(): Promise<CommandCenterStats> {
     // avgOnTimeDelivery/avgHealthScore/customersByRegion below (and the
     // customerById lookup used for the activity feed) were all computed
     // over an incomplete set once the table passed 1000 rows.
-    fetchAllRows<CustomerRow>("customers", "name"),
+    fetchAllRows<CustomerRow>((from, to) => supabase.from("customers").select("*").order("name").range(from, to)),
     supabase.from("compliance_findings").select("status"),
     supabase
       .from("customer_comments")

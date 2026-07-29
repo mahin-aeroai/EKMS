@@ -39,7 +39,7 @@ async function loadStats(): Promise<AnalyticsStats> {
     // pages through so the tier/region breakdowns below don't silently
     // undercount once the table passes 1000 rows (see estimate-builder/page.tsx
     // for the dropdown bug this same cap caused).
-    fetchAllRows<CustomerRow>("customers", "name"),
+    fetchAllRows<CustomerRow>((from, to) => supabase.from("customers").select("*").order("name").range(from, to)),
     supabase.from("quotes").select("*"),
     supabase.from("contracts").select("*"),
     supabase.from("customer_approvals").select("status"),

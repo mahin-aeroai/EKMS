@@ -29,7 +29,7 @@ async function loadStats(): Promise<FinanceStats> {
   // this array) were undercounting once the table passed 1000 rows.
   // fetchAllRows pages through with .range() to get every row.
   const [customerRows, { data: contracts }] = await Promise.all([
-    fetchAllRows<CustomerRow>("customers", "name"),
+    fetchAllRows<CustomerRow>((from, to) => supabase.from("customers").select("*").order("name").range(from, to)),
     supabase.from("contracts").select("*"),
   ]);
 

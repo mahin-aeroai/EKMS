@@ -27,26 +27,29 @@ export async function getCountWhere(table: string, column: string, value: string
 }
 
 /**
- * Fetches every row of a table, paging past PostgREST's default 1000-row
- * cap via .range(). A plain `.select("*")` silently truncates once a table
- * grows past 1000 rows — which is exactly what hid customers alphabetically
- * past "T" (e.g. "Unicorn Infosolutions") from the Estimate Builder's
- * customer dropdown, and was quietly under-counting the tier/region
- * breakdowns on Analytics, Finance, and Command Center once the customers
- * table passed 1000 rows. Use this instead of a bare `.select("*")` for any
- * dashboard aggregation that needs the whole table, not just a count.
+ * Fetches every row matching a query, paging past PostgREST's default
+ * 1000-row cap via .range(). A plain `.select("*")` (even with an explicit
+ * `.limit()`) silently truncates once the match set grows past 1000 rows —
+ * this is what hid customers alphabetically past "T" (e.g. "Unicorn
+ * Infosolutions") from the Estimate Builder's customer dropdown, quietly
+ * under-counted the tier/region breakdowns on Analytics, Finance, and
+ * Command Center, and once caused the AI Copilot's sales_summary tool to
+ * report a grand total less than 1/10th of the real figure (see
+ * PROJECT_STATUS.md items 31/32). Same canonical shape as the pagination
+ * helper already used in src/app/api/ai-copilot/route.ts and
+ * src/app/workspaces/sales-by-rep/page.tsx — pass a function that builds
+ * one page of the query given a from/to range, and this loops until a page
+ * comes back short of a full page.
  */
-export async function fetchAllRows<T>(table: string, orderColumn = "id"): Promise<T[]> {
+export async function fetchAllRows<T>(
+  buildPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>
+): Promise<T[]> {
   const pageSize = 1000;
   const all: T[] = [];
   for (let from = 0; ; from += pageSize) {
-    const { data, error } = await supabase
-      .from(table)
-      .select("*")
-      .order(orderColumn)
-      .range(from, from + pageSize - 1);
+    const { data, error } = await buildPage(from, from + pageSize - 1);
     if (error || !data) break;
-    all.push(...(data as T[]));
+    all.push(...data);
     if (data.length < pageSize) break;
   }
   return all;

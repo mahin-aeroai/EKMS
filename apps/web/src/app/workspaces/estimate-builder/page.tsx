@@ -53,7 +53,25 @@ import { fetchAllRows } from "@/lib/dashboard-queries";
 //   quotes use a location/series-based number (e.g. "Worli-MUM/25-26/
 //   IEPL/39") that the user said they'd supply separately.
 
-type DraftSource = "contract" | "custom";
+type DraftSource = "contract" | "custom" | "history";
+
+// One distinct product previously sold to this customer, per
+// sales_transactions -- for customers with no contract/rate card wired up
+// (which is most of them; only IKEA/Apple have one so far), this is the
+// only source of "what did we actually charge them last time" short of
+// digging through old invoices by hand. latestRate/latestDate come from
+// whichever of that customer's transactions for this item_code has the
+// most recent invoice_date -- exactly "the latest price against whatever
+// we sold them," not an average across their whole history (an average
+// would blend in old, stale pricing).
+interface SalesHistoryProduct {
+  itemCode: string | null;
+  itemDescription: string | null;
+  productCategory: string | null;
+  latestRate: number | null;
+  latestDate: string | null;
+  timesPurchased: number;
+}
 
 interface DraftLine {
   key: string;
@@ -133,9 +151,11 @@ export default function EstimateBuilderPage() {
 
   const [rateCard, setRateCard] = useState<IkeaRateCardRow[] | null>(null);
   const [appleRateCard, setAppleRateCard] = useState<AppleRateCardRow[] | null>(null);
+  const [salesHistory, setSalesHistory] = useState<SalesHistoryProduct[] | null>(null);
 
   const [source, setSource] = useState<DraftSource>("contract");
   const [rateCardPick, setRateCardPick] = useState("");
+  const [historyPick, setHistoryPick] = useState("");
   const [draft, setDraft] = useState<Omit<DraftLine, "key">>(emptyDraft());
   const [lines, setLines] = useState<DraftLine[]>([]);
 
@@ -188,7 +208,7 @@ export default function EstimateBuilderPage() {
   // dropdown always has the complete list no matter how large the table
   // grows.
   useEffect(() => {
-    fetchAllRows<CustomerRow>("customers", "name").then(setCustomers);
+    fetchAllRows<CustomerRow>((from, to) => supabase.from("customers").select("*").order("name").range(from, to)).then(setCustomers);
     supabase
       .from("contracts")
       .select("*")
@@ -275,6 +295,7 @@ export default function EstimateBuilderPage() {
       setJobNumber(estimate.job_number ?? "");
       setAttentionPerson(estimate.attention_person ?? "");
       void loadCustomerContacts(estimate.customer_id, { autofill: false });
+      void loadSalesHistory(estimate.customer_id);
       setQuoteSubject(estimate.quote_subject ?? "");
       setCustomerAddress(estimate.customer_address ?? "");
       setCustomerGstin(estimate.customer_gstin ?? "");
@@ -370,17 +391,68 @@ export default function EstimateBuilderPage() {
     }
   }
 
+  // Collapses every past sale to this customer down to one row per distinct
+  // product (item_code, falling back to item_description when a row has no
+  // code) carrying only that product's MOST RECENT rate -- sorted
+  // client-side by invoice_date descending first, so "first row seen per
+  // key wins" always means "the latest one," never an average blended with
+  // old pricing. Paginated via fetchAllRows since a long-standing customer
+  // can easily have more than 1000 line items on file (see that helper's
+  // comment in dashboard-queries.ts for why a bare .select() can't be
+  // trusted here).
+  async function loadSalesHistory(customerId: string) {
+    const rows = await fetchAllRows<{
+      item_code: string | null;
+      item_description: string | null;
+      product_category: string | null;
+      rate: number | null;
+      invoice_date: string | null;
+    }>((from, to) =>
+      supabase
+        .from("sales_transactions")
+        .select("item_code, item_description, product_category, rate, invoice_date")
+        .eq("customer_id", customerId)
+        .range(from, to)
+    );
+    rows.sort((a, b) => (b.invoice_date ?? "").localeCompare(a.invoice_date ?? ""));
+
+    const byKey = new Map<string, SalesHistoryProduct>();
+    for (const r of rows) {
+      const key = r.item_code || r.item_description;
+      if (!key) continue;
+      const existing = byKey.get(key);
+      if (existing) {
+        existing.timesPurchased += 1;
+        continue;
+      }
+      byKey.set(key, {
+        itemCode: r.item_code,
+        itemDescription: r.item_description,
+        productCategory: r.product_category,
+        latestRate: r.rate,
+        latestDate: r.invoice_date,
+        timesPurchased: 1,
+      });
+    }
+    // Most-recently-purchased product first -- surfaces "what they've
+    // actually been buying lately" at the top of the picker.
+    setSalesHistory([...byKey.values()].sort((a, b) => (b.latestDate ?? "").localeCompare(a.latestDate ?? "")));
+  }
+
   function onCustomerChange(id: string) {
     setSelectedCustomerId(id);
     setSelectedContractId("");
     setRateCard(null);
     setAppleRateCard(null);
     setRateCardPick("");
+    setSalesHistory(null);
+    setHistoryPick("");
     setCustomerContacts(null);
     const customer = customers?.find((c) => c.id === id);
     setCustomerAddress(customer?.address ?? "");
     setCustomerGstin(customer?.gstin ?? "");
     void loadCustomerContacts(id, { autofill: true });
+    void loadSalesHistory(id);
     const name = customer?.name?.toLowerCase() ?? "";
     if (name.includes("ikea")) setPaymentTermsDays(30);
     else if (name.includes("apple")) setPaymentTermsDays(45);
@@ -443,6 +515,26 @@ export default function EstimateBuilderPage() {
     }));
   }
 
+  // Sales history isn't a signed contract -- picking a previously-sold
+  // product only pre-fills a starting point (name/description/last rate),
+  // all of it still freely editable below, unlike a contract pick which is
+  // treated as locked/authoritative. isContractItem stays false so these
+  // lines are correctly tagged "Unlisted" in the line-items table, same as
+  // a fully custom line.
+  function pickHistoryRow(idx: string) {
+    setHistoryPick(idx);
+    const row = salesHistory?.[Number(idx)];
+    if (!row) return;
+    setDraft((d) => ({
+      ...d,
+      isContractItem: false,
+      productNo: row.itemCode ?? "",
+      productName: row.itemDescription || row.itemCode || "",
+      description: row.productCategory ?? "",
+      unitRate: row.latestRate ?? 0,
+    }));
+  }
+
   function addLine() {
     if (!draft.productName.trim()) {
       toast("danger", "Enter or select a product first");
@@ -455,6 +547,7 @@ export default function EstimateBuilderPage() {
     setLines((ls) => [...ls, { ...draft, isContractItem: source === "contract", key: crypto.randomUUID() }]);
     setDraft(emptyDraft());
     setRateCardPick("");
+    setHistoryPick("");
   }
 
   function removeLine(key: string) {
@@ -752,6 +845,16 @@ export default function EstimateBuilderPage() {
           <button
             type="button"
             onClick={() => {
+              setSource("history");
+              setDraft((d) => ({ ...d, isContractItem: false }));
+            }}
+            className={`rounded-md px-3 py-1.5 text-xs font-medium ${source === "history" ? "bg-success-tint text-success" : "text-ink-secondary hover:bg-surface-sunken"}`}
+          >
+            From recent purchases
+          </button>
+          <button
+            type="button"
+            onClick={() => {
               setSource("custom");
               setDraft((d) => ({ ...d, isContractItem: false }));
             }}
@@ -760,6 +863,29 @@ export default function EstimateBuilderPage() {
             Non-contract / unlisted product
           </button>
         </div>
+
+        {source === "history" && (
+          <>
+            {!selectedCustomerId ? (
+              <p className="text-sm text-ink-muted">Select a customer to see what&apos;s been sold to them before.</p>
+            ) : salesHistory === null ? (
+              <p className="text-sm text-ink-muted">Loading past sales…</p>
+            ) : salesHistory.length === 0 ? (
+              <p className="text-sm text-ink-muted">No past sales on file for this customer yet — use “Non-contract / unlisted product” instead.</p>
+            ) : (
+              <Dropdown
+                label={`Previously sold to ${selectedCustomer?.name ?? "this customer"} (${salesHistory.length} distinct products)`}
+                placeholder="Search products they've bought before"
+                options={salesHistory.map((r, i) => ({
+                  value: String(i),
+                  label: `${r.itemCode ? `${r.itemCode} — ` : ""}${r.itemDescription ?? "Unknown item"} — ${r.latestRate != null ? rupee(r.latestRate) : "rate n/a"}${r.latestDate ? ` (last bought ${r.latestDate})` : ""}${r.timesPurchased > 1 ? `, bought ${r.timesPurchased}×` : ""}`,
+                }))}
+                value={historyPick}
+                onChange={(v) => pickHistoryRow(v as string)}
+              />
+            )}
+          </>
+        )}
 
         {source === "contract" && (
           <>
@@ -795,7 +921,7 @@ export default function EstimateBuilderPage() {
 
         {(source === "custom" || draft.productName) && (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {source === "custom" && (
+            {(source === "custom" || source === "history") && (
               <>
                 <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
                   Product name
@@ -874,7 +1000,7 @@ export default function EstimateBuilderPage() {
                 </label>
               </>
             )}
-            {source === "custom" && (
+            {(source === "custom" || source === "history") && (
               <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
                 UOM
                 <input
@@ -900,9 +1026,9 @@ export default function EstimateBuilderPage() {
               </div>
             )}
 
-            {source === "custom" && (
+            {(source === "custom" || source === "history") && (
               <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
-                Unit rate (₹)
+                Unit rate (₹){source === "history" && <span className="ml-1 font-normal normal-case text-ink-muted">— last price charged; adjust as needed</span>}
                 <input
                   type="number"
                   value={draft.unitRate}
