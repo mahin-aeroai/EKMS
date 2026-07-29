@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { Sparkles } from "lucide-react";
 import { PromptInput } from "@/components/ui/PromptInput";
 import { NAV } from "@/components/AppShell";
@@ -23,11 +24,38 @@ export default function HomePage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-ink">Welcome to MMDI ONE</h1>
-        <p className="mt-1 text-sm text-ink-secondary">
-          Jump into any workspace below, or ask the AI Copilot anything about your business.
-        </p>
+      {/* Hero banner -- brand gradient sampled from the MMDI logo (red at
+          top-left through orange to gold at bottom-right), styled like a
+          classic Apple hero: one confident headline, huge negative space,
+          minimal supporting copy. The dark scrim on top guarantees the
+          white text stays legible over every part of the gradient,
+          including the paler gold corner. */}
+      <div
+        className="relative mb-8 overflow-hidden rounded-2xl px-8 py-14 text-center sm:px-12 sm:py-20"
+        style={{ background: "linear-gradient(135deg, #FB050D 0%, #F97A2A 55%, #FBCB3F 100%)" }}
+      >
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0) 40%, rgba(0,0,0,0.18) 100%)" }}
+        />
+        {/* Soft glow, an understated nod to Apple's glossy hero backdrops. */}
+        <div className="pointer-events-none absolute -top-24 left-1/2 h-72 w-72 -translate-x-1/2 rounded-full bg-white/20 blur-3xl" />
+
+        <div className="relative mx-auto max-w-2xl">
+          <Image
+            src="/brand/mmdi-logo.jpg"
+            alt="MMDI"
+            width={64}
+            height={64}
+            className="mx-auto mb-6 rounded-xl shadow-lg"
+            priority
+          />
+          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-white/80">MMDI ONE</p>
+          <h1 className="mt-3 text-4xl font-bold tracking-tight text-white sm:text-5xl">Bringing Brands Alive.</h1>
+          <p className="mx-auto mt-4 max-w-lg text-base text-white/90 sm:text-lg">
+            Signage, graphics, displays &amp; decor — run end to end from one enterprise operating platform.
+          </p>
+        </div>
       </div>
 
       <div className="mb-8 rounded-xl border border-ai/30 bg-ai-tint p-5">
