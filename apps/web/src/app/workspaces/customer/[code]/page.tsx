@@ -38,7 +38,7 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
   const customerId = (customer as CustomerRow).id;
 
   const [{ data: contacts }, { data: comments }, { data: approvals }] = await Promise.all([
-    supabase.from("customer_contacts").select("*").eq("customer_id", customerId),
+    supabase.from("customer_contacts").select("*").eq("customer_id", customerId).order("name"),
     supabase.from("customer_comments").select("*").eq("customer_id", customerId).order("created_at", { ascending: true }),
     supabase.from("customer_approvals").select("*").eq("customer_id", customerId).order("created_at", { ascending: false }),
   ]);
@@ -46,7 +46,7 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
   return (
     <CustomerWorkspaceClient
       customer={customer as CustomerRow}
-      contacts={contacts ?? []}
+      initialContacts={contacts ?? []}
       initialComments={comments ?? []}
       initialApproval={approvals?.[0] ?? null}
     />

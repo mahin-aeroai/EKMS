@@ -548,7 +548,7 @@ async function executeToolCall(
       const { data: customer, error } = await supabase.from("customers").select("*").eq("code", code).maybeSingle();
       if (error || !customer) return { result: { error: error?.message ?? "Not found" } };
       const [{ data: contacts }, { data: comments }, { data: approvals }] = await Promise.all([
-        supabase.from("customer_contacts").select("name, role, email").eq("customer_id", customer.id),
+        supabase.from("customer_contacts").select("name, role, email").eq("customer_id", customer.id).eq("is_active", true),
         supabase.from("customer_comments").select("author, content, created_at").eq("customer_id", customer.id).order("created_at", { ascending: false }).limit(5),
         supabase.from("customer_approvals").select("title, status, value").eq("customer_id", customer.id).order("created_at", { ascending: false }).limit(5),
       ]);
@@ -1280,6 +1280,7 @@ export async function POST(request: Request) {
       .from("customer_contacts")
       .select("name, email, customers(name)")
       .eq("id", body.to.contactId)
+      .eq("is_active", true)
       .maybeSingle();
     if (contact?.email) {
       recipient = { email: contact.email, name: contact.name ?? null };

@@ -75,10 +75,15 @@ export function ContactPicker({
       // own name. An empty term matches every contact (ilike '%%'), which
       // is deliberate: opening the picker with nothing typed yet shows a
       // starting list rather than an empty box.
+      // is_active = true excludes contacts who've left the organization
+      // (soft-deactivated, not deleted -- see the Customer workspace's "Show
+      // former contacts" toggle) from ever being suggested as a draft
+      // recipient here.
       const [byContactName, matchingCustomers] = await Promise.all([
         supabase
           .from("customer_contacts")
           .select("id, name, role, email, customer_id, customers(name)")
+          .eq("is_active", true)
           .ilike("name", `%${term}%`)
           .limit(15),
         term
@@ -92,6 +97,7 @@ export function ContactPicker({
         byCompany = await supabase
           .from("customer_contacts")
           .select("id, name, role, email, customer_id, customers(name)")
+          .eq("is_active", true)
           .in("customer_id", customerIds)
           .limit(15);
       }

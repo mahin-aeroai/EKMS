@@ -71,6 +71,9 @@ export interface CustomerContactRow {
   name: string;
   role: string | null;
   email: string | null;
+  phone: string | null;
+  is_active: boolean;
+  deactivated_at: string | null;
 }
 
 export interface CustomerCommentRow {

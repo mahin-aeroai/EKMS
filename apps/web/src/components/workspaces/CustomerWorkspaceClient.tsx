@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Building2, Pencil, Archive, UserPlus } from "lucide-react";
+import { Building2, Pencil, Archive, UserPlus, Plus, UserX, RotateCcw } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -32,14 +32,16 @@ function toDisplayComment(row: CustomerCommentRow): Comment {
  * the database. Insights, Timeline, and Documents aren't wired to a real
  * data source yet and show an honest empty state instead of sample content.
  */
+const emptyContactDraft = { name: "", role: "", phone: "", email: "" };
+
 export function CustomerWorkspaceClient({
   customer,
-  contacts,
+  initialContacts,
   initialComments,
   initialApproval,
 }: {
   customer: CustomerRow;
-  contacts: CustomerContactRow[];
+  initialContacts: CustomerContactRow[];
   initialComments: CustomerCommentRow[];
   initialApproval: CustomerApprovalRow | null;
 }) {
@@ -48,6 +50,87 @@ export function CustomerWorkspaceClient({
   const role = useUserRole();
   const [comments, setComments] = useState<Comment[]>(initialComments.map(toDisplayComment));
   const [approval, setApproval] = useState(initialApproval);
+
+  // Contacts — kept as local state (not just the initial server fetch) so
+  // add/edit/deactivate all update the UI immediately without a full page
+  // reload. Deactivating someone never deletes their row (see
+  // supabase-customer-contacts-mobile-active-migration.sql) -- they stay in
+  // the historical record, just hidden from "who do I contact today" by
+  // default, behind the "Show former contacts" toggle.
+  const [contacts, setContacts] = useState<CustomerContactRow[]>(initialContacts);
+  const activeContacts = contacts.filter((c) => c.is_active);
+  const inactiveContacts = contacts.filter((c) => !c.is_active);
+  const [showInactiveContacts, setShowInactiveContacts] = useState(false);
+  const [addingContact, setAddingContact] = useState(false);
+  const [contactDraft, setContactDraft] = useState(emptyContactDraft);
+  const [editingContactId, setEditingContactId] = useState<string | null>(null);
+  const [editContactDraft, setEditContactDraft] = useState(emptyContactDraft);
+
+  async function handleAddContact() {
+    if (!contactDraft.name.trim()) {
+      toast("danger", "Enter a name first");
+      return;
+    }
+    const { data, error } = await supabase
+      .from("customer_contacts")
+      .insert({
+        customer_id: customer.id,
+        name: contactDraft.name.trim(),
+        role: contactDraft.role.trim() || null,
+        phone: contactDraft.phone.trim() || null,
+        email: contactDraft.email.trim() || null,
+      })
+      .select()
+      .single();
+    if (error) {
+      toast("danger", "Couldn't save contact — check your Supabase connection");
+      return;
+    }
+    setContacts((cs) => [...cs, data as CustomerContactRow]);
+    setContactDraft(emptyContactDraft);
+    setAddingContact(false);
+    toast("success", `Added ${(data as CustomerContactRow).name}`);
+  }
+
+  function startEditContact(c: CustomerContactRow) {
+    setEditingContactId(c.id);
+    setEditContactDraft({ name: c.name, role: c.role ?? "", phone: c.phone ?? "", email: c.email ?? "" });
+  }
+
+  async function handleSaveContact(id: string) {
+    if (!editContactDraft.name.trim()) {
+      toast("danger", "Name can't be empty");
+      return;
+    }
+    const patch = {
+      name: editContactDraft.name.trim(),
+      role: editContactDraft.role.trim() || null,
+      phone: editContactDraft.phone.trim() || null,
+      email: editContactDraft.email.trim() || null,
+    };
+    const { error } = await supabase.from("customer_contacts").update(patch).eq("id", id);
+    if (error) {
+      toast("danger", "Couldn't save changes — check your Supabase connection");
+      return;
+    }
+    setContacts((cs) => cs.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+    setEditingContactId(null);
+    toast("success", "Contact updated");
+  }
+
+  // Soft-deactivate/reactivate -- never a delete, per the user's request to
+  // keep former contacts on file rather than lose them outright.
+  async function handleToggleContactActive(c: CustomerContactRow) {
+    const nextActive = !c.is_active;
+    const patch = { is_active: nextActive, deactivated_at: nextActive ? null : new Date().toISOString() };
+    const { error } = await supabase.from("customer_contacts").update(patch).eq("id", c.id);
+    if (error) {
+      toast("danger", "Couldn't update — check your Supabase connection");
+      return;
+    }
+    setContacts((cs) => cs.map((x) => (x.id === c.id ? { ...x, ...patch } : x)));
+    toast(nextActive ? "success" : "warning", nextActive ? `${c.name} reactivated` : `${c.name} marked as no longer with the organization`);
+  }
   const nodes: GraphNode[] = [
     { id: "center", label: customer.name, type: "Customer" },
     ...(customer.account_owner ? [{ id: "n4", label: customer.account_owner, type: "Account Owner" }] : []),
@@ -161,20 +244,169 @@ export function CustomerWorkspaceClient({
                 </div>
                 <div className="flex flex-col gap-4">
                   <div className="rounded-lg border border-line bg-surface p-4">
-                    <h3 className="mb-3 text-sm font-semibold text-ink">Key contacts</h3>
-                    {contacts.length === 0 ? (
+                    <div className="mb-3 flex items-center justify-between">
+                      <h3 className="text-sm font-semibold text-ink">Key contacts</h3>
+                      {canWrite(role) && !addingContact && (
+                        <Button variant="ghost" size="sm" onClick={() => setAddingContact(true)}>
+                          <Plus size={13} className="mr-1" /> Add
+                        </Button>
+                      )}
+                    </div>
+
+                    {addingContact && (
+                      <div className="mb-3 flex flex-col gap-2 rounded-md border border-line-strong bg-surface-sunken p-3">
+                        <input
+                          autoFocus
+                          placeholder="Name"
+                          value={contactDraft.name}
+                          onChange={(e) => setContactDraft((d) => ({ ...d, name: e.target.value }))}
+                          className="h-8 rounded-md border border-line-strong bg-surface px-2 text-xs text-ink outline-none"
+                        />
+                        <input
+                          placeholder="Role (e.g. Store Manager)"
+                          value={contactDraft.role}
+                          onChange={(e) => setContactDraft((d) => ({ ...d, role: e.target.value }))}
+                          className="h-8 rounded-md border border-line-strong bg-surface px-2 text-xs text-ink outline-none"
+                        />
+                        <input
+                          placeholder="Mobile number"
+                          value={contactDraft.phone}
+                          onChange={(e) => setContactDraft((d) => ({ ...d, phone: e.target.value }))}
+                          className="h-8 rounded-md border border-line-strong bg-surface px-2 text-xs text-ink outline-none"
+                        />
+                        <input
+                          placeholder="Email"
+                          value={contactDraft.email}
+                          onChange={(e) => setContactDraft((d) => ({ ...d, email: e.target.value }))}
+                          className="h-8 rounded-md border border-line-strong bg-surface px-2 text-xs text-ink outline-none"
+                        />
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setAddingContact(false);
+                              setContactDraft(emptyContactDraft);
+                            }}
+                          >
+                            Cancel
+                          </Button>
+                          <Button variant="primary" size="sm" onClick={handleAddContact}>
+                            Save
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+
+                    {activeContacts.length === 0 && !addingContact ? (
                       <p className="text-sm text-ink-muted">No contacts on file.</p>
                     ) : (
                       <ul className="flex flex-col gap-3 text-sm">
-                        {contacts.map((c) => (
-                          <li key={c.id}>
-                            <p className="font-medium text-ink">{c.name}</p>
-                            <p className="text-xs text-ink-secondary">
-                              {c.role ?? "Contact"} {c.email ? `· ${c.email}` : ""}
-                            </p>
-                          </li>
-                        ))}
+                        {activeContacts.map((c) =>
+                          editingContactId === c.id ? (
+                            <li key={c.id} className="flex flex-col gap-2 rounded-md border border-line-strong bg-surface-sunken p-3">
+                              <input
+                                autoFocus
+                                value={editContactDraft.name}
+                                onChange={(e) => setEditContactDraft((d) => ({ ...d, name: e.target.value }))}
+                                placeholder="Name"
+                                className="h-8 rounded-md border border-line-strong bg-surface px-2 text-xs text-ink outline-none"
+                              />
+                              <input
+                                value={editContactDraft.role}
+                                onChange={(e) => setEditContactDraft((d) => ({ ...d, role: e.target.value }))}
+                                placeholder="Role"
+                                className="h-8 rounded-md border border-line-strong bg-surface px-2 text-xs text-ink outline-none"
+                              />
+                              <input
+                                value={editContactDraft.phone}
+                                onChange={(e) => setEditContactDraft((d) => ({ ...d, phone: e.target.value }))}
+                                placeholder="Mobile number"
+                                className="h-8 rounded-md border border-line-strong bg-surface px-2 text-xs text-ink outline-none"
+                              />
+                              <input
+                                value={editContactDraft.email}
+                                onChange={(e) => setEditContactDraft((d) => ({ ...d, email: e.target.value }))}
+                                placeholder="Email"
+                                className="h-8 rounded-md border border-line-strong bg-surface px-2 text-xs text-ink outline-none"
+                              />
+                              <div className="flex justify-end gap-2">
+                                <Button variant="ghost" size="sm" onClick={() => setEditingContactId(null)}>
+                                  Cancel
+                                </Button>
+                                <Button variant="primary" size="sm" onClick={() => handleSaveContact(c.id)}>
+                                  Save
+                                </Button>
+                              </div>
+                            </li>
+                          ) : (
+                            <li key={c.id} className="flex items-start justify-between gap-2">
+                              <div>
+                                <p className="font-medium text-ink">{c.name}</p>
+                                <p className="text-xs text-ink-secondary">
+                                  {c.role ?? "Contact"}
+                                  {c.phone ? ` · ${c.phone}` : ""}
+                                  {c.email ? ` · ${c.email}` : ""}
+                                </p>
+                              </div>
+                              {canWrite(role) && (
+                                <div className="flex shrink-0 items-center gap-1">
+                                  <Button variant="icon" size="sm" aria-label={`Edit ${c.name}`} onClick={() => startEditContact(c)}>
+                                    <Pencil size={13} />
+                                  </Button>
+                                  <Button
+                                    variant="icon"
+                                    size="sm"
+                                    aria-label={`Mark ${c.name} as left the organization`}
+                                    onClick={() => handleToggleContactActive(c)}
+                                  >
+                                    <UserX size={13} />
+                                  </Button>
+                                </div>
+                              )}
+                            </li>
+                          )
+                        )}
                       </ul>
+                    )}
+
+                    {inactiveContacts.length > 0 && (
+                      <div className="mt-3 border-t border-line pt-3">
+                        <button
+                          type="button"
+                          onClick={() => setShowInactiveContacts((v) => !v)}
+                          className="text-xs font-medium text-ink-muted hover:text-ink-secondary"
+                        >
+                          {showInactiveContacts ? "Hide" : "Show"} former contacts ({inactiveContacts.length})
+                        </button>
+                        {showInactiveContacts && (
+                          <ul className="mt-2 flex flex-col gap-3 text-sm">
+                            {inactiveContacts.map((c) => (
+                              <li key={c.id} className="flex items-start justify-between gap-2 opacity-60">
+                                <div>
+                                  <p className="font-medium text-ink line-through">{c.name}</p>
+                                  <p className="text-xs text-ink-secondary">
+                                    {c.role ?? "Contact"}
+                                    {c.phone ? ` · ${c.phone}` : ""}
+                                    {c.email ? ` · ${c.email}` : ""}
+                                    {c.deactivated_at ? ` · Left ${timeAgo(c.deactivated_at)}` : ""}
+                                  </p>
+                                </div>
+                                {canWrite(role) && (
+                                  <Button
+                                    variant="icon"
+                                    size="sm"
+                                    aria-label={`Reactivate ${c.name}`}
+                                    onClick={() => handleToggleContactActive(c)}
+                                  >
+                                    <RotateCcw size={13} />
+                                  </Button>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
