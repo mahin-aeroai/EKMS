@@ -1040,28 +1040,31 @@ export default function EstimateBuilderPage() {
                 <option value="nos">Nos (qty only)</option>
               </select>
             </label>
-            {(source === "custom" || source === "history") && (
-              <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
-                UOM
-                {draft.calcMode === "sqft" ? (
-                  <select
-                    value={isFeetUom(draft.uom) ? "ft" : "cm"}
-                    onChange={(e) => setDraft((d) => ({ ...d, uom: e.target.value }))}
-                    className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
-                  >
-                    <option value="cm">CM — enter Width/Height in centimeters</option>
-                    <option value="ft">Feet — enter Width/Height in feet</option>
-                  </select>
-                ) : (
-                  <input
-                    value={draft.uom}
-                    onChange={(e) => setDraft((d) => ({ ...d, uom: e.target.value }))}
-                    placeholder="e.g. Boxes, Rolls, Each"
-                    className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
-                  />
-                )}
-              </label>
-            )}
+            {/* Shown for every source, including a contract-catalog pick --
+                a rate card's own uom text (e.g. IKEA's "SQFT") still just
+                means "cm entry" here (isFeetUom excludes anything with
+                "sq" in it), so this is a safe, non-breaking default for
+                contract lines too, with Feet available as an override. */}
+            <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
+              UOM
+              {draft.calcMode === "sqft" ? (
+                <select
+                  value={isFeetUom(draft.uom) ? "ft" : "cm"}
+                  onChange={(e) => setDraft((d) => ({ ...d, uom: e.target.value }))}
+                  className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
+                >
+                  <option value="cm">CM — enter Width/Height in centimeters</option>
+                  <option value="ft">Feet — enter Width/Height in feet</option>
+                </select>
+              ) : (
+                <input
+                  value={draft.uom}
+                  onChange={(e) => setDraft((d) => ({ ...d, uom: e.target.value }))}
+                  placeholder="e.g. Boxes, Rolls, Each"
+                  className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
+                />
+              )}
+            </label>
             {draft.calcMode === "sqft" && (
               <>
                 <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
