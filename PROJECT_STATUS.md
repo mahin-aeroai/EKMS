@@ -1,16 +1,23 @@
 # MMDI ONE — Project Status
 
-Last updated: 30 July 2026 (session: closing a long-standing documentation
-gap — the Estimate Builder + Quotations workspaces existed and had shipped
-across several prior sessions with zero mention in this file — plus this
-session's own round of live-testing-driven fixes to Estimate Builder: a
-proper cm/feet/inches UOM selector, a bulk Total-SQFT entry mode, a PDF
-table that wraps instead of clipping/overlapping, GST-labeled tax column +
-HSN code + full product descriptions on the quote PDF, a searchable sales
-person picker, and an employee office-contact edit drawer on the People
-workspace. Session ended here — **next session starts on a Cost Sheet
-module, scope not yet discussed; see the "Next up" section below,
-just before "Natural next steps."**)
+Last updated: 30 July 2026 (session: built the Cost Sheet module this file's
+previous handoff flagged, from scratch, in a *different* session/sandbox
+than this repo's usual assistant environment — this one started from a
+Cowork (not Claude Code) chat, was handed two source files (an internal FG
+Codes BOM Specs workbook and a Jan-Jun 2026 purchase register export), and
+delivered an Excel workbook version of the cost sheet FIRST before the user
+asked for "a module in EKMS MMDI One's Tools tab" — at which point this
+session cloned this repo, read this file, found the "Next up" section
+below, and asked the three scoping questions it demanded before writing
+any code. All three were answered "the recommended option": new
+standalone Tools workspace, wired to real data, BOM + Work Centre cost
+model. See item 72 in session history for the full build. Committed to a
+new branch `cost-sheet-module` (not pushed — this sandbox has no GitHub
+push credentials, only fetch; see that item for the handoff mechanics) —
+**next session should pull that branch, review it, and decide whether to
+merge, then run the two new SQL files against Supabase and confirm
+`npm run build` actually succeeds outside this session's sandbox (see
+"Next up" for why that matters here specifically).**
 
 This file exists so a new chat session (or a new contributor) can pick up this
 project without re-deriving context. Read this before making changes.
@@ -222,29 +229,54 @@ workspaces. The estimator's `calc.ts` and ~45 row types are shared verbatim.
 
 ## Next up (start here — this is where the session ended)
 
-**Cost Sheet module.** The user said, right at the end of this session,
-that this is what's being built next — no scope has been discussed yet.
-Before writing any code, clarify with the user:
-- Is this a new top-level workspace, or an extension of something that
-  already exists? Two things in the codebase already use the phrase "cost
-  sheet" and either could be what's meant, or neither: (1) Sign Estimator's
-  own `CostSheetTab.tsx` (re-renders a saved `sign_estimates` row's stored
-  JSON cost breakdown, print button — see item 51 in session history), and
-  (2) the Costing dashboard (`/workspaces/costing`), which per item 7 in
-  "Natural next steps" below only shows "real-but-adjacent metrics"
-  (portfolio LTV, PO pipeline) rather than actual per-job cost/margin data,
-  for want of a real costing ledger schema.
-- What line items make up a cost sheet for MMDI specifically (material,
-  print, finishing, installation, shipping, labor/overhead, margin %) —
-  the Estimate Builder (item 70/71 above) already has a rate/quantity/
-  shipping/installation model per line that may or may not be the right
-  starting point vs. building something new.
-- Whether this should read from real data already in the schema (e.g.
-  `raw_materials`, `sales_transactions`, `job_orders`, `estimate_line_
-  items`) or is a standalone calculator like the Sign Estimator started as.
-Don't assume any of the above — ask a clarifying question before scoping
-or writing code, same as every other genuine scope decision this session
-and its predecessors have handled (see "Working conventions" below).
+**Land the Cost Sheet module (branch `cost-sheet-module`, commit
+`556bd1a`, not merged/pushed).** In priority order:
+
+1. **Get the branch onto GitHub.** It only exists in the sandbox that built
+   it — that assistant environment had no push credentials (fetch-only).
+   Either the user pulls the changes out some other way (the session's
+   sandbox is ephemeral) or a session with push access re-applies them —
+   check with the user which happened before assuming the branch is gone.
+2. **Run `supabase-cost-sheet-schema.sql`, then `supabase-cost-sheet-
+   seed.sql`, then `supabase-cost-sheet-unit-cost-backfill.sql`** against
+   the real Supabase project, in that order (each file's own header
+   explains why). All three were validated against a real local Postgres
+   via PGlite before being committed — see that commit's message for the
+   exact row counts to expect (33 / 139 / 57, 399 raw_materials rows
+   backfilled) — but nobody has run them against the actual Supabase
+   project yet.
+3. **Confirm `npm run build` actually passes.** The session that built
+   this could only verify `npm run typecheck` (clean) and `npm run lint`
+   (clean on every new/changed file — a handful of pre-existing errors in
+   files it didn't touch remain, see below). `next build` itself crashed
+   with a native "Bus error" the instant it loaded `@next/swc-linux-
+   arm64-gnu` (and the musl variant — both crash identically on a bare
+   `require()`, before any of this change's code runs) — an ARM64/sandbox
+   incompatibility in that particular session, since a prior session (see
+   item 71 below) verified a clean `next build` including Turbopack in
+   what should be a similar environment. Don't assume the Bus error means
+   anything is wrong with the Cost Sheet code itself; just get a real
+   build to confirm before merging.
+4. **Map the BOM lines.** By design, none of the 139 `bom_template_lines`
+   rows are pre-mapped to a `raw_materials.code` — the BOM's shorthand
+   material names (e.g. "RSD Flex 340GSM", "RDD Flex Megarich") didn't
+   text-match the purchase register closely enough to auto-map safely (see
+   the schema file's header, and `suggested_codes` on each line for
+   candidates that were found). Someone who knows MMDI's actual item
+   master needs to confirm each mapping via the new workspace's BOM Master
+   tab before the Cost Sheet tab's material costs mean anything.
+5. **Fill in the rest of the rate card.** Only 5 of 16 work centres
+   (Solvent Printing, Manual Cut, Seaming, QC, Packing) have rates
+   confirmed from the user's own sample cost sheet; UV/Latex/Dye Sub
+   Printing, Aluminium Cut, Dye Sub Transfer, Lamination, Application,
+   Digital Cut, Sewing, LED Section, and Assembling all need real rates
+   entered via the Rate Card tab (`work_centre_rates.confidence =
+   'missing'` marks exactly which ones).
+6. Possible follow-up, not required: link `inventory_skus` (785 real FG
+   SKUs from the Tally import) to `bom_templates` (33 coarser product-type
+   "recipes" from the BOM Specs file) via a `bom_template_id` FK, so a
+   specific real FG SKU can resolve to a template automatically instead of
+   the user picking a template by hand every time.
 
 ## Natural next steps (not started, pick one)
 
@@ -2022,3 +2054,82 @@ and its predecessors have handled (see "Working conventions" below).
     `Date.now()` during render, flagged by a `react-hooks/purity` rule) —
     not introduced by this session's changes, left as-is rather than
     scope-creeping into an unrelated fix.
+72. **Cost Sheet module (Tools) — from a Cowork session, not Claude Code.**
+    Started as a completely different task in a chat with no repo access:
+    the user asked for a "cost sheet" built from two files (FG Codes BOM
+    Specs.xlsx — 33 FG-type BOM "recipes" across 16 work centres — and a
+    Jan-Jun 2026 purchase register export, ~6,900 real transaction rows).
+    That was delivered first as a standalone Excel workbook (materials
+    priced at both recent and quantity-weighted-average purchase rate,
+    computed with live formulas over the raw purchase data, not
+    hardcoded numbers) before the user said "I want a module in EKMS MMDI
+    One in tools tab" — at which point the session fetched this repo's
+    README, found this file, cloned the repo, and read the "Next up"
+    section a previous session had left specifically for this moment. Its
+    three scoping questions were asked verbatim (as multiple-choice, this
+    being a Cowork chat) and answered: new standalone Tools workspace
+    (not an extension of Sign Estimator's `CostSheetTab` or the Costing
+    dashboard), wired to real Supabase data, BOM + Work Centre cost model.
+    - **Schema** (`supabase-cost-sheet-schema.sql` /
+      `-seed.sql` / `-unit-cost-backfill.sql`): `bom_templates` (33) +
+      `bom_template_lines` (139, material name/category/consumption/
+      wastage per line) + `work_centre_rates` (57, keyed on work centre +
+      print mode + substrate, tagged confirmed/extrapolated/missing
+      confidence) — plus 4 new columns on `raw_materials`
+      (`unit_cost_recent/_avg/_recent_date/_source`), backfilled for 399
+      of ~1,558 items (the ones actually purchased in the Jan-Jun 2026
+      window; the rest stay NULL). Deliberately did NOT auto-map BOM
+      lines to `raw_materials.code` — the BOM's shorthand names (e.g.
+      "RSD Flex 340GSM") don't reliably text-match the purchase
+      register's real item names, so every line ships unmapped with a
+      `suggested_codes` hint column instead of a guessed FK, same
+      reasoning as the Excel workbook's mapping sheet. RLS is plain
+      `authenticated`-only, not group-gated (Tools nav section is
+      deliberately ungated — see `AppShell.tsx`'s `SECTION_GROUP`
+      comment). Validated all three files against a real local Postgres
+      via a one-off PGlite harness before committing (row counts, RLS
+      policy counts, and one cross-checked raw_materials backfill value
+      all matched expectations) — no equivalent `test-*.mjs` was left in
+      the repo since PGlite wasn't already a project dependency and
+      wasn't added as one just for this.
+    - **UI** (`apps/web/src/app/workspaces/cost-sheet/`): a 3-tab page
+      (Cost Sheet / BOM Master / Rate Card), same one-route-internal-tabs
+      structure as Sign Estimator. Cost Sheet tab is the live calculator
+      (FG code → dimensions/qty/selling price → material cost at both
+      recent and average price + per-work-centre process cost, flagging
+      unmapped materials and missing rates inline rather than silently
+      showing ₹0). BOM Master tab maps lines to real raw materials via a
+      client-side-filtered picker (`RawMaterialPicker.tsx` — the ~1,558-
+      row `raw_materials` table is loaded once, filtered in memory, no
+      per-keystroke query). Rate Card tab edits rates inline with
+      confidence badges. `calc.ts` holds the actual math with no Supabase
+      import, kept separate and pure on purpose.
+    - Added `BomTemplateRow` / `BomTemplateLineRow` / `WorkCentreRateRow`
+      to `packages/shared/src/rows.ts`, extended `RawMaterialRow` with the
+      4 new columns. Added a "Cost Sheet" entry to `AppShell.tsx`'s Tools
+      section.
+    - **Verification, and its limit.** `npm run typecheck` and `npm run
+      lint` both came back clean on every new/changed file (a handful of
+      pre-existing errors/warnings elsewhere — `account/page.tsx`,
+      `people/page.tsx`, `procurement/page.tsx`, `sops/page.tsx`,
+      `verify5_tmp.ts` — were left alone, not introduced here; the
+      `people/page.tsx` one is the same `Date.now()`-during-render issue
+      item 71 above already flagged and chose not to fix). Could NOT get
+      a clean `next build` in this session's sandbox — it crashed with a
+      native "Bus error" the instant Next tried to load
+      `@next/swc-linux-arm64-gnu`, confirmed by `require()`-ing that
+      module directly outside of Next entirely (same crash, and the musl
+      variant crashes identically) — an environment-level ARM64/sandbox
+      issue unrelated to this change's code, not something fixable from
+      inside the session that hit it.
+    - **Handoff mechanics — read this before assuming the work is lost.**
+      This session's sandbox is a Cowork workspace with git fetch access
+      but no push credentials (confirmed: `git push --dry-run` fails with
+      "could not read Username for 'https://github.com'"), unlike a
+      Claude Code session which might be configured with push access.
+      The commit exists on a local branch (`cost-sheet-module`, one commit
+      on top of the tip this session found) inside that ephemeral
+      sandbox only — it does not exist on GitHub yet. Whoever picks this
+      up next needs to find out from the user how (or whether) those
+      changes made it out of that sandbox before re-doing any of this
+      work from scratch.
