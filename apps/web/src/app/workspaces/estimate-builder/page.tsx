@@ -197,7 +197,11 @@ export default function EstimateBuilderPage() {
   // exactly the bug this replaces (an estimate kept showing a contact who
   // had already been marked as having left).
   const [customerContacts, setCustomerContacts] = useState<CustomerContactRow[] | null>(null);
-  const [quoteSubject, setQuoteSubject] = useState("");
+  // Defaults to the standard subject line so it doesn't need retyping on
+  // every new estimate -- still fully editable, and loadEstimateForEdit
+  // below overwrites this with whatever was actually saved when reopening
+  // an existing estimate.
+  const [quoteSubject, setQuoteSubject] = useState("Quote for - Digital Printing Graphics");
   const [customerAddress, setCustomerAddress] = useState("");
   const [customerGstin, setCustomerGstin] = useState("");
   const [jobCompletionTime, setJobCompletionTime] = useState("");
@@ -1266,7 +1270,13 @@ export default function EstimateBuilderPage() {
                       {l.calcMode !== "sqft" ? "—" : l.sizeEntryMode === "bulk" ? `${l.bulkSqft} sqft (bulk)` : `${l.widthCm}${sizeUnit} × ${l.heightCm}${sizeUnit}`}
                     </td>
                     <td className="px-3 py-2.5">
-                      {l.quantity} {l.uom}
+                      {/* SQFT-priced lines carry the unit on Width x Height
+                          and UOM is repurposed as the cm/ft/in size-entry
+                          unit there -- so it isn't a real quantity unit and
+                          shouldn't be appended here (was showing e.g. "1 ft"
+                          for a line entered in feet). Only "nos" lines have
+                          a genuine per-piece UOM (Boxes, Rolls, Each, ...). */}
+                      {l.calcMode === "sqft" ? l.quantity : `${l.quantity} ${l.uom}`.trim()}
                     </td>
                     <td className="px-3 py-2.5">{l.calcMode === "sqft" ? sqftTotal(l).toFixed(2) : "—"}</td>
                     <td className="px-3 py-2.5">{rupee(l.unitRate)}</td>

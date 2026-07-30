@@ -207,6 +207,7 @@ interface Ctx {
   logo: Logo | null;
   quoteNumber: string;
   pageNumber: number;
+  cols: ReturnType<typeof tableCols>;
 }
 
 const LOGO_H = mm(12);
@@ -260,58 +261,88 @@ function ensure(ctx: Ctx, state: { page: PDFPage; y: number }, need: number) {
 // that used to mean a line billed as 2 nos x Rs.2000 with Rs.1000 shipping
 // showed a flat Rs.5000 "Amount" with no visible breakdown, which read as
 // the base rate being wrong rather than shipping being added on top.
-const TABLE_COLS = [
-  { label: "Product No.", width: mm(15) },
-  { label: "Design / Product", width: mm(33) },
-  { label: "W × H", width: mm(17) },
-  { label: "Qty", width: mm(8) },
-  { label: "SQFT", width: mm(12) },
-  { label: "Rate", width: mm(12) },
-  { label: "Amount", width: mm(13) },
-  { label: "Shipping", width: mm(13) },
-  { label: "Instl.", width: mm(12) },
-  { label: "Tax", width: mm(12) },
-  { label: "Grand Total", width: mm(23) },
-] as const;
+//
+// The Tax column's label is built per-document from the estimate's own
+// gstPercent ("GST@18%") rather than a generic "Tax" -- the user quotes at
+// different GST rates per estimate and wants the rate visible in the
+// header rather than having to infer it from Tax/Amount.
+function tableCols(gstPercent: number) {
+  return [
+    { label: "Product No.", width: mm(15) },
+    { label: "Design / Product", width: mm(33) },
+    { label: "W × H", width: mm(17) },
+    { label: "Qty", width: mm(8) },
+    { label: "SQFT", width: mm(12) },
+    { label: "Rate", width: mm(12) },
+    { label: "Amount", width: mm(13) },
+    { label: "Shipping", width: mm(13) },
+    { label: "Instl.", width: mm(12) },
+    { label: `GST@${gstPercent}%`, width: mm(12) },
+    { label: "Grand Total", width: mm(23) },
+  ] as const;
+}
 
-function tableWidth() {
-  return TABLE_COLS.reduce((s, c) => s + c.width, 0);
+function tableWidth(cols: readonly { width: number }[]) {
+  return cols.reduce((s, c) => s + c.width, 0);
 }
 
 const ROW_H = mm(7);
+// Extra vertical space budgeted per wrapped line beyond the first, and the
+// combined top+bottom padding, when a cell (almost always Design/Product)
+// needs more than one line -- rows used to be a fixed ROW_H tall and simply
+// clipped every cell to its first wrapped line, silently cutting off long
+// product descriptions/design names instead of growing the row.
+const ROW_LINE_H = FONT_SIZE - 1 + 3;
+const ROW_V_PAD = 6;
 
 function drawTableHeader(ctx: Ctx, state: { page: PDFPage; y: number }) {
   ensure(ctx, state, ROW_H);
   let x = MARGIN;
-  state.page.drawRectangle({ x: MARGIN, y: state.y - ROW_H, width: tableWidth(), height: ROW_H, color: HEADER_BG });
+  const width = tableWidth(ctx.cols);
+  state.page.drawRectangle({ x: MARGIN, y: state.y - ROW_H, width, height: ROW_H, color: HEADER_BG });
   const size = FONT_SIZE - 1;
-  for (const col of TABLE_COLS) {
+  for (const col of ctx.cols) {
     state.page.drawText(col.label, { x: x + 3, y: state.y - ROW_H / 2 - size / 2 + 1, size, font: ctx.bold, color: INK });
     x += col.width;
   }
-  state.page.drawRectangle({ x: MARGIN, y: state.y - ROW_H, width: tableWidth(), height: ROW_H, borderColor: BORDER, borderWidth: 0.75 });
+  state.page.drawRectangle({ x: MARGIN, y: state.y - ROW_H, width, height: ROW_H, borderColor: BORDER, borderWidth: 0.75 });
   state.y -= ROW_H;
 }
 
 function drawTableRow(ctx: Ctx, state: { page: PDFPage; y: number }, cells: string[], opts?: { bold?: boolean }) {
+  const size = FONT_SIZE - 1;
+  const font = opts?.bold ? ctx.bold : ctx.font;
+  // Wrap every cell up front so the row's required height is known before
+  // anything is drawn -- a row is only ever as tall as its tallest cell
+  // needs to be (usually 1 line; more when Design/Product runs long).
+  const wrapped = cells.map((text, i) => wrapText(font, text, size, ctx.cols[i].width - 6));
+  const maxLines = Math.max(1, ...wrapped.map((l) => l.length));
+  const rowH = maxLines <= 1 ? ROW_H : maxLines * ROW_LINE_H + ROW_V_PAD * 2;
+
   const yBefore = state.y;
-  ensure(ctx, state, ROW_H);
+  ensure(ctx, state, rowH);
   if (state.y !== yBefore) {
     // `ensure` just started a fresh page mid-table -- repeat the header
     // before this row so a page break never leaves an unlabeled table.
     drawTableHeader(ctx, state);
   }
   let x = MARGIN;
-  const size = FONT_SIZE - 1;
-  const font = opts?.bold ? ctx.bold : ctx.font;
-  cells.forEach((text, i) => {
-    const col = TABLE_COLS[i];
-    const lines = wrapText(font, text, size, col.width - 6);
-    state.page.drawText(lines[0] ?? "", { x: x + 3, y: state.y - ROW_H / 2 - size / 2 + 1, size, font, color: INK });
+  const width = tableWidth(ctx.cols);
+  wrapped.forEach((lines, i) => {
+    const col = ctx.cols[i];
+    if (lines.length <= 1) {
+      // Single line: same vertical centering as before.
+      state.page.drawText(lines[0] ?? "", { x: x + 3, y: state.y - rowH / 2 - size / 2 + 1, size, font, color: INK });
+    } else {
+      const firstBaseline = state.y - ROW_V_PAD - size;
+      lines.forEach((line, j) => {
+        state.page.drawText(line, { x: x + 3, y: firstBaseline - j * ROW_LINE_H, size, font, color: INK });
+      });
+    }
     x += col.width;
   });
-  state.page.drawRectangle({ x: MARGIN, y: state.y - ROW_H, width: tableWidth(), height: ROW_H, borderColor: BORDER, borderWidth: 0.5 });
-  state.y -= ROW_H;
+  state.page.drawRectangle({ x: MARGIN, y: state.y - rowH, width, height: rowH, borderColor: BORDER, borderWidth: 0.5 });
+  state.y -= rowH;
 }
 
 export async function generateEstimatePdf(data: EstimatePdfData): Promise<Blob> {
@@ -337,7 +368,7 @@ export async function generateEstimatePdf(data: EstimatePdfData): Promise<Blob> 
   }
 
   const versionLabel = data.version > 1 ? ` (Version ${data.version})` : " (Version 1)";
-  const ctx: Ctx = { doc, font, bold, logo, quoteNumber: data.quoteNumber || "—", pageNumber: 0 };
+  const ctx: Ctx = { doc, font, bold, logo, quoteNumber: data.quoteNumber || "—", pageNumber: 0, cols: tableCols(data.gstPercent) };
   const state = newPage(ctx);
   const contentW = PAGE_WIDTH - MARGIN * 2;
   const size = FONT_SIZE;
