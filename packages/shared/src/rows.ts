@@ -148,6 +148,14 @@ export interface RawMaterialRow {
   approved_suppliers: number;
   compatible_substrates: string | null;
   unit_cost: number;
+  // Added by supabase-cost-sheet-schema.sql / backfilled by
+  // supabase-cost-sheet-unit-cost-backfill.sql from the Jan-Jun 2026
+  // purchase register -- NULL for the ~1,159 items never purchased in that
+  // window (only 399 of ~1,558 raw materials have real purchase history so far).
+  unit_cost_recent: number | null;
+  unit_cost_recent_date: string | null;
+  unit_cost_avg: number | null;
+  unit_cost_source: string | null;
   moq: string | null;
   storage_class: string | null;
   tags: string[];
@@ -683,5 +691,54 @@ export interface SignEstimateRow {
   margin: number;
   calc: Record<string, unknown>;
   created_by: string | null;
+  created_at: string;
+}
+
+// ---------- Cost Sheet (supabase-cost-sheet-schema.sql) ----------
+// New standalone Tools workspace -- BOM + Work Centre cost model, per the
+// scoping questions PROJECT_STATUS.md's "Next up" section raised and the
+// user's answers to them. Ports the same logic already built and verified
+// as an Excel workbook this session into MMDI ONE's own schema.
+
+export type BomLineBasis = "per_sqft" | "per_piece";
+export type WorkCentreRateConfidence = "confirmed" | "extrapolated" | "missing";
+
+export interface BomTemplateRow {
+  id: string;
+  code: string;
+  description: string;
+  category: string;
+  print_mode: string;
+  substrate_type: string;
+  work_centres: string[];
+  created_at: string;
+}
+
+export interface BomTemplateLineRow {
+  id: string;
+  template_id: string;
+  line_no: number;
+  material_name: string;
+  material_category: string | null;
+  // Deliberately nullable -- left unmapped where the BOM's shorthand
+  // material name had no confident match in raw_materials (see
+  // suggested_codes). Map it in the Cost Sheet workspace's BOM Master tab.
+  raw_material_code: string | null;
+  suggested_codes: string | null;
+  basis: BomLineBasis;
+  consumption_qty: number;
+  wastage_pct: number;
+  created_at: string;
+}
+
+export interface WorkCentreRateRow {
+  id: string;
+  work_centre: string;
+  print_mode: string; // '-' when the rate doesn't vary by print mode
+  substrate: string;
+  rate_basis: BomLineBasis;
+  rate: number | null; // NULL when confidence = 'missing'
+  confidence: WorkCentreRateConfidence;
+  note: string | null;
   created_at: string;
 }
