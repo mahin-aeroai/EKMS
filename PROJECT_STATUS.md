@@ -8,7 +8,9 @@ proper cm/feet/inches UOM selector, a bulk Total-SQFT entry mode, a PDF
 table that wraps instead of clipping/overlapping, GST-labeled tax column +
 HSN code + full product descriptions on the quote PDF, a searchable sales
 person picker, and an employee office-contact edit drawer on the People
-workspace)
+workspace. Session ended here — **next session starts on a Cost Sheet
+module, scope not yet discussed; see the "Next up" section below,
+just before "Natural next steps."**)
 
 This file exists so a new chat session (or a new contributor) can pick up this
 project without re-deriving context. Read this before making changes.
@@ -217,6 +219,32 @@ workspaces. The estimator's `calc.ts` and ~45 row types are shared verbatim.
   fire** — the middleware `/api` gap and the Gmail address-matching check.
   Both were caught by testing, neither by reading. Prefer schema-level
   enforcement to prompt-level or comment-level assurance.
+
+## Next up (start here — this is where the session ended)
+
+**Cost Sheet module.** The user said, right at the end of this session,
+that this is what's being built next — no scope has been discussed yet.
+Before writing any code, clarify with the user:
+- Is this a new top-level workspace, or an extension of something that
+  already exists? Two things in the codebase already use the phrase "cost
+  sheet" and either could be what's meant, or neither: (1) Sign Estimator's
+  own `CostSheetTab.tsx` (re-renders a saved `sign_estimates` row's stored
+  JSON cost breakdown, print button — see item 51 in session history), and
+  (2) the Costing dashboard (`/workspaces/costing`), which per item 7 in
+  "Natural next steps" below only shows "real-but-adjacent metrics"
+  (portfolio LTV, PO pipeline) rather than actual per-job cost/margin data,
+  for want of a real costing ledger schema.
+- What line items make up a cost sheet for MMDI specifically (material,
+  print, finishing, installation, shipping, labor/overhead, margin %) —
+  the Estimate Builder (item 70/71 above) already has a rate/quantity/
+  shipping/installation model per line that may or may not be the right
+  starting point vs. building something new.
+- Whether this should read from real data already in the schema (e.g.
+  `raw_materials`, `sales_transactions`, `job_orders`, `estimate_line_
+  items`) or is a standalone calculator like the Sign Estimator started as.
+Don't assume any of the above — ask a clarifying question before scoping
+or writing code, same as every other genuine scope decision this session
+and its predecessors have handled (see "Working conventions" below).
 
 ## Natural next steps (not started, pick one)
 
