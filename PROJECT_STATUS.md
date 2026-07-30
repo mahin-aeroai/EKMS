@@ -1,11 +1,14 @@
 # MMDI ONE — Project Status
 
-Last updated: 29 July 2026 (session: Bearer auth for mobile clients, the
-monorepo split into apps/web + apps/mobile + packages/shared, custom-domain
-+ middleware fixes, the Gmail integration end to end (OAuth, search, draft
-with a recipient picker), the Expo mobile app built and running on a
-physical device, and the web app's PWA layer + mobile-shell responsive
-fixes)
+Last updated: 30 July 2026 (session: closing a long-standing documentation
+gap — the Estimate Builder + Quotations workspaces existed and had shipped
+across several prior sessions with zero mention in this file — plus this
+session's own round of live-testing-driven fixes to Estimate Builder: a
+proper cm/feet/inches UOM selector, a bulk Total-SQFT entry mode, a PDF
+table that wraps instead of clipping/overlapping, GST-labeled tax column +
+HSN code + full product descriptions on the quote PDF, a searchable sales
+person picker, and an employee office-contact edit drawer on the People
+workspace)
 
 This file exists so a new chat session (or a new contributor) can pick up this
 project without re-deriving context. Read this before making changes.
@@ -50,11 +53,12 @@ over what the code actually does again.
 
 **Deployed and verified**
 
-- `app.mmdi.in` — Next.js 16, 56 routes total per `next build`'s own output
+- `app.mmdi.in` — Next.js 16, 59 routes total per `next build`'s own output
   (verified against a fresh build, not estimated — see item 52's
-  established convention), 33 workspace modules under `/workspaces/*` (32
-  real + `project`, confirmed a pure redirect stub to job-orders),
-  installable as a PWA on both iOS and Android
+  established convention; up from 56 now that Estimate Builder and
+  Quotations — see item 70 — are counted), 35 workspace modules under
+  `/workspaces/*` (34 real + `project`, confirmed a pure redirect stub to
+  job-orders), installable as a PWA on both iOS and Android
 - Supabase Postgres, RLS on every table, roles `admin | editor | viewer`,
   MFA enforced at `aal2` on all API routes
 - Cloudflare R2 for files, always via short-lived presigned URLs
@@ -140,6 +144,11 @@ workspaces. The estimator's `calc.ts` and ~45 row types are shared verbatim.
 - `src/lib/dashboard-queries.ts` — shared count/group-by helpers
   (`getCount`, `getCountWhere`, `groupCount`, `groupSum`, `statusDonutData`,
   `formatCrore`) used by all 6 aggregation dashboards.
+- `src/app/workspaces/estimate-builder/page.tsx` + `src/lib/estimateBuilder/
+  pdf.ts` — the Estimate Builder workspace and its client-side (`pdf-lib`)
+  quote PDF generator. See item 70 below for what this workspace actually
+  does; this file's own session history had never mentioned it before that
+  entry despite it being live in production across several prior sessions.
 - SQL files (all committed to the repo root, all idempotent, all validated
   against a real local Postgres instance via `@electric-sql/pglite` before
   being handed off — confirm each has actually been run in production
@@ -596,6 +605,18 @@ workspaces. The estimator's `calc.ts` and ~45 row types are shared verbatim.
     means the Finance dashboard's portfolio LTV total and every AI Copilot
     answer about revenue/sales are currently overstated by roughly the GST
     proportion (~15%) for any customer touched by the Q1 backfill.
+  - `supabase-estimate-builder-schema.sql` + five follow-on migrations
+    (`-fields`, `-attention-person`, `-jobno-productno`, `-payment-terms-
+    type`, `-salesperson`, `-versions`) — the Estimate Builder workspace's
+    full schema (`estimates`, `estimate_line_items`, versioning, job
+    number/product number, attention person, payment terms type, per-
+    estimate sales person snapshot). **Confirmed run in production** — the
+    workspace has been used live to generate real customer quotes (IKEA,
+    etc.) across several sessions; see item 70 for the feature itself. Note:
+    these files currently sit as untracked/uncommitted in the working
+    repo (`git status` shows them `??`) despite being live in Supabase —
+    worth an explicit `git add` pass at some point so the schema history
+    isn't only in Supabase's own migration log.
 
 23. Built a real admin UI for user role management on the existing
     Administration workspace (`src/app/workspaces/administration/page.tsx`),
@@ -1880,3 +1901,96 @@ workspaces. The estimator's `calc.ts` and ~45 row types are shared verbatim.
     `NSCameraUsageDescription` was never written to Info.plist. Added the
     plugin with explanatory strings and `microphonePermission: false` (the app
     only ever picks images).
+
+70. **Estimate Builder + Quotations workspaces — documented here for the
+    first time.** These two workspaces (`/workspaces/estimate-builder`,
+    `/workspaces/quotations`) were built and shipped across several prior
+    sessions with zero mention anywhere in this file — the gap surfaced
+    when this session went looking for context before making further
+    changes and found none. Documenting what actually exists, retroactively:
+    - `estimates` + `estimate_line_items` (Supabase, versioned — every save
+      creates a new row rather than updating in place, so `quoteNumber` +
+      `version` display e.g. "IKEA-EST-0001 (Version 2)" while every past
+      version stays retrievable).
+    - Three line-item sources feeding one shared `DraftLine` shape: **From
+      contract catalog** (IKEA/Apple rate cards), **From recent purchases**
+      (real `sales_transactions` history for the selected customer), and
+      **Non-contract / unlisted product** (fully custom). Pricing basis is
+      either `nos` (quantity × rate) or `sqft` (area × rate).
+    - Per-estimate fields beyond the line items: Campaign/Job#/Program,
+      attention person (live-picked from that customer's active contacts,
+      not a stale flat field), quote subject, customer address/GSTIN, GST
+      percent, job-completion/delivery-commitment text, payment terms
+      (net days / 100% advance / against delivery), notes, and a sales
+      person snapshot (name/designation/phone/email) for the PDF sign-off.
+    - `src/lib/estimateBuilder/pdf.ts` generates the actual customer-facing
+      quote PDF entirely client-side (`pdf-lib` + `@pdf-lib/fontkit`,
+      Caladea font as an OFL-licensed Cambria substitute — Cambria itself
+      can't legally be bundled) — Date/To/Attn/Subject/Quote No. block, a
+      line-items table, fixed Prices/Job-Completion/Delivery/Payment-
+      Schedule paragraphs, and a signing block.
+    - The Quotations workspace (`/workspaces/quotations`) lists every
+      estimate ever saved, all versions, across all customers — searchable
+      by Campaign/Job#/Program, quote number, or customer name — with a
+      one-click PDF re-download per row (re-generates from the saved line
+      items, not a cached file).
+    No SQL migration was written or changed this session for this item —
+    this is a documentation-only entry closing the gap. See item 71 for
+    this session's actual code changes.
+
+71. **Estimate Builder: a full round of live-testing-driven fixes**, found
+    by the user generating real quotes against production and reporting
+    back screenshots — no single big feature, six real bugs/gaps closed in
+    one sitting:
+    - **UOM was gated to the wrong tabs, then generalized.** The user
+      wanted a real cm/feet/inches unit selector controlling how Width/
+      Height are entered (select "Feet", then type the size in feet — no
+      manual conversion), positioned before Width/Height, and visible on
+      all three line-item source tabs (contract catalog/history/custom) —
+      it had only been showing on custom/history. `getSizeUnit(uom)` in
+      `pdf.ts` (replacing a plain `isFeetUom` boolean) now resolves cm/ft/
+      in from the same `uom` text already persisted per line — no new DB
+      column — and both the PDF and the on-screen Estimate Builder read
+      Width/Height through it consistently.
+    - **Bulk Total-SQFT entry**, for quoting a lump area with no specific
+      panel dimensions. A "Size entry" toggle (Width × Height / Total
+      SQFT) on area-priced lines; on reload, whether a saved line used bulk
+      entry is reverse-inferred from `width_cm`/`height_cm` being null
+      while `sqft_total` is populated — again no new DB column.
+    - **On-screen Qty column was showing e.g. "1 ft"** for SQFT-priced
+      lines — UOM there is the cm/ft/in size unit, not a genuine quantity
+      unit, and was being appended to Qty by mistake. Only "nos" lines
+      (which have a real per-piece UOM like Boxes/Rolls/Each) show it now.
+    - **PDF table cells were clipped to one line and headers could
+      overlap** ("GST@18%" running into "Grand Total"). Rows (body and
+      header both) now wrap every cell up front and grow to fit the tallest
+      cell instead of silently dropping text past the first line.
+    - **PDF line items were missing their own description and an HSN
+      code.** The Design/Product cell only ever showed design name +
+      product name, dropping `description`/`additionalDescription` (e.g.
+      "bubble free vinyl UV print" specs) that the on-screen table already
+      displayed — threaded `additionalDescription` through
+      `EstimatePdfLine` and every construction site. Every line now also
+      prints "HSN: 4911", the HSN code covering this business's printed
+      products (fixed value, not a new per-line field, since every line
+      item this business quotes is a printed product).
+    - **Quote subject now defaults to "Quote for - Digital Printing
+      Graphics"** instead of blank, so it doesn't need retyping on every
+      new estimate — still fully editable per estimate.
+    - **Sales person picker was a plain `<select>` listing ~500
+      employees** — replaced with the same searchable `Dropdown` component
+      already used for rate-card/sales-history product search.
+    - **People workspace gained its first edit affordance.** Clicking an
+      employee row used to just show a toast ("Opened <name>") and do
+      nothing. Added an edit drawer (office mobile number + office email
+      ID) — `off_phone`/`off_email` columns already existed on
+      `public.employees` (from an earlier session's HR-roster import),
+      there was simply no UI anywhere to write them.
+    Verified via a clean `next build` (Turbopack, using the established
+    font-stub-then-restore workaround for the sandbox's lack of network
+    access to fonts.googleapis.com), `tsc --noEmit`, and `eslint` on every
+    changed file each round. One pre-existing, unrelated lint error was
+    noticed in passing (`people/page.tsx`'s `recentJoiners` filter calls
+    `Date.now()` during render, flagged by a `react-hooks/purity` rule) —
+    not introduced by this session's changes, left as-is rather than
+    scope-creeping into an unrelated fix.
