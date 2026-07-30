@@ -78,6 +78,7 @@ export default function QuotationsPage() {
         productName: i.product_name,
         designName: i.design_name,
         description: i.description,
+        additionalDescription: i.additional_description,
         uom: i.uom,
         calcMode: i.calc_mode,
         widthCm: i.width_cm,

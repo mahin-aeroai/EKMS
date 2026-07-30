@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { UserRound } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import { Drawer } from "@/components/ui/Drawer";
 import { StatCard, AICard } from "@/components/ui/Card";
 import { Table, type TableColumn } from "@/components/ui/Table";
 import { useToast } from "@/components/ui/Notifications";
@@ -25,6 +27,37 @@ export default function PeoplePage() {
   const { toast } = useToast();
   const [employees, setEmployees] = useState<EmployeeRow[] | null>(null);
   const [locationFilter, setLocationFilter] = useState<string>(ALL);
+
+  // Record edit — off_phone/off_email already exist on public.employees
+  // (supabase-employees-full-fields-migration.sql) but there was no UI to
+  // ever set them; clicking a row used to just toast "Opened <name>" and go
+  // nowhere. A Drawer keeps this scoped to the two fields actually asked
+  // for rather than turning People into a full employee-editor.
+  const [editingEmployee, setEditingEmployee] = useState<EmployeeRow | null>(null);
+  const [officeMobile, setOfficeMobile] = useState("");
+  const [officeEmail, setOfficeEmail] = useState("");
+  const [savingEmployee, setSavingEmployee] = useState(false);
+
+  function openEditEmployee(e: EmployeeRow) {
+    setEditingEmployee(e);
+    setOfficeMobile(e.off_phone ?? "");
+    setOfficeEmail(e.off_email ?? "");
+  }
+
+  async function saveEmployee() {
+    if (!editingEmployee) return;
+    setSavingEmployee(true);
+    const patch = { off_phone: officeMobile.trim() || null, off_email: officeEmail.trim() || null };
+    const { error } = await supabase.from("employees").update(patch).eq("id", editingEmployee.id);
+    setSavingEmployee(false);
+    if (error) {
+      toast("danger", "Couldn't save — check your Supabase connection");
+      return;
+    }
+    setEmployees((es) => (es ? es.map((x) => (x.id === editingEmployee.id ? { ...x, ...patch } : x)) : es));
+    toast("success", `${editingEmployee.name} updated`);
+    setEditingEmployee(null);
+  }
 
   useEffect(() => {
     supabase
@@ -115,10 +148,57 @@ export default function PeoplePage() {
           ) : visibleEmployees && visibleEmployees.length === 0 ? (
             <p className="py-6 text-center text-sm text-ink-muted">No employees in this location yet.</p>
           ) : (
-            <Table columns={COLUMNS} rows={visibleEmployees ?? []} onRowClick={(r) => toast("info", `Opened ${r.name}`)} />
+            <Table columns={COLUMNS} rows={visibleEmployees ?? []} onRowClick={openEditEmployee} />
           )}
         </div>
       </div>
+
+      <Drawer open={!!editingEmployee} onClose={() => setEditingEmployee(null)} title={editingEmployee?.name ?? "Employee"}>
+        {editingEmployee && (
+          <div className="flex flex-col gap-4">
+            <div className="text-sm text-ink-secondary">
+              <p>
+                {editingEmployee.role ?? "—"}
+                {editingEmployee.department ? ` · ${editingEmployee.department}` : ""}
+              </p>
+              <p>
+                {editingEmployee.employee_code ?? "—"} · {editingEmployee.location ?? "—"}
+              </p>
+            </div>
+            <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
+              Office mobile number
+              <input
+                value={officeMobile}
+                onChange={(e) => setOfficeMobile(e.target.value)}
+                placeholder="e.g. +91 90000 00000"
+                className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
+              Office email ID
+              <input
+                value={officeEmail}
+                onChange={(e) => setOfficeEmail(e.target.value)}
+                placeholder="e.g. name@mmdi.in"
+                className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
+              />
+            </label>
+            {(editingEmployee.personal_phone || editingEmployee.personal_email) && (
+              <div className="rounded-md bg-surface-sunken px-3 py-2 text-xs text-ink-muted">
+                Personal on file: {editingEmployee.personal_phone || "—"} · {editingEmployee.personal_email || "—"}
+              </div>
+            )}
+            <div className="flex justify-end gap-2 border-t border-line pt-4">
+              <Button variant="secondary" onClick={() => setEditingEmployee(null)}>
+                Cancel
+              </Button>
+              <Button variant="primary" loading={savingEmployee} onClick={saveEmployee}>
+                Save
+              </Button>
+            </div>
+          </div>
+        )}
+      </Drawer>
     </div>
   );
 }

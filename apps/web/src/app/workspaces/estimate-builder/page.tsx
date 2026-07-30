@@ -214,6 +214,7 @@ export default function EstimateBuilderPage() {
   // built it, same "snapshot at save time, stays editable" pattern as
   // Attention person.
   const [employees, setEmployees] = useState<EmployeeRow[] | null>(null);
+  const [salespersonPick, setSalespersonPick] = useState("");
   const [salespersonName, setSalespersonName] = useState("");
   const [salespersonDesignation, setSalespersonDesignation] = useState("");
   const [salespersonPhone, setSalespersonPhone] = useState("");
@@ -273,6 +274,7 @@ export default function EstimateBuilderPage() {
       productName: i.product_name,
       designName: i.design_name,
       description: i.description,
+      additionalDescription: i.additional_description,
       uom: i.uom,
       calcMode: i.calc_mode,
       widthCm: i.width_cm,
@@ -763,6 +765,7 @@ export default function EstimateBuilderPage() {
           productName: l.productName,
           designName: l.designName || null,
           description: l.description || null,
+          additionalDescription: l.additionalDescription || null,
           uom: l.uom || null,
           calcMode: l.calcMode,
           widthCm: l.widthCm || null,
@@ -1384,31 +1387,35 @@ export default function EstimateBuilderPage() {
           default person: every estimate starts blank, same "pick from a
           list, then freely edit" pattern as Attention person above. */}
       <Card interactive={false} className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary sm:col-span-2 lg:col-span-4">
-          Sales person (for the sign-off block)
-          {employees && employees.length > 0 && (
-            <select
-              value=""
-              onChange={(e) => {
-                const p = employees.find((x) => x.id === e.target.value);
+        <div className="flex flex-col gap-1 sm:col-span-2 lg:col-span-4">
+          {employees && employees.length > 0 ? (
+            // Searchable instead of a plain <select> -- with ~500 employees
+            // on file, scrolling a native dropdown to find one by eye was
+            // impractical. Same Dropdown component already used to search
+            // the rate card / sales history product lists above.
+            <Dropdown
+              label="Sales person (for the sign-off block)"
+              placeholder={`Search ${employees.length} employees by name, code, or designation…`}
+              options={employees.map((p) => ({
+                value: p.id,
+                label: `${p.name}${p.role ? ` — ${p.role}` : ""}${p.employee_code ? ` · ${p.employee_code}` : ""}`,
+              }))}
+              value={salespersonPick}
+              onChange={(v) => {
+                const id = v as string;
+                setSalespersonPick(id);
+                const p = employees.find((x) => x.id === id);
                 if (!p) return;
                 setSalespersonName(p.name);
                 setSalespersonDesignation(p.role ?? "");
                 setSalespersonPhone(p.off_phone || p.personal_phone || "");
                 setSalespersonEmail(p.off_email || p.personal_email || "");
               }}
-              className="h-8 rounded-md border border-line-strong bg-surface px-2 text-xs text-ink outline-none"
-            >
-              <option value="">Pick from employees on file ({employees.length})…</option>
-              {employees.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                  {p.role ? ` — ${p.role}` : ""}
-                </option>
-              ))}
-            </select>
+            />
+          ) : (
+            <span className="text-xs font-medium text-ink-secondary">Sales person (for the sign-off block)</span>
           )}
-        </label>
+        </div>
         <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
           Name
           <input

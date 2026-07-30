@@ -80,6 +80,12 @@ const BOILERPLATE = {
   thanking: "Thanking and assuring you of our best services at all the times.",
 };
 
+// HSN 4911 ("printed matter, pictures, other than periodicals") covers
+// every line item this business quotes -- signage, wall graphics, vinyl
+// prints, etc. -- so it's shown as a fixed value on every line rather than
+// a per-line field the user would have to fill in every time.
+const HSN_CODE_PRINTED_PRODUCTS = "4911";
+
 export const DEFAULT_JOB_COMPLETION_TIME = "The overall job is expected to be completed according to the given Schedule.";
 export const DEFAULT_DELIVERY_COMMITMENT =
   "Same day delivery within Hyderabad city, out station deliveries based on logistics with effect from the provided conditions are true.";
@@ -89,6 +95,7 @@ export interface EstimatePdfLine {
   productName: string;
   designName: string | null;
   description: string | null;
+  additionalDescription: string | null;
   uom: string | null;
   calcMode: "nos" | "sqft";
   widthCm: number | null;
@@ -194,6 +201,25 @@ function wrapText(font: PDFFont, text: string, size: number, maxWidth: number): 
   return lines;
 }
 
+// Like wrapText, but respects explicit "\n"s in the input as forced line
+// breaks first (wrapText alone treats "\n" as just another whitespace
+// separator between words, so e.g. "Name\nHSN: 4911" could get silently
+// re-joined onto one wrapped line). Table cells that stack multiple
+// distinct pieces of text -- product name, description, HSN code -- use
+// this so each piece reliably starts its own line, still word-wrapping
+// within itself if it's too long for the column.
+function wrapParagraphs(font: PDFFont, text: string, size: number, maxWidth: number): string[] {
+  const lines: string[] = [];
+  for (const para of text.split("\n")) {
+    if (para === "") {
+      lines.push("");
+    } else {
+      lines.push(...wrapText(font, para, size, maxWidth));
+    }
+  }
+  return lines;
+}
+
 interface Logo {
   image: Awaited<ReturnType<PDFDocument["embedJpg"]>>;
   w: number;
@@ -277,7 +303,7 @@ function tableCols(gstPercent: number) {
     { label: "Amount", width: mm(13) },
     { label: "Shipping", width: mm(13) },
     { label: "Instl.", width: mm(12) },
-    { label: `GST@${gstPercent}%`, width: mm(12) },
+    { label: `GST @${gstPercent}%`, width: mm(12) },
     { label: "Grand Total", width: mm(23) },
   ] as const;
 }
@@ -295,29 +321,64 @@ const ROW_H = mm(7);
 const ROW_LINE_H = FONT_SIZE - 1 + 3;
 const ROW_V_PAD = 6;
 
-function drawTableHeader(ctx: Ctx, state: { page: PDFPage; y: number }) {
-  ensure(ctx, state, ROW_H);
+// Shared by header + body rows: wraps every cell to its column's width up
+// front so the row's required height is known before anything is drawn,
+// then figures out how tall the row needs to be (usually 1 line; more
+// when a cell -- a long column header like "GST @18%", or Design/Product
+// -- runs past its column width and needs a second line instead of
+// overflowing into the next column).
+function wrapRowCells(cols: readonly { width: number }[], cells: string[], font: PDFFont, size: number): string[][] {
+  return cells.map((text, i) => wrapParagraphs(font, text, size, cols[i].width - 6));
+}
+
+function rowHeightFor(wrapped: string[][]): number {
+  const maxLines = Math.max(1, ...wrapped.map((l) => l.length));
+  return maxLines <= 1 ? ROW_H : maxLines * ROW_LINE_H + ROW_V_PAD * 2;
+}
+
+function drawWrappedCells(
+  page: PDFPage,
+  cols: readonly { width: number }[],
+  wrapped: string[][],
+  rowH: number,
+  y: number,
+  font: PDFFont,
+  size: number
+) {
   let x = MARGIN;
-  const width = tableWidth(ctx.cols);
-  state.page.drawRectangle({ x: MARGIN, y: state.y - ROW_H, width, height: ROW_H, color: HEADER_BG });
-  const size = FONT_SIZE - 1;
-  for (const col of ctx.cols) {
-    state.page.drawText(col.label, { x: x + 3, y: state.y - ROW_H / 2 - size / 2 + 1, size, font: ctx.bold, color: INK });
+  wrapped.forEach((lines, i) => {
+    const col = cols[i];
+    if (lines.length <= 1) {
+      // Single line: centered vertically in the row.
+      page.drawText(lines[0] ?? "", { x: x + 3, y: y - rowH / 2 - size / 2 + 1, size, font, color: INK });
+    } else {
+      const firstBaseline = y - ROW_V_PAD - size;
+      lines.forEach((line, j) => {
+        page.drawText(line, { x: x + 3, y: firstBaseline - j * ROW_LINE_H, size, font, color: INK });
+      });
+    }
     x += col.width;
-  }
-  state.page.drawRectangle({ x: MARGIN, y: state.y - ROW_H, width, height: ROW_H, borderColor: BORDER, borderWidth: 0.75 });
-  state.y -= ROW_H;
+  });
+}
+
+function drawTableHeader(ctx: Ctx, state: { page: PDFPage; y: number }) {
+  const size = FONT_SIZE - 1;
+  const labels = ctx.cols.map((c) => c.label);
+  const wrapped = wrapRowCells(ctx.cols, labels, ctx.bold, size);
+  const rowH = rowHeightFor(wrapped);
+  ensure(ctx, state, rowH);
+  const width = tableWidth(ctx.cols);
+  state.page.drawRectangle({ x: MARGIN, y: state.y - rowH, width, height: rowH, color: HEADER_BG });
+  drawWrappedCells(state.page, ctx.cols, wrapped, rowH, state.y, ctx.bold, size);
+  state.page.drawRectangle({ x: MARGIN, y: state.y - rowH, width, height: rowH, borderColor: BORDER, borderWidth: 0.75 });
+  state.y -= rowH;
 }
 
 function drawTableRow(ctx: Ctx, state: { page: PDFPage; y: number }, cells: string[], opts?: { bold?: boolean }) {
   const size = FONT_SIZE - 1;
   const font = opts?.bold ? ctx.bold : ctx.font;
-  // Wrap every cell up front so the row's required height is known before
-  // anything is drawn -- a row is only ever as tall as its tallest cell
-  // needs to be (usually 1 line; more when Design/Product runs long).
-  const wrapped = cells.map((text, i) => wrapText(font, text, size, ctx.cols[i].width - 6));
-  const maxLines = Math.max(1, ...wrapped.map((l) => l.length));
-  const rowH = maxLines <= 1 ? ROW_H : maxLines * ROW_LINE_H + ROW_V_PAD * 2;
+  const wrapped = wrapRowCells(ctx.cols, cells, font, size);
+  const rowH = rowHeightFor(wrapped);
 
   const yBefore = state.y;
   ensure(ctx, state, rowH);
@@ -326,21 +387,8 @@ function drawTableRow(ctx: Ctx, state: { page: PDFPage; y: number }, cells: stri
     // before this row so a page break never leaves an unlabeled table.
     drawTableHeader(ctx, state);
   }
-  let x = MARGIN;
   const width = tableWidth(ctx.cols);
-  wrapped.forEach((lines, i) => {
-    const col = ctx.cols[i];
-    if (lines.length <= 1) {
-      // Single line: same vertical centering as before.
-      state.page.drawText(lines[0] ?? "", { x: x + 3, y: state.y - rowH / 2 - size / 2 + 1, size, font, color: INK });
-    } else {
-      const firstBaseline = state.y - ROW_V_PAD - size;
-      lines.forEach((line, j) => {
-        state.page.drawText(line, { x: x + 3, y: firstBaseline - j * ROW_LINE_H, size, font, color: INK });
-      });
-    }
-    x += col.width;
-  });
+  drawWrappedCells(state.page, ctx.cols, wrapped, rowH, state.y, font, size);
   state.page.drawRectangle({ x: MARGIN, y: state.y - rowH, width, height: rowH, borderColor: BORDER, borderWidth: 0.5 });
   state.y -= rowH;
 }
@@ -435,9 +483,18 @@ export async function generateEstimatePdf(data: EstimatePdfData): Promise<Blob> 
     installTotal += l.installationRate;
     const tax = (amount * data.gstPercent) / 100;
     const sizeUnit = getSizeUnit(l.uom);
+    // Design/Product cell stacks four distinct pieces, each starting its
+    // own line (via wrapParagraphs' "\n" handling) and wrapping further
+    // within itself if long: the name, the full description (description +
+    // additionalDescription -- e.g. "bubble free vinyl UV print" specs that
+    // used to be dropped from the PDF even though the on-screen table
+    // already showed them), then the HSN code every printed line carries.
+    const nameLine = [l.designName, l.productName].filter(Boolean).join(" — ") || l.productName;
+    const descLine = [l.description, l.additionalDescription].filter(Boolean).join(" — ");
+    const productCell = [nameLine, descLine, `HSN: ${HSN_CODE_PRINTED_PRODUCTS}`].filter(Boolean).join("\n");
     drawTableRow(ctx, state, [
       l.productNo || "—",
-      [l.designName, l.productName].filter(Boolean).join(" — ") || l.productName,
+      productCell,
       l.calcMode === "sqft" && l.widthCm && l.heightCm ? `${l.widthCm}${sizeUnit} × ${l.heightCm}${sizeUnit}` : "—",
       // The SQFT column already carries the area-priced total, so the
       // Qty column just shows the bare count there instead of repeating
