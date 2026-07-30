@@ -73,6 +73,15 @@ interface SalesHistoryProduct {
   timesPurchased: number;
 }
 
+// SQFT-priced lines can be entered two ways: real Width × Height
+// dimensions (the default), or a bulk total SQFT typed directly when
+// there's no width/height to multiply -- e.g. quoting "500 sqft of vinyl"
+// as one lump area rather than a specific panel size. Purely a UI-side
+// toggle: bulkSqft has no DB column of its own, since sqft_total (already
+// a stored column either way) carries the final number regardless of
+// which entry method produced it.
+type SizeEntryMode = "dimensions" | "bulk";
+
 interface DraftLine {
   key: string;
   isContractItem: boolean;
@@ -83,8 +92,10 @@ interface DraftLine {
   additionalDescription: string;
   uom: string;
   calcMode: EstimateCalcMode;
+  sizeEntryMode: SizeEntryMode;
   widthCm: number;
   heightCm: number;
+  bulkSqft: number;
   unitRate: number;
   quantity: number;
   transportationRate: number;
@@ -101,8 +112,10 @@ function emptyDraft(): Omit<DraftLine, "key"> {
     additionalDescription: "",
     uom: "",
     calcMode: "sqft",
+    sizeEntryMode: "dimensions",
     widthCm: 0,
     heightCm: 0,
+    bulkSqft: 0,
     unitRate: 0,
     quantity: 1,
     transportationRate: 0,
@@ -137,11 +150,12 @@ function heightIn(l: Pick<DraftLine, "heightCm" | "uom">) {
   if (unit === "in") return l.heightCm;
   return l.heightCm / CM_PER_IN;
 }
-function sqftTotal(l: Pick<DraftLine, "calcMode" | "widthCm" | "heightCm" | "quantity" | "uom">) {
+function sqftTotal(l: Pick<DraftLine, "calcMode" | "sizeEntryMode" | "widthCm" | "heightCm" | "bulkSqft" | "quantity" | "uom">) {
   if (l.calcMode !== "sqft") return 0;
+  if (l.sizeEntryMode === "bulk") return l.bulkSqft * l.quantity;
   return (widthIn(l) * heightIn(l)) / 144 * l.quantity;
 }
-function lineSubtotal(l: Pick<DraftLine, "calcMode" | "widthCm" | "heightCm" | "quantity" | "unitRate" | "uom">) {
+function lineSubtotal(l: Pick<DraftLine, "calcMode" | "sizeEntryMode" | "widthCm" | "heightCm" | "bulkSqft" | "quantity" | "unitRate" | "uom">) {
   return l.calcMode === "sqft" ? sqftTotal(l) * l.unitRate : l.quantity * l.unitRate;
 }
 function lineTotal(l: DraftLine) {
@@ -337,23 +351,33 @@ export default function EstimateBuilderPage() {
       setSalespersonPhone(estimate.salesperson_phone ?? "");
       setSalespersonEmail(estimate.salesperson_email ?? "");
       setLines(
-        ((items as EstimateLineItemRow[]) ?? []).map((i) => ({
-          key: crypto.randomUUID(),
-          isContractItem: i.is_contract_item,
-          productNo: i.product_no ?? "",
-          productName: i.product_name,
-          designName: i.design_name ?? "",
-          description: i.description ?? "",
-          additionalDescription: i.additional_description ?? "",
-          uom: i.uom ?? "",
-          calcMode: i.calc_mode,
-          widthCm: i.width_cm ?? 0,
-          heightCm: i.height_cm ?? 0,
-          unitRate: i.unit_rate,
-          quantity: i.quantity,
-          transportationRate: i.transportation_rate,
-          installationRate: i.installation_rate,
-        }))
+        ((items as EstimateLineItemRow[]) ?? []).map((i) => {
+          // A bulk-entered line has no width_cm/height_cm on file (they
+          // were never asked for) but does have a stored sqft_total --
+          // reverse out the per-qty bulk figure so editing this estimate
+          // shows the same "Total SQFT" entry the line was originally
+          // built with, instead of blank Width/Height boxes.
+          const wasBulk = i.calc_mode === "sqft" && !i.width_cm && !i.height_cm && !!i.sqft_total;
+          return {
+            key: crypto.randomUUID(),
+            isContractItem: i.is_contract_item,
+            productNo: i.product_no ?? "",
+            productName: i.product_name,
+            designName: i.design_name ?? "",
+            description: i.description ?? "",
+            additionalDescription: i.additional_description ?? "",
+            uom: i.uom ?? "",
+            calcMode: i.calc_mode,
+            sizeEntryMode: wasBulk ? ("bulk" as const) : ("dimensions" as const),
+            widthCm: i.width_cm ?? 0,
+            heightCm: i.height_cm ?? 0,
+            bulkSqft: wasBulk ? (i.sqft_total as number) / (i.quantity || 1) : 0,
+            unitRate: i.unit_rate,
+            quantity: i.quantity,
+            transportationRate: i.transportation_rate,
+            installationRate: i.installation_rate,
+          };
+        })
       );
 
       const rootId = estimate.root_estimate_id ?? estimate.id;
@@ -575,8 +599,12 @@ export default function EstimateBuilderPage() {
       toast("danger", "Enter or select a product first");
       return;
     }
-    if (draft.calcMode === "sqft" && (draft.widthCm <= 0 || draft.heightCm <= 0)) {
-      toast("danger", "Enter width and height (cm) for an area-priced line");
+    if (draft.calcMode === "sqft" && draft.sizeEntryMode === "dimensions" && (draft.widthCm <= 0 || draft.heightCm <= 0)) {
+      toast("danger", "Enter width and height for an area-priced line");
+      return;
+    }
+    if (draft.calcMode === "sqft" && draft.sizeEntryMode === "bulk" && draft.bulkSqft <= 0) {
+      toast("danger", "Enter the total SQFT for this line");
       return;
     }
     setLines((ls) => [...ls, { ...draft, isContractItem: source === "contract", key: crypto.randomUUID() }]);
@@ -1076,23 +1104,53 @@ export default function EstimateBuilderPage() {
             {draft.calcMode === "sqft" && (
               <>
                 <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
-                  Width ({getSizeUnit(draft.uom)})
-                  <input
-                    type="number"
-                    value={draft.widthCm || ""}
-                    onChange={(e) => setDraft((d) => ({ ...d, widthCm: Number(e.target.value) }))}
+                  Size entry
+                  <select
+                    value={draft.sizeEntryMode}
+                    onChange={(e) => setDraft((d) => ({ ...d, sizeEntryMode: e.target.value as SizeEntryMode }))}
                     className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
-                  />
+                  >
+                    <option value="dimensions">Width × Height</option>
+                    <option value="bulk">Total SQFT (no width/height)</option>
+                  </select>
                 </label>
-                <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
-                  Height ({getSizeUnit(draft.uom)})
-                  <input
-                    type="number"
-                    value={draft.heightCm || ""}
-                    onChange={(e) => setDraft((d) => ({ ...d, heightCm: Number(e.target.value) }))}
-                    className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
-                  />
-                </label>
+                {draft.sizeEntryMode === "dimensions" ? (
+                  <>
+                    <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
+                      Width ({getSizeUnit(draft.uom)})
+                      <input
+                        type="number"
+                        value={draft.widthCm || ""}
+                        onChange={(e) => setDraft((d) => ({ ...d, widthCm: Number(e.target.value) }))}
+                        className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
+                      Height ({getSizeUnit(draft.uom)})
+                      <input
+                        type="number"
+                        value={draft.heightCm || ""}
+                        onChange={(e) => setDraft((d) => ({ ...d, heightCm: Number(e.target.value) }))}
+                        className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
+                      />
+                    </label>
+                  </>
+                ) : (
+                  // Bulk entry: no width/height to multiply -- just the
+                  // total SQFT for one unit of Quantity below (e.g. 500
+                  // sqft x Quantity 2 rooms = 1000 sqft total), for
+                  // quoting a lump area rather than a specific panel size.
+                  <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
+                    Total SQFT (per qty)
+                    <input
+                      type="number"
+                      value={draft.bulkSqft || ""}
+                      onChange={(e) => setDraft((d) => ({ ...d, bulkSqft: Number(e.target.value) }))}
+                      placeholder="e.g. 500"
+                      className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
+                    />
+                  </label>
+                )}
               </>
             )}
             <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
@@ -1105,9 +1163,14 @@ export default function EstimateBuilderPage() {
                 className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
               />
             </label>
-            {draft.calcMode === "sqft" && draft.widthCm > 0 && draft.heightCm > 0 && (
+            {draft.calcMode === "sqft" && draft.sizeEntryMode === "dimensions" && draft.widthCm > 0 && draft.heightCm > 0 && (
               <div className="flex flex-col justify-end rounded-md bg-surface-sunken px-3 py-2 text-xs text-ink-secondary">
                 {widthIn(draft).toFixed(2)}in × {heightIn(draft).toFixed(2)}in — total {sqftTotal(draft).toFixed(2)} sqft
+              </div>
+            )}
+            {draft.calcMode === "sqft" && draft.sizeEntryMode === "bulk" && draft.bulkSqft > 0 && (
+              <div className="flex flex-col justify-end rounded-md bg-surface-sunken px-3 py-2 text-xs text-ink-secondary">
+                {draft.bulkSqft} sqft × qty {draft.quantity} — total {sqftTotal(draft).toFixed(2)} sqft
               </div>
             )}
 
@@ -1199,7 +1262,9 @@ export default function EstimateBuilderPage() {
                         </div>
                       </div>
                     </td>
-                    <td className="px-3 py-2.5">{l.calcMode === "sqft" ? `${l.widthCm}${sizeUnit} × ${l.heightCm}${sizeUnit}` : "—"}</td>
+                    <td className="px-3 py-2.5">
+                      {l.calcMode !== "sqft" ? "—" : l.sizeEntryMode === "bulk" ? `${l.bulkSqft} sqft (bulk)` : `${l.widthCm}${sizeUnit} × ${l.heightCm}${sizeUnit}`}
+                    </td>
                     <td className="px-3 py-2.5">
                       {l.quantity} {l.uom}
                     </td>
