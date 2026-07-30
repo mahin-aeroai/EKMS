@@ -122,7 +122,7 @@ export default function QuotationsPage() {
 
   const COLUMNS: TableColumn<QuotationRow>[] = [
     { key: "quote_number", header: "Quote #", sortable: true, render: (r) => <span className="font-medium text-ink">{r.quote_number}</span> },
-    { key: "job_number", header: "Job No.", sortable: true, render: (r) => r.job_number ?? "—" },
+    { key: "job_number", header: "Campaign/Job#/Program", sortable: true, render: (r) => r.job_number ?? "—" },
     { key: "version", header: "Version", render: (r) => <Badge status={r.version > 1 ? "info" : "neutral"}>{`V${r.version}`}</Badge> },
     { key: "customers", header: "Customer", sortable: true, render: (r) => r.customers?.name ?? "—" },
     { key: "status", header: "Status", render: (r) => <Badge status={STATUS_BADGE[r.status] ?? "neutral"}>{r.status}</Badge> },
@@ -174,7 +174,7 @@ export default function QuotationsPage() {
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by Job No., Quote #, or customer name…"
+          placeholder="Search by Campaign/Job#/Program, Quote #, or customer name…"
           className="h-10 w-full bg-transparent text-sm text-ink outline-none"
         />
       </div>

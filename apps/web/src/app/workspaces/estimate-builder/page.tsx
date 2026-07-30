@@ -10,7 +10,7 @@ import { Dropdown } from "@/components/ui/Dropdown";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
 import type { CustomerRow, CustomerContactRow, ContractRow, IkeaRateCardRow, AppleRateCardRow, EstimateRow, EstimateCalcMode, EstimateLineItemRow, EstimatePaymentTermsType, EmployeeRow } from "@mmdi/shared/rows";
-import { generateEstimatePdf, downloadBlob, type EstimatePdfLine } from "@/lib/estimateBuilder/pdf";
+import { generateEstimatePdf, downloadBlob, isFeetUom, type EstimatePdfLine } from "@/lib/estimateBuilder/pdf";
 import { fetchAllRows } from "@/lib/dashboard-queries";
 
 // MMDI ONE Estimate Builder — scoped to IKEA first per the user's request
@@ -119,17 +119,23 @@ function inferCalcMode(uom: string | null | undefined): EstimateCalcMode {
 }
 
 const CM_PER_IN = 2.54;
-function widthIn(l: Pick<DraftLine, "widthCm">) {
-  return l.widthCm / CM_PER_IN;
+// Width/Height are entered in cm by default, but typing "ft"/"feet" into
+// UOM (see isFeetUom in pdf.ts) switches them to feet instead -- e.g. a
+// 10x5 signage job can be typed as 10/5 with UOM "ft" rather than having
+// to hand-convert to 304.8/152.4 cm first. widthCm/heightCm keep their
+// field names for minimal disruption to the DB columns/save-load code
+// they map to, but hold whichever unit the line's UOM specifies.
+function widthIn(l: Pick<DraftLine, "widthCm" | "uom">) {
+  return isFeetUom(l.uom) ? l.widthCm * 12 : l.widthCm / CM_PER_IN;
 }
-function heightIn(l: Pick<DraftLine, "heightCm">) {
-  return l.heightCm / CM_PER_IN;
+function heightIn(l: Pick<DraftLine, "heightCm" | "uom">) {
+  return isFeetUom(l.uom) ? l.heightCm * 12 : l.heightCm / CM_PER_IN;
 }
-function sqftTotal(l: Pick<DraftLine, "calcMode" | "widthCm" | "heightCm" | "quantity">) {
+function sqftTotal(l: Pick<DraftLine, "calcMode" | "widthCm" | "heightCm" | "quantity" | "uom">) {
   if (l.calcMode !== "sqft") return 0;
   return (widthIn(l) * heightIn(l)) / 144 * l.quantity;
 }
-function lineSubtotal(l: Pick<DraftLine, "calcMode" | "widthCm" | "heightCm" | "quantity" | "unitRate">) {
+function lineSubtotal(l: Pick<DraftLine, "calcMode" | "widthCm" | "heightCm" | "quantity" | "unitRate" | "uom">) {
   return l.calcMode === "sqft" ? sqftTotal(l) * l.unitRate : l.quantity * l.unitRate;
 }
 function lineTotal(l: DraftLine) {
@@ -590,7 +596,7 @@ export default function EstimateBuilderPage() {
       return;
     }
     if (!jobNumber.trim()) {
-      toast("danger", "Enter a Job No. — every estimate needs one so it can be searched later");
+      toast("danger", "Enter a Campaign/Job#/Program — every estimate needs one so it can be searched later");
       return;
     }
     if (lines.length === 0) {
@@ -804,7 +810,7 @@ export default function EstimateBuilderPage() {
           editable so they're never silently blank. */}
       <Card interactive={false} className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
-          Job No. <span className="text-danger">*</span>
+          Campaign/Job#/Program <span className="text-danger">*</span>
           <input
             value={jobNumber}
             onChange={(e) => setJobNumber(e.target.value)}
@@ -991,9 +997,12 @@ export default function EstimateBuilderPage() {
               />
             </label>
 
-            {/* Design, Width/Height, UOM, Qty — same order for a contract
-                pick or a custom line, matching the sample quotes' column
-                order (Product, Design, Width, Height, UOM, Qty). */}
+            {/* Design, UOM, Pricing basis, Width/Height, Qty — UOM comes
+                before Width/Height because it drives how they're read: type
+                "ft"/"feet" here and Width/Height switch from the default cm
+                to feet (see isFeetUom in pdf.ts) -- no separate unit field,
+                since UOM is already saved per line and already round-trips
+                through edit/PDF regeneration. */}
             <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
               Design
               <input
@@ -1003,6 +1012,18 @@ export default function EstimateBuilderPage() {
                 className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
               />
             </label>
+            {(source === "custom" || source === "history") && (
+              <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
+                UOM
+                <span className="font-normal normal-case text-ink-muted"> — type &quot;ft&quot; to enter Width/Height in feet</span>
+                <input
+                  value={draft.uom}
+                  onChange={(e) => setDraft((d) => ({ ...d, uom: e.target.value }))}
+                  placeholder="e.g. SQFT, Nos, ft"
+                  className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
+                />
+              </label>
+            )}
             <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
               Pricing basis
               <select
@@ -1017,7 +1038,7 @@ export default function EstimateBuilderPage() {
             {draft.calcMode === "sqft" && (
               <>
                 <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
-                  Width (cm)
+                  Width ({isFeetUom(draft.uom) ? "ft" : "cm"})
                   <input
                     type="number"
                     value={draft.widthCm || ""}
@@ -1026,7 +1047,7 @@ export default function EstimateBuilderPage() {
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
-                  Height (cm)
+                  Height ({isFeetUom(draft.uom) ? "ft" : "cm"})
                   <input
                     type="number"
                     value={draft.heightCm || ""}
@@ -1035,16 +1056,6 @@ export default function EstimateBuilderPage() {
                   />
                 </label>
               </>
-            )}
-            {(source === "custom" || source === "history") && (
-              <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
-                UOM
-                <input
-                  value={draft.uom}
-                  onChange={(e) => setDraft((d) => ({ ...d, uom: e.target.value }))}
-                  className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
-                />
-              </label>
             )}
             <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
               Quantity
@@ -1123,6 +1134,8 @@ export default function EstimateBuilderPage() {
                 <th className="px-3 py-2">SQFT</th>
                 <th className="px-3 py-2">Rate</th>
                 <th className="px-3 py-2">Amount</th>
+                <th className="px-3 py-2">Shipping</th>
+                <th className="px-3 py-2">Installation</th>
                 <th className="px-3 py-2">Tax</th>
                 <th className="px-3 py-2">Line grand total</th>
                 <th className="px-3 py-2" />
@@ -1130,8 +1143,10 @@ export default function EstimateBuilderPage() {
             </thead>
             <tbody className="divide-y divide-line">
               {lines.map((l) => {
-                const amount = lineSubtotal(l) + l.transportationRate + l.installationRate;
+                const base = lineSubtotal(l);
+                const amount = base + l.transportationRate + l.installationRate;
                 const tax = (amount * gstPercent) / 100;
+                const sizeUnit = isFeetUom(l.uom) ? "ft" : "cm";
                 return (
                   <tr key={l.key}>
                     <td className="px-3 py-2.5 text-ink-secondary">{l.productNo || "—"}</td>
@@ -1146,13 +1161,15 @@ export default function EstimateBuilderPage() {
                         </div>
                       </div>
                     </td>
-                    <td className="px-3 py-2.5">{l.calcMode === "sqft" ? `${l.widthCm}cm × ${l.heightCm}cm` : "—"}</td>
+                    <td className="px-3 py-2.5">{l.calcMode === "sqft" ? `${l.widthCm}${sizeUnit} × ${l.heightCm}${sizeUnit}` : "—"}</td>
                     <td className="px-3 py-2.5">
                       {l.quantity} {l.uom}
                     </td>
                     <td className="px-3 py-2.5">{l.calcMode === "sqft" ? sqftTotal(l).toFixed(2) : "—"}</td>
                     <td className="px-3 py-2.5">{rupee(l.unitRate)}</td>
-                    <td className="px-3 py-2.5">{rupee(amount)}</td>
+                    <td className="px-3 py-2.5">{rupee(base)}</td>
+                    <td className="px-3 py-2.5">{l.transportationRate ? rupee(l.transportationRate) : "—"}</td>
+                    <td className="px-3 py-2.5">{l.installationRate ? rupee(l.installationRate) : "—"}</td>
                     <td className="px-3 py-2.5">{rupee(tax)}</td>
                     <td className="px-3 py-2.5 font-medium text-ink">{rupee(amount + tax)}</td>
                     <td className="px-3 py-2.5">
@@ -1165,7 +1182,7 @@ export default function EstimateBuilderPage() {
               })}
               {lines.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="px-3 py-8 text-center text-ink-muted">
+                  <td colSpan={12} className="px-3 py-8 text-center text-ink-muted">
                     No line items yet — add one above.
                   </td>
                 </tr>
@@ -1331,7 +1348,7 @@ export default function EstimateBuilderPage() {
             <thead className="text-xs font-semibold uppercase tracking-wide text-ink-secondary">
               <tr>
                 <th className="px-3 py-2">Quote #</th>
-                <th className="px-3 py-2">Job No.</th>
+                <th className="px-3 py-2">Campaign/Job#/Program</th>
                 <th className="px-3 py-2">Version</th>
                 <th className="px-3 py-2">Customer</th>
                 <th className="px-3 py-2">Status</th>

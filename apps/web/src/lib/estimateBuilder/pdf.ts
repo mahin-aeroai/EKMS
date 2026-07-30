@@ -150,6 +150,22 @@ function rupee(n: number): string {
   return n.toLocaleString("en-IN", { maximumFractionDigits: 2, minimumFractionDigits: 2 });
 }
 
+// Width/Height entry unit is driven by the line's own UOM text rather than
+// a separate field: type "ft"/"feet" as the UOM and Width/Height are read
+// as feet instead of the default cm. Deliberately excludes anything
+// containing "sq" ("SQFT"/"Sq.Ft"/"Sq Ft") -- those describe the
+// (already square-feet) OUTPUT area unit that every sqft-priced line
+// already produces via the cm-to-inches-to-/144 math, not a request to
+// enter Width/Height in feet. Exported so both this file and the Estimate
+// Builder page derive "is this a feet-entry line" identically from the
+// same stored uom text -- no separate DB column needed, since uom is
+// already persisted per line.
+export function isFeetUom(uom: string | null | undefined): boolean {
+  const u = (uom ?? "").toLowerCase().trim();
+  if (!u || u.includes("sq")) return false;
+  return /\bft\b|feet/.test(u);
+}
+
 function lineAmount(l: EstimatePdfLine): number {
   const base = l.calcMode === "sqft" ? (l.sqftTotal ?? 0) * l.unitRate : l.quantity * l.unitRate;
   return base + l.transportationRate + l.installationRate;
@@ -233,16 +249,24 @@ function ensure(ctx: Ctx, state: { page: PDFPage; y: number }, need: number) {
 // the column list changes. Width/Height collapses cm-only into one column
 // (rather than separate cm + inch columns) so everything still fits
 // comfortably at 9pt instead of the ~6.5pt a full cm+inch table would need.
+//
+// Amount/Shipping/Installation are three separate columns rather than one
+// lump "Amount" that silently folds transportation+installation in --
+// that used to mean a line billed as 2 nos x Rs.2000 with Rs.1000 shipping
+// showed a flat Rs.5000 "Amount" with no visible breakdown, which read as
+// the base rate being wrong rather than shipping being added on top.
 const TABLE_COLS = [
-  { label: "Product No.", width: mm(18) },
-  { label: "Design / Product", width: mm(40) },
-  { label: "W × H (cm)", width: mm(22) },
-  { label: "Qty", width: mm(10) },
-  { label: "SQFT", width: mm(14) },
-  { label: "Rate", width: mm(14) },
-  { label: "Amount", width: mm(16) },
-  { label: "Tax", width: mm(14) },
-  { label: "Grand Total", width: mm(22) },
+  { label: "Product No.", width: mm(15) },
+  { label: "Design / Product", width: mm(33) },
+  { label: "W × H", width: mm(17) },
+  { label: "Qty", width: mm(8) },
+  { label: "SQFT", width: mm(12) },
+  { label: "Rate", width: mm(12) },
+  { label: "Amount", width: mm(13) },
+  { label: "Shipping", width: mm(13) },
+  { label: "Instl.", width: mm(12) },
+  { label: "Tax", width: mm(12) },
+  { label: "Grand Total", width: mm(23) },
 ] as const;
 
 function tableWidth() {
@@ -349,7 +373,7 @@ export async function generateEstimatePdf(data: EstimatePdfData): Promise<Blob> 
   state.page.drawText(`Quote No.: ${data.quoteNumber}${versionLabel}`, { x: MARGIN, y: state.y, size, font: bold, color: INK });
   state.y -= 12;
   if (data.jobNumber) {
-    state.page.drawText(`Job No.: ${data.jobNumber}`, { x: MARGIN, y: state.y, size, font: bold, color: INK });
+    state.page.drawText(`Campaign/Job#/Program: ${data.jobNumber}`, { x: MARGIN, y: state.y, size, font: bold, color: INK });
     state.y -= 12;
   }
   state.y -= 7;
@@ -374,10 +398,11 @@ export async function generateEstimatePdf(data: EstimatePdfData): Promise<Blob> 
     transportTotal += l.transportationRate;
     installTotal += l.installationRate;
     const tax = (amount * data.gstPercent) / 100;
+    const sizeUnit = isFeetUom(l.uom) ? "ft" : "cm";
     drawTableRow(ctx, state, [
       l.productNo || "—",
       [l.designName, l.productName].filter(Boolean).join(" — ") || l.productName,
-      l.calcMode === "sqft" && l.widthCm && l.heightCm ? `${l.widthCm} × ${l.heightCm}` : "—",
+      l.calcMode === "sqft" && l.widthCm && l.heightCm ? `${l.widthCm}${sizeUnit} × ${l.heightCm}${sizeUnit}` : "—",
       // The SQFT column already carries the area-priced total, so the
       // Qty column just shows the bare count there instead of repeating
       // the unit a second time (e.g. "4" not "4 SQFT") -- the unit still
@@ -385,7 +410,9 @@ export async function generateEstimatePdf(data: EstimatePdfData): Promise<Blob> 
       l.calcMode === "sqft" ? String(l.quantity) : `${l.quantity} ${l.uom ?? ""}`.trim(),
       l.calcMode === "sqft" ? (l.sqftTotal ?? 0).toFixed(2) : "—",
       rupee(l.unitRate),
-      rupee(amount),
+      rupee(base),
+      l.transportationRate ? rupee(l.transportationRate) : "—",
+      l.installationRate ? rupee(l.installationRate) : "—",
       rupee(tax),
       rupee(amount + tax),
     ]);
@@ -394,7 +421,12 @@ export async function generateEstimatePdf(data: EstimatePdfData): Promise<Blob> 
   const taxableTotal = subtotal + transportTotal + installTotal;
   const gstAmount = (taxableTotal * data.gstPercent) / 100;
   const grandTotal = taxableTotal + gstAmount;
-  drawTableRow(ctx, state, ["", "", "", "", "", "Totals", rupee(taxableTotal), rupee(gstAmount), rupee(grandTotal)], { bold: true });
+  drawTableRow(
+    ctx,
+    state,
+    ["", "", "", "", "", "Totals", rupee(subtotal), rupee(transportTotal), rupee(installTotal), rupee(gstAmount), rupee(grandTotal)],
+    { bold: true }
+  );
   state.y -= 14;
 
   ensure(ctx, state, 18);
