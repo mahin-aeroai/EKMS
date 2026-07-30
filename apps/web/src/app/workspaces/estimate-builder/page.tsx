@@ -997,12 +997,17 @@ export default function EstimateBuilderPage() {
               />
             </label>
 
-            {/* Design, UOM, Pricing basis, Width/Height, Qty — UOM comes
-                before Width/Height because it drives how they're read: type
-                "ft"/"feet" here and Width/Height switch from the default cm
-                to feet (see isFeetUom in pdf.ts) -- no separate unit field,
-                since UOM is already saved per line and already round-trips
-                through edit/PDF regeneration. */}
+            {/* Design, Pricing basis, UOM, Width/Height, Qty — UOM sits
+                right before Width/Height because, for SQFT-priced lines,
+                it IS the unit selector for them: pick "Feet" and Width/
+                Height are read directly in feet, pick "CM" (the default)
+                and they're read in centimeters -- no separate hand
+                conversion needed either way. For Nos-priced lines, UOM
+                goes back to being a free-text label for whatever's being
+                counted (e.g. "Boxes"), since there's no Width/Height to
+                interpret there. Either way it's the same underlying uom
+                field/DB column, so it round-trips through edit/PDF
+                regeneration without a schema change. */}
             <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
               Design
               <input
@@ -1012,29 +1017,51 @@ export default function EstimateBuilderPage() {
                 className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
               />
             </label>
-            {(source === "custom" || source === "history") && (
-              <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
-                UOM
-                <span className="font-normal normal-case text-ink-muted"> — type &quot;ft&quot; to enter Width/Height in feet</span>
-                <input
-                  value={draft.uom}
-                  onChange={(e) => setDraft((d) => ({ ...d, uom: e.target.value }))}
-                  placeholder="e.g. SQFT, Nos, ft"
-                  className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
-                />
-              </label>
-            )}
             <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
               Pricing basis
               <select
                 value={draft.calcMode}
-                onChange={(e) => setDraft((d) => ({ ...d, calcMode: e.target.value as EstimateCalcMode }))}
+                onChange={(e) => {
+                  const mode = e.target.value as EstimateCalcMode;
+                  setDraft((d) => ({
+                    ...d,
+                    calcMode: mode,
+                    // Switching to SQFT always normalizes uom to a valid
+                    // cm/ft selection (defaulting to cm) so the dropdown
+                    // below has a real value to show; switching to Nos
+                    // clears a leftover cm/ft value so there's a blank
+                    // field ready for a real counting-unit label instead.
+                    uom: mode === "sqft" ? (isFeetUom(d.uom) ? "ft" : "cm") : isFeetUom(d.uom) || d.uom.toLowerCase() === "cm" ? "" : d.uom,
+                  }));
+                }}
                 className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
               >
                 <option value="sqft">SQFT (width × height × qty)</option>
                 <option value="nos">Nos (qty only)</option>
               </select>
             </label>
+            {(source === "custom" || source === "history") && (
+              <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
+                UOM
+                {draft.calcMode === "sqft" ? (
+                  <select
+                    value={isFeetUom(draft.uom) ? "ft" : "cm"}
+                    onChange={(e) => setDraft((d) => ({ ...d, uom: e.target.value }))}
+                    className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
+                  >
+                    <option value="cm">CM — enter Width/Height in centimeters</option>
+                    <option value="ft">Feet — enter Width/Height in feet</option>
+                  </select>
+                ) : (
+                  <input
+                    value={draft.uom}
+                    onChange={(e) => setDraft((d) => ({ ...d, uom: e.target.value }))}
+                    placeholder="e.g. Boxes, Rolls, Each"
+                    className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
+                  />
+                )}
+              </label>
+            )}
             {draft.calcMode === "sqft" && (
               <>
                 <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
