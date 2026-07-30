@@ -10,7 +10,7 @@ import { Dropdown } from "@/components/ui/Dropdown";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
 import type { CustomerRow, CustomerContactRow, ContractRow, IkeaRateCardRow, AppleRateCardRow, EstimateRow, EstimateCalcMode, EstimateLineItemRow, EstimatePaymentTermsType, EmployeeRow } from "@mmdi/shared/rows";
-import { generateEstimatePdf, downloadBlob, isFeetUom, type EstimatePdfLine } from "@/lib/estimateBuilder/pdf";
+import { generateEstimatePdf, downloadBlob, getSizeUnit, type EstimatePdfLine } from "@/lib/estimateBuilder/pdf";
 import { fetchAllRows } from "@/lib/dashboard-queries";
 
 // MMDI ONE Estimate Builder — scoped to IKEA first per the user's request
@@ -119,17 +119,23 @@ function inferCalcMode(uom: string | null | undefined): EstimateCalcMode {
 }
 
 const CM_PER_IN = 2.54;
-// Width/Height are entered in cm by default, but typing "ft"/"feet" into
-// UOM (see isFeetUom in pdf.ts) switches them to feet instead -- e.g. a
-// 10x5 signage job can be typed as 10/5 with UOM "ft" rather than having
-// to hand-convert to 304.8/152.4 cm first. widthCm/heightCm keep their
-// field names for minimal disruption to the DB columns/save-load code
-// they map to, but hold whichever unit the line's UOM specifies.
+// Width/Height default to cm, but the UOM dropdown (see getSizeUnit in
+// pdf.ts) can switch them to feet or inches instead -- e.g. a 10x5 signage
+// job can be typed as 10/5 with UOM "Feet" rather than hand-converting to
+// 304.8/152.4 cm first. widthCm/heightCm keep their field names for
+// minimal disruption to the DB columns/save-load code they map to, but
+// hold whichever unit the line's UOM specifies.
 function widthIn(l: Pick<DraftLine, "widthCm" | "uom">) {
-  return isFeetUom(l.uom) ? l.widthCm * 12 : l.widthCm / CM_PER_IN;
+  const unit = getSizeUnit(l.uom);
+  if (unit === "ft") return l.widthCm * 12;
+  if (unit === "in") return l.widthCm;
+  return l.widthCm / CM_PER_IN;
 }
 function heightIn(l: Pick<DraftLine, "heightCm" | "uom">) {
-  return isFeetUom(l.uom) ? l.heightCm * 12 : l.heightCm / CM_PER_IN;
+  const unit = getSizeUnit(l.uom);
+  if (unit === "ft") return l.heightCm * 12;
+  if (unit === "in") return l.heightCm;
+  return l.heightCm / CM_PER_IN;
 }
 function sqftTotal(l: Pick<DraftLine, "calcMode" | "widthCm" | "heightCm" | "quantity" | "uom">) {
   if (l.calcMode !== "sqft") return 0;
@@ -1027,11 +1033,11 @@ export default function EstimateBuilderPage() {
                     ...d,
                     calcMode: mode,
                     // Switching to SQFT always normalizes uom to a valid
-                    // cm/ft selection (defaulting to cm) so the dropdown
+                    // cm/ft/in selection (defaulting to cm) so the dropdown
                     // below has a real value to show; switching to Nos
-                    // clears a leftover cm/ft value so there's a blank
+                    // clears a leftover cm/ft/in value so there's a blank
                     // field ready for a real counting-unit label instead.
-                    uom: mode === "sqft" ? (isFeetUom(d.uom) ? "ft" : "cm") : isFeetUom(d.uom) || d.uom.toLowerCase() === "cm" ? "" : d.uom,
+                    uom: mode === "sqft" ? getSizeUnit(d.uom) : ["cm", "ft", "in"].includes(d.uom.toLowerCase()) ? "" : d.uom,
                   }));
                 }}
                 className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
@@ -1042,19 +1048,21 @@ export default function EstimateBuilderPage() {
             </label>
             {/* Shown for every source, including a contract-catalog pick --
                 a rate card's own uom text (e.g. IKEA's "SQFT") still just
-                means "cm entry" here (isFeetUom excludes anything with
-                "sq" in it), so this is a safe, non-breaking default for
-                contract lines too, with Feet available as an override. */}
+                means "cm entry" here (getSizeUnit treats anything with
+                "sq" in it as cm), so this is a safe, non-breaking default
+                for contract lines too, with Feet/Inches available as an
+                override. */}
             <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
               UOM
               {draft.calcMode === "sqft" ? (
                 <select
-                  value={isFeetUom(draft.uom) ? "ft" : "cm"}
+                  value={getSizeUnit(draft.uom)}
                   onChange={(e) => setDraft((d) => ({ ...d, uom: e.target.value }))}
                   className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
                 >
                   <option value="cm">CM — enter Width/Height in centimeters</option>
                   <option value="ft">Feet — enter Width/Height in feet</option>
+                  <option value="in">Inches — enter Width/Height in inches</option>
                 </select>
               ) : (
                 <input
@@ -1068,7 +1076,7 @@ export default function EstimateBuilderPage() {
             {draft.calcMode === "sqft" && (
               <>
                 <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
-                  Width ({isFeetUom(draft.uom) ? "ft" : "cm"})
+                  Width ({getSizeUnit(draft.uom)})
                   <input
                     type="number"
                     value={draft.widthCm || ""}
@@ -1077,7 +1085,7 @@ export default function EstimateBuilderPage() {
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
-                  Height ({isFeetUom(draft.uom) ? "ft" : "cm"})
+                  Height ({getSizeUnit(draft.uom)})
                   <input
                     type="number"
                     value={draft.heightCm || ""}
@@ -1176,7 +1184,7 @@ export default function EstimateBuilderPage() {
                 const base = lineSubtotal(l);
                 const amount = base + l.transportationRate + l.installationRate;
                 const tax = (amount * gstPercent) / 100;
-                const sizeUnit = isFeetUom(l.uom) ? "ft" : "cm";
+                const sizeUnit = getSizeUnit(l.uom);
                 return (
                   <tr key={l.key}>
                     <td className="px-3 py-2.5 text-ink-secondary">{l.productNo || "—"}</td>

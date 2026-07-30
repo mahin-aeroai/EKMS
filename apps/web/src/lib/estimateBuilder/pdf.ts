@@ -150,20 +150,25 @@ function rupee(n: number): string {
   return n.toLocaleString("en-IN", { maximumFractionDigits: 2, minimumFractionDigits: 2 });
 }
 
+export type SizeUnit = "cm" | "ft" | "in";
+
 // Width/Height entry unit is driven by the line's own UOM text rather than
-// a separate field: type "ft"/"feet" as the UOM and Width/Height are read
-// as feet instead of the default cm. Deliberately excludes anything
-// containing "sq" ("SQFT"/"Sq.Ft"/"Sq Ft") -- those describe the
-// (already square-feet) OUTPUT area unit that every sqft-priced line
-// already produces via the cm-to-inches-to-/144 math, not a request to
-// enter Width/Height in feet. Exported so both this file and the Estimate
-// Builder page derive "is this a feet-entry line" identically from the
+// a separate field: the Estimate Builder's UOM dropdown (for SQFT-priced
+// lines) writes exactly "cm"/"ft"/"in" here, and Width/Height are read in
+// whichever unit this resolves to instead of always being cm. Deliberately
+// treats anything containing "sq" ("SQFT"/"Sq.Ft"/"Sq Ft") as cm -- those
+// describe the (already square-feet) OUTPUT area unit that every
+// sqft-priced line already produces via the cm-to-inches-to-/144 math, not
+// a request to enter Width/Height in feet. Exported so both this file and
+// the Estimate Builder page derive the same unit identically from the
 // same stored uom text -- no separate DB column needed, since uom is
 // already persisted per line.
-export function isFeetUom(uom: string | null | undefined): boolean {
+export function getSizeUnit(uom: string | null | undefined): SizeUnit {
   const u = (uom ?? "").toLowerCase().trim();
-  if (!u || u.includes("sq")) return false;
-  return /\bft\b|feet/.test(u);
+  if (!u || u.includes("sq")) return "cm";
+  if (/\bft\b|feet/.test(u)) return "ft";
+  if (/\bin\b|inch/.test(u)) return "in";
+  return "cm";
 }
 
 function lineAmount(l: EstimatePdfLine): number {
@@ -398,7 +403,7 @@ export async function generateEstimatePdf(data: EstimatePdfData): Promise<Blob> 
     transportTotal += l.transportationRate;
     installTotal += l.installationRate;
     const tax = (amount * data.gstPercent) / 100;
-    const sizeUnit = isFeetUom(l.uom) ? "ft" : "cm";
+    const sizeUnit = getSizeUnit(l.uom);
     drawTableRow(ctx, state, [
       l.productNo || "—",
       [l.designName, l.productName].filter(Boolean).join(" — ") || l.productName,
