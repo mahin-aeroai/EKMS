@@ -6,7 +6,7 @@ import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/dashboard-queries";
 import type { BomTemplateLineRow, BomTemplateRow, RawMaterialRow, WorkCentreRateRow } from "@mmdi/shared/rows";
-import { computeCostSheet, type Uom } from "./calc";
+import { computeCostSheet, computeSqft, computeWorkCentreCost, type Uom } from "./calc";
 import { groupByCategory } from "./categoryOrder";
 
 const fmtRupee = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
@@ -37,6 +37,13 @@ export function CostSheetCalcTab() {
   const [height, setHeight] = useState<number | "">("");
   const [qty, setQty] = useState<number | "">(1);
   const [sellPrice, setSellPrice] = useState<number | "">("");
+  // Work centres a specific job doesn't need this time -- e.g. the
+  // customer is doing their own packing, or a job skips a process the FG
+  // code normally goes through. Deliberately local/ephemeral state, NOT
+  // saved to bom_templates.work_centres -- that array is the FG code's
+  // permanent default (edited in BOM Master); this is a one-off override
+  // for THIS calculation only, and resets whenever the FG code changes.
+  const [excludedWorkCentres, setExcludedWorkCentres] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     // raw_materials alone is ~1,558 rows -- well past PostgREST's default
@@ -70,6 +77,7 @@ export function CostSheetCalcTab() {
       return;
     }
     setLoadingLines(true);
+    setExcludedWorkCentres(new Set());
     supabase
       .from("bom_template_lines")
       .select("*")
@@ -90,16 +98,47 @@ export function CostSheetCalcTab() {
   const materialsByCode = useMemo(() => new Map(materials.map((m) => [m.code, m])), [materials]);
   const templateGroups = useMemo(() => groupByCategory(templates), [templates]);
 
-  const result = useMemo(() => {
+  // The FG code's saved default (template.work_centres) minus whatever's
+  // unticked for this one job -- this is what actually feeds the totals.
+  const effectiveTemplate = useMemo(() => {
     if (!template) return null;
-    return computeCostSheet(template, lines, materialsByCode, rates, {
+    return { ...template, work_centres: template.work_centres.filter((wc) => !excludedWorkCentres.has(wc)) };
+  }, [template, excludedWorkCentres]);
+
+  const result = useMemo(() => {
+    if (!effectiveTemplate) return null;
+    return computeCostSheet(effectiveTemplate, lines, materialsByCode, rates, {
       uom,
       width: width === "" ? 0 : width,
       height: height === "" ? 0 : height,
       qty: qty === "" ? 0 : qty,
       sellingPricePerSqft: sellPrice === "" ? 0 : sellPrice,
     });
-  }, [template, lines, materialsByCode, rates, uom, width, height, qty, sellPrice]);
+  }, [effectiveTemplate, lines, materialsByCode, rates, uom, width, height, qty, sellPrice]);
+
+  // Every work centre the FG code is normally set up for, checked or not --
+  // rendered as the checklist below so unchecking one is still visible and
+  // re-checkable, instead of just disappearing once excluded.
+  const allWorkCentreCosts = useMemo(() => {
+    if (!template) return [];
+    const sqft = computeSqft({
+      uom,
+      width: width === "" ? 0 : width,
+      height: height === "" ? 0 : height,
+      qty: qty === "" ? 0 : qty,
+      sellingPricePerSqft: 0,
+    });
+    return template.work_centres.map((wc) => computeWorkCentreCost(wc, template, rates, sqft, qty === "" ? 0 : qty));
+  }, [template, rates, uom, width, height, qty]);
+
+  function toggleWorkCentreForJob(workCentre: string, applicable: boolean) {
+    setExcludedWorkCentres((prev) => {
+      const next = new Set(prev);
+      if (applicable) next.delete(workCentre);
+      else next.add(workCentre);
+      return next;
+    });
+  }
 
   const unmappedLines = lines.filter((l) => !l.raw_material_code);
   const missingRateCentres = result?.workCentreCosts.filter((w) => w.cost === null) ?? [];
@@ -261,14 +300,34 @@ export function CostSheetCalcTab() {
             </div>
 
             <div className="rounded-lg border border-line bg-surface p-4">
-              <h3 className="mb-3 text-sm font-semibold text-ink">Work centre process cost</h3>
+              <h3 className="text-sm font-semibold text-ink">Work centre process cost</h3>
+              <p className="mb-3 mt-0.5 text-[11px] text-ink-muted">
+                Untick one this job doesn&apos;t need — applies to this calculation only, doesn&apos;t change the FG code&apos;s
+                saved default (edit that in the BOM Master tab).
+              </p>
               <div className="flex flex-wrap gap-3">
-                {result.workCentreCosts.map((w) => (
-                  <div key={w.workCentre} className="rounded-md border border-line px-3 py-2 text-xs">
-                    <div className="text-ink-secondary">{w.workCentre}</div>
-                    <div className="font-semibold text-ink">{w.cost !== null ? fmtRupee(w.cost) : "no rate"}</div>
-                  </div>
-                ))}
+                {allWorkCentreCosts.map((w) => {
+                  const excluded = excludedWorkCentres.has(w.workCentre);
+                  return (
+                    <div
+                      key={w.workCentre}
+                      className={`rounded-md border px-3 py-2 text-xs ${excluded ? "border-line/60 bg-surface-sunken" : "border-line"}`}
+                    >
+                      <label className="flex items-center gap-1.5">
+                        <input
+                          type="checkbox"
+                          checked={!excluded}
+                          onChange={(e) => toggleWorkCentreForJob(w.workCentre, e.target.checked)}
+                          className="h-3 w-3 rounded border-line-strong"
+                        />
+                        <span className={excluded ? "text-ink-muted line-through" : "text-ink-secondary"}>{w.workCentre}</span>
+                      </label>
+                      <div className={`mt-1 font-semibold ${excluded ? "text-ink-muted" : "text-ink"}`}>
+                        {excluded ? "excluded" : w.cost !== null ? fmtRupee(w.cost) : "no rate"}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
               <div className="mt-3 border-t border-line pt-3 text-sm">
                 Total process cost: <span className="font-semibold text-ink">{fmtRupee(result.totalProcessCost)}</span>
