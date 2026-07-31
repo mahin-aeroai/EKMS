@@ -1,14 +1,30 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/dashboard-queries";
-import type { BomTemplateLineRow, BomTemplateRow, RawMaterialRow } from "@mmdi/shared/rows";
+import type { BomMaterialUnit, BomTemplateLineRow, BomTemplateRow, RawMaterialRow } from "@mmdi/shared/rows";
 import { groupByCategory } from "./categoryOrder";
 import { RawMaterialPicker } from "./RawMaterialPicker";
+
+// Real-world consumption units, matching how materials are actually
+// bought/tracked in Raw Materials.xlsx (Nos, SQF, Mtr, Kgs, Set) plus
+// RFT (running feet) for keder/piping-type trims that weren't in that
+// file's own UOM list but are a real unit MMDI uses. See calc.ts's
+// SQFT_SCALED_UNITS for how each of these affects cost scaling -- only
+// SQFT scales with the job's area, everything else scales with Qty.
+const BASIS_OPTIONS: { value: BomMaterialUnit; label: string }[] = [
+  { value: "SQFT", label: "SQFT — sq. feet (scales with job area)" },
+  { value: "NOS", label: "NOS — pieces/count" },
+  { value: "RFT", label: "RFT — running feet" },
+  { value: "MTR", label: "MTR — metres" },
+  { value: "KGS", label: "KGS — kilograms" },
+  { value: "SET", label: "SET — set" },
+  { value: "KLR", label: "KLR — litres" },
+];
 
 // Combined view of bom_templates + bom_template_lines -- the web equivalent
 // of the Excel workbook's "BOM Master" + "BOM Item Mapping" + "BOM Cost
@@ -21,6 +37,7 @@ export function BomMasterTab() {
   const [materials, setMaterials] = useState<RawMaterialRow[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [savingLineId, setSavingLineId] = useState<string | null>(null);
+  const materialsByCode = useMemo(() => new Map(materials.map((m) => [m.code, m])), [materials]);
 
   useEffect(() => {
     supabase
@@ -79,6 +96,51 @@ export function BomMasterTab() {
       ...prev,
       [templateId]: prev[templateId].map((l) => (l.id === line.id ? { ...l, ...patch } : l)),
     }));
+  }
+
+  // Picking a raw material also refreshes material_category from that
+  // material's own category -- "Category should be automated" -- instead
+  // of being a manually-typed field left to go stale.
+  function mapLineToMaterial(templateId: string, line: BomTemplateLineRow, code: string | null) {
+    const material = code ? materialsByCode.get(code) ?? null : null;
+    void updateLine(templateId, line, { raw_material_code: code, material_category: material?.category ?? null });
+  }
+
+  // "Add material" builds the BOM by hand, line by line, instead of
+  // requiring a fixed set of lines pre-seeded via migration -- lets the
+  // user cost each finished good exactly the way they want to, adding as
+  // many or as few materials as that product actually needs.
+  async function addLine(templateId: string) {
+    const existing = linesByTemplate[templateId] ?? [];
+    const nextLineNo = existing.length ? Math.max(...existing.map((l) => l.line_no)) + 1 : 1;
+    const { data, error } = await supabase
+      .from("bom_template_lines")
+      .insert({
+        template_id: templateId,
+        line_no: nextLineNo,
+        material_name: "New material",
+        material_category: null,
+        raw_material_code: null,
+        basis: "SQFT",
+        consumption_qty: 0,
+        wastage_pct: 0,
+      })
+      .select()
+      .single();
+    if (error) {
+      toast("danger", `Couldn't add line: ${error.message}`);
+      return;
+    }
+    setLinesByTemplate((prev) => ({ ...prev, [templateId]: [...existing, data as BomTemplateLineRow] }));
+  }
+
+  async function deleteLine(templateId: string, lineId: string) {
+    const { error } = await supabase.from("bom_template_lines").delete().eq("id", lineId);
+    if (error) {
+      toast("danger", `Couldn't remove line: ${error.message}`);
+      return;
+    }
+    setLinesByTemplate((prev) => ({ ...prev, [templateId]: (prev[templateId] ?? []).filter((l) => l.id !== lineId) }));
   }
 
   if (!templates) return <p className="py-8 text-center text-sm text-ink-muted">Loading…</p>;
@@ -143,57 +205,92 @@ export function BomMasterTab() {
                           <th className="py-1.5 pr-2">Basis</th>
                           <th className="py-1.5 pr-2">Consumption</th>
                           <th className="py-1.5 pr-2">Wastage %</th>
+                          <th className="py-1.5 pr-2" />
                         </tr>
                       </thead>
                       <tbody>
-                        {linesByTemplate[t.id].map((line) => (
-                          <tr key={line.id} className="border-b border-line/60 align-top">
-                            <td className="py-2 pr-2 text-ink-muted">{line.line_no}</td>
-                            <td className="py-2 pr-2 font-medium text-ink">{line.material_name}</td>
-                            <td className="py-2 pr-2 text-ink-secondary">{line.material_category ?? "—"}</td>
-                            <td className="py-2 pr-2">
-                              <RawMaterialPicker
-                                materials={materials}
-                                value={line.raw_material_code}
-                                onChange={(code) => updateLine(t.id, line, { raw_material_code: code })}
-                              />
-                              {!line.raw_material_code && line.suggested_codes && (
-                                <div className="mt-1 max-w-xs text-[11px] italic text-ink-muted">{line.suggested_codes}</div>
-                              )}
-                            </td>
-                            <td className="py-2 pr-2">
-                              <select
-                                value={line.basis}
-                                onChange={(e) => updateLine(t.id, line, { basis: e.target.value as BomTemplateLineRow["basis"] })}
-                                className="h-8 rounded-md border border-line-strong bg-surface px-1.5 text-xs text-ink outline-none"
-                              >
-                                <option value="per_sqft">per sqft</option>
-                                <option value="per_piece">per piece</option>
-                              </select>
-                            </td>
-                            <td className="py-2 pr-2">
-                              <input
-                                type="number"
-                                step="0.01"
-                                value={line.consumption_qty}
-                                onChange={(e) => updateLine(t.id, line, { consumption_qty: Number(e.target.value) })}
-                                className="h-8 w-20 rounded-md border border-line-strong bg-surface px-1.5 text-xs text-ink outline-none"
-                              />
-                            </td>
-                            <td className="py-2 pr-2">
-                              <input
-                                type="number"
-                                step="1"
-                                value={Math.round(line.wastage_pct * 100)}
-                                onChange={(e) => updateLine(t.id, line, { wastage_pct: Number(e.target.value) / 100 })}
-                                className="h-8 w-16 rounded-md border border-line-strong bg-surface px-1.5 text-xs text-ink outline-none"
-                              />
-                              {savingLineId === line.id && <span className="ml-1 text-ink-muted">saving…</span>}
-                            </td>
-                          </tr>
-                        ))}
+                        {linesByTemplate[t.id].map((line) => {
+                          // Category is derived from whichever raw material is
+                          // currently mapped -- never hand-typed -- so it can
+                          // never drift out of sync with the actual mapping.
+                          const mappedMaterial = line.raw_material_code ? materialsByCode.get(line.raw_material_code) ?? null : null;
+                          return (
+                            <tr key={line.id} className="border-b border-line/60 align-top">
+                              <td className="py-2 pr-2 text-ink-muted">{line.line_no}</td>
+                              <td className="py-2 pr-2">
+                                <input
+                                  type="text"
+                                  value={line.material_name}
+                                  onChange={(e) => updateLine(t.id, line, { material_name: e.target.value })}
+                                  className="h-8 w-40 rounded-md border border-line-strong bg-surface px-1.5 text-xs font-medium text-ink outline-none"
+                                />
+                              </td>
+                              <td className="py-2 pr-2 text-ink-secondary">{mappedMaterial?.category ?? "—"}</td>
+                              <td className="py-2 pr-2">
+                                <RawMaterialPicker
+                                  materials={materials}
+                                  value={line.raw_material_code}
+                                  onChange={(code) => mapLineToMaterial(t.id, line, code)}
+                                />
+                                {!line.raw_material_code && line.suggested_codes && (
+                                  <div className="mt-1 max-w-xs text-[11px] italic text-ink-muted">{line.suggested_codes}</div>
+                                )}
+                              </td>
+                              <td className="py-2 pr-2">
+                                <select
+                                  value={line.basis}
+                                  onChange={(e) => updateLine(t.id, line, { basis: e.target.value as BomTemplateLineRow["basis"] })}
+                                  className="h-8 rounded-md border border-line-strong bg-surface px-1.5 text-xs text-ink outline-none"
+                                >
+                                  {BASIS_OPTIONS.map((opt) => (
+                                    <option key={opt.value} value={opt.value}>
+                                      {opt.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td className="py-2 pr-2">
+                                <input
+                                  type="number"
+                                  step="0.0001"
+                                  value={line.consumption_qty}
+                                  onChange={(e) => updateLine(t.id, line, { consumption_qty: Number(e.target.value) })}
+                                  className="h-8 w-24 rounded-md border border-line-strong bg-surface px-1.5 text-xs text-ink outline-none"
+                                />
+                              </td>
+                              <td className="py-2 pr-2">
+                                <input
+                                  type="number"
+                                  step="1"
+                                  value={Math.round(line.wastage_pct * 100)}
+                                  onChange={(e) => updateLine(t.id, line, { wastage_pct: Number(e.target.value) / 100 })}
+                                  className="h-8 w-16 rounded-md border border-line-strong bg-surface px-1.5 text-xs text-ink outline-none"
+                                />
+                                {savingLineId === line.id && <span className="ml-1 text-ink-muted">saving…</span>}
+                              </td>
+                              <td className="py-2 pr-2">
+                                <button
+                                  type="button"
+                                  aria-label="Remove line"
+                                  onClick={() => deleteLine(t.id, line.id)}
+                                  className="text-ink-muted hover:text-danger"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
+                    <button
+                      type="button"
+                      onClick={() => addLine(t.id)}
+                      className="mt-2 flex items-center gap-1 rounded-md border border-dashed border-line-strong px-2.5 py-1.5 text-xs font-medium text-ink-secondary hover:border-primary hover:text-primary"
+                    >
+                      <Plus size={14} />
+                      Add material
+                    </button>
                   </div>
                 )}
               </div>

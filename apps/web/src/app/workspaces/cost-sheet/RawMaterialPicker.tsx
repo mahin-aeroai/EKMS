@@ -25,10 +25,25 @@ export function RawMaterialPicker({
   const selected = value ? materials.find((m) => m.code === value) ?? null : null;
 
   const matches = useMemo(() => {
-    if (!query.trim()) return materials.slice(0, 25);
+    if (!query.trim()) return materials.slice(0, 60);
     const q = query.toLowerCase();
-    return materials.filter((m) => m.code.toLowerCase().includes(q) || m.name.toLowerCase().includes(q)).slice(0, 25);
+    return materials.filter((m) => m.code.toLowerCase().includes(q) || m.name.toLowerCase().includes(q)).slice(0, 60);
   }, [materials, query]);
+
+  // Grouped by category (the categories from Raw Materials.xlsx --
+  // Accessories, Flags, Vinyl, etc.) so a long result list is scannable
+  // instead of one flat block. Materials with no category sort under
+  // "Uncategorized" at the end rather than disappearing from the list.
+  const grouped = useMemo(() => {
+    const byCategory = new Map<string, RawMaterialRow[]>();
+    for (const m of matches) {
+      const cat = m.category?.trim() || "Uncategorized";
+      const list = byCategory.get(cat) ?? [];
+      list.push(m);
+      byCategory.set(cat, list);
+    }
+    return [...byCategory.entries()].sort(([a], [b]) => (a === "Uncategorized" ? 1 : b === "Uncategorized" ? -1 : a.localeCompare(b)));
+  }, [matches]);
 
   if (selected) {
     return (
@@ -62,24 +77,31 @@ export function RawMaterialPicker({
         className="h-8 w-64 rounded-md border border-line-strong bg-surface px-2 text-xs text-ink outline-none"
       />
       {open && (
-        <div className="absolute z-10 mt-1 max-h-64 w-80 overflow-y-auto rounded-md border border-line-strong bg-surface shadow-2">
+        <div className="absolute z-10 mt-1 max-h-80 w-96 overflow-y-auto rounded-md border border-line-strong bg-surface shadow-2">
           {matches.length === 0 && <div className="px-3 py-2 text-xs text-ink-muted">No matches</div>}
-          {matches.map((m) => (
-            <button
-              key={m.code}
-              type="button"
-              onClick={() => {
-                onChange(m.code);
-                setQuery("");
-                setOpen(false);
-              }}
-              className="block w-full truncate px-3 py-1.5 text-left text-xs text-ink hover:bg-surface-sunken"
-            >
-              <span className="font-medium">{m.code}</span> — {m.name}
-              {m.unit_cost_recent !== null && (
-                <span className="text-ink-muted"> (₹{m.unit_cost_recent.toFixed(2)})</span>
-              )}
-            </button>
+          {grouped.map(([category, items]) => (
+            <div key={category}>
+              <div className="sticky top-0 bg-surface-sunken px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-ink-muted">
+                {category}
+              </div>
+              {items.map((m) => (
+                <button
+                  key={m.code}
+                  type="button"
+                  onClick={() => {
+                    onChange(m.code);
+                    setQuery("");
+                    setOpen(false);
+                  }}
+                  className="block w-full truncate px-3 py-1.5 text-left text-xs text-ink hover:bg-surface-sunken"
+                >
+                  <span className="font-medium">{m.code}</span> — {m.name}
+                  {m.unit_cost_recent !== null && (
+                    <span className="text-ink-muted"> (₹{m.unit_cost_recent.toFixed(2)})</span>
+                  )}
+                </button>
+              ))}
+            </div>
           ))}
         </div>
       )}

@@ -702,6 +702,17 @@ export interface SignEstimateRow {
 // as an Excel workbook this session into MMDI ONE's own schema.
 
 export type BomLineBasis = "per_sqft" | "per_piece";
+// The BOM Master tab lets the user pick a real-world consumption unit per
+// line (matching how the material is actually bought/tracked -- Nos,
+// SQFT, running feet, metres, kilos, sets) instead of being limited to
+// the old per_sqft/per_piece split. Cost-scaling behavior only cares
+// about ONE distinction though: does this line's cost scale with the
+// job's total SQFT (only "SQFT") or with its Qty (everything else,
+// same math the old "per_piece" always used) -- see calc.ts's
+// SQFT_SCALED_UNITS. WorkCentreRateRow.rate_basis is intentionally left
+// on the older BomLineBasis type above -- the Rate Card tab wasn't part
+// of this change.
+export type BomMaterialUnit = "SQFT" | "NOS" | "RFT" | "MTR" | "KGS" | "SET" | "KLR";
 export type WorkCentreRateConfidence = "confirmed" | "extrapolated" | "missing";
 
 export interface BomTemplateRow {
@@ -726,7 +737,7 @@ export interface BomTemplateLineRow {
   // suggested_codes). Map it in the Cost Sheet workspace's BOM Master tab.
   raw_material_code: string | null;
   suggested_codes: string | null;
-  basis: BomLineBasis;
+  basis: BomMaterialUnit;
   consumption_qty: number;
   wastage_pct: number;
   created_at: string;
