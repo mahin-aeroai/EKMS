@@ -65,7 +65,11 @@ export function computeLineCost(
   const rawMaterial = line.raw_material_code ? rawMaterialsByCode.get(line.raw_material_code) ?? null : null;
   const recentUnitPrice = rawMaterial?.unit_cost_recent ?? null;
   const avgUnitPrice = rawMaterial?.unit_cost_avg ?? null;
-  const multiplier = line.consumption_qty * (1 + line.wastage_pct);
+  // Wastage inflates the physical quantity consumed; markup then inflates
+  // the ₹/unit price of that quantity (landed cost -- shipping/handling
+  // that the raw material's Tally purchase price doesn't carry). Applied
+  // in that order, matching the BOM Master tab's column order.
+  const multiplier = line.consumption_qty * (1 + line.wastage_pct) * (1 + line.markup_pct);
   return {
     line,
     rawMaterial,

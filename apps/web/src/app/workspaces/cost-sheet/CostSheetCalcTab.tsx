@@ -218,7 +218,9 @@ export function CostSheetCalcTab() {
                       <th className="py-1.5 pr-2 text-right">Recent ₹/unit</th>
                       <th className="py-1.5 pr-2 text-right">Avg ₹/unit</th>
                       <th className="py-1.5 pr-2 text-right">Consumption</th>
+                      <th className="py-1.5 pr-2 text-right">Line cost</th>
                       <th className="py-1.5 pr-2 text-right">Wastage</th>
+                      <th className="py-1.5 pr-2 text-right">Markup</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -233,7 +235,16 @@ export function CostSheetCalcTab() {
                         <td className="py-1.5 pr-2 text-right">
                           {lc.line.consumption_qty} /{lc.line.basis.toLowerCase()}
                         </td>
+                        {/* Rate x consumption, with wastage and markup already
+                            folded in -- this is the ₹ this line adds per SQFT
+                            (or per Nos/RFT/etc.) before scaling by the job's
+                            total sqft/qty in the totals below. */}
+                        <td className="py-1.5 pr-2 text-right">
+                          <div className="font-medium text-ink">{lc.recentLineCost.toFixed(2)}</div>
+                          <div className="text-[10px] text-ink-muted">avg {lc.avgLineCost.toFixed(2)}</div>
+                        </td>
                         <td className="py-1.5 pr-2 text-right">{Math.round(lc.line.wastage_pct * 100)}%</td>
+                        <td className="py-1.5 pr-2 text-right">{Math.round(lc.line.markup_pct * 100)}%</td>
                       </tr>
                     ))}
                   </tbody>
