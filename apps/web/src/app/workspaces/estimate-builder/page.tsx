@@ -399,13 +399,56 @@ export default function EstimateBuilderPage() {
     }
   }
 
-  function cancelEdit() {
+  // Full reset back to a blank form -- used both by "Cancel edit" (leaving
+  // an in-progress edit without saving a new version) and the "New
+  // Estimate" button (the user no longer has to hand-clear every field
+  // themselves before starting the next quote). Anything not explicitly
+  // reset here keeps its default useState() initializer in sync -- see
+  // those declarations above if a new field gets added later.
+  function resetForm() {
     setEditingEstimateId(null);
     setEditingRootId(null);
     setEditingBaseQuoteNumber(null);
     setEditingVersion(1);
+    setSelectedCustomerId("");
+    setSelectedContractId("");
+    setRateCardPick("");
+    setHistoryPick("");
+    setCustomerContacts(null);
+    setSalesHistory(null);
+    setSource("contract");
+    setDraft(emptyDraft());
     setLines([]);
+    setGstPercent(18);
+    setNotes("");
     setJobNumber("");
+    setAttentionPerson("");
+    setQuoteSubject("Quote for - Digital Printing Graphics");
+    setCustomerAddress("");
+    setCustomerGstin("");
+    setJobCompletionTime("");
+    setDeliveryCommitment("");
+    setPaymentTermsType("net_days");
+    setPaymentTermsDays("");
+    setSalespersonPick("");
+    setSalespersonName("");
+    setSalespersonDesignation("");
+    setSalespersonPhone("");
+    setSalespersonEmail("");
+  }
+
+  function cancelEdit() {
+    resetForm();
+  }
+
+  function startNewEstimate() {
+    const hasContent = !!selectedCustomerId || lines.length > 0 || !!editingEstimateId;
+    if (hasContent && !window.confirm("Start a new estimate? This clears everything currently filled in on this form.")) {
+      return;
+    }
+    resetForm();
+    toast("info", "Started a new estimate — form cleared");
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   const selectedCustomer = customers?.find((c) => c.id === selectedCustomerId) ?? null;
@@ -801,17 +844,23 @@ export default function EstimateBuilderPage() {
     <div>
       <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "Tools" }, { label: "Estimate Builder" }]} />
 
-      <div className="mt-4 flex items-start gap-4 border-b border-line pb-6">
-        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary-tint text-primary">
-          <FileSpreadsheet size={22} />
-        </span>
-        <div>
-          <h1 className="text-xl font-semibold text-ink">Estimate Builder</h1>
-          <p className="mt-0.5 text-sm text-ink-secondary">
-            Tools — build a customer estimate from their contract&rsquo;s real pricing, add anything not on the contract as an
-            unlisted line, and get GST-ready totals
-          </p>
+      <div className="mt-4 flex items-start justify-between gap-4 border-b border-line pb-6">
+        <div className="flex items-start gap-4">
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary-tint text-primary">
+            <FileSpreadsheet size={22} />
+          </span>
+          <div>
+            <h1 className="text-xl font-semibold text-ink">Estimate Builder</h1>
+            <p className="mt-0.5 text-sm text-ink-secondary">
+              Tools — build a customer estimate from their contract&rsquo;s real pricing, add anything not on the contract as an
+              unlisted line, and get GST-ready totals
+            </p>
+          </div>
         </div>
+        <Button variant="secondary" size="sm" onClick={startNewEstimate} className="shrink-0">
+          <Plus size={16} />
+          New Estimate
+        </Button>
       </div>
 
       {editingEstimateId && (
