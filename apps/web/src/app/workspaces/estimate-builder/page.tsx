@@ -825,12 +825,13 @@ export default function EstimateBuilderPage() {
       downloadBlob(blob, `${quoteNumberData}.pdf`);
 
       toast("success", `Saved ${quoteNumberData} — PDF downloaded`);
-      setLines([]);
-      setNotes("");
-      setEditingEstimateId(null);
-      setEditingRootId(null);
-      setEditingBaseQuoteNumber(null);
-      setEditingVersion(1);
+      // Full reset, not just the line items -- previously customer, job
+      // number, address, quote subject, salesperson, etc. all stayed
+      // filled in after a successful save, so the next estimate had to be
+      // hand-cleared field by field. Same resetForm() the "New Estimate"
+      // button uses, so a completed save always leaves a blank form ready
+      // for the next quote.
+      resetForm();
       loadRecent();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Couldn't save this estimate";
