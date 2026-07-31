@@ -740,6 +740,10 @@ export interface BomTemplateLineRow {
   basis: BomMaterialUnit;
   consumption_qty: number;
   wastage_pct: number;
+  // Landed-cost markup applied on top of the raw material's purchase price
+  // (shipping/handling etc. that Tally's purchase price doesn't carry) --
+  // applied after wastage. Same 0-1 fraction convention as wastage_pct.
+  markup_pct: number;
   created_at: string;
 }
 
