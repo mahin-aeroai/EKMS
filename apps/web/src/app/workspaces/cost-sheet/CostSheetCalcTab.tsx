@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
+import { fetchAllRows } from "@/lib/dashboard-queries";
 import type { BomTemplateLineRow, BomTemplateRow, RawMaterialRow, WorkCentreRateRow } from "@mmdi/shared/rows";
 import { computeCostSheet, type Uom } from "./calc";
 import { groupByCategory } from "./categoryOrder";
@@ -38,18 +39,26 @@ export function CostSheetCalcTab() {
   const [sellPrice, setSellPrice] = useState<number | "">("");
 
   useEffect(() => {
+    // raw_materials alone is ~1,558 rows -- well past PostgREST's default
+    // 1000-row cap on an unpaginated select. A plain .select("*") here
+    // silently truncated the list, so lines that WERE correctly mapped in
+    // the BOM Master tab (materials.get(raw_material_code) missing from
+    // this half-loaded set) still showed as "unmapped" on this tab.
+    // fetchAllRows pages through with .range() until it gets a real
+    // full set, same fix already used for customers/employees in
+    // Estimate Builder.
     Promise.all([
       supabase.from("bom_templates").select("*").order("code"),
       supabase.from("work_centre_rates").select("*"),
-      supabase.from("raw_materials").select("*"),
-    ]).then(([t, r, m]) => {
-      if (t.error || r.error || m.error) {
+      fetchAllRows<RawMaterialRow>((from, to) => supabase.from("raw_materials").select("*").order("code").range(from, to)),
+    ]).then(([t, r, materialRows]) => {
+      if (t.error || r.error) {
         toast("danger", "Couldn't load Cost Sheet master data");
         return;
       }
       setTemplates((t.data as BomTemplateRow[]) ?? []);
       setRates((r.data as WorkCentreRateRow[]) ?? []);
-      setMaterials((m.data as RawMaterialRow[]) ?? []);
+      setMaterials(materialRows);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
