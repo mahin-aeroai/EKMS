@@ -5,6 +5,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
+import { fetchAllRows } from "@/lib/dashboard-queries";
 import type { BomTemplateLineRow, BomTemplateRow, RawMaterialRow } from "@mmdi/shared/rows";
 import { groupByCategory } from "./categoryOrder";
 import { RawMaterialPicker } from "./RawMaterialPicker";
@@ -33,14 +34,14 @@ export function BomMasterTab() {
         }
         setTemplates((data as BomTemplateRow[]) ?? []);
       });
-    supabase
-      .from("raw_materials")
-      .select("*")
-      .order("code")
-      .then(({ data, error }) => {
-        if (error) return;
-        setMaterials((data as RawMaterialRow[]) ?? []);
-      });
+    // raw_materials is ~1,558 rows -- past PostgREST's default 1000-row
+    // cap on an unpaginated select, which was silently cutting the picker's
+    // candidate list short (some suggested codes, e.g. higher-numbered
+    // RM-4xxxx ones, simply weren't in the loaded set to search against).
+    // fetchAllRows pages through with .range() to get the real full list.
+    fetchAllRows<RawMaterialRow>((from, to) => supabase.from("raw_materials").select("*").order("code").range(from, to)).then(
+      setMaterials
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
