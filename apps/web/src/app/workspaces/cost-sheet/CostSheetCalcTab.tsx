@@ -231,7 +231,7 @@ export function CostSheetCalcTab() {
                         <td className="py-1.5 pr-2 text-right">{lc.recentUnitPrice !== null ? lc.recentUnitPrice.toFixed(2) : "—"}</td>
                         <td className="py-1.5 pr-2 text-right">{lc.avgUnitPrice !== null ? lc.avgUnitPrice.toFixed(2) : "—"}</td>
                         <td className="py-1.5 pr-2 text-right">
-                          {lc.line.consumption_qty} {lc.line.basis === "per_piece" ? "/pc" : "/sqft"}
+                          {lc.line.consumption_qty} /{lc.line.basis.toLowerCase()}
                         </td>
                         <td className="py-1.5 pr-2 text-right">{Math.round(lc.line.wastage_pct * 100)}%</td>
                       </tr>

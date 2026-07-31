@@ -76,8 +76,21 @@ export function computeLineCost(
   };
 }
 
-function sumByBasis(lineCosts: LineCost[], basis: "per_sqft" | "per_piece", field: "recentLineCost" | "avgLineCost") {
-  return lineCosts.filter((lc) => lc.line.basis === basis).reduce((sum, lc) => sum + lc[field], 0);
+// Only "SQFT" scales with the job's computed area -- every other unit
+// (Nos, RFT, MTR, KGS, SET) scales with the job's Qty, the same math
+// "per_piece" always used. The user enters consumption_qty in whatever
+// real unit makes sense for that material (e.g. "0.0234" for RFT of
+// keder per sqft of sign, or "2" for Nos of a hardware part per piece)
+// -- this file doesn't need to know the physical meaning, just whether
+// to multiply by sqft or by qty.
+const SQFT_SCALED_UNITS = new Set(["SQFT"]);
+
+function isSqftScaled(basis: string) {
+  return SQFT_SCALED_UNITS.has(basis);
+}
+
+function sumByScaling(lineCosts: LineCost[], sqftScaled: boolean, field: "recentLineCost" | "avgLineCost") {
+  return lineCosts.filter((lc) => isSqftScaled(lc.line.basis) === sqftScaled).reduce((sum, lc) => sum + lc[field], 0);
 }
 
 export function computeWorkCentreCost(
@@ -121,9 +134,9 @@ export function computeCostSheet(
 
   const lineCosts = lines.map((l) => computeLineCost(l, rawMaterialsByCode));
   const materialCostRecent =
-    sumByBasis(lineCosts, "per_sqft", "recentLineCost") * sqft + sumByBasis(lineCosts, "per_piece", "recentLineCost") * inputs.qty;
+    sumByScaling(lineCosts, true, "recentLineCost") * sqft + sumByScaling(lineCosts, false, "recentLineCost") * inputs.qty;
   const materialCostAvg =
-    sumByBasis(lineCosts, "per_sqft", "avgLineCost") * sqft + sumByBasis(lineCosts, "per_piece", "avgLineCost") * inputs.qty;
+    sumByScaling(lineCosts, true, "avgLineCost") * sqft + sumByScaling(lineCosts, false, "avgLineCost") * inputs.qty;
 
   const workCentreCosts = template.work_centres.map((wc) => computeWorkCentreCost(wc, template, rates, sqft, inputs.qty));
   const totalProcessCost = workCentreCosts.reduce((sum, w) => sum + (w.cost ?? 0), 0);
