@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/Badge";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
 import type { BomTemplateLineRow, BomTemplateRow, RawMaterialRow } from "@mmdi/shared/rows";
+import { groupByCategory } from "./categoryOrder";
 import { RawMaterialPicker } from "./RawMaterialPicker";
 
 // Combined view of bom_templates + bom_template_lines -- the web equivalent
@@ -84,6 +85,7 @@ export function BomMasterTab() {
   const unmappedCount = Object.values(linesByTemplate)
     .flat()
     .filter((l) => !l.raw_material_code).length;
+  const templateGroups = groupByCategory(templates);
 
   return (
     <div>
@@ -96,9 +98,13 @@ export function BomMasterTab() {
         )}
       </p>
 
-      <div className="flex flex-col gap-2">
-        {templates.map((t) => (
-          <div key={t.id} className="rounded-lg border border-line bg-surface">
+      <div className="flex flex-col gap-6">
+        {templateGroups.map((group) => (
+          <div key={group.category}>
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">{group.category}</h3>
+            <div className="flex flex-col gap-2">
+              {group.items.map((t) => (
+                <div key={t.id} className="rounded-lg border border-line bg-surface">
             <button
               type="button"
               onClick={() => toggle(t.id)}
@@ -191,6 +197,9 @@ export function BomMasterTab() {
                 )}
               </div>
             )}
+                </div>
+              ))}
+            </div>
           </div>
         ))}
       </div>
