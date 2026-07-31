@@ -528,7 +528,7 @@ export default function EstimateBuilderPage() {
     if (!isIkea) return;
     supabase
       .from("ikea_rate_card")
-      .select("scope, material_category, product, description, uom, revised_rate, remarks")
+      .select("sl_no, scope, material_category, product, description, uom, revised_rate, remarks")
       .order("product")
       .then(({ data }) => setRateCard((data as IkeaRateCardRow[]) ?? []));
   }, [isIkea]);
@@ -542,10 +542,12 @@ export default function EstimateBuilderPage() {
       .then(({ data }) => setAppleRateCard((data as AppleRateCardRow[]) ?? []));
   }, [isApple]);
 
-  // IKEA's rate card has no real serial-number column of its own -- the
-  // picked row's position in this (name-ordered) list is used as a best-
-  // guess Product No., always editable afterwards to match the real
-  // contract document's numbering if it differs.
+  // IKEA's rate card DOES have a real serial number (sl_no, backfilled from
+  // the master contract sheet's "Sl. No." column) -- use it as-is, same as
+  // Apple's sku_id below. Only falls back to list position for any row that
+  // somehow has no sl_no set (e.g. a brand-new row added directly in
+  // Supabase before the sheet's numbering catches up), still editable
+  // afterwards to match the real contract document if it differs.
   function pickIkeaRateCardRow(idx: string) {
     setRateCardPick(idx);
     const row = rateCard?.[Number(idx)];
@@ -553,7 +555,7 @@ export default function EstimateBuilderPage() {
     setDraft((d) => ({
       ...d,
       isContractItem: true,
-      productNo: String(Number(idx) + 1),
+      productNo: row.sl_no != null ? String(row.sl_no) : String(Number(idx) + 1),
       productName: row.product,
       description: row.description ?? "",
       uom: row.uom ?? "",

@@ -307,6 +307,7 @@ export interface CustomerSiteRow {
 }
 
 export interface IkeaRateCardRow {
+  sl_no: number | null;
   scope: string | null;
   material_category: string | null;
   product: string;
