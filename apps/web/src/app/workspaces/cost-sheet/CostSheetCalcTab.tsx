@@ -6,6 +6,7 @@ import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
 import type { BomTemplateLineRow, BomTemplateRow, RawMaterialRow, WorkCentreRateRow } from "@mmdi/shared/rows";
 import { computeCostSheet, type Uom } from "./calc";
+import { groupByCategory } from "./categoryOrder";
 
 const fmtRupee = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 
@@ -78,6 +79,7 @@ export function CostSheetCalcTab() {
 
   const template = templates.find((t) => t.id === templateId) ?? null;
   const materialsByCode = useMemo(() => new Map(materials.map((m) => [m.code, m])), [materials]);
+  const templateGroups = useMemo(() => groupByCategory(templates), [templates]);
 
   const result = useMemo(() => {
     if (!template) return null;
@@ -114,10 +116,14 @@ export function CostSheetCalcTab() {
             className="h-9 w-full rounded-md border border-line-strong bg-surface px-2.5 text-sm text-ink outline-none"
           >
             <option value="">— select —</option>
-            {templates.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.code} — {t.description}
-              </option>
+            {templateGroups.map((group) => (
+              <optgroup key={group.category} label={group.category}>
+                {group.items.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.code} — {t.description}
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
         </Field>
