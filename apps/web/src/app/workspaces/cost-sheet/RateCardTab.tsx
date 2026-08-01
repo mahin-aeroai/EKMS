@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Trash2 } from "lucide-react";
 import { Table, type TableColumn } from "@/components/ui/Table";
 import { Badge } from "@/components/ui/Badge";
 import { useToast } from "@/components/ui/Notifications";
@@ -21,6 +22,7 @@ export function RateCardTab() {
   const { toast } = useToast();
   const [rows, setRows] = useState<WorkCentreRateRow[] | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   function load() {
     supabase
@@ -55,6 +57,50 @@ export function RateCardTab() {
       return;
     }
     setRows((prev) => prev?.map((r) => (r.id === row.id ? { ...r, rate, confidence } : r)) ?? null);
+  }
+
+  // "Delete that multi layer print mode" -- e.g. after renaming a
+  // template's print mode in BOM Master, the old combo's rate row is
+  // orphaned (nothing references it anymore) and just clutters the list.
+  // Checks first whether any BOM template still actually uses this exact
+  // work centre + print mode + substrate combo -- if one does, refuses and
+  // names it, rather than silently deleting a rate a live FG code still
+  // needs (which would make that FG code price as "no rate" on Cost Sheet).
+  async function deleteRateRow(row: WorkCentreRateRow) {
+    setDeletingId(row.id);
+    let stillUsedQuery = supabase
+      .from("bom_templates")
+      .select("code")
+      .eq("substrate_type", row.substrate)
+      .contains("work_centres", [row.work_centre]);
+    // '-' means this work centre's rate doesn't vary by print mode, so any
+    // template with the right substrate + work centre uses it, regardless
+    // of that template's own print_mode.
+    if (row.print_mode !== "-") {
+      stillUsedQuery = stillUsedQuery.eq("print_mode", row.print_mode);
+    }
+    const { data: usedBy, error: checkError } = await stillUsedQuery;
+    if (checkError) {
+      setDeletingId(null);
+      toast("danger", `Couldn't check if this rate is still in use: ${checkError.message}`);
+      return;
+    }
+    if ((usedBy ?? []).length > 0) {
+      setDeletingId(null);
+      toast(
+        "danger",
+        `Still used by ${usedBy!.map((t) => t.code).join(", ")} -- change that FG code's print mode, substrate, or work centres in BOM Master first if you want to remove this.`
+      );
+      return;
+    }
+    const { error } = await supabase.from("work_centre_rates").delete().eq("id", row.id);
+    setDeletingId(null);
+    if (error) {
+      toast("danger", `Couldn't delete: ${error.message}`);
+      return;
+    }
+    setRows((prev) => prev?.filter((r) => r.id !== row.id) ?? null);
+    toast("success", "Rate combo removed.");
   }
 
   const summary = useMemo(() => {
@@ -101,6 +147,22 @@ export function RateCardTab() {
       },
     },
     { key: "note", header: "Note", render: (r) => <span className="text-ink-secondary">{r.note ?? "—"}</span> },
+    {
+      key: "id",
+      header: "",
+      render: (r) => (
+        <button
+          type="button"
+          aria-label="Delete this rate combo"
+          title="Delete this rate combo"
+          onClick={() => deleteRateRow(r)}
+          disabled={deletingId === r.id}
+          className="text-ink-muted hover:text-danger disabled:opacity-50"
+        >
+          <Trash2 size={14} />
+        </button>
+      ),
+    },
   ];
 
   return (
