@@ -7,6 +7,7 @@ import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/dashboard-queries";
 import type { BomMaterialUnit, BomTemplateLineAlternativeRow, BomTemplateLineRow, BomTemplateRow, RawMaterialRow } from "@mmdi/shared/rows";
+import { PRINT_DEPENDENT_WORK_CENTRES } from "./calc";
 import { groupByCategory } from "./categoryOrder";
 import { RawMaterialPicker } from "./RawMaterialPicker";
 
@@ -40,6 +41,16 @@ export function BomMasterTab() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [savingLineId, setSavingLineId] = useState<string | null>(null);
   const [savingWorkCentresId, setSavingWorkCentresId] = useState<string | null>(null);
+  // "Work centre 1 A-D has different modes like production, quality,
+  // backlit print, multiple layers print -- how do we add the costing?"
+  // print_mode used to be a read-only badge, only ever set via seed SQL.
+  // Now editable per FG code: pick an existing mode (e.g. "Backlit Print")
+  // or type a brand new one (e.g. "UV Printing - Quality" or "UV Printing
+  // - 2 Layer"). See updatePrintMode below for what happens next.
+  const [printModeOptions, setPrintModeOptions] = useState<string[]>([]);
+  const [editingPrintModeId, setEditingPrintModeId] = useState<string | null>(null);
+  const [printModeDraft, setPrintModeDraft] = useState("");
+  const [savingPrintModeId, setSavingPrintModeId] = useState<string | null>(null);
   const materialsByCode = useMemo(() => new Map(materials.map((m) => [m.code, m])), [materials]);
 
   useEffect(() => {
@@ -52,7 +63,9 @@ export function BomMasterTab() {
           toast("danger", "Couldn't load BOM templates");
           return;
         }
-        setTemplates((data as BomTemplateRow[]) ?? []);
+        const rows = (data as BomTemplateRow[]) ?? [];
+        setTemplates(rows);
+        setPrintModeOptions(Array.from(new Set(rows.map((t) => t.print_mode))).sort());
       });
     // raw_materials is ~1,558 rows -- past PostgREST's default 1000-row
     // cap on an unpaginated select, which was silently cutting the picker's
@@ -192,6 +205,66 @@ export function BomMasterTab() {
     setTemplates((prev) => prev?.map((t) => (t.id === template.id ? { ...t, work_centres: nextWorkCentres } : t)) ?? null);
   }
 
+  // "Work centre 1 A-D has different modes like production, quality,
+  // backlit print, multiple layers print -- how do we add the costing?"
+  // Each work centre/print mode/substrate combo needs its own rate in
+  // work_centre_rates (unique on that triple) before the Cost Sheet tab
+  // can price it. Changing a template's print_mode here to a new value
+  // (typed, not just picked from the list) would otherwise leave every
+  // print-dependent work centre this FG code uses (WC1A-D, WC3) with no
+  // rate row to price against at all -- Rate Card only lets you edit rates
+  // for combos that already exist, it can't create a brand new one. So
+  // this also seeds a 'missing' rate row (rate NULL) for each such work
+  // centre + the new print mode + this template's substrate, via upsert
+  // with ignoreDuplicates so re-picking an already-seeded mode is a no-op.
+  // Those show up on the Rate Card tab exactly like any other missing
+  // rate, ready to have the real ₹ entered.
+  async function updatePrintMode(template: BomTemplateRow, rawNewMode: string) {
+    const newMode = rawNewMode.trim();
+    if (!newMode || newMode === template.print_mode) {
+      setEditingPrintModeId(null);
+      return;
+    }
+    setSavingPrintModeId(template.id);
+    const { error } = await supabase.from("bom_templates").update({ print_mode: newMode }).eq("id", template.id);
+    if (error) {
+      setSavingPrintModeId(null);
+      toast("danger", `Couldn't save print mode: ${error.message}`);
+      return;
+    }
+    setTemplates((prev) => prev?.map((t) => (t.id === template.id ? { ...t, print_mode: newMode } : t)) ?? null);
+    setPrintModeOptions((prev) => (prev.includes(newMode) ? prev : [...prev, newMode].sort()));
+    setEditingPrintModeId(null);
+
+    const printDependentCentres = template.work_centres.filter((wc) => PRINT_DEPENDENT_WORK_CENTRES.has(wc));
+    if (printDependentCentres.length > 0) {
+      const { data: newRates, error: rateError } = await supabase
+        .from("work_centre_rates")
+        .upsert(
+          printDependentCentres.map((wc) => ({
+            work_centre: wc,
+            print_mode: newMode,
+            substrate: template.substrate_type,
+            rate_basis: "per_sqft",
+            rate: null,
+            confidence: "missing",
+            note: `Auto-created when ${template.code}'s print mode was set to "${newMode}" in BOM Master -- enter the real rate here.`,
+          })),
+          { onConflict: "work_centre,print_mode,substrate", ignoreDuplicates: true }
+        )
+        .select();
+      if (rateError) {
+        toast("danger", `Print mode saved, but couldn't set up rate combos: ${rateError.message}`);
+      } else if ((newRates ?? []).length > 0) {
+        toast(
+          "info",
+          `${newRates!.length} new rate combo${newRates!.length === 1 ? "" : "s"} added to the Rate Card tab (missing rate) -- enter the real ₹ there.`
+        );
+      }
+    }
+    setSavingPrintModeId(null);
+  }
+
   // "We have many options under one FG product in BOM materials so we
   // need to accommodate them for selection at Cost Sheet Page" -- a line's
   // raw_material_code stays its default; alternatives are extra
@@ -246,26 +319,60 @@ export function BomMasterTab() {
             <div className="flex flex-col gap-2">
               {group.items.map((t) => (
                 <div key={t.id} className="rounded-lg border border-line bg-surface">
-            <button
-              type="button"
-              onClick={() => toggle(t.id)}
-              className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
-            >
-              <div className="flex items-center gap-2">
+            <div className="flex w-full items-center justify-between gap-3 px-4 py-3">
+              <button type="button" onClick={() => toggle(t.id)} className="flex min-w-0 items-center gap-2 text-left">
                 {expanded === t.id ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                <div>
-                  <div className="text-sm font-medium text-ink">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium text-ink">
                     {t.code} <span className="font-normal text-ink-secondary">— {t.description}</span>
                   </div>
-                  <div className="mt-0.5 flex flex-wrap gap-1">
+                  <div className="mt-0.5 flex flex-wrap items-center gap-1">
                     <Badge status="info">{t.category}</Badge>
-                    <Badge status="neutral">{t.print_mode}</Badge>
                     <Badge status="neutral">{t.substrate_type}</Badge>
                   </div>
                 </div>
+              </button>
+              <div className="flex shrink-0 items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                {editingPrintModeId === t.id ? (
+                  <input
+                    type="text"
+                    autoFocus
+                    value={printModeDraft}
+                    onChange={(e) => setPrintModeDraft(e.target.value)}
+                    onBlur={() => updatePrintMode(t, printModeDraft)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") updatePrintMode(t, printModeDraft);
+                      if (e.key === "Escape") setEditingPrintModeId(null);
+                    }}
+                    placeholder="e.g. UV Printing - Quality"
+                    className="h-7 w-44 rounded-md border border-line-strong bg-surface px-1.5 text-xs text-ink outline-none"
+                  />
+                ) : (
+                  <select
+                    value={t.print_mode}
+                    onChange={(e) => {
+                      if (e.target.value === "__new__") {
+                        setPrintModeDraft("");
+                        setEditingPrintModeId(t.id);
+                      } else {
+                        updatePrintMode(t, e.target.value);
+                      }
+                    }}
+                    className="h-7 max-w-[180px] rounded-md border border-line-strong bg-surface px-1.5 text-[11px] text-ink outline-none"
+                  >
+                    {!printModeOptions.includes(t.print_mode) && <option value={t.print_mode}>{t.print_mode}</option>}
+                    {printModeOptions.map((pm) => (
+                      <option key={pm} value={pm}>
+                        {pm}
+                      </option>
+                    ))}
+                    <option value="__new__">+ New print mode…</option>
+                  </select>
+                )}
+                {savingPrintModeId === t.id && <span className="text-[11px] text-ink-muted">saving…</span>}
+                <span className="text-xs text-ink-muted">{t.work_centres.length} work centres</span>
               </div>
-              <span className="shrink-0 text-xs text-ink-muted">{t.work_centres.length} work centres</span>
-            </button>
+            </div>
 
             {expanded === t.id && (
               <div className="border-t border-line px-4 py-3">

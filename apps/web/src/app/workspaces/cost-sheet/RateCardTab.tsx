@@ -106,7 +106,9 @@ export function RateCardTab() {
   return (
     <div>
       <p className="mb-4 text-sm text-ink-secondary">
-        {rows.length} work centre / print mode / substrate combinations, derived from the 33 BOM templates.{" "}
+        {rows.length} work centre / print mode / substrate combinations -- derived from the BOM templates&apos; work centres
+        and print modes (BOM Master), including any new combo created there when a template&apos;s print mode was set to
+        something new.{" "}
         {summary && (
           <>
             <Badge status="success">{summary.confirmed} confirmed</Badge>{" "}

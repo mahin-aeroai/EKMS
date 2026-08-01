@@ -97,6 +97,21 @@ function sumByScaling(lineCosts: LineCost[], sqftScaled: boolean, field: "recent
   return lineCosts.filter((lc) => isSqftScaled(lc.line.basis) === sqftScaled).reduce((sum, lc) => sum + lc[field], 0);
 }
 
+// Print-dependent work centres key on (work_centre, print_mode, substrate);
+// every other work centre keys on (work_centre, '-', substrate) -- same
+// split as the Excel workbook's Rate Card, because a QC/Packing/Cut rate
+// doesn't vary by frontlit vs backlit, but a Printing rate does. Exported
+// so BomMasterTab can figure out which work centres need a new rate combo
+// created when a template's print_mode changes (e.g. to a "quality" or
+// "multi-layer" variant) -- see updatePrintMode there.
+export const PRINT_DEPENDENT_WORK_CENTRES = new Set([
+  "WC1A Solvent Printing",
+  "WC1B UV Printing",
+  "WC1C Latex Printing",
+  "WC1D Dye Sub Printing",
+  "WC3 Dye Sub Transfer",
+]);
+
 export function computeWorkCentreCost(
   workCentre: string,
   template: BomTemplateRow,
@@ -104,18 +119,7 @@ export function computeWorkCentreCost(
   sqft: number,
   qty: number
 ): WorkCentreCost {
-  // Print-dependent work centres key on (work_centre, print_mode, substrate);
-  // every other work centre keys on (work_centre, '-', substrate) -- same
-  // split as the Excel workbook's Rate Card, because a QC/Packing/Cut rate
-  // doesn't vary by frontlit vs backlit, but a Printing rate does.
-  const PRINT_DEPENDENT = new Set([
-    "WC1A Solvent Printing",
-    "WC1B UV Printing",
-    "WC1C Latex Printing",
-    "WC1D Dye Sub Printing",
-    "WC3 Dye Sub Transfer",
-  ]);
-  const printMode = PRINT_DEPENDENT.has(workCentre) ? template.print_mode : "-";
+  const printMode = PRINT_DEPENDENT_WORK_CENTRES.has(workCentre) ? template.print_mode : "-";
   const rateRow =
     rates.find((r) => r.work_centre === workCentre && r.print_mode === printMode && r.substrate === template.substrate_type) ??
     null;
