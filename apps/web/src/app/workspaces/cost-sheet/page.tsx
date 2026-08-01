@@ -9,6 +9,7 @@ import { CostSheetCalcTab } from "./CostSheetCalcTab";
 import { BomMasterTab } from "./BomMasterTab";
 import { RateCardTab } from "./RateCardTab";
 import { MaterialPricingTab } from "./MaterialPricingTab";
+import { ToolAccessGuard } from "@/components/ToolAccessGuard";
 
 // MMDI ONE Cost Sheet -- new standalone Tools workspace (per the scoping
 // questions PROJECT_STATUS.md's "Next up" section raised, and the user's
@@ -33,6 +34,7 @@ export default function CostSheetPage() {
   const [activeTab, setActiveTab] = useState<TabId>("costsheet");
 
   return (
+    <ToolAccessGuard toolId="cost-sheet" toolLabel="Cost Sheet">
     <div>
       <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "Tools" }, { label: "Cost Sheet" }]} />
 
@@ -77,5 +79,6 @@ export default function CostSheetPage() {
       {activeTab === "ratecard" && <RateCardTab />}
       {activeTab === "materialpricing" && <MaterialPricingTab />}
     </div>
+    </ToolAccessGuard>
   );
 }

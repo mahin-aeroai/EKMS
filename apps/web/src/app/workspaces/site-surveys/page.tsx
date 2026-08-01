@@ -10,6 +10,7 @@ import { Table, type TableColumn } from "@/components/ui/Table";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
 import type { ApplelfgSiteSurveyRow } from "@mmdi/shared/rows";
+import { ToolAccessGuard } from "@/components/ToolAccessGuard";
 
 // Real viewer for the 333 LFG site survey PDFs (see
 // supabase-lfg-site-surveys-schema.sql / upload-lfg-site-surveys.mjs) — the
@@ -100,6 +101,7 @@ export default function SiteSurveysPage() {
   ];
 
   return (
+    <ToolAccessGuard toolId="site-surveys" toolLabel="Site Surveys">
     <div>
       <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "Customers" }, { label: "Site Surveys" }]} />
 
@@ -141,5 +143,6 @@ export default function SiteSurveysPage() {
         )}
       </div>
     </div>
+    </ToolAccessGuard>
   );
 }

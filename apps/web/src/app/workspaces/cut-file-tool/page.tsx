@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { ToolAccessGuard } from "@/components/ToolAccessGuard";
 
 // pdfjs-dist touches browser-only APIs (DOMMatrix, Path2D, etc.) at module
 // evaluation time, which don't exist in the Node.js environment Next.js
@@ -14,5 +15,9 @@ const CutFileToolClient = dynamic(() => import("@/components/cutfile/CutFileTool
 });
 
 export default function CutFileToolPage() {
-  return <CutFileToolClient />;
+  return (
+    <ToolAccessGuard toolId="cut-file-tool" toolLabel="Cut File Tool">
+      <CutFileToolClient />
+    </ToolAccessGuard>
+  );
 }

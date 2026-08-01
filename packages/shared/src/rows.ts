@@ -564,6 +564,10 @@ export interface ProfileRow {
   // supabase-module-access-migration.sql and
   // apps/web/src/lib/UserGroupsContext.tsx.
   allowed_groups: string[] | null;
+  // NULL = unrestricted (sees every Tools-section tool). UI-level only, not
+  // RLS-backed -- see supabase-tool-access-migration.sql and
+  // apps/web/src/lib/UserToolsContext.tsx.
+  allowed_tools: string[] | null;
 }
 
 // ── Sign Estimator (React rewrite of SignERP_v2.html) ──────────────────────
