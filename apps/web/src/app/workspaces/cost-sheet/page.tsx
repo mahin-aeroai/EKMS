@@ -8,6 +8,7 @@ import { Tag } from "@/components/ui/Tag";
 import { CostSheetCalcTab } from "./CostSheetCalcTab";
 import { BomMasterTab } from "./BomMasterTab";
 import { RateCardTab } from "./RateCardTab";
+import { MaterialPricingTab } from "./MaterialPricingTab";
 
 // MMDI ONE Cost Sheet -- new standalone Tools workspace (per the scoping
 // questions PROJECT_STATUS.md's "Next up" section raised, and the user's
@@ -19,12 +20,13 @@ import { RateCardTab } from "./RateCardTab";
 //
 // See supabase-cost-sheet-schema.sql for the schema this reads/writes, and
 // PROJECT_STATUS.md for the full scoping history.
-type TabId = "costsheet" | "bommaster" | "ratecard";
+type TabId = "costsheet" | "bommaster" | "ratecard" | "materialpricing";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "costsheet", label: "Cost Sheet" },
   { id: "bommaster", label: "BOM Master" },
   { id: "ratecard", label: "Rate Card" },
+  { id: "materialpricing", label: "Material Pricing" },
 ];
 
 export default function CostSheetPage() {
@@ -73,6 +75,7 @@ export default function CostSheetPage() {
       {activeTab === "costsheet" && <CostSheetCalcTab />}
       {activeTab === "bommaster" && <BomMasterTab />}
       {activeTab === "ratecard" && <RateCardTab />}
+      {activeTab === "materialpricing" && <MaterialPricingTab />}
     </div>
   );
 }
