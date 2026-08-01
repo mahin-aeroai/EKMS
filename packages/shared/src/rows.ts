@@ -747,6 +747,19 @@ export interface BomTemplateLineRow {
   created_at: string;
 }
 
+// A BOM line's raw_material_code above is its DEFAULT mapping. A line can
+// also have zero or more interchangeable substitutes -- e.g. "RSD Flex
+// 340GSM" might be sourced from any of several GSM/finish variants
+// depending what's in stock -- listed here as one row per substitute.
+// Managed from BOM Master; selectable per job in the Cost Sheet tab
+// without changing the line's saved default.
+export interface BomTemplateLineAlternativeRow {
+  id: string;
+  line_id: string;
+  raw_material_code: string;
+  created_at: string;
+}
+
 export interface WorkCentreRateRow {
   id: string;
   work_centre: string;
