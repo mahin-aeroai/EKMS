@@ -11,6 +11,16 @@ import { groupByCategory } from "./categoryOrder";
 
 const fmtRupee = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 
+// "Add the price too in dropdown recent/average so that I can choose
+// wisely" -- each alternative material option shows its own ₹/unit so a
+// job can be priced against the cheapest (or most in-stock) option
+// without having to switch and check the columns each time.
+function priceLabel(m: RawMaterialRow) {
+  const recent = m.unit_cost_recent !== null ? `₹${m.unit_cost_recent.toFixed(2)}` : "no price";
+  const avg = m.unit_cost_avg !== null ? `₹${m.unit_cost_avg.toFixed(2)}` : "no price";
+  return `recent ${recent} / avg ${avg}`;
+}
+
 // The live calculator -- select an FG template, enter dimensions/qty/selling
 // price, get material cost (recent + average purchase price) and
 // work-centre process cost, same breakdown as the Excel workbook's Cost
@@ -318,12 +328,15 @@ export function CostSheetCalcTab() {
                         options.push({
                           code: originalLine?.raw_material_code ?? null,
                           label: defaultMaterial
-                            ? `${defaultMaterial.code} — ${defaultMaterial.name} (default)`
+                            ? `${defaultMaterial.code} — ${defaultMaterial.name} — ${priceLabel(defaultMaterial)} (default)`
                             : "— unmapped (default) —",
                         });
                         for (const alt of alts) {
                           const m = materialsByCode.get(alt.raw_material_code);
-                          options.push({ code: alt.raw_material_code, label: m ? `${m.code} — ${m.name}` : alt.raw_material_code });
+                          options.push({
+                            code: alt.raw_material_code,
+                            label: m ? `${m.code} — ${m.name} — ${priceLabel(m)}` : alt.raw_material_code,
+                          });
                         }
                       }
                       const currentValue = selectedMaterialByLine[lc.line.id] !== undefined
@@ -337,7 +350,7 @@ export function CostSheetCalcTab() {
                               <select
                                 value={currentValue ?? ""}
                                 onChange={(e) => selectMaterialForLine(lc.line.id, e.target.value === "" ? null : e.target.value)}
-                                className="h-7 max-w-[220px] rounded-md border border-line-strong bg-surface px-1.5 text-[11px] text-ink outline-none"
+                                className="h-7 max-w-[260px] rounded-md border border-line-strong bg-surface px-1.5 text-[11px] text-ink outline-none"
                               >
                                 {options.map((opt) => (
                                   <option key={opt.code ?? "__none__"} value={opt.code ?? ""}>
