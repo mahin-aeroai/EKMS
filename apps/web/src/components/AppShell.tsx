@@ -51,6 +51,7 @@ import { supabase } from "@/lib/supabase";
 import type { UserRole } from "@mmdi/shared/rows";
 import { UserRoleContext } from "@/lib/UserRoleContext";
 import { UserGroupsContext, canAccessGroup } from "@/lib/UserGroupsContext";
+import { UserToolsContext, canAccessTool } from "@/lib/UserToolsContext";
 
 // Maps a NAV section's title to the group id used in profiles.allowed_groups
 // (supabase-module-access-migration.sql). Sections not listed here (Home,
@@ -162,6 +163,24 @@ export const NAV: SidebarSection[] = [
   },
 ];
 
+// Shared by AppShell's own sidebar AND the home page's icon-grid tiles (see
+// src/app/page.tsx) so the two surfaces can never drift apart -- a section
+// gated out by allowed_groups, or a Tools-section item gated out by
+// allowed_tools, disappears from both consistently. Sections are filtered
+// whole (no per-item gating there, see SECTION_GROUP's own comment); Tools
+// is the one section with per-item gating, via allowed_tools.
+export function getVisibleNav(role: UserRole | null, allowedGroups: string[] | null, allowedTools: string[] | null): SidebarSection[] {
+  return NAV.filter((section) => {
+    const group = SECTION_GROUP[section.title];
+    if (!group) return true;
+    return canAccessGroup(role, allowedGroups, group);
+  }).map((section) =>
+    section.title === "Tools"
+      ? { ...section, items: section.items.filter((item) => canAccessTool(role, allowedTools, item.id)) }
+      : section
+  );
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -177,6 +196,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<UserRole | null>(null);
   const [allowedGroups, setAllowedGroups] = useState<string[] | null>(null);
+  const [allowedTools, setAllowedTools] = useState<string[] | null>(null);
 
   useEffect(() => {
     async function loadRole(userId: string) {
@@ -196,6 +216,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         setUserRole(data.role as UserRole);
         setAllowedGroups((data as { allowed_groups?: string[] | null }).allowed_groups ?? null);
       }
+
+      // Separate, independently-tolerant fetch for allowed_tools -- kept
+      // apart from the query above so that if supabase-tool-access-
+      // migration.sql hasn't been run yet in production (column doesn't
+      // exist), only tool access falls back to unrestricted -- it must
+      // never take role/allowed_groups down with it, since those are
+      // already relied on today.
+      const { data: toolsData, error: toolsError } = await supabase
+        .from("profiles")
+        .select("allowed_tools")
+        .eq("id", userId)
+        .maybeSingle();
+      if (!toolsError && toolsData) {
+        setAllowedTools((toolsData as { allowed_tools?: string[] | null }).allowed_tools ?? null);
+      }
     }
 
     supabase.auth.getUser().then(({ data }) => {
@@ -209,6 +244,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       } else {
         setUserRole(null);
         setAllowedGroups(null);
+        setAllowedTools(null);
       }
     });
     return () => subscription.subscription.unsubscribe();
@@ -239,14 +275,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
-  // Filter out sidebar sections the current user isn't scoped into. Admins
-  // and unrestricted users (allowedGroups === null) see every section,
+  // Filter out sidebar sections the current user isn't scoped into (and,
+  // within Tools, individual tools they don't have access to). Admins and
+  // unrestricted users (allowedGroups/allowedTools === null) see everything,
   // unchanged from before this feature existed.
-  const visibleNav = NAV.filter((section) => {
-    const group = SECTION_GROUP[section.title];
-    if (!group) return true;
-    return canAccessGroup(userRole, allowedGroups, group);
-  });
+  const visibleNav = getVisibleNav(userRole, allowedGroups, allowedTools);
 
   const navigateCommands: Command[] = visibleNav.flatMap((s) =>
     s.items.map((item) => ({
@@ -313,6 +346,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <UserRoleContext.Provider value={userRole}>
     <UserGroupsContext.Provider value={allowedGroups}>
+    <UserToolsContext.Provider value={allowedTools}>
       <div className="flex h-screen flex-col">
         <TopNav
           onOpenNav={() => setNavOpen(true)}
@@ -352,6 +386,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <AIConversation turns={turns} onSend={handleSend} loading={aiLoading} />
         </Drawer>
       </div>
+    </UserToolsContext.Provider>
     </UserGroupsContext.Provider>
     </UserRoleContext.Provider>
   );

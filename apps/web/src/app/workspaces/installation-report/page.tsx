@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { ToolAccessGuard } from "@/components/ToolAccessGuard";
 
 // Same reasoning as cut-file-tool/page.tsx: this tool builds PDFs and reads
 // local image files entirely in the browser (pdf-lib + canvas), neither of
@@ -15,5 +16,9 @@ const InstallationReportClient = dynamic(
 );
 
 export default function InstallationReportPage() {
-  return <InstallationReportClient />;
+  return (
+    <ToolAccessGuard toolId="installation-report" toolLabel="Installation Report">
+      <InstallationReportClient />
+    </ToolAccessGuard>
+  );
 }

@@ -10,6 +10,7 @@ import { MastersTab } from "./MastersTab";
 import { CostSheetTab } from "./CostSheetTab";
 import { DashboardTab } from "./DashboardTab";
 import { HistoryTab } from "./HistoryTab";
+import { ToolAccessGuard } from "@/components/ToolAccessGuard";
 
 // MMDI ONE Sign Estimator -- React rewrite of the user's standalone
 // SignERP_v2.html tool, migrated to real Supabase tables (see
@@ -52,6 +53,7 @@ export default function SignEstimatorPage() {
   }
 
   return (
+    <ToolAccessGuard toolId="sign-estimator" toolLabel="Sign Estimator">
     <div>
       <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "Customers" }, { label: "Sign Estimator" }]} />
 
@@ -98,5 +100,6 @@ export default function SignEstimatorPage() {
         {activeTab === "history" && <HistoryTab refreshKey={refreshKey} onOpenEstimate={openEstimate} />}
       </div>
     </div>
+    </ToolAccessGuard>
   );
 }

@@ -11,6 +11,7 @@ import { Dialog } from "@/components/ui/Dialog";
 import { useToast } from "@/components/ui/Notifications";
 import { useUserRole } from "@/lib/UserRoleContext";
 import { supabase } from "@/lib/supabase";
+import { NAV } from "@/components/AppShell";
 import type { AccessRequestRow, ProfileRow, UserRole } from "@mmdi/shared/rows";
 import { timeAgo } from "@/lib/timeAgo";
 import { cn } from "@/lib/cn";
@@ -54,20 +55,41 @@ const GROUP_OPTIONS: { id: string; label: string }[] = [
 ];
 const GROUP_LABEL: Record<string, string> = Object.fromEntries(GROUP_OPTIONS.map((g) => [g.id, g.label]));
 
+// The 7 Tools-section workspaces a user's tool access can be restricted to
+// (Site Surveys, Sign Estimator, Installation Report, Cut File Tool, QR
+// Label Tool, Estimate Builder, Cost Sheet). Derived from AppShell's NAV
+// (same source of truth the sidebar and home page tiles use) instead of a
+// second hardcoded list that could drift -- see supabase-tool-access-
+// migration.sql for why this is a separate, UI-level-only control from
+// Module access above.
+const TOOL_OPTIONS: { id: string; label: string }[] =
+  NAV.find((section) => section.title === "Tools")?.items.map((item) => ({ id: item.id, label: item.label })) ?? [];
+const TOOL_LABEL: Record<string, string> = Object.fromEntries(TOOL_OPTIONS.map((t) => [t.id, t.label]));
+
 /**
- * Compact multi-select for one profile's allowed_groups. Deliberately local
- * to this page rather than the design system's Dropdown component — that
- * one always renders its own label above the trigger (built for form use),
- * which looks wrong repeated in every table row. An empty selection means
- * "all modules" (allowed_groups = NULL), not "no modules" — see the
+ * Compact multi-select for one profile's allowed_groups OR allowed_tools --
+ * generalized from a groups-only component since both follow the exact same
+ * shape (a list of ids, empty selection meaning "unrestricted"). Deliberately
+ * local to this page rather than the design system's Dropdown component —
+ * that one always renders its own label above the trigger (built for form
+ * use), which looks wrong repeated in every table row. An empty selection
+ * means "everything" (NULL in the database), not "nothing" — see the
  * onChange mapping in the parent.
  */
-function GroupAccessSelect({
+function MultiSelectAccessControl({
   selected,
   onChange,
+  options,
+  labelById,
+  allLabel,
+  resetLabel,
 }: {
   selected: string[];
-  onChange: (groups: string[]) => void;
+  onChange: (ids: string[]) => void;
+  options: { id: string; label: string }[];
+  labelById: Record<string, string>;
+  allLabel: string;
+  resetLabel: string;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -80,7 +102,7 @@ function GroupAccessSelect({
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
 
-  const summary = selected.length === 0 ? "All modules" : selected.map((g) => GROUP_LABEL[g] ?? g).join(", ");
+  const summary = selected.length === 0 ? allLabel : selected.map((id) => labelById[id] ?? id).join(", ");
 
   return (
     <div ref={rootRef} className="relative w-56">
@@ -94,21 +116,21 @@ function GroupAccessSelect({
       </button>
       {open && (
         <div className="absolute z-30 mt-1 w-full rounded-lg border border-line bg-surface-overlay p-1 shadow-3">
-          {GROUP_OPTIONS.map((g) => {
-            const isSelected = selected.includes(g.id);
+          {options.map((o) => {
+            const isSelected = selected.includes(o.id);
             return (
               <button
-                key={g.id}
+                key={o.id}
                 type="button"
                 onClick={() =>
-                  onChange(isSelected ? selected.filter((s) => s !== g.id) : [...selected, g.id])
+                  onChange(isSelected ? selected.filter((s) => s !== o.id) : [...selected, o.id])
                 }
                 className={cn(
                   "flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-surface-sunken",
                   isSelected && "text-primary"
                 )}
               >
-                {g.label}
+                {o.label}
                 {isSelected && <Check size={14} />}
               </button>
             );
@@ -121,7 +143,7 @@ function GroupAccessSelect({
                 onClick={() => onChange([])}
                 className="w-full rounded-md px-2 py-1.5 text-left text-sm text-ink-muted hover:bg-surface-sunken"
               >
-                Reset to all modules
+                {resetLabel}
               </button>
             </>
           )}
@@ -215,6 +237,17 @@ export default function AdministrationPage() {
     toast("success", `${profile.email} is now scoped to ${value === null ? "all modules" : value.map((g) => GROUP_LABEL[g] ?? g).join(", ")}`);
   }
 
+  async function applyToolChange(profile: ProfileRow, tools: string[]) {
+    const value = tools.length === 0 ? null : tools;
+    const { error } = await supabase.from("profiles").update({ allowed_tools: value }).eq("id", profile.id);
+    if (error) {
+      toast("danger", `Couldn't update ${profile.email}'s tool access: ${error.message}`);
+      return;
+    }
+    setProfiles((prev) => prev?.map((p) => (p.id === profile.id ? { ...p, allowed_tools: value } : p)) ?? prev);
+    toast("success", `${profile.email} is now scoped to ${value === null ? "all tools" : value.map((t) => TOOL_LABEL[t] ?? t).join(", ")}`);
+  }
+
   const PROFILE_COLUMNS: TableColumn<ProfileRow>[] = [
     { key: "email", header: "User", sortable: true },
     {
@@ -245,10 +278,38 @@ export default function AdministrationPage() {
         p.role === "admin" ? (
           <span className="text-sm text-ink-muted">All modules (admin)</span>
         ) : isAdmin ? (
-          <GroupAccessSelect selected={p.allowed_groups ?? []} onChange={(groups) => applyGroupChange(p, groups)} />
+          <MultiSelectAccessControl
+            selected={p.allowed_groups ?? []}
+            onChange={(groups) => applyGroupChange(p, groups)}
+            options={GROUP_OPTIONS}
+            labelById={GROUP_LABEL}
+            allLabel="All modules"
+            resetLabel="Reset to all modules"
+          />
         ) : (
           <span className="text-sm text-ink-muted">
             {p.allowed_groups === null ? "All modules" : p.allowed_groups.map((g) => GROUP_LABEL[g] ?? g).join(", ")}
+          </span>
+        ),
+    },
+    {
+      key: "allowed_tools",
+      header: "Tool access",
+      render: (p) =>
+        p.role === "admin" ? (
+          <span className="text-sm text-ink-muted">All tools (admin)</span>
+        ) : isAdmin ? (
+          <MultiSelectAccessControl
+            selected={p.allowed_tools ?? []}
+            onChange={(tools) => applyToolChange(p, tools)}
+            options={TOOL_OPTIONS}
+            labelById={TOOL_LABEL}
+            allLabel="All tools"
+            resetLabel="Reset to all tools"
+          />
+        ) : (
+          <span className="text-sm text-ink-muted">
+            {p.allowed_tools === null ? "All tools" : p.allowed_tools.map((t) => TOOL_LABEL[t] ?? t).join(", ")}
           </span>
         ),
     },

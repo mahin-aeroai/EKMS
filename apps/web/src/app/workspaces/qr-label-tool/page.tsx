@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { ToolAccessGuard } from "@/components/ToolAccessGuard";
 
 // Canvas rendering only makes sense in the browser, and this tool never
 // sends anything to a server — everything happens on the visitor's
@@ -11,5 +12,9 @@ const QrLabelToolClient = dynamic(() => import("@/components/qrlabel/QrLabelTool
 });
 
 export default function QrLabelToolPage() {
-  return <QrLabelToolClient />;
+  return (
+    <ToolAccessGuard toolId="qr-label-tool" toolLabel="QR Label Tool">
+      <QrLabelToolClient />
+    </ToolAccessGuard>
+  );
 }

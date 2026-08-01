@@ -3,15 +3,24 @@
 import { useRouter } from "next/navigation";
 import { Sparkles } from "lucide-react";
 import { PromptInput } from "@/components/ui/PromptInput";
-import { NAV } from "@/components/AppShell";
-
-// "Home" itself is the first NAV section (a single tile pointing back to
-// this page) -- no reason to render a tile that links to the page you're
-// already on, so it's the one section skipped here.
-const GROUPS = NAV.filter((section) => section.title !== "Home");
+import { getVisibleNav } from "@/components/AppShell";
+import { useUserRole } from "@/lib/UserRoleContext";
+import { useAllowedGroups } from "@/lib/UserGroupsContext";
+import { useAllowedTools } from "@/lib/UserToolsContext";
 
 export default function HomePage() {
   const router = useRouter();
+  const userRole = useUserRole();
+  const allowedGroups = useAllowedGroups();
+  const allowedTools = useAllowedTools();
+  // "Home" itself is the first NAV section (a single tile pointing back to
+  // this page) -- no reason to render a tile that links to the page you're
+  // already on, so it's the one section skipped here. Same
+  // group/tool-scoped filtering as the sidebar (getVisibleNav) -- this used
+  // to render every NAV section unfiltered, which meant a restricted
+  // section/tool still showed up as a clickable tile here even though it
+  // was hidden from the sidebar.
+  const GROUPS = getVisibleNav(userRole, allowedGroups, allowedTools).filter((section) => section.title !== "Home");
 
   function handleAsk(message: string) {
     // Full conversation UI (citations, contact picker, live Supabase stat

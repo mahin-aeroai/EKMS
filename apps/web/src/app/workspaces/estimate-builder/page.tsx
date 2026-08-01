@@ -12,6 +12,7 @@ import { supabase } from "@/lib/supabase";
 import type { CustomerRow, CustomerContactRow, ContractRow, IkeaRateCardRow, AppleRateCardRow, EstimateRow, EstimateCalcMode, EstimateLineItemRow, EstimatePaymentTermsType, EmployeeRow } from "@mmdi/shared/rows";
 import { generateEstimatePdf, downloadBlob, getSizeUnit, type EstimatePdfLine } from "@/lib/estimateBuilder/pdf";
 import { fetchAllRows } from "@/lib/dashboard-queries";
+import { ToolAccessGuard } from "@/components/ToolAccessGuard";
 
 // MMDI ONE Estimate Builder — scoped to IKEA first per the user's request
 // to "start with it," then extended to Apple (apple_rate_card, 117 SKUs
@@ -841,6 +842,7 @@ export default function EstimateBuilderPage() {
   }
 
   return (
+    <ToolAccessGuard toolId="estimate-builder" toolLabel="Estimate Builder">
     <div>
       <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "Tools" }, { label: "Estimate Builder" }]} />
 
@@ -1566,5 +1568,6 @@ export default function EstimateBuilderPage() {
         </div>
       </Card>
     </div>
+    </ToolAccessGuard>
   );
 }
