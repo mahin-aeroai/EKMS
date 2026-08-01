@@ -6,7 +6,7 @@ import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/dashboard-queries";
 import type { BomTemplateLineAlternativeRow, BomTemplateLineRow, BomTemplateRow, RawMaterialRow, WorkCentreRateRow } from "@mmdi/shared/rows";
-import { computeCostSheet, computeSqft, computeWorkCentreCost, type Uom } from "./calc";
+import { computeCostSheet, computeLineCost, computeSqft, computeWorkCentreCost, type Uom } from "./calc";
 import { groupByCategory } from "./categoryOrder";
 
 const fmtRupee = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
@@ -63,6 +63,13 @@ export function CostSheetCalcTab() {
   // uses no material for this line." Local/ephemeral like the work centre
   // exclusions above -- resets when the FG code changes.
   const [selectedMaterialByLine, setSelectedMaterialByLine] = useState<Record<string, string | null>>({});
+  // A specific material line a specific job doesn't need -- e.g. the white
+  // ink layer in a multilayer print job's BOM, which some jobs use and
+  // others don't. "i want to make white ink optional." Same ephemeral,
+  // per-calculation pattern as excludedWorkCentres above: doesn't touch the
+  // FG code's saved BOM (edit that in BOM Master), resets when the FG code
+  // changes.
+  const [excludedLines, setExcludedLines] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     // raw_materials alone is ~1,558 rows -- well past PostgREST's default
@@ -111,6 +118,7 @@ export function CostSheetCalcTab() {
     setLoadingLines(true);
     setExcludedWorkCentres(new Set());
     setSelectedMaterialByLine({});
+    setExcludedLines(new Set());
     supabase
       .from("bom_template_lines")
       .select("*")
@@ -145,12 +153,19 @@ export function CostSheetCalcTab() {
   // Same override pattern as effectiveTemplate above -- a line keeps its
   // saved raw_material_code unless this job picked a different (or no)
   // material for it via the dropdown below.
-  const effectiveLines = useMemo(() => {
+  const overriddenLines = useMemo(() => {
     return lines.map((l) => {
       const sel = selectedMaterialByLine[l.id];
       return sel !== undefined ? { ...l, raw_material_code: sel } : l;
     });
   }, [lines, selectedMaterialByLine]);
+
+  // overriddenLines minus whatever's unticked for this one job -- this is
+  // what actually feeds the totals, same "keep the FG code's saved BOM
+  // untouched, override just this calculation" pattern as effectiveTemplate.
+  const effectiveLines = useMemo(() => {
+    return overriddenLines.filter((l) => !excludedLines.has(l.id));
+  }, [overriddenLines, excludedLines]);
 
   const result = useMemo(() => {
     if (!effectiveTemplate) return null;
@@ -178,11 +193,29 @@ export function CostSheetCalcTab() {
     return template.work_centres.map((wc) => computeWorkCentreCost(wc, template, rates, sqft, qty === "" ? 0 : qty));
   }, [template, rates, uom, width, height, qty]);
 
+  // Every material line the BOM normally has, excluded or not -- same
+  // "always render the full list so an unticked one is still visible and
+  // re-checkable" pattern as allWorkCentreCosts. Built from overriddenLines
+  // (material-swap applied) so the checkbox and the alternatives dropdown
+  // stay independent of each other.
+  const allLineCosts = useMemo(() => {
+    return overriddenLines.map((l) => computeLineCost(l, materialsByCode));
+  }, [overriddenLines, materialsByCode]);
+
   function toggleWorkCentreForJob(workCentre: string, applicable: boolean) {
     setExcludedWorkCentres((prev) => {
       const next = new Set(prev);
       if (applicable) next.delete(workCentre);
       else next.add(workCentre);
+      return next;
+    });
+  }
+
+  function toggleLineForJob(lineId: string, applicable: boolean) {
+    setExcludedLines((prev) => {
+      const next = new Set(prev);
+      if (applicable) next.delete(lineId);
+      else next.add(lineId);
       return next;
     });
   }
@@ -299,10 +332,15 @@ export function CostSheetCalcTab() {
 
             <div className="rounded-lg border border-line bg-surface p-4">
               <h3 className="mb-3 text-sm font-semibold text-ink">Material cost</h3>
+              <p className="mb-3 mt-0.5 text-[11px] text-ink-muted">
+                Untick a line this job doesn&apos;t need (e.g. white ink on a job that&apos;s CMYK-only) — applies to this
+                calculation only, doesn&apos;t change the FG code&apos;s saved BOM (edit that in the BOM Master tab).
+              </p>
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="border-b border-line text-left text-ink-secondary">
+                      <th className="py-1.5 pr-2"></th>
                       <th className="py-1.5 pr-2">Material</th>
                       <th className="py-1.5 pr-2">Mapped to</th>
                       <th className="py-1.5 pr-2 text-right">Recent ₹/unit</th>
@@ -314,7 +352,8 @@ export function CostSheetCalcTab() {
                     </tr>
                   </thead>
                   <tbody>
-                    {result.lineCosts.map((lc) => {
+                    {allLineCosts.map((lc) => {
+                      const excluded = excludedLines.has(lc.line.id);
                       const originalLine = originalLinesById.get(lc.line.id);
                       const alts = alternativesByLine[lc.line.id] ?? [];
                       // Only show a picker when there's actually a choice --
@@ -343,14 +382,25 @@ export function CostSheetCalcTab() {
                         ? selectedMaterialByLine[lc.line.id]
                         : (originalLine?.raw_material_code ?? null);
                       return (
-                        <tr key={lc.line.id} className="border-b border-line/60">
-                          <td className="py-1.5 pr-2 text-ink">{lc.line.material_name}</td>
+                        <tr key={lc.line.id} className={`border-b border-line/60 ${excluded ? "bg-surface-sunken" : ""}`}>
+                          <td className="py-1.5 pr-2">
+                            <input
+                              type="checkbox"
+                              checked={!excluded}
+                              onChange={(e) => toggleLineForJob(lc.line.id, e.target.checked)}
+                              className="h-3 w-3 rounded border-line-strong"
+                            />
+                          </td>
+                          <td className={`py-1.5 pr-2 ${excluded ? "text-ink-muted line-through" : "text-ink"}`}>
+                            {lc.line.material_name}
+                          </td>
                           <td className="py-1.5 pr-2 text-ink-secondary">
                             {options.length > 0 ? (
                               <select
                                 value={currentValue ?? ""}
                                 onChange={(e) => selectMaterialForLine(lc.line.id, e.target.value === "" ? null : e.target.value)}
-                                className="h-7 max-w-[260px] rounded-md border border-line-strong bg-surface px-1.5 text-[11px] text-ink outline-none"
+                                disabled={excluded}
+                                className="h-7 max-w-[260px] rounded-md border border-line-strong bg-surface px-1.5 text-[11px] text-ink outline-none disabled:opacity-50"
                               >
                                 {options.map((opt) => (
                                   <option key={opt.code ?? "__none__"} value={opt.code ?? ""}>
@@ -372,9 +422,14 @@ export function CostSheetCalcTab() {
                           {/* Rate x consumption, with wastage and markup already
                               folded in -- this is the ₹ this line adds per SQFT
                               (or per Nos/RFT/etc.) before scaling by the job's
-                              total sqft/qty in the totals below. */}
-                          <td className="py-1.5 pr-2 text-right">
-                            <div className="font-medium text-ink">{lc.recentLineCost.toFixed(2)}</div>
+                              total sqft/qty in the totals below. Excluded lines
+                              still show their would-be cost (struck through) so
+                              unticking one shows what it's saving, but this
+                              per-row number never scales by sqft/qty -- see the
+                              Material cost totals below for the real number,
+                              which already excludes it via effectiveLines. */}
+                          <td className={`py-1.5 pr-2 text-right ${excluded ? "text-ink-muted line-through" : ""}`}>
+                            <div className={excluded ? "" : "font-medium text-ink"}>{lc.recentLineCost.toFixed(2)}</div>
                             <div className="text-[10px] text-ink-muted">avg {lc.avgLineCost.toFixed(2)}</div>
                           </td>
                           <td className="py-1.5 pr-2 text-right">{Math.round(lc.line.wastage_pct * 100)}%</td>
