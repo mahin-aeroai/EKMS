@@ -6,7 +6,7 @@ import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/dashboard-queries";
 import type { BomTemplateLineAlternativeRow, BomTemplateLineRow, BomTemplateRow, RawMaterialRow, WorkCentreRateRow } from "@mmdi/shared/rows";
-import { computeCostSheet, computeLineCost, computeSqft, computeWorkCentreCost, type Uom } from "./calc";
+import { computeCostSheet, computeLineCost, computeSqft, computeWorkCentreCost, suggestSellingPrice, type GpMethod, type Uom } from "./calc";
 import { groupByCategory } from "./categoryOrder";
 
 const fmtRupee = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
@@ -47,6 +47,15 @@ export function CostSheetCalcTab() {
   const [height, setHeight] = useState<number | "">("");
   const [qty, setQty] = useState<number | "">(1);
   const [sellPrice, setSellPrice] = useState<number | "">("");
+  // "For gross margins let's keep 2 types" -- Traditional (GP on total
+  // cost) vs Value Addition (materials recovered at cost, GP only on
+  // ink + process/services cost). Picked fresh per job, not saved to the
+  // FG code -- the same product might get quoted either way depending on
+  // the deal. Feeds the "Suggested selling price" section below; doesn't
+  // touch the Selling Price / SqFt field above, which still drives the
+  // actual GP shown in the results.
+  const [gpMethod, setGpMethod] = useState<GpMethod>("total_cost");
+  const [targetGpPct, setTargetGpPct] = useState<number | "">(30);
   // Work centres a specific job doesn't need this time -- e.g. the
   // customer is doing their own packing, or a job skips a process the FG
   // code normally goes through. Deliberately local/ephemeral state, NOT
@@ -177,6 +186,30 @@ export function CostSheetCalcTab() {
       sellingPricePerSqft: sellPrice === "" ? 0 : sellPrice,
     });
   }, [effectiveTemplate, effectiveLines, materialsByCode, rates, uom, width, height, qty, sellPrice]);
+
+  // Traditional: GP on materialCost + totalProcessCost (everything).
+  // Value Addition: non-ink materials recovered at cost; GP applied only
+  // to ink + totalProcessCost ("services"). Computed for both recent and
+  // avg cost basis, same convention as the rest of this tab's totals.
+  // Independent of the Selling Price / SqFt field -- this is "what should
+  // I charge," that field is "what am I charging, and what's my GP."
+  const priceSuggestion = useMemo(() => {
+    if (!result || result.sqft <= 0 || targetGpPct === "") return null;
+    const g = targetGpPct / 100;
+    const materialAtCostRecent = result.materialCostRecent - result.inkCostRecent;
+    const materialAtCostAvg = result.materialCostAvg - result.inkCostAvg;
+    const servicesRecent = result.inkCostRecent + result.totalProcessCost;
+    const servicesAvg = result.inkCostAvg + result.totalProcessCost;
+    const totalRecent = suggestSellingPrice(materialAtCostRecent, servicesRecent, g, gpMethod);
+    const totalAvg = suggestSellingPrice(materialAtCostAvg, servicesAvg, g, gpMethod);
+    if (totalRecent === null || totalAvg === null) return null;
+    return {
+      perSqftRecent: totalRecent / result.sqft,
+      perSqftAvg: totalAvg / result.sqft,
+      totalRecent,
+      totalAvg,
+    };
+  }, [result, targetGpPct, gpMethod]);
 
   // Every work centre the FG code is normally set up for, checked or not --
   // rendered as the checklist below so unchecking one is still visible and
@@ -492,6 +525,46 @@ export function CostSheetCalcTab() {
                 <Metric label="GP (recent)" value={fmtRupee(result.gpRecent)} sub={pct(result.gpRecentPct)} />
                 <Metric label="GP (avg)" value={fmtRupee(result.gpAvg)} sub={pct(result.gpAvgPct)} />
               </div>
+            </div>
+
+            <div className="rounded-lg border border-line bg-surface p-4">
+              <h3 className="text-sm font-semibold text-ink">Suggested selling price</h3>
+              <p className="mb-3 mt-0.5 text-[11px] text-ink-muted">
+                What to charge for a target GP% -- doesn&apos;t use the Selling Price / SqFt field above (that one shows the
+                GP you&apos;d actually get at a price you enter yourself).
+              </p>
+              <div className="flex flex-wrap items-end gap-4">
+                <Field label="Method">
+                  <select
+                    value={gpMethod}
+                    onChange={(e) => setGpMethod(e.target.value as GpMethod)}
+                    className="h-9 w-full min-w-[220px] rounded-md border border-line-strong bg-surface px-2.5 text-sm text-ink outline-none"
+                  >
+                    <option value="total_cost">Traditional -- GP on total cost</option>
+                    <option value="services_only">Value Addition -- GP on services only</option>
+                  </select>
+                </Field>
+                <Field label="Target GP %">
+                  <NumberInput value={targetGpPct} onChange={setTargetGpPct} />
+                </Field>
+              </div>
+              <p className="mt-2 text-[11px] text-ink-muted">
+                {gpMethod === "total_cost"
+                  ? "Margin applied to everything: raw materials, wastage, ink, machine cost, labour, finishing, packing, overheads."
+                  : "Raw materials and wastage recovered at cost. Margin applied only to ink, machine time, labour, finishing, packing, and overheads."}
+              </p>
+              {priceSuggestion ? (
+                <div className="mt-3 grid grid-cols-2 gap-4 border-t border-line pt-3 sm:grid-cols-4">
+                  <Metric label="Price / SqFt (recent)" value={fmtRupee(priceSuggestion.perSqftRecent)} />
+                  <Metric label="Price / SqFt (avg)" value={fmtRupee(priceSuggestion.perSqftAvg)} />
+                  <Metric label="Total (recent)" value={fmtRupee(priceSuggestion.totalRecent)} />
+                  <Metric label="Total (avg)" value={fmtRupee(priceSuggestion.totalAvg)} />
+                </div>
+              ) : (
+                <p className="mt-3 border-t border-line pt-3 text-xs text-ink-muted">
+                  Enter a target GP% under 100 to see a suggested price.
+                </p>
+              )}
             </div>
           </>
         )}
