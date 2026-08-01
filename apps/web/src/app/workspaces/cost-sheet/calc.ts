@@ -40,6 +40,12 @@ export interface CostSheetResult {
   lineCosts: LineCost[];
   materialCostRecent: number;
   materialCostAvg: number;
+  // Ink lines' share of materialCostRecent/Avg -- broken out because
+  // "Gross Profit on Services Only" pricing treats ink as a value-added
+  // service cost (billed with margin) rather than a raw material recovered
+  // at cost, same as machine/labour/finishing/packing. See suggestSellingPrice.
+  inkCostRecent: number;
+  inkCostAvg: number;
   workCentreCosts: WorkCentreCost[];
   totalProcessCost: number;
   totalCostRecent: number;
@@ -97,6 +103,28 @@ function sumByScaling(lineCosts: LineCost[], sqftScaled: boolean, field: "recent
   return lineCosts.filter((lc) => isSqftScaled(lc.line.basis) === sqftScaled).reduce((sum, lc) => sum + lc[field], 0);
 }
 
+// Sums a (possibly pre-filtered, e.g. "Ink lines only") set of lineCosts up
+// to a real ₹ total, applying the same SQFT-vs-Qty scaling as the main
+// material cost total below.
+function sumMaterialCost(lineCosts: LineCost[], field: "recentLineCost" | "avgLineCost", sqft: number, qty: number) {
+  return sumByScaling(lineCosts, true, field) * sqft + sumByScaling(lineCosts, false, field) * qty;
+}
+
+// Print-dependent work centres key on (work_centre, print_mode, substrate);
+// every other work centre keys on (work_centre, '-', substrate) -- same
+// split as the Excel workbook's Rate Card, because a QC/Packing/Cut rate
+// doesn't vary by frontlit vs backlit, but a Printing rate does. Exported
+// so BomMasterTab can figure out which work centres need a new rate combo
+// created when a template's print_mode changes (e.g. to a "quality" or
+// "multi-layer" variant) -- see updatePrintMode there.
+export const PRINT_DEPENDENT_WORK_CENTRES = new Set([
+  "WC1A Solvent Printing",
+  "WC1B UV Printing",
+  "WC1C Latex Printing",
+  "WC1D Dye Sub Printing",
+  "WC3 Dye Sub Transfer",
+]);
+
 export function computeWorkCentreCost(
   workCentre: string,
   template: BomTemplateRow,
@@ -104,18 +132,7 @@ export function computeWorkCentreCost(
   sqft: number,
   qty: number
 ): WorkCentreCost {
-  // Print-dependent work centres key on (work_centre, print_mode, substrate);
-  // every other work centre keys on (work_centre, '-', substrate) -- same
-  // split as the Excel workbook's Rate Card, because a QC/Packing/Cut rate
-  // doesn't vary by frontlit vs backlit, but a Printing rate does.
-  const PRINT_DEPENDENT = new Set([
-    "WC1A Solvent Printing",
-    "WC1B UV Printing",
-    "WC1C Latex Printing",
-    "WC1D Dye Sub Printing",
-    "WC3 Dye Sub Transfer",
-  ]);
-  const printMode = PRINT_DEPENDENT.has(workCentre) ? template.print_mode : "-";
+  const printMode = PRINT_DEPENDENT_WORK_CENTRES.has(workCentre) ? template.print_mode : "-";
   const rateRow =
     rates.find((r) => r.work_centre === workCentre && r.print_mode === printMode && r.substrate === template.substrate_type) ??
     null;
@@ -137,10 +154,11 @@ export function computeCostSheet(
   const sellingAmount = sqft * inputs.sellingPricePerSqft;
 
   const lineCosts = lines.map((l) => computeLineCost(l, rawMaterialsByCode));
-  const materialCostRecent =
-    sumByScaling(lineCosts, true, "recentLineCost") * sqft + sumByScaling(lineCosts, false, "recentLineCost") * inputs.qty;
-  const materialCostAvg =
-    sumByScaling(lineCosts, true, "avgLineCost") * sqft + sumByScaling(lineCosts, false, "avgLineCost") * inputs.qty;
+  const materialCostRecent = sumMaterialCost(lineCosts, "recentLineCost", sqft, inputs.qty);
+  const materialCostAvg = sumMaterialCost(lineCosts, "avgLineCost", sqft, inputs.qty);
+  const inkLineCosts = lineCosts.filter((lc) => lc.line.material_category === "Ink");
+  const inkCostRecent = sumMaterialCost(inkLineCosts, "recentLineCost", sqft, inputs.qty);
+  const inkCostAvg = sumMaterialCost(inkLineCosts, "avgLineCost", sqft, inputs.qty);
 
   const workCentreCosts = template.work_centres.map((wc) => computeWorkCentreCost(wc, template, rates, sqft, inputs.qty));
   const totalProcessCost = workCentreCosts.reduce((sum, w) => sum + (w.cost ?? 0), 0);
@@ -156,6 +174,8 @@ export function computeCostSheet(
     lineCosts,
     materialCostRecent,
     materialCostAvg,
+    inkCostRecent,
+    inkCostAvg,
     workCentreCosts,
     totalProcessCost,
     totalCostRecent,
@@ -165,4 +185,37 @@ export function computeCostSheet(
     gpAvg,
     gpAvgPct: sellingAmount ? gpAvg / sellingAmount : null,
   };
+}
+
+// "For gross margins let's keep 2 types" --
+//
+// 1. Gross Profit on Total Cost (Traditional Pricing) -- margin is applied
+//    to everything: raw materials, wastage, ink, machine cost, labour,
+//    finishing, packing, overheads.
+// 2. Gross Profit on Services Only (Value Addition Pricing) -- raw
+//    materials + wastage are recovered at cost (0 margin); margin is
+//    applied only to ink + work-centre process cost (machine/labour/
+//    finishing/packing/overheads) -- ink counts as a "service" here, not a
+//    raw material, per the user's own listing of ink alongside machine
+//    time/labour/finishing/packing.
+export type GpMethod = "total_cost" | "services_only";
+
+/**
+ * Suggested selling amount (₹, NOT per-sqft -- divide by sqft yourself) to
+ * hit `targetGpPct` (0-1) under the given method. `materialAtCost` should
+ * exclude ink (see inkCostRecent/Avg above); `servicesCost` should be
+ * ink + totalProcessCost. Returns null if targetGpPct is 100% or more --
+ * there's no finite price that recovers cost AND leaves that much margin.
+ */
+export function suggestSellingPrice(
+  materialAtCost: number,
+  servicesCost: number,
+  targetGpPct: number,
+  method: GpMethod
+): number | null {
+  if (targetGpPct >= 1) return null;
+  if (method === "total_cost") {
+    return (materialAtCost + servicesCost) / (1 - targetGpPct);
+  }
+  return materialAtCost + servicesCost / (1 - targetGpPct);
 }
