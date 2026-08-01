@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/Badge";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/dashboard-queries";
-import type { BomTemplateLineRow, BomTemplateRow, RawMaterialRow, WorkCentreRateRow } from "@mmdi/shared/rows";
+import type { BomTemplateLineAlternativeRow, BomTemplateLineRow, BomTemplateRow, RawMaterialRow, WorkCentreRateRow } from "@mmdi/shared/rows";
 import { computeCostSheet, computeSqft, computeWorkCentreCost, type Uom } from "./calc";
 import { groupByCategory } from "./categoryOrder";
 
@@ -44,6 +44,15 @@ export function CostSheetCalcTab() {
   // permanent default (edited in BOM Master); this is a one-off override
   // for THIS calculation only, and resets whenever the FG code changes.
   const [excludedWorkCentres, setExcludedWorkCentres] = useState<Set<string>>(new Set());
+  const [alternativesByLine, setAlternativesByLine] = useState<Record<string, BomTemplateLineAlternativeRow[]>>({});
+  // Which raw material a specific job actually uses for a line, when it
+  // differs from that line's saved default -- "we have many options under
+  // one FG product in BOM materials, we need to accommodate them for
+  // selection at Cost Sheet Page." Keyed by line id; undefined means "use
+  // the line's default raw_material_code," explicit null means "this job
+  // uses no material for this line." Local/ephemeral like the work centre
+  // exclusions above -- resets when the FG code changes.
+  const [selectedMaterialByLine, setSelectedMaterialByLine] = useState<Record<string, string | null>>({});
 
   useEffect(() => {
     // raw_materials alone is ~1,558 rows -- well past PostgREST's default
@@ -67,6 +76,19 @@ export function CostSheetCalcTab() {
       setRates((r.data as WorkCentreRateRow[]) ?? []);
       setMaterials(materialRows);
     });
+    // Small table -- one row per alternative raw material per BOM line.
+    // Loaded in full up front, same as templates/rates/materials above.
+    supabase
+      .from("bom_template_line_alternatives")
+      .select("*")
+      .then(({ data, error }) => {
+        if (error) return;
+        const byLine: Record<string, BomTemplateLineAlternativeRow[]> = {};
+        for (const row of (data as BomTemplateLineAlternativeRow[]) ?? []) {
+          (byLine[row.line_id] ??= []).push(row);
+        }
+        setAlternativesByLine(byLine);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -78,6 +100,7 @@ export function CostSheetCalcTab() {
     }
     setLoadingLines(true);
     setExcludedWorkCentres(new Set());
+    setSelectedMaterialByLine({});
     supabase
       .from("bom_template_lines")
       .select("*")
@@ -97,6 +120,10 @@ export function CostSheetCalcTab() {
   const template = templates.find((t) => t.id === templateId) ?? null;
   const materialsByCode = useMemo(() => new Map(materials.map((m) => [m.code, m])), [materials]);
   const templateGroups = useMemo(() => groupByCategory(templates), [templates]);
+  // The line's saved default (before any per-job override) -- needed to
+  // build each dropdown's option list, since result.lineCosts' line
+  // already has the override applied.
+  const originalLinesById = useMemo(() => new Map(lines.map((l) => [l.id, l])), [lines]);
 
   // The FG code's saved default (template.work_centres) minus whatever's
   // unticked for this one job -- this is what actually feeds the totals.
@@ -105,16 +132,26 @@ export function CostSheetCalcTab() {
     return { ...template, work_centres: template.work_centres.filter((wc) => !excludedWorkCentres.has(wc)) };
   }, [template, excludedWorkCentres]);
 
+  // Same override pattern as effectiveTemplate above -- a line keeps its
+  // saved raw_material_code unless this job picked a different (or no)
+  // material for it via the dropdown below.
+  const effectiveLines = useMemo(() => {
+    return lines.map((l) => {
+      const sel = selectedMaterialByLine[l.id];
+      return sel !== undefined ? { ...l, raw_material_code: sel } : l;
+    });
+  }, [lines, selectedMaterialByLine]);
+
   const result = useMemo(() => {
     if (!effectiveTemplate) return null;
-    return computeCostSheet(effectiveTemplate, lines, materialsByCode, rates, {
+    return computeCostSheet(effectiveTemplate, effectiveLines, materialsByCode, rates, {
       uom,
       width: width === "" ? 0 : width,
       height: height === "" ? 0 : height,
       qty: qty === "" ? 0 : qty,
       sellingPricePerSqft: sellPrice === "" ? 0 : sellPrice,
     });
-  }, [effectiveTemplate, lines, materialsByCode, rates, uom, width, height, qty, sellPrice]);
+  }, [effectiveTemplate, effectiveLines, materialsByCode, rates, uom, width, height, qty, sellPrice]);
 
   // Every work centre the FG code is normally set up for, checked or not --
   // rendered as the checklist below so unchecking one is still visible and
@@ -140,7 +177,11 @@ export function CostSheetCalcTab() {
     });
   }
 
-  const unmappedLines = lines.filter((l) => !l.raw_material_code);
+  function selectMaterialForLine(lineId: string, code: string | null) {
+    setSelectedMaterialByLine((prev) => ({ ...prev, [lineId]: code }));
+  }
+
+  const unmappedLines = effectiveLines.filter((l) => !l.raw_material_code);
   const missingRateCentres = result?.workCentreCosts.filter((w) => w.cost === null) ?? [];
 
   return (
@@ -263,29 +304,71 @@ export function CostSheetCalcTab() {
                     </tr>
                   </thead>
                   <tbody>
-                    {result.lineCosts.map((lc) => (
-                      <tr key={lc.line.id} className="border-b border-line/60">
-                        <td className="py-1.5 pr-2 text-ink">{lc.line.material_name}</td>
-                        <td className="py-1.5 pr-2 text-ink-secondary">
-                          {lc.rawMaterial ? `${lc.rawMaterial.code} — ${lc.rawMaterial.name}` : "— unmapped —"}
-                        </td>
-                        <td className="py-1.5 pr-2 text-right">{lc.recentUnitPrice !== null ? lc.recentUnitPrice.toFixed(2) : "—"}</td>
-                        <td className="py-1.5 pr-2 text-right">{lc.avgUnitPrice !== null ? lc.avgUnitPrice.toFixed(2) : "—"}</td>
-                        <td className="py-1.5 pr-2 text-right">
-                          {lc.line.consumption_qty} /{lc.line.basis.toLowerCase()}
-                        </td>
-                        {/* Rate x consumption, with wastage and markup already
-                            folded in -- this is the ₹ this line adds per SQFT
-                            (or per Nos/RFT/etc.) before scaling by the job's
-                            total sqft/qty in the totals below. */}
-                        <td className="py-1.5 pr-2 text-right">
-                          <div className="font-medium text-ink">{lc.recentLineCost.toFixed(2)}</div>
-                          <div className="text-[10px] text-ink-muted">avg {lc.avgLineCost.toFixed(2)}</div>
-                        </td>
-                        <td className="py-1.5 pr-2 text-right">{Math.round(lc.line.wastage_pct * 100)}%</td>
-                        <td className="py-1.5 pr-2 text-right">{Math.round(lc.line.markup_pct * 100)}%</td>
-                      </tr>
-                    ))}
+                    {result.lineCosts.map((lc) => {
+                      const originalLine = originalLinesById.get(lc.line.id);
+                      const alts = alternativesByLine[lc.line.id] ?? [];
+                      // Only show a picker when there's actually a choice --
+                      // a line with no alternatives on file still just shows
+                      // its mapped material as plain text, same as before.
+                      const options: { code: string | null; label: string }[] = [];
+                      if (alts.length > 0) {
+                        const defaultMaterial = originalLine?.raw_material_code
+                          ? materialsByCode.get(originalLine.raw_material_code)
+                          : null;
+                        options.push({
+                          code: originalLine?.raw_material_code ?? null,
+                          label: defaultMaterial
+                            ? `${defaultMaterial.code} — ${defaultMaterial.name} (default)`
+                            : "— unmapped (default) —",
+                        });
+                        for (const alt of alts) {
+                          const m = materialsByCode.get(alt.raw_material_code);
+                          options.push({ code: alt.raw_material_code, label: m ? `${m.code} — ${m.name}` : alt.raw_material_code });
+                        }
+                      }
+                      const currentValue = selectedMaterialByLine[lc.line.id] !== undefined
+                        ? selectedMaterialByLine[lc.line.id]
+                        : (originalLine?.raw_material_code ?? null);
+                      return (
+                        <tr key={lc.line.id} className="border-b border-line/60">
+                          <td className="py-1.5 pr-2 text-ink">{lc.line.material_name}</td>
+                          <td className="py-1.5 pr-2 text-ink-secondary">
+                            {options.length > 0 ? (
+                              <select
+                                value={currentValue ?? ""}
+                                onChange={(e) => selectMaterialForLine(lc.line.id, e.target.value === "" ? null : e.target.value)}
+                                className="h-7 max-w-[220px] rounded-md border border-line-strong bg-surface px-1.5 text-[11px] text-ink outline-none"
+                              >
+                                {options.map((opt) => (
+                                  <option key={opt.code ?? "__none__"} value={opt.code ?? ""}>
+                                    {opt.label}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : lc.rawMaterial ? (
+                              `${lc.rawMaterial.code} — ${lc.rawMaterial.name}`
+                            ) : (
+                              "— unmapped —"
+                            )}
+                          </td>
+                          <td className="py-1.5 pr-2 text-right">{lc.recentUnitPrice !== null ? lc.recentUnitPrice.toFixed(2) : "—"}</td>
+                          <td className="py-1.5 pr-2 text-right">{lc.avgUnitPrice !== null ? lc.avgUnitPrice.toFixed(2) : "—"}</td>
+                          <td className="py-1.5 pr-2 text-right">
+                            {lc.line.consumption_qty} /{lc.line.basis.toLowerCase()}
+                          </td>
+                          {/* Rate x consumption, with wastage and markup already
+                              folded in -- this is the ₹ this line adds per SQFT
+                              (or per Nos/RFT/etc.) before scaling by the job's
+                              total sqft/qty in the totals below. */}
+                          <td className="py-1.5 pr-2 text-right">
+                            <div className="font-medium text-ink">{lc.recentLineCost.toFixed(2)}</div>
+                            <div className="text-[10px] text-ink-muted">avg {lc.avgLineCost.toFixed(2)}</div>
+                          </td>
+                          <td className="py-1.5 pr-2 text-right">{Math.round(lc.line.wastage_pct * 100)}%</td>
+                          <td className="py-1.5 pr-2 text-right">{Math.round(lc.line.markup_pct * 100)}%</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

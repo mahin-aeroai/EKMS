@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/Badge";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/dashboard-queries";
-import type { BomMaterialUnit, BomTemplateLineRow, BomTemplateRow, RawMaterialRow } from "@mmdi/shared/rows";
+import type { BomMaterialUnit, BomTemplateLineAlternativeRow, BomTemplateLineRow, BomTemplateRow, RawMaterialRow } from "@mmdi/shared/rows";
 import { groupByCategory } from "./categoryOrder";
 import { RawMaterialPicker } from "./RawMaterialPicker";
 
@@ -36,6 +36,7 @@ export function BomMasterTab() {
   const [linesByTemplate, setLinesByTemplate] = useState<Record<string, BomTemplateLineRow[]>>({});
   const [materials, setMaterials] = useState<RawMaterialRow[]>([]);
   const [workCentreOptions, setWorkCentreOptions] = useState<string[]>([]);
+  const [alternativesByLine, setAlternativesByLine] = useState<Record<string, BomTemplateLineAlternativeRow[]>>({});
   const [expanded, setExpanded] = useState<string | null>(null);
   const [savingLineId, setSavingLineId] = useState<string | null>(null);
   const [savingWorkCentresId, setSavingWorkCentresId] = useState<string | null>(null);
@@ -73,6 +74,19 @@ export function BomMasterTab() {
         if (error) return;
         const names = Array.from(new Set((data ?? []).map((r) => r.work_centre as string))).sort();
         setWorkCentreOptions(names);
+      });
+    // Small table (one row per alternative raw material per line) --
+    // cheap to load in full up front rather than per-template-expand.
+    supabase
+      .from("bom_template_line_alternatives")
+      .select("*")
+      .then(({ data, error }) => {
+        if (error) return;
+        const byLine: Record<string, BomTemplateLineAlternativeRow[]> = {};
+        for (const row of (data as BomTemplateLineAlternativeRow[]) ?? []) {
+          (byLine[row.line_id] ??= []).push(row);
+        }
+        setAlternativesByLine(byLine);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -178,6 +192,35 @@ export function BomMasterTab() {
     setTemplates((prev) => prev?.map((t) => (t.id === template.id ? { ...t, work_centres: nextWorkCentres } : t)) ?? null);
   }
 
+  // "We have many options under one FG product in BOM materials so we
+  // need to accommodate them for selection at Cost Sheet Page" -- a line's
+  // raw_material_code stays its default; alternatives are extra
+  // acceptable substitutes (e.g. several Frontlit Flex GSM grades all
+  // fulfilling the same "RSD Flex 340GSM" line) the Cost Sheet tab can
+  // offer as a per-job choice.
+  async function addAlternative(lineId: string, code: string) {
+    const { data, error } = await supabase
+      .from("bom_template_line_alternatives")
+      .insert({ line_id: lineId, raw_material_code: code })
+      .select()
+      .single();
+    if (error) {
+      // unique(line_id, raw_material_code) -- already added, not a real error
+      if (error.code !== "23505") toast("danger", `Couldn't add alternative: ${error.message}`);
+      return;
+    }
+    setAlternativesByLine((prev) => ({ ...prev, [lineId]: [...(prev[lineId] ?? []), data as BomTemplateLineAlternativeRow] }));
+  }
+
+  async function removeAlternative(lineId: string, altId: string) {
+    const { error } = await supabase.from("bom_template_line_alternatives").delete().eq("id", altId);
+    if (error) {
+      toast("danger", `Couldn't remove alternative: ${error.message}`);
+      return;
+    }
+    setAlternativesByLine((prev) => ({ ...prev, [lineId]: (prev[lineId] ?? []).filter((a) => a.id !== altId) }));
+  }
+
   if (!templates) return <p className="py-8 text-center text-sm text-ink-muted">Loading…</p>;
 
   const unmappedCount = Object.values(linesByTemplate)
@@ -271,6 +314,38 @@ export function BomMasterTab() {
                                 {!line.raw_material_code && line.suggested_codes && (
                                   <div className="mt-1 max-w-xs text-[11px] italic text-ink-muted">{line.suggested_codes}</div>
                                 )}
+                                {(alternativesByLine[line.id] ?? []).length > 0 && (
+                                  <div className="mt-1.5 flex flex-wrap gap-1">
+                                    {(alternativesByLine[line.id] ?? []).map((alt) => {
+                                      const m = materialsByCode.get(alt.raw_material_code);
+                                      return (
+                                        <span
+                                          key={alt.id}
+                                          className="inline-flex items-center gap-1 rounded bg-surface-sunken px-1.5 py-0.5 text-[10px] text-ink-secondary"
+                                        >
+                                          {alt.raw_material_code}
+                                          {m ? ` — ${m.name}` : ""}
+                                          <button
+                                            type="button"
+                                            aria-label="Remove alternative"
+                                            onClick={() => removeAlternative(line.id, alt.id)}
+                                            className="text-ink-muted hover:text-danger"
+                                          >
+                                            ×
+                                          </button>
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                                <div className="mt-1.5 max-w-xs">
+                                  <p className="mb-0.5 text-[10px] text-ink-muted">+ alternative material</p>
+                                  <RawMaterialPicker
+                                    materials={materials}
+                                    value={null}
+                                    onChange={(code) => code && addAlternative(line.id, code)}
+                                  />
+                                </div>
                               </td>
                               <td className="py-2 pr-2">
                                 <select
