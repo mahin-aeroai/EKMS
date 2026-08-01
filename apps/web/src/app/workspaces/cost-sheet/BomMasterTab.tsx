@@ -1,14 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Copy, Plus, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/dashboard-queries";
 import type { BomMaterialUnit, BomTemplateLineAlternativeRow, BomTemplateLineRow, BomTemplateRow, RawMaterialRow } from "@mmdi/shared/rows";
 import { PRINT_DEPENDENT_WORK_CENTRES } from "./calc";
-import { groupByCategory } from "./categoryOrder";
+import { COST_SHEET_CATEGORY_ORDER, groupByCategory } from "./categoryOrder";
 import { RawMaterialPicker } from "./RawMaterialPicker";
 
 // Real-world consumption units, matching how materials are actually
@@ -51,6 +51,30 @@ export function BomMasterTab() {
   const [editingPrintModeId, setEditingPrintModeId] = useState<string | null>(null);
   const [printModeDraft, setPrintModeDraft] = useState("");
   const [savingPrintModeId, setSavingPrintModeId] = useState<string | null>(null);
+  // Same editable-badge treatment as print_mode above -- substrate_type is
+  // the other half of a work centre rate's pricing key, and "clone it and
+  // change it" needs both editable (e.g. cloning a Vinyl FG code as a
+  // Fabric variant).
+  const [substrateOptions, setSubstrateOptions] = useState<string[]>([]);
+  const [editingSubstrateId, setEditingSubstrateId] = useState<string | null>(null);
+  const [substrateDraft, setSubstrateDraft] = useState("");
+  const [savingSubstrateId, setSavingSubstrateId] = useState<string | null>(null);
+  // "I can't create new BOM or clone it and change it?" -- BOM templates
+  // were only ever created via seed SQL; there was no in-app way to add a
+  // brand new FG code, or to spin off a variant of an existing one (e.g.
+  // to try a new print mode/substrate without touching the original).
+  const [showNewTemplateForm, setShowNewTemplateForm] = useState(false);
+  const [newTemplateDraft, setNewTemplateDraft] = useState({
+    code: "",
+    description: "",
+    category: COST_SHEET_CATEGORY_ORDER[0] as string,
+    print_mode: "",
+    substrate_type: "",
+  });
+  const [creatingTemplate, setCreatingTemplate] = useState(false);
+  const [cloningId, setCloningId] = useState<string | null>(null);
+  const [cloneCodeDraft, setCloneCodeDraft] = useState("");
+  const [savingCloneId, setSavingCloneId] = useState<string | null>(null);
   const materialsByCode = useMemo(() => new Map(materials.map((m) => [m.code, m])), [materials]);
 
   useEffect(() => {
@@ -66,6 +90,7 @@ export function BomMasterTab() {
         const rows = (data as BomTemplateRow[]) ?? [];
         setTemplates(rows);
         setPrintModeOptions(Array.from(new Set(rows.map((t) => t.print_mode))).sort());
+        setSubstrateOptions(Array.from(new Set(rows.map((t) => t.substrate_type))).sort());
       });
     // raw_materials is ~1,558 rows -- past PostgREST's default 1000-row
     // cap on an unpaginated select, which was silently cutting the picker's
@@ -186,6 +211,42 @@ export function BomMasterTab() {
     setLinesByTemplate((prev) => ({ ...prev, [templateId]: (prev[templateId] ?? []).filter((l) => l.id !== lineId) }));
   }
 
+  // Every work centre/print mode/substrate combo needs its own rate row in
+  // work_centre_rates (unique on that triple) before the Cost Sheet tab can
+  // price it -- Rate Card can only edit rates for combos that already
+  // exist, it can't create a brand new one. Shared by updatePrintMode,
+  // updateSubstrateType, toggleWorkCentre (adding a new work centre), and
+  // createTemplate/cloneTemplate below -- upserts a 'missing' rate row
+  // (rate NULL) for each work centre in `workCentres`, keyed on printMode
+  // for the print-dependent ones (WC1A-D, WC3) and '-' for everything
+  // else, same split as calc.ts's computeWorkCentreCost. ignoreDuplicates
+  // means calling this for combos that already exist is a safe no-op.
+  async function ensureRateCombos(workCentres: string[], printMode: string, substrateType: string, templateCode: string) {
+    if (workCentres.length === 0) return;
+    const note = `Auto-created for ${templateCode} in BOM Master -- enter the real rate here.`;
+    const rows = workCentres.map((wc) => ({
+      work_centre: wc,
+      print_mode: PRINT_DEPENDENT_WORK_CENTRES.has(wc) ? printMode : "-",
+      substrate: substrateType,
+      rate_basis: "per_sqft",
+      rate: null,
+      confidence: "missing",
+      note,
+    }));
+    const { data: newRates, error } = await supabase
+      .from("work_centre_rates")
+      .upsert(rows, { onConflict: "work_centre,print_mode,substrate", ignoreDuplicates: true })
+      .select();
+    if (error) {
+      toast("danger", `Couldn't set up rate combos: ${error.message}`);
+    } else if ((newRates ?? []).length > 0) {
+      toast(
+        "info",
+        `${newRates!.length} new rate combo${newRates!.length === 1 ? "" : "s"} added to the Rate Card tab (missing rate) -- enter the real ₹ there.`
+      );
+    }
+  }
+
   // "Workcentres are fixed now let us make it applicable or not so that we
   // can keep or remove" -- checking a work centre adds it to this
   // template's work_centres, unchecking removes it. Saved directly on
@@ -203,22 +264,20 @@ export function BomMasterTab() {
       return;
     }
     setTemplates((prev) => prev?.map((t) => (t.id === template.id ? { ...t, work_centres: nextWorkCentres } : t)) ?? null);
+    // Newly-checked work centre might be a combo (this print mode +
+    // substrate) that's never existed before -- seed it as 'missing' so
+    // it's priceable on the Rate Card tab instead of silently costing ₹0.
+    if (applicable) {
+      void ensureRateCombos([workCentre], template.print_mode, template.substrate_type, template.code);
+    }
   }
 
   // "Work centre 1 A-D has different modes like production, quality,
   // backlit print, multiple layers print -- how do we add the costing?"
-  // Each work centre/print mode/substrate combo needs its own rate in
-  // work_centre_rates (unique on that triple) before the Cost Sheet tab
-  // can price it. Changing a template's print_mode here to a new value
-  // (typed, not just picked from the list) would otherwise leave every
-  // print-dependent work centre this FG code uses (WC1A-D, WC3) with no
-  // rate row to price against at all -- Rate Card only lets you edit rates
-  // for combos that already exist, it can't create a brand new one. So
-  // this also seeds a 'missing' rate row (rate NULL) for each such work
-  // centre + the new print mode + this template's substrate, via upsert
-  // with ignoreDuplicates so re-picking an already-seeded mode is a no-op.
-  // Those show up on the Rate Card tab exactly like any other missing
-  // rate, ready to have the real ₹ entered.
+  // print_mode is editable per FG code: pick an existing mode (e.g.
+  // "Backlit Print") or type a brand new one (e.g. "UV Printing - Quality"
+  // or "UV Printing - 2 Layer"). See ensureRateCombos above for what
+  // happens to pricing when it changes.
   async function updatePrintMode(template: BomTemplateRow, rawNewMode: string) {
     const newMode = rawNewMode.trim();
     if (!newMode || newMode === template.print_mode) {
@@ -235,34 +294,175 @@ export function BomMasterTab() {
     setTemplates((prev) => prev?.map((t) => (t.id === template.id ? { ...t, print_mode: newMode } : t)) ?? null);
     setPrintModeOptions((prev) => (prev.includes(newMode) ? prev : [...prev, newMode].sort()));
     setEditingPrintModeId(null);
+    await ensureRateCombos(template.work_centres, newMode, template.substrate_type, template.code);
+    setSavingPrintModeId(null);
+  }
 
-    const printDependentCentres = template.work_centres.filter((wc) => PRINT_DEPENDENT_WORK_CENTRES.has(wc));
-    if (printDependentCentres.length > 0) {
-      const { data: newRates, error: rateError } = await supabase
-        .from("work_centre_rates")
-        .upsert(
-          printDependentCentres.map((wc) => ({
-            work_centre: wc,
-            print_mode: newMode,
-            substrate: template.substrate_type,
-            rate_basis: "per_sqft",
-            rate: null,
-            confidence: "missing",
-            note: `Auto-created when ${template.code}'s print mode was set to "${newMode}" in BOM Master -- enter the real rate here.`,
-          })),
-          { onConflict: "work_centre,print_mode,substrate", ignoreDuplicates: true }
+  // Same editable-badge treatment, for the other half of a work centre
+  // rate's pricing key. Unlike print_mode, a substrate change affects
+  // EVERY work centre this FG code uses (not just the print-dependent
+  // ones) since substrate is part of every rate's lookup key.
+  async function updateSubstrateType(template: BomTemplateRow, rawNewSubstrate: string) {
+    const newSubstrate = rawNewSubstrate.trim();
+    if (!newSubstrate || newSubstrate === template.substrate_type) {
+      setEditingSubstrateId(null);
+      return;
+    }
+    setSavingSubstrateId(template.id);
+    const { error } = await supabase.from("bom_templates").update({ substrate_type: newSubstrate }).eq("id", template.id);
+    if (error) {
+      setSavingSubstrateId(null);
+      toast("danger", `Couldn't save substrate: ${error.message}`);
+      return;
+    }
+    setTemplates((prev) => prev?.map((t) => (t.id === template.id ? { ...t, substrate_type: newSubstrate } : t)) ?? null);
+    setSubstrateOptions((prev) => (prev.includes(newSubstrate) ? prev : [...prev, newSubstrate].sort()));
+    setEditingSubstrateId(null);
+    await ensureRateCombos(template.work_centres, template.print_mode, newSubstrate, template.code);
+    setSavingSubstrateId(null);
+  }
+
+  // "I can't create new BOM or clone it and change it?" -- adds a brand
+  // new FG code from scratch (no lines, no work centres yet -- add those
+  // below same as any template). See cloneTemplate below for the other
+  // half: copying an existing FG code's lines/work centres/alternatives
+  // wholesale, then changing just what's different about the variant.
+  async function createTemplate() {
+    const code = newTemplateDraft.code.trim();
+    const description = newTemplateDraft.description.trim();
+    const printMode = newTemplateDraft.print_mode.trim();
+    const substrateType = newTemplateDraft.substrate_type.trim();
+    if (!code || !description || !printMode || !substrateType) {
+      toast("danger", "Code, description, print mode, and substrate are all required.");
+      return;
+    }
+    setCreatingTemplate(true);
+    const { data, error } = await supabase
+      .from("bom_templates")
+      .insert({
+        code,
+        description,
+        category: newTemplateDraft.category,
+        print_mode: printMode,
+        substrate_type: substrateType,
+        work_centres: [],
+      })
+      .select()
+      .single();
+    setCreatingTemplate(false);
+    if (error) {
+      toast("danger", error.code === "23505" ? `"${code}" already exists` : `Couldn't create FG code: ${error.message}`);
+      return;
+    }
+    const newTemplate = data as BomTemplateRow;
+    setTemplates((prev) => (prev ? [...prev, newTemplate] : [newTemplate]));
+    setLinesByTemplate((prev) => ({ ...prev, [newTemplate.id]: [] }));
+    setPrintModeOptions((prev) => (prev.includes(printMode) ? prev : [...prev, printMode].sort()));
+    setSubstrateOptions((prev) => (prev.includes(substrateType) ? prev : [...prev, substrateType].sort()));
+    setShowNewTemplateForm(false);
+    setNewTemplateDraft({ code: "", description: "", category: COST_SHEET_CATEGORY_ORDER[0], print_mode: "", substrate_type: "" });
+    setExpanded(newTemplate.id);
+    toast("success", `${code} created -- add its material lines and work centres below.`);
+  }
+
+  // Copies a template's own fields plus every material line (and each
+  // line's alternatives) under a new code -- the fast path for "start from
+  // a working FG code, then change its print mode/substrate/lines for a
+  // variant" instead of rebuilding one from scratch.
+  async function cloneTemplate(source: BomTemplateRow, rawNewCode: string) {
+    const code = rawNewCode.trim();
+    if (!code) return;
+    setSavingCloneId(source.id);
+
+    const { data: newTemplateData, error: templateError } = await supabase
+      .from("bom_templates")
+      .insert({
+        code,
+        description: `${source.description} (copy)`,
+        category: source.category,
+        print_mode: source.print_mode,
+        substrate_type: source.substrate_type,
+        work_centres: source.work_centres,
+      })
+      .select()
+      .single();
+    if (templateError || !newTemplateData) {
+      setSavingCloneId(null);
+      toast("danger", templateError?.code === "23505" ? `"${code}" already exists` : `Couldn't clone: ${templateError?.message}`);
+      return;
+    }
+    const newTemplate = newTemplateData as BomTemplateRow;
+
+    let sourceLines = linesByTemplate[source.id];
+    if (!sourceLines) {
+      const { data, error } = await supabase.from("bom_template_lines").select("*").eq("template_id", source.id).order("line_no");
+      if (error) toast("danger", `Cloned ${code}, but couldn't read its material lines to copy: ${error.message}`);
+      sourceLines = (data as BomTemplateLineRow[]) ?? [];
+    }
+
+    let newLines: BomTemplateLineRow[] = [];
+    if (sourceLines.length > 0) {
+      const { data: insertedLines, error: linesError } = await supabase
+        .from("bom_template_lines")
+        .insert(
+          sourceLines.map((l) => ({
+            template_id: newTemplate.id,
+            line_no: l.line_no,
+            material_name: l.material_name,
+            material_category: l.material_category,
+            raw_material_code: l.raw_material_code,
+            suggested_codes: null,
+            basis: l.basis,
+            consumption_qty: l.consumption_qty,
+            wastage_pct: l.wastage_pct,
+            markup_pct: l.markup_pct,
+          }))
         )
         .select();
-      if (rateError) {
-        toast("danger", `Print mode saved, but couldn't set up rate combos: ${rateError.message}`);
-      } else if ((newRates ?? []).length > 0) {
-        toast(
-          "info",
-          `${newRates!.length} new rate combo${newRates!.length === 1 ? "" : "s"} added to the Rate Card tab (missing rate) -- enter the real ₹ there.`
-        );
+      if (linesError) {
+        toast("danger", `Cloned ${code}, but couldn't copy its material lines: ${linesError.message}`);
+      } else {
+        newLines = (insertedLines as BomTemplateLineRow[]) ?? [];
       }
     }
-    setSavingPrintModeId(null);
+
+    const newLineIdByLineNo = new Map(newLines.map((l) => [l.line_no, l.id]));
+    const altRowsToInsert: { line_id: string; raw_material_code: string }[] = [];
+    for (const oldLine of sourceLines) {
+      const newLineId = newLineIdByLineNo.get(oldLine.line_no);
+      if (!newLineId) continue;
+      for (const alt of alternativesByLine[oldLine.id] ?? []) {
+        altRowsToInsert.push({ line_id: newLineId, raw_material_code: alt.raw_material_code });
+      }
+    }
+    let newAlternatives: BomTemplateLineAlternativeRow[] = [];
+    if (altRowsToInsert.length > 0) {
+      const { data: insertedAlts, error: altError } = await supabase
+        .from("bom_template_line_alternatives")
+        .insert(altRowsToInsert)
+        .select();
+      if (!altError) newAlternatives = (insertedAlts as BomTemplateLineAlternativeRow[]) ?? [];
+    }
+
+    await ensureRateCombos(newTemplate.work_centres, newTemplate.print_mode, newTemplate.substrate_type, newTemplate.code);
+
+    setTemplates((prev) => (prev ? [...prev, newTemplate] : [newTemplate]));
+    setLinesByTemplate((prev) => ({ ...prev, [newTemplate.id]: newLines }));
+    if (newAlternatives.length > 0) {
+      setAlternativesByLine((prev) => {
+        const next = { ...prev };
+        for (const alt of newAlternatives) {
+          next[alt.line_id] = [...(next[alt.line_id] ?? []), alt];
+        }
+        return next;
+      });
+    }
+    setPrintModeOptions((prev) => (prev.includes(newTemplate.print_mode) ? prev : [...prev, newTemplate.print_mode].sort()));
+    setSubstrateOptions((prev) => (prev.includes(newTemplate.substrate_type) ? prev : [...prev, newTemplate.substrate_type].sort()));
+    setCloningId(null);
+    setSavingCloneId(null);
+    setExpanded(newTemplate.id);
+    toast("success", `Cloned as ${code} -- change its print mode, substrate, or lines below.`);
   }
 
   // "We have many options under one FG product in BOM materials so we
@@ -312,6 +512,101 @@ export function BomMasterTab() {
         )}
       </p>
 
+      {!showNewTemplateForm ? (
+        <button
+          type="button"
+          onClick={() => setShowNewTemplateForm(true)}
+          className="mb-4 flex items-center gap-1 rounded-md border border-dashed border-line-strong px-2.5 py-1.5 text-xs font-medium text-ink-secondary hover:border-primary hover:text-primary"
+        >
+          <Plus size={14} />
+          New FG Code
+        </button>
+      ) : (
+        <div className="mb-4 rounded-lg border border-line bg-surface p-4">
+          <h4 className="mb-3 text-sm font-semibold text-ink">New FG Code</h4>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <Field label="Code">
+              <input
+                type="text"
+                value={newTemplateDraft.code}
+                onChange={(e) => setNewTemplateDraft((prev) => ({ ...prev, code: e.target.value }))}
+                placeholder="e.g. UVSD-Vinyl-Quality"
+                className="h-9 w-full rounded-md border border-line-strong bg-surface px-2.5 text-sm text-ink outline-none"
+              />
+            </Field>
+            <Field label="Description">
+              <input
+                type="text"
+                value={newTemplateDraft.description}
+                onChange={(e) => setNewTemplateDraft((prev) => ({ ...prev, description: e.target.value }))}
+                placeholder="e.g. Digital UV Frontlit Vinyl - Quality tier"
+                className="h-9 w-full rounded-md border border-line-strong bg-surface px-2.5 text-sm text-ink outline-none"
+              />
+            </Field>
+            <Field label="Category">
+              <select
+                value={newTemplateDraft.category}
+                onChange={(e) => setNewTemplateDraft((prev) => ({ ...prev, category: e.target.value }))}
+                className="h-9 w-full rounded-md border border-line-strong bg-surface px-2.5 text-sm text-ink outline-none"
+              >
+                {COST_SHEET_CATEGORY_ORDER.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Print Mode">
+              <input
+                type="text"
+                list="new-template-print-modes"
+                value={newTemplateDraft.print_mode}
+                onChange={(e) => setNewTemplateDraft((prev) => ({ ...prev, print_mode: e.target.value }))}
+                placeholder="e.g. Frontlit Print"
+                className="h-9 w-full rounded-md border border-line-strong bg-surface px-2.5 text-sm text-ink outline-none"
+              />
+              <datalist id="new-template-print-modes">
+                {printModeOptions.map((pm) => (
+                  <option key={pm} value={pm} />
+                ))}
+              </datalist>
+            </Field>
+            <Field label="Substrate">
+              <input
+                type="text"
+                list="new-template-substrates"
+                value={newTemplateDraft.substrate_type}
+                onChange={(e) => setNewTemplateDraft((prev) => ({ ...prev, substrate_type: e.target.value }))}
+                placeholder="e.g. Vinyl"
+                className="h-9 w-full rounded-md border border-line-strong bg-surface px-2.5 text-sm text-ink outline-none"
+              />
+              <datalist id="new-template-substrates">
+                {substrateOptions.map((s) => (
+                  <option key={s} value={s} />
+                ))}
+              </datalist>
+            </Field>
+          </div>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              onClick={createTemplate}
+              disabled={creatingTemplate}
+              className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+            >
+              {creatingTemplate ? "Creating…" : "Create"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowNewTemplateForm(false)}
+              className="rounded-md border border-line-strong px-3 py-1.5 text-xs font-medium text-ink-secondary"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col gap-6">
         {templateGroups.map((group) => (
           <div key={group.category}>
@@ -328,11 +623,10 @@ export function BomMasterTab() {
                   </div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-1">
                     <Badge status="info">{t.category}</Badge>
-                    <Badge status="neutral">{t.substrate_type}</Badge>
                   </div>
                 </div>
               </button>
-              <div className="flex shrink-0 items-center gap-2" onClick={(e) => e.stopPropagation()}>
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
                 {editingPrintModeId === t.id ? (
                   <input
                     type="text"
@@ -358,7 +652,7 @@ export function BomMasterTab() {
                         updatePrintMode(t, e.target.value);
                       }
                     }}
-                    className="h-7 max-w-[180px] rounded-md border border-line-strong bg-surface px-1.5 text-[11px] text-ink outline-none"
+                    className="h-7 max-w-[160px] rounded-md border border-line-strong bg-surface px-1.5 text-[11px] text-ink outline-none"
                   >
                     {!printModeOptions.includes(t.print_mode) && <option value={t.print_mode}>{t.print_mode}</option>}
                     {printModeOptions.map((pm) => (
@@ -369,8 +663,90 @@ export function BomMasterTab() {
                     <option value="__new__">+ New print mode…</option>
                   </select>
                 )}
-                {savingPrintModeId === t.id && <span className="text-[11px] text-ink-muted">saving…</span>}
+                {editingSubstrateId === t.id ? (
+                  <input
+                    type="text"
+                    autoFocus
+                    value={substrateDraft}
+                    onChange={(e) => setSubstrateDraft(e.target.value)}
+                    onBlur={() => updateSubstrateType(t, substrateDraft)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") updateSubstrateType(t, substrateDraft);
+                      if (e.key === "Escape") setEditingSubstrateId(null);
+                    }}
+                    placeholder="e.g. Vinyl"
+                    className="h-7 w-32 rounded-md border border-line-strong bg-surface px-1.5 text-xs text-ink outline-none"
+                  />
+                ) : (
+                  <select
+                    value={t.substrate_type}
+                    onChange={(e) => {
+                      if (e.target.value === "__new__") {
+                        setSubstrateDraft("");
+                        setEditingSubstrateId(t.id);
+                      } else {
+                        updateSubstrateType(t, e.target.value);
+                      }
+                    }}
+                    className="h-7 max-w-[130px] rounded-md border border-line-strong bg-surface px-1.5 text-[11px] text-ink outline-none"
+                  >
+                    {!substrateOptions.includes(t.substrate_type) && <option value={t.substrate_type}>{t.substrate_type}</option>}
+                    {substrateOptions.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                    <option value="__new__">+ New substrate…</option>
+                  </select>
+                )}
+                {(savingPrintModeId === t.id || savingSubstrateId === t.id) && (
+                  <span className="text-[11px] text-ink-muted">saving…</span>
+                )}
                 <span className="text-xs text-ink-muted">{t.work_centres.length} work centres</span>
+                {cloningId === t.id ? (
+                  <>
+                    <input
+                      type="text"
+                      autoFocus
+                      value={cloneCodeDraft}
+                      onChange={(e) => setCloneCodeDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") cloneTemplate(t, cloneCodeDraft);
+                        if (e.key === "Escape") setCloningId(null);
+                      }}
+                      placeholder="new code"
+                      className="h-7 w-32 rounded-md border border-line-strong bg-surface px-1.5 text-xs text-ink outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => cloneTemplate(t, cloneCodeDraft)}
+                      disabled={savingCloneId === t.id}
+                      className="rounded-md bg-primary px-2 py-1 text-[11px] font-medium text-white disabled:opacity-50"
+                    >
+                      {savingCloneId === t.id ? "Cloning…" : "Confirm"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCloningId(null)}
+                      className="rounded-md border border-line-strong px-2 py-1 text-[11px] text-ink-secondary"
+                    >
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    aria-label="Clone this FG code"
+                    title="Clone this FG code"
+                    onClick={() => {
+                      setCloneCodeDraft(`${t.code}-COPY`);
+                      setCloningId(t.id);
+                    }}
+                    className="text-ink-muted hover:text-primary"
+                  >
+                    <Copy size={14} />
+                  </button>
+                )}
               </div>
             </div>
 
@@ -552,6 +928,15 @@ export function BomMasterTab() {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="mb-1 block text-xs font-medium text-ink-secondary">{label}</label>
+      {children}
     </div>
   );
 }
