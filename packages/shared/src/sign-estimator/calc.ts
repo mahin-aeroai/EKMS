@@ -801,21 +801,26 @@ export function computePrint(
 // ═══════════════════════════════════════════════════════════
 //  PRICING
 //
-//  Sold as THREE separate commercial components, per the shop's real
-//  invoicing: Signage (the frame/structure), Printing, and Installation.
-//  Only Signage runs through the full cost-plus pipeline (raw material +
-//  overhead% + labour, marked up %, then discount %) -- Printing and
-//  Installation are each posted directly as a final selling price with no
-//  cost-plus math applied, because the shop prices those two however it
-//  sees fit (a print vendor rate, a flat site-visit fee, etc.) rather than
-//  computing them from cost. GST is still applied ONCE, on the combined
-//  total of all three, matching a single-invoice GST line.
+//  Sold as FOUR separate commercial components, per the shop's real
+//  invoicing: Signage (the frame/structure), Printing, Shipping, and
+//  Installation. Only Signage runs through the full cost-plus pipeline (raw
+//  material + overhead% + labour, marked up %, then discount %) to arrive
+//  at a SUGGESTED price -- but, like Printing, that suggestion can be
+//  overridden with a final posted price, and either component can be
+//  priced as a flat lumpsum OR as a ₹/sq.ft rate × its own area ("we
+//  conclude the price either lumpsum or sqft price, for both signage and
+//  print" -- the caller resolves the basis and passes in the resulting
+//  total; this function only ever deals in already-resolved totals).
+//  Shipping and Installation are always posted directly with no cost-plus
+//  math, same reasoning as before. GST is applied ONCE, on the combined
+//  total of all four, matching a single-invoice GST line.
 //
 //  `printCostRefPerSign` is carried through purely as a reference/margin
 //  figure (what printing would have cost on a cost-plus basis) -- it never
-//  feeds the selling price. Installation has no cost tracked at all (the
-//  shop doesn't cost it), so it contributes its full posted price to
-//  margin with no offsetting cost, same as any other pure-service line.
+//  feeds the selling price. Shipping/Installation have no cost tracked at
+//  all (the shop doesn't cost them), so they contribute their full posted
+//  price to margin with no offsetting cost, same as any other pure-service
+//  line.
 // ═══════════════════════════════════════════════════════════
 export interface PricingInputs {
   qty: number;
@@ -842,18 +847,22 @@ export interface PricingResult {
   costAll: number; // × qty
   sellBD: number; // × qty, before discount
   discAmt: number;
-  signageSell: number; // × qty, after discount, ex-GST
+  signageSellSuggested: number; // × qty, after discount, ex-GST -- cost-plus suggestion before any override
+  signageSell: number; // × qty, after discount, ex-GST -- what actually gets invoiced (override or suggestion)
 
   // Printing -- posted selling price, no cost-plus. printCostRef is the
   // computed cost-plus estimate, kept only for margin/reference.
   printCostRef: number; // per sign
   printSell: number; // total, as posted, ex-GST
 
+  // Shipping -- posted selling price, no cost tracked at all.
+  shipping: number; // total, as posted, ex-GST
+
   // Installation -- posted selling price, no cost tracked at all.
   installSell: number; // total, as posted, ex-GST
 
   // Combined invoice total.
-  sell: number; // signageSell + printSell + installSell, ex-GST
+  sell: number; // signageSell + printSell + shipping + installSell, ex-GST
   gstAmt: number;
   final: number;
   margin: number;
@@ -862,8 +871,10 @@ export interface PricingResult {
 
 export function computePricing(
   signageCosts: SignageCostInputs,
+  signageSellOverrideTotal: number | null,
   printCostRefPerSign: number,
   printSellTotal: number,
+  shippingTotal: number,
   installSellTotal: number,
   p: PricingInputs
 ): PricingResult {
@@ -873,18 +884,20 @@ export function computePricing(
   const costAll = costPer * p.qty;
   const sellBD = Math.round(costAll * (1 + p.markupPct / 100));
   const discAmt = Math.round(sellBD * (p.discountPct / 100));
-  const signageSell = sellBD - discAmt;
+  const signageSellSuggested = sellBD - discAmt;
+  const signageSell = signageSellOverrideTotal !== null ? signageSellOverrideTotal : signageSellSuggested;
 
   const printCostAll = (printCostRefPerSign || 0) * p.qty;
-  const sell = signageSell + (printSellTotal || 0) + (installSellTotal || 0);
+  const sell = signageSell + (printSellTotal || 0) + (shippingTotal || 0) + (installSellTotal || 0);
   const gstAmt = Math.round(sell * (p.gstPct / 100));
   const final = sell + gstAmt;
-  const trueCostAll = costAll + printCostAll; // installation has no tracked cost
+  const trueCostAll = costAll + printCostAll; // shipping/installation have no tracked cost
   const margin = sell > 0 ? Math.round(((sell - trueCostAll) / sell) * 100) : 0;
   const mgnAmt = sell - trueCostAll;
   return {
-    raw, ovh, costPer, costAll, sellBD, discAmt, signageSell,
+    raw, ovh, costPer, costAll, sellBD, discAmt, signageSellSuggested, signageSell,
     printCostRef: printCostRefPerSign || 0, printSell: printSellTotal || 0,
+    shipping: shippingTotal || 0,
     installSell: installSellTotal || 0,
     sell, gstAmt, final, margin, mgnAmt,
   };
