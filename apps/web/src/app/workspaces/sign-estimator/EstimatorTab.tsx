@@ -159,6 +159,11 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
   const hMM = h === "" ? 0 : toMM(h, unit);
   const isLit = category !== "" && category !== "nonlit";
   const profile = masters?.profiles.find((p) => p.id === profileId) ?? null;
+  // profile.cost is per full stock bar, not per running length -- Section 1
+  // of Step 6 wants the per-RFT/per-running-metre rate actually used to
+  // arrive at that bar cost, so it's derived here once rather than inline.
+  const profRatePerRFT = profile && profile.stock_len > 0 ? profile.cost / (profile.stock_len / 304.8) : 0;
+  const profRatePerRM = profile && profile.stock_len > 0 ? profile.cost / (profile.stock_len / 1000) : 0;
   const profilesForCategory = useMemo(() => {
     if (!masters || !category) return [];
     const catKey = CATEGORY_TO_PROFILE_CATEGORY[category];
@@ -892,12 +897,41 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
               <tbody>
                 <Row
                   label="Profile"
-                  detail={profResult ? `${(profResult.analysis.totalUsed / 304.8).toFixed(1)} RFT · ${profResult.analysis.totalBars} bar(s)` : ""}
+                  detail={
+                    profile && profResult ? (
+                      <>
+                        <div>
+                          {profile.name}
+                          {profile.width && profile.depth ? ` — ${profile.width}×${profile.depth}mm section` : ""}
+                        </div>
+                        <div>
+                          {(profile.stock_len / 1000).toFixed(2)}m stock bar @ {fmtRupee(profile.cost)}/bar (₹{profRatePerRFT.toFixed(2)}/RFT
+                          {" · "}₹{profRatePerRM.toFixed(2)}/RM) — {profResult.analysis.totalBars} bar(s), {(profResult.analysis.totalUsed / 304.8).toFixed(1)} RFT used
+                        </div>
+                      </>
+                    ) : (
+                      ""
+                    )
+                  }
                   value={fmtRupee(profResult?.analysis.totalCost ?? 0)}
                 />
                 <Row
                   label="Backing Sheet"
-                  detail={sheetResult ? `${sheetResult.chargeable.toFixed(2)} sq.ft` : ""}
+                  detail={
+                    sheet && sheetResult ? (
+                      <>
+                        <div>
+                          {sheet.name}
+                          {sheet.thickness ? ` (${sheet.thickness}mm)` : ""}
+                        </div>
+                        <div>
+                          ₹{sheetResult.cpSqFt}/sq.ft × {sheetResult.chargeable.toFixed(2)} sq.ft chargeable
+                        </div>
+                      </>
+                    ) : (
+                      ""
+                    )
+                  }
                   value={fmtRupee(sheetResult?.chargedCost ?? 0)}
                 />
                 <Row
@@ -908,17 +942,44 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
                 <Row
                   label={`LED ${ledMode === "bar" ? "Bars" : "Modules"}`}
                   detail={
-                    ledMode === "bar" && barResult
-                      ? `${barResult.totalPieces} pieces · ${barResult.numBars} bar(s)`
-                      : ledMode === "module" && moduleResult
-                      ? `${moduleResult.total} modules`
-                      : ""
+                    ledMode === "bar" && barResult && ledBar ? (
+                      <>
+                        <div>
+                          {ledBar.name} — {ledBar.watt}W/piece{ledBar.ip ? `, IP${ledBar.ip}` : ""}
+                        </div>
+                        <div>
+                          {barResult.totalPieces} pieces · {barResult.numBars} bar(s) × {(ledBar.bar_len / 1000).toFixed(2)}m run — {barResult.watt}W total
+                        </div>
+                      </>
+                    ) : ledMode === "module" && moduleResult && ledMod ? (
+                      <>
+                        <div>
+                          {ledMod.name} — {ledMod.watt}W/module{ledMod.ip ? `, IP${ledMod.ip}` : ""}
+                        </div>
+                        <div>
+                          {moduleResult.cols}×{moduleResult.rows} grid, {moduleResult.total} modules — {moduleResult.watt}W total
+                        </div>
+                      </>
+                    ) : (
+                      ""
+                    )
                   }
                   value={fmtRupee(ledCost)}
                 />
                 <Row
                   label="LED Drivers"
-                  detail={driverFinal ? `${driverFinal.qty} × ${driverFinal.watt}W` : ""}
+                  detail={
+                    driverFinal ? (
+                      <>
+                        <div>{driverResult?.selected[0]?.drv.brand ?? "—"}</div>
+                        <div>
+                          {driverFinal.qty} × {driverFinal.watt}W ({driverFinal.util}% load)
+                        </div>
+                      </>
+                    ) : (
+                      ""
+                    )
+                  }
                   value={fmtRupee(driverFinal?.totalCost ?? 0)}
                 />
                 <Row label="Raw Material Cost — Signage (per sign)" value={fmtRupee(pricing.raw)} strong />
@@ -1205,7 +1266,23 @@ function CuttingDiagram({ bins, stockLen }: { bins: CutBin[]; stockLen: number }
     </div>
   );
 }
-function Row({ label, detail, value, strong, big }: { label: string; detail?: string; value: string; strong?: boolean; big?: boolean }) {
+function Row({
+  label,
+  detail,
+  value,
+  strong,
+  big,
+}: {
+  label: string;
+  // ReactNode (not just string) so a line item can carry a real spec
+  // breakdown -- e.g. profile cross-section size + stock rate on one line,
+  // its bars-used/RFT-consumed reference on the next -- instead of a single
+  // run-on sentence.
+  detail?: React.ReactNode;
+  value: string;
+  strong?: boolean;
+  big?: boolean;
+}) {
   return (
     <tr className={`border-t border-line ${strong ? "bg-surface-sunken" : ""}`}>
       <td className={`p-2 ${strong ? "font-semibold text-ink" : "text-ink-secondary"} ${big ? "text-base" : ""}`}>{label}</td>
