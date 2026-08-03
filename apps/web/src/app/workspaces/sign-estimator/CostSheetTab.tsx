@@ -434,7 +434,11 @@ function Row({
   return (
     <tr className="border-t border-line first:border-t-0">
       <td className={`p-1 align-top ${strong ? "font-semibold text-ink" : "text-ink-secondary"} ${big ? "text-sm" : "text-xs"}`}>{label}</td>
-      <td className="p-1 align-top text-[11px] text-ink-muted">{detail}</td>
+      {/* Plain neutral grey, not the app-wide --ink-muted token -- that
+          token carries a slight blue tint (used everywhere else for
+          "muted" text), which read as an odd light-blue/lavender color
+          for this dense block of material-spec detail text specifically. */}
+      <td className="p-1 align-top text-[11px] text-[#6b7280]">{detail}</td>
       <td className={`p-1 whitespace-nowrap text-right align-top ${strong ? "font-semibold text-ink" : "text-ink-secondary"} ${big ? "text-sm" : "text-xs"}`}>{value}</td>
     </tr>
   );
