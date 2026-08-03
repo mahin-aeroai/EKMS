@@ -293,11 +293,11 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
           )}
         </Card>
 
-        <Card title="Printing, Shipping & Installation — Posted Selling Price (no cost-plus)" full>
+        <Card title="Printing, Packing & Forwarding, Installation — Posted Selling Price (no cost-plus)" full>
           {editing ? (
             <div className="grid grid-cols-1 gap-3 py-2 sm:grid-cols-3">
               <EditField label="Printing Selling Price (₹)" value={ePrintSell} onChange={setEPrintSell} />
-              <EditField label="Shipping (₹)" value={eShipping} onChange={setEShipping} />
+              <EditField label="Packing & Forwarding (₹)" value={eShipping} onChange={setEShipping} />
               <EditField label="Installation Selling Price (₹)" value={eInstallSell} onChange={setEInstallSell} />
             </div>
           ) : (
@@ -306,7 +306,7 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
                 <KV k="Printing Rate" v={`₹${c.pricing.printRatePerSqft}/sq.ft`} />
               )}
               <KV k="Printing Selling Price" v={fmtRupee(c.pricing.printSell ?? 0)} />
-              <KV k="Shipping" v={fmtRupee(c.pricing.shipping ?? 0)} />
+              <KV k="Packing & Forwarding" v={fmtRupee(c.pricing.shipping ?? 0)} />
               <KV k="Installation Selling Price" v={fmtRupee(c.pricing.installSell ?? 0)} />
             </>
           )}

@@ -869,79 +869,17 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
       )}
 
       {step === 6 && (
-        <div className="space-y-4">
-          <div>
-            <p className="mb-2 text-xs font-medium text-ink-secondary">Signage cost-plus terms</p>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
-              <NumberField label="Labour (₹)" value={labour} onChange={(v) => setLabour(v || 0)} />
-              <NumberField label="Overhead %" value={overheadPct} onChange={(v) => setOverheadPct(v || 0)} />
-              <NumberField label="Markup %" value={markupPct} onChange={(v) => setMarkupPct(v || 0)} />
-              <NumberField label="Discount %" value={discountPct} onChange={(v) => setDiscountPct(v || 0)} />
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-line bg-surface-sunken p-3">
-            <p className="mb-2 text-xs font-medium text-ink-secondary">
-              Signage selling price — post it as a flat lumpsum (starting from the cost-plus suggestion above), or at a ₹/sq.ft
-              rate × {signSqft.toFixed(2)} sq.ft sign area.
-            </p>
-            <PriceBasisToggle value={signagePriceBasis} onChange={setSignagePriceBasis} />
-            {signagePriceBasis === "lumpsum" ? (
-              <NumberField
-                label={signageSellOverride === "" ? "Signage Selling Price (₹) — suggested" : "Signage Selling Price (₹)"}
-                value={signageSellOverride === "" ? pricing.signageSellSuggested : signageSellOverride}
-                onChange={setSignageSellOverride}
-              />
-            ) : (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <NumberField label="Signage Rate (₹/sq.ft)" value={signageRatePerSqft} onChange={setSignageRatePerSqft} />
-                <Metric label="Signage Selling Price" value={fmtRupee(pricing.signageSell)} />
-              </div>
-            )}
-          </div>
-
-          <div className="rounded-lg border border-line bg-surface-sunken p-3">
-            <p className="mb-2 text-xs font-medium text-ink-secondary">
-              Printing selling price — post it as a flat lumpsum (starting from the cost-plus reference below), or at a ₹/sq.ft
-              rate × {printResult ? printResult.printSqFt : 0} sq.ft printed area (bleed + waste already included).
-            </p>
-            <PriceBasisToggle value={printPriceBasis} onChange={setPrintPriceBasis} />
-            {printPriceBasis === "lumpsum" ? (
-              <NumberField
-                label={printSellOverride === "" ? "Printing Selling Price (₹) — suggested" : "Printing Selling Price (₹)"}
-                value={printSellOverride === "" ? printSellDefault : printSellOverride}
-                onChange={setPrintSellOverride}
-              />
-            ) : (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <NumberField label="Printing Rate (₹/sq.ft)" value={printRatePerSqft} onChange={setPrintRatePerSqft} />
-                <Metric label="Printing Selling Price" value={fmtRupee(pricing.printSell)} />
-              </div>
-            )}
-          </div>
-
-          <div className="rounded-lg border border-line bg-surface-sunken p-3">
-            <p className="mb-2 text-xs font-medium text-ink-secondary">
-              Shipping and Installation are posted directly, no cost-plus needed.
-            </p>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <NumberField label="Shipping (₹)" value={shipping} onChange={(v) => setShipping(v || 0)} />
-              <NumberField label="Installation Selling Price (₹)" value={install} onChange={(v) => setInstall(v || 0)} />
-            </div>
-          </div>
-
-          <div>
-            <p className="mb-2 text-xs font-medium text-ink-secondary">GST</p>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
-              <NumberField label="GST %" value={gstPct} onChange={(v) => setGstPct(v || 0)} />
-            </div>
-          </div>
-
-          <div className="overflow-x-auto rounded-lg border border-line">
+        <div className="space-y-3">
+          {/* "This looks very confusing, make sections separately" -- each
+              commercial concern (materials, signage GP, printing,
+              installation/P&F, tax) now gets its own compact, clearly
+              titled block instead of one long undifferentiated table, and
+              the lumpsum/₹-per-sqft controls live right where they're
+              concluded (inside Signage's and Printing's own sections)
+              rather than in separate boxes above a table that repeats the
+              same numbers again. */}
+          <Section title="1. Materials — Profile, Backing Sheet, Accessories, LED">
             <table className="w-full text-sm">
-              <thead className="bg-surface-sunken text-xs text-ink-secondary">
-                <tr><th className="p-2 text-left">Item</th><th className="p-2 text-left">Measure</th><th className="p-2 text-right">Amount</th></tr>
-              </thead>
               <tbody>
                 <Row
                   label="Profile"
@@ -975,41 +913,106 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
                   value={fmtRupee(driverFinal?.totalCost ?? 0)}
                 />
                 <Row label="Raw Material Cost — Signage (per sign)" value={fmtRupee(pricing.raw)} strong />
+              </tbody>
+            </table>
+          </Section>
+
+          <Section title="2. Signage Pricing — Overheads, Labour, GP Markup">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <NumberField label="Labour (₹)" value={labour} onChange={(v) => setLabour(v || 0)} />
+              <NumberField label="Overhead %" value={overheadPct} onChange={(v) => setOverheadPct(v || 0)} />
+              <NumberField label="Markup %" value={markupPct} onChange={(v) => setMarkupPct(v || 0)} />
+              <NumberField label="Discount %" value={discountPct} onChange={(v) => setDiscountPct(v || 0)} />
+            </div>
+            <table className="w-full text-sm">
+              <tbody>
                 <Row label={`Overhead (${overheadPct}%)`} value={fmtRupee(pricing.ovh)} />
                 <Row label="Labour" value={fmtRupee(labour)} />
                 {qty > 1 && <Row label={`Quantity (× ${qty})`} value={`× ${qty}`} />}
                 <Row label="Signage Production Cost" value={fmtRupee(pricing.costAll)} strong />
                 <Row label={`Markup (${markupPct}%)`} value={fmtRupee(pricing.sellBD - pricing.costAll)} />
                 {pricing.discAmt > 0 && <Row label={`Discount (${discountPct}%)`} value={`−${fmtRupee(pricing.discAmt)}`} />}
-                <Row
-                  label="Signage Selling Price (ex-GST)"
-                  detail={signagePriceBasis === "sqft" ? `₹${signageRatePerSqft || 0}/sq.ft × ${signSqft.toFixed(2)} sq.ft × qty ${qty}` : ""}
-                  value={fmtRupee(pricing.signageSell)}
-                  strong
+              </tbody>
+            </table>
+            <div className="border-t border-line pt-2">
+              <p className="mb-1.5 text-xs text-ink-secondary">
+                Conclude Signage Selling Price — flat lumpsum, or ₹/sq.ft × {signSqft.toFixed(2)} sq.ft sign area.
+              </p>
+              <PriceBasisToggle value={signagePriceBasis} onChange={setSignagePriceBasis} />
+              {signagePriceBasis === "lumpsum" ? (
+                <NumberField
+                  label={signageSellOverride === "" ? "Signage Selling Price (₹) — suggested" : "Signage Selling Price (₹)"}
+                  value={signageSellOverride === "" ? pricing.signageSellSuggested : signageSellOverride}
+                  onChange={setSignageSellOverride}
                 />
+              ) : (
+                <NumberField label="Signage Rate (₹/sq.ft)" value={signageRatePerSqft} onChange={setSignageRatePerSqft} />
+              )}
+              <div className="mt-2 flex justify-between text-sm font-semibold text-ink">
+                <span>Signage Selling Price (ex-GST)</span>
+                <span>{fmtRupee(pricing.signageSell)}</span>
+              </div>
+            </div>
+          </Section>
 
+          <Section title="3. Printing">
+            <table className="w-full text-sm">
+              <tbody>
                 <Row
                   label="Printing & Finishing (cost reference, per sign)"
                   detail={printResult ? `${printResult.printSqFt} sq.ft — not used in pricing` : ""}
                   value={fmtRupee(pricing.printCostRef)}
                 />
-                <Row
-                  label="Printing Selling Price (ex-GST)"
-                  detail={printPriceBasis === "sqft" ? `₹${printRatePerSqft || 0}/sq.ft × ${printResult?.printSqFt ?? 0} sq.ft × qty ${qty}` : ""}
-                  value={fmtRupee(pricing.printSell)}
-                  strong
+              </tbody>
+            </table>
+            <div className="border-t border-line pt-2">
+              <p className="mb-1.5 text-xs text-ink-secondary">
+                Conclude Printing Selling Price — flat lumpsum, or ₹/sq.ft × {printResult ? printResult.printSqFt : 0} sq.ft
+                printed area (bleed + waste already included).
+              </p>
+              <PriceBasisToggle value={printPriceBasis} onChange={setPrintPriceBasis} />
+              {printPriceBasis === "lumpsum" ? (
+                <NumberField
+                  label={printSellOverride === "" ? "Printing Selling Price (₹) — suggested" : "Printing Selling Price (₹)"}
+                  value={printSellOverride === "" ? printSellDefault : printSellOverride}
+                  onChange={setPrintSellOverride}
                 />
+              ) : (
+                <NumberField label="Printing Rate (₹/sq.ft)" value={printRatePerSqft} onChange={setPrintRatePerSqft} />
+              )}
+              <div className="mt-2 flex justify-between text-sm font-semibold text-ink">
+                <span>Printing Selling Price (ex-GST)</span>
+                <span>{fmtRupee(pricing.printSell)}</span>
+              </div>
+            </div>
+          </Section>
 
-                <Row label="Shipping (ex-GST)" value={fmtRupee(pricing.shipping)} strong />
+          <Section title="4. Installation, Packing & Forwarding">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <NumberField label="Packing & Forwarding (₹)" value={shipping} onChange={(v) => setShipping(v || 0)} />
+              <NumberField label="Installation Selling Price (₹)" value={install} onChange={(v) => setInstall(v || 0)} />
+            </div>
+            <table className="w-full text-sm">
+              <tbody>
+                <Row label="Packing & Forwarding (ex-GST)" value={fmtRupee(pricing.shipping)} strong />
                 <Row label="Installation Selling Price (ex-GST)" value={fmtRupee(pricing.installSell)} strong />
+              </tbody>
+            </table>
+          </Section>
 
-                <Row label="Total Selling Price (ex-GST)" value={fmtRupee(pricing.sell)} strong big />
+          <Section title="5. Taxable Value, GST & Total">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <NumberField label="GST %" value={gstPct} onChange={(v) => setGstPct(v || 0)} />
+            </div>
+            <table className="w-full text-sm">
+              <tbody>
+                <Row label="Total Taxable Value (ex-GST)" value={fmtRupee(pricing.sell)} strong big />
                 <Row label={`GST ${gstPct}%`} value={fmtRupee(pricing.gstAmt)} />
                 <Row label="Final Amount (incl. GST)" value={fmtRupee(pricing.final)} strong big />
                 <Row label="Gross Margin" value={`${pricing.margin}% (${fmtRupee(pricing.mgnAmt)})`} />
               </tbody>
             </table>
-          </div>
+          </Section>
 
           <div className="flex justify-between">
             <Button variant="secondary" onClick={() => goStep(5)}>Back</Button>
@@ -1062,6 +1065,20 @@ function CheckField({ label, checked, onChange }: { label: string; checked: bool
     </label>
   );
 }
+// Compact, titled block for one commercial concern in Step 6's pricing
+// screen (Materials / Signage GP / Printing / Installation & P&F / Tax) --
+// "this looks very confusing, make sections separately... keep the section
+// intact compact so information can be seen without eyesore." Replaces one
+// long undifferentiated table with small, clearly separated groups.
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-lg border border-line bg-surface p-3">
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-secondary">{title}</h3>
+      <div className="space-y-2">{children}</div>
+    </div>
+  );
+}
+
 // Shared lumpsum/₹-per-sqft basis picker for Signage and Printing in Step 6
 // -- same two options, independent state per component (a job might sell
 // signage on a per-sqft rate card but still post printing as a flat number).
