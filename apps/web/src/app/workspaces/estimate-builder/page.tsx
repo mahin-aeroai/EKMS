@@ -680,41 +680,77 @@ export default function EstimateBuilderPage() {
   }
 
   // Small human-readable line built from a pool item's denormalized
-  // summary -- the two source tools' snapshots have different shapes
-  // (Cost Sheet: fgCode/description/uom/width/height/qty/sqft; Sign
-  // Estimator: category/categoryLabel/dimW/dimH/dimUnit/qty), so this
-  // just picks out whatever's present rather than assuming one shape.
+  // summary -- for Cost Sheet this is the real physical materials used
+  // (substrate, lamination, trims, hardware -- never ink, which is priced
+  // in as a service, see CostSheetCalcTab's addToPool), for Sign Estimator
+  // it's the category + dims, since that tool doesn't track a materials
+  // list the same way.
   function poolItemDescription(item: EstimatePoolItemRow): string {
-    const s = item.summary as Record<string, unknown>;
-    const parts =
-      item.source === "cost_sheet"
-        ? [s.description, s.width && s.height ? `${s.width}×${s.height} ${s.uom ?? ""}`.trim() : null, s.qty ? `qty ${s.qty}` : null]
-        : [s.categoryLabel, s.dimW && s.dimH ? `${s.dimW}×${s.dimH} ${s.dimUnit ?? ""}`.trim() : null, s.qty ? `qty ${s.qty}` : null];
-    const label = parts.filter(Boolean).join(" — ");
-    return label || (item.source === "cost_sheet" ? "Cost Sheet job" : "Sign Estimator job");
+    const s = item.summary as {
+      description?: string;
+      materials?: { name: string; mappedTo: string | null }[];
+      categoryLabel?: string;
+      dimW?: number;
+      dimH?: number;
+      dimUnit?: string;
+      qty?: number;
+    };
+    if (item.source === "cost_sheet") {
+      const materialsLine = (s.materials ?? []).map((m) => (m.mappedTo ? `${m.name}: ${m.mappedTo}` : m.name)).join("; ");
+      return [s.description, materialsLine].filter(Boolean).join(" — ") || "Cost Sheet job";
+    }
+    const parts = [s.categoryLabel, s.dimW && s.dimH ? `${s.dimW}×${s.dimH} ${s.dimUnit ?? ""}`.trim() : null, s.qty ? `qty ${s.qty}` : null];
+    return parts.filter(Boolean).join(" — ") || "Sign Estimator job";
   }
 
-  // Picking a pool item pre-fills the draft as a single "nos" line at the
-  // pool item's already-computed sell amount -- it's a whole priced job
-  // (Sign Estimator/Cost Sheet already did the sqft/qty math), not a
-  // per-unit rate to multiply again.
+  // Picking a pool item pre-fills the draft as a real SQFT line for Cost
+  // Sheet items (width x height x qty at the same ₹/sqft rate the job was
+  // costed at -- NOT the whole-job total treated as a per-sqft rate, which
+  // would massively overprice the line the moment someone entered real
+  // dimensions) since that's exactly how Cost Sheet itself prices; Sign
+  // Estimator items still come in as a single "nos" line at the whole
+  // job's sell amount, since that tool doesn't produce a clean ₹/sqft rate
+  // (LED/profile/print costs don't divide evenly across area the way a
+  // BOM's per-sqft material+process cost does).
   function pickPoolRow(idx: string) {
     setPoolPick(idx);
     const row = poolItems?.[Number(idx)];
     if (!row) return;
-    setDraft((d) => ({
-      ...d,
-      isContractItem: false,
-      productNo: "",
-      productName: row.label,
-      description: poolItemDescription(row),
-      calcMode: "nos",
-      sizeEntryMode: "dimensions",
-      widthCm: 0,
-      heightCm: 0,
-      quantity: 1,
-      unitRate: row.sell_amount ?? 0,
-    }));
+    const s = row.summary as { width?: number | null; height?: number | null; uom?: string; qty?: number | null; unitRatePerSqft?: number | null };
+    if (row.source === "cost_sheet" && s.width && s.height && s.unitRatePerSqft != null) {
+      setDraft((d) => ({
+        ...d,
+        isContractItem: false,
+        productNo: "",
+        productName: row.label,
+        description: poolItemDescription(row),
+        calcMode: "sqft",
+        sizeEntryMode: "dimensions",
+        // Cost Sheet's own UOM is "FT"/"INC" -- getSizeUnit (shared with
+        // the PDF) only recognizes "ft"/"feet" and "in"/"inch", so this
+        // maps to what it actually expects rather than passing "INC"
+        // through and silently falling back to centimeters.
+        uom: s.uom === "INC" ? "in" : "ft",
+        widthCm: s.width ?? 0,
+        heightCm: s.height ?? 0,
+        quantity: s.qty || 1,
+        unitRate: s.unitRatePerSqft ?? 0,
+      }));
+    } else {
+      setDraft((d) => ({
+        ...d,
+        isContractItem: false,
+        productNo: "",
+        productName: row.label,
+        description: poolItemDescription(row),
+        calcMode: "nos",
+        sizeEntryMode: "dimensions",
+        widthCm: 0,
+        heightCm: 0,
+        quantity: 1,
+        unitRate: row.sell_amount ?? 0,
+      }));
+    }
     setPendingPoolItemId(row.id);
   }
 

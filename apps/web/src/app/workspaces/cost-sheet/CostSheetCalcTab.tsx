@@ -274,12 +274,25 @@ export function CostSheetCalcTab() {
     // Prefer whatever you've actually typed as the selling price; fall
     // back to the GP-target suggester's recent-basis number if you were
     // using that instead and never filled in Selling Price / SqFt.
-    const sellAmount = sellPrice !== "" ? result.sellingAmount : priceSuggestion?.totalRecent ?? null;
+    const sellAmountTotal = sellPrice !== "" ? result.sellingAmount : priceSuggestion?.totalRecent ?? null;
+    // Estimate Builder prices a line as (rate x sqft), not a flat total --
+    // so the pool item needs the real ₹/sqft, not just the whole job's ₹.
+    // Storing this up front (rather than dividing sell_amount by sqft over
+    // in Estimate Builder every time) means it's exactly the number you
+    // typed into Selling Price / SqFt, not a recomputed approximation.
+    const unitRatePerSqft = sellAmountTotal !== null && result.sqft > 0 ? sellAmountTotal / result.sqft : null;
+    // Ink is priced in as a service, not a customer-facing material line
+    // (see the Gross Profit work) -- so the pool item's material list for
+    // the quote's description only carries the actual physical materials
+    // (substrate, lamination, trims, hardware, etc.), never the ink lines.
+    const materials = result.lineCosts
+      .filter((lc) => lc.line.material_category !== "Ink")
+      .map((lc) => ({ name: lc.line.material_name, mappedTo: lc.rawMaterial?.name ?? null }));
     const { error } = await supabase.from("estimate_pool_items").insert({
       source: "cost_sheet",
       source_ref_id: null,
-      label: `${template.code} — ${salesOrder || "Untitled job"}`,
-      sell_amount: sellAmount,
+      label: salesOrder ? `${template.code} — ${salesOrder}` : template.code,
+      sell_amount: sellAmountTotal,
       cost_amount: result.totalCostRecent,
       summary: {
         fgCode: template.code,
@@ -290,6 +303,8 @@ export function CostSheetCalcTab() {
         height: height === "" ? null : height,
         qty: qty === "" ? null : qty,
         sqft: result.sqft,
+        unitRatePerSqft,
+        materials,
         materialCostRecent: result.materialCostRecent,
         totalProcessCost: result.totalProcessCost,
         totalCostRecent: result.totalCostRecent,
