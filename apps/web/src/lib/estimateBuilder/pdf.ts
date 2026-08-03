@@ -522,8 +522,16 @@ export async function generateEstimatePdf(data: EstimatePdfData): Promise<Blob> 
   );
   state.y -= 14;
 
-  ensure(ctx, state, 18);
-  state.page.drawText(`Grand Total (INR): ${rupee(grandTotal)}`, { x: MARGIN, y: state.y, size: size + 1, font: bold, color: INK });
+  // The line-item table has no room left for a pre-tax subtotal column
+  // (Tax already has to squeeze in ahead of Grand Total at 12mm), so the
+  // taxable value / GST / final value breakdown lives here instead, as
+  // three separate lines rather than one opaque "Grand Total" figure.
+  ensure(ctx, state, 48);
+  state.page.drawText(`Total Taxable Value (INR): ${rupee(taxableTotal)}`, { x: MARGIN, y: state.y, size: size + 1, font: bold, color: INK });
+  state.y -= 16;
+  state.page.drawText(`GST @${data.gstPercent}% (INR): ${rupee(gstAmount)}`, { x: MARGIN, y: state.y, size: size + 1, font: bold, color: INK });
+  state.y -= 16;
+  state.page.drawText(`Total Value (INR): ${rupee(grandTotal)}`, { x: MARGIN, y: state.y, size: size + 1, font: bold, color: INK });
   state.y -= 22;
 
   // ---- Prices / Job completion / Delivery / Payment schedule — exact

@@ -284,10 +284,29 @@ export function CostSheetCalcTab() {
     // Ink is priced in as a service, not a customer-facing material line
     // (see the Gross Profit work) -- so the pool item's material list for
     // the quote's description only carries the actual physical materials
-    // (substrate, lamination, trims, hardware, etc.), never the ink lines.
+    // (substrate, lamination, trims, hardware, etc.), never the ink/print
+    // layers. Category alone isn't reliable here -- a mapped raw material's
+    // category can be anything the item master calls it -- so this also
+    // keyword-matches the BOM line's own name, which is what actually
+    // catches lines like "Top Layer Print" or "Blockout Layers Ink" that
+    // don't get tagged with the "Ink" category.
     const materials = result.lineCosts
-      .filter((lc) => lc.line.material_category !== "Ink")
+      .filter((lc) => {
+        const category = (lc.line.material_category ?? "").toLowerCase();
+        const name = lc.line.material_name.toLowerCase();
+        return category !== "ink" && !name.includes("ink") && !name.includes("layer");
+      })
       .map((lc) => ({ name: lc.line.material_name, mappedTo: lc.rawMaterial?.name ?? null }));
+    // The client-facing quote shouldn't carry legacy/discontinued brand
+    // names baked into the master description (e.g. "MegaRich" surviving
+    // in the text after the BOM's actual substrate was swapped to a
+    // different brand) -- strip those out rather than editing the BOM
+    // template's own description, which is internal record-keeping.
+    const clientFacingDescription = template.description
+      .replace(/\bmegarich\b/gi, "")
+      .replace(/\s{2,}/g, " ")
+      .replace(/\s*-\s*$/, "")
+      .trim();
     const { error } = await supabase.from("estimate_pool_items").insert({
       source: "cost_sheet",
       source_ref_id: null,
@@ -296,7 +315,7 @@ export function CostSheetCalcTab() {
       cost_amount: result.totalCostRecent,
       summary: {
         fgCode: template.code,
-        description: template.description,
+        description: clientFacingDescription,
         salesOrder: salesOrder || null,
         uom,
         width: width === "" ? null : width,
