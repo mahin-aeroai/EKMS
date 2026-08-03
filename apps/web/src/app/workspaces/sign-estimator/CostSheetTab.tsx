@@ -236,7 +236,10 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
         {c.print && (
           <Card title="Printing & Finishing" full>
             <KV k="Print Media" v={c.print.mediaName} />
-            <KV k="Print Area" v={`${c.print.sqFt} sq.ft`} />
+            <KV k="Print Area (chargeable)" v={`${c.print.sqFt} sq.ft`} />
+            {c.print.productionSqFt != null && (
+              <KV k="Production Area (ref. only, not charged)" v={`${c.print.productionSqFt} sq.ft`} />
+            )}
             <KV k="Finishing" v={c.print.finishingLabel} />
             <KV k="Print Cost" v={fmtRupee(c.print.cost)} />
           </Card>

@@ -370,8 +370,8 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
         driverWatt: driverFinal.watt, utilPct: driverFinal.util, cost: driverFinal.totalCost,
       } : null,
       print: media && printResult ? {
-        mediaName: media.name, sqFt: printResult.printSqFt, costPerSqFt: printResult.printCostPerSqFt,
-        finishingLabel: printResult.finishingLabel, cost: printResult.printCost,
+        mediaName: media.name, sqFt: printResult.printSqFt, productionSqFt: printResult.productionSqFt,
+        costPerSqFt: printResult.printCostPerSqFt, finishingLabel: printResult.finishingLabel, cost: printResult.printCost,
       } : null,
       pricing: {
         raw: pricing.raw, ovh: pricing.ovh, ovhPct: overheadPct, labour,
@@ -510,13 +510,13 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
   return (
     <div>
       {/* Step indicator */}
-      <div className="mb-6 flex flex-wrap gap-2">
+      <div className="mb-4 flex flex-wrap gap-1.5">
         {STEP_LABELS.map((label, i) => (
           <button
             key={label}
             onClick={() => goStep(i + 1)}
-            className={`rounded-full border px-3 py-1 text-xs font-medium ${
-              step === i + 1 ? "border-primary bg-primary-tint text-primary" : "border-line text-ink-secondary hover:bg-surface-sunken"
+            className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+              step === i + 1 ? "border-info bg-info-tint text-info" : "border-line text-ink-secondary hover:bg-surface-sunken"
             }`}
           >
             {i + 1}. {label}
@@ -535,8 +535,8 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
       )}
 
       {step === 1 && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="space-y-3">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <TextField label="Job / Customer Name" value={jobName} onChange={setJobName} />
             <NumberField label="Quantity" value={qty} onChange={(v) => setQty(v || 1)} />
           </div>
@@ -547,7 +547,7 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
                 <button
                   key={c.value}
                   onClick={() => { setCategory(c.value); setProfileId(""); }}
-                  className={`rounded-lg border p-3 text-left ${category === c.value ? "border-primary bg-primary-tint" : "border-line hover:bg-surface-sunken"}`}
+                  className={`rounded-lg border p-2.5 text-left ${category === c.value ? "border-info bg-info-tint" : "border-line hover:bg-surface-sunken"}`}
                 >
                   <div className="text-sm font-medium text-ink">{c.label}</div>
                   <div className="mt-0.5 text-xs text-ink-secondary">{c.desc}</div>
@@ -571,7 +571,7 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
                   <button
                     key={m}
                     onClick={() => setLedMode(m)}
-                    className={`rounded-lg border p-3 text-left ${ledMode === m ? "border-primary bg-primary-tint" : "border-line hover:bg-surface-sunken"}`}
+                    className={`rounded-lg border p-2.5 text-left ${ledMode === m ? "border-info bg-info-tint" : "border-line hover:bg-surface-sunken"}`}
                   >
                     <div className="text-sm font-medium text-ink">{m === "module" ? "LED Modules" : "LED Bars (Vertical)"}</div>
                     <div className="mt-0.5 text-xs text-ink-secondary">
@@ -592,14 +592,14 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
       )}
 
       {step === 2 && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="space-y-3">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             <NumberField label="Width" value={w} onChange={setW} />
             <NumberField label="Height" value={h} onChange={setH} />
             <SelectField label="Unit" value={unit} onChange={(v) => setUnit(v as "mm" | "feet" | "inches")} options={[{ value: "mm", label: "mm" }, { value: "feet", label: "feet" }, { value: "inches", label: "inches" }]} />
           </div>
           {wMM > 0 && hMM > 0 && (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <Metric label="Width (mm)" value={Math.round(wMM).toString()} />
               <Metric label="Height (mm)" value={Math.round(hMM).toString()} />
               <Metric label="Area" value={`${((wMM / 304.8) * (hMM / 304.8)).toFixed(2)} sq.ft`} />
@@ -614,9 +614,9 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
       )}
 
       {step === 3 && (
-        <div className="space-y-6">
+        <div className="space-y-4">
           <section>
-            <h3 className="mb-2 text-sm font-semibold text-ink">Profile Costing (Fabrication-Planned)</h3>
+            <h3 className="mb-1.5 text-sm font-semibold text-ink">Profile Costing (Fabrication-Planned)</h3>
             {!profile ? (
               <Alert>No profile selected — go back to Step 1.</Alert>
             ) : profResult ? (
@@ -720,7 +720,7 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
       )}
 
       {step === 4 && (
-        <div className="space-y-6">
+        <div className="space-y-4">
           {!isLit ? (
             <Alert>This sign category is non-lit — no LED configuration needed.</Alert>
           ) : (
@@ -811,16 +811,16 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
       )}
 
       {step === 5 && (
-        <div className="space-y-4">
+        <div className="space-y-3">
           <SelectField label="Print Media" value={mediaId} onChange={setMediaId} options={masters.printing.map((p) => ({ value: p.id, label: `${p.name} (₹${p.cost_per_sqft}/sq.ft)` }))} />
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <NumberField label="Bleed (mm)" value={bleed} onChange={(v) => setBleed(v || 0)} />
-            <NumberField label="Waste % Override" value={printWaste} onChange={setPrintWaste} />
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <NumberField label="Bleed (mm) — production only, not charged" value={bleed} onChange={(v) => setBleed(v || 0)} />
+            <NumberField label="Waste % Override — production only, not charged" value={printWaste} onChange={setPrintWaste} />
             <NumberField label="Printing Rate (₹/sq.ft) — editable" value={printCost} onChange={setPrintCost} />
           </div>
           <div>
-            <label className="mb-2 block text-xs font-medium text-ink-secondary">Finishing</label>
-            <div className="flex flex-wrap gap-4">
+            <label className="mb-1.5 block text-xs font-medium text-ink-secondary">Finishing</label>
+            <div className="flex flex-wrap gap-3">
               {isLit && <CheckField label="SEG Silicone Border" checked={finSeg} onChange={setFinSeg} />}
               <CheckField label="Hemming / Heat-seal" checked={finHem} onChange={setFinHem} />
               <CheckField label="Eyelets" checked={finEye} onChange={setFinEye} />
@@ -829,7 +829,7 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
             </div>
           </div>
           {(finSeg || finHem || finEye || finWeld || finStitch) && (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               {isLit && finSeg && <NumberField label="SEG Border Rate (₹/m)" value={segRate} onChange={(v) => setSegRate(v || 0)} />}
               {finHem && <NumberField label="Hemming Flat Rate (₹)" value={hemRate} onChange={(v) => setHemRate(v || 0)} />}
               {(finEye || finWeld || finStitch) && <NumberField label="Eyelets/Welding/Stitching Flat Rate (₹)" value={finRate} onChange={(v) => setFinRate(v || 0)} />}
@@ -839,23 +839,32 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
             <div className="overflow-x-auto rounded-lg border border-line">
               <table className="w-full text-sm">
                 <thead className="bg-surface-sunken text-xs text-ink-secondary">
-                  <tr><th className="p-2 text-left">Item</th><th className="p-2 text-left">Detail</th><th className="p-2 text-right">Cost</th></tr>
+                  <tr><th className="p-1.5 text-left">Item</th><th className="p-1.5 text-left">Detail</th><th className="p-1.5 text-right">Cost</th></tr>
                 </thead>
                 <tbody>
                   <tr className="border-t border-line">
-                    <td className="p-2">Print area (incl. {bleed}mm bleed)</td>
-                    <td className="p-2 text-ink-secondary">{printResult.printSqFt} sq.ft chargeable</td>
-                    <td className="p-2 text-right">{fmtRupee(printResult.printCost - printResult.finishingCost)}</td>
+                    <td className="p-1.5">Print area</td>
+                    <td className="p-1.5 text-ink-secondary">{printResult.printSqFt} sq.ft chargeable — plain size, no bleed/waste added</td>
+                    <td className="p-1.5 text-right">{fmtRupee(printResult.printCost - printResult.finishingCost)}</td>
                   </tr>
                   {printResult.finLines.map((f, i) => (
                     <tr key={i} className="border-t border-line">
-                      <td className="p-2">{f.label}</td><td className="p-2 text-ink-secondary">{f.detail}</td><td className="p-2 text-right">{fmtRupee(f.cost)}</td>
+                      <td className="p-1.5">{f.label}</td><td className="p-1.5 text-ink-secondary">{f.detail}</td><td className="p-1.5 text-right">{fmtRupee(f.cost)}</td>
                     </tr>
                   ))}
+                  {/* Reference only, not billed -- lets the shop still see
+                      what bleed + waste would consume in material without
+                      that figure ever feeding the customer's price. */}
+                  <tr className="border-t border-line">
+                    <td className="p-1.5 text-xs text-ink-muted">Production area (ref. only)</td>
+                    <td className="p-1.5 text-xs text-ink-muted" colSpan={2}>
+                      {printResult.productionSqFt} sq.ft incl. {bleed}mm bleed + waste — not charged
+                    </td>
+                  </tr>
                 </tbody>
                 <tfoot>
                   <tr className="border-t border-line bg-surface-sunken font-medium">
-                    <td className="p-2" colSpan={2}>Total Print &amp; Finishing</td><td className="p-2 text-right">{fmtRupee(printResult.printCost)}</td>
+                    <td className="p-1.5" colSpan={2}>Total Print &amp; Finishing</td><td className="p-1.5 text-right">{fmtRupee(printResult.printCost)}</td>
                   </tr>
                 </tfoot>
               </table>
@@ -968,7 +977,7 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
             <div className="border-t border-line pt-2">
               <p className="mb-1.5 text-xs text-ink-secondary">
                 Conclude Printing Selling Price — flat lumpsum, or ₹/sq.ft × {printResult ? printResult.printSqFt : 0} sq.ft
-                printed area (bleed + waste already included).
+                (plain sign size — bleed/waste are production-only, never charged).
               </p>
               <PriceBasisToggle value={printPriceBasis} onChange={setPrintPriceBasis} />
               {printPriceBasis === "lumpsum" ? (
@@ -1027,30 +1036,35 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
   );
 }
 
+// Compact by design -- "make it compact view so I can see all information
+// at once... like our Cost Sheet, with small fonts for some of the
+// information" -- h-8 inputs and tight label spacing instead of h-10, same
+// pattern Cost Sheet Calc already uses, applied here across every step
+// since these four are shared by the whole wizard.
 function TextField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   return (
     <div>
-      <label className="mb-1 block text-xs font-medium text-ink-secondary">{label}</label>
+      <label className="mb-0.5 block text-xs font-medium text-ink-secondary">{label}</label>
       <input type="text" value={value} onChange={(e) => onChange(e.target.value)}
-        className="h-10 w-full rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none" />
+        className="h-8 w-full rounded-md border border-line-strong bg-surface px-2.5 text-sm text-ink outline-none" />
     </div>
   );
 }
 function NumberField({ label, value, onChange }: { label: string; value: number | ""; onChange: (v: number | "") => void }) {
   return (
     <div>
-      <label className="mb-1 block text-xs font-medium text-ink-secondary">{label}</label>
+      <label className="mb-0.5 block text-xs font-medium text-ink-secondary">{label}</label>
       <input type="number" value={value} onChange={(e) => onChange(e.target.value === "" ? "" : Number(e.target.value))}
-        className="h-10 w-full rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none" />
+        className="h-8 w-full rounded-md border border-line-strong bg-surface px-2.5 text-sm text-ink outline-none" />
     </div>
   );
 }
 function SelectField({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: { value: string; label: string }[] }) {
   return (
     <div>
-      <label className="mb-1 block text-xs font-medium text-ink-secondary">{label}</label>
+      <label className="mb-0.5 block text-xs font-medium text-ink-secondary">{label}</label>
       <select value={value} onChange={(e) => onChange(e.target.value)}
-        className="h-10 w-full rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none">
+        className="h-8 w-full rounded-md border border-line-strong bg-surface px-2.5 text-sm text-ink outline-none">
         <option value="">— select —</option>
         {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
@@ -1059,8 +1073,8 @@ function SelectField({ label, value, onChange, options }: { label: string; value
 }
 function CheckField({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <label className="flex items-center gap-2 text-sm text-ink">
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="h-4 w-4 rounded border-line-strong" />
+    <label className="flex items-center gap-1.5 text-xs text-ink">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="h-3.5 w-3.5 rounded border-line-strong" />
       {label}
     </label>
   );
@@ -1082,16 +1096,20 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 // Shared lumpsum/₹-per-sqft basis picker for Signage and Printing in Step 6
 // -- same two options, independent state per component (a job might sell
 // signage on a per-sqft rate card but still post printing as a flat number).
+// Uses the "info" blue (bg-info-tint/text-info -- #1a5fb4, the same shade
+// as the category Badge on Cost Sheet Calc's FG Code picker) rather than
+// the app's usual muted "primary" steel-blue, per explicit request to
+// reuse that particular shade here.
 function PriceBasisToggle({ value, onChange }: { value: "lumpsum" | "sqft"; onChange: (v: "lumpsum" | "sqft") => void }) {
   return (
-    <div className="mb-2 flex gap-2">
+    <div className="mb-1.5 flex gap-1.5">
       {(["lumpsum", "sqft"] as const).map((v) => (
         <button
           key={v}
           type="button"
           onClick={() => onChange(v)}
-          className={`rounded-full border px-3 py-1 text-xs font-medium ${
-            value === v ? "border-primary bg-primary-tint text-primary" : "border-line text-ink-secondary hover:bg-surface-sunken"
+          className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+            value === v ? "border-info bg-info-tint text-info" : "border-line text-ink-secondary hover:bg-surface-sunken"
           }`}
         >
           {v === "lumpsum" ? "Lumpsum" : "₹ / SqFt"}
@@ -1102,9 +1120,9 @@ function PriceBasisToggle({ value, onChange }: { value: "lumpsum" | "sqft"; onCh
 }
 function Metric({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <div className="rounded-lg border border-line bg-surface p-3">
+    <div className="rounded-lg border border-line bg-surface p-2">
       <div className="text-xs text-ink-secondary">{label}</div>
-      <div className="mt-1 text-lg font-semibold text-ink">{value}</div>
+      <div className="mt-0.5 text-sm font-semibold text-ink">{value}</div>
       {sub && <div className="text-xs text-ink-muted">{sub}</div>}
     </div>
   );

@@ -736,8 +736,15 @@ export interface FinishingRates {
 
 export interface PrintResult {
   printCost: number;
-  printSqFt: number;
+  printSqFt: number; // chargeable area -- plain W×H only, never inflated by bleed/waste (see below)
   printCostPerSqFt: number;
+  // Informational only -- what the print would actually consume once
+  // bleed + production waste are accounted for. Never fed into printCost
+  // or printSqFt: "let's not charge for bleed, fix it -- only size like
+  // 8x4 = 32 sq.ft only" -- the shop absorbs bleed/waste as its own cost of
+  // doing business rather than billing the customer for material beyond
+  // the sign's actual size.
+  productionSqFt: number;
   finishingCost: number;
   finishingLabel: string;
   finLines: { label: string; detail: string; cost: number }[];
@@ -757,12 +764,18 @@ export function computePrint(
   const wPct = overrideWastePct !== null && overrideWastePct > 0 ? overrideWastePct : media.wastage || 0;
   const cpSqFt = overrideCostPerSqFt || media.cost_per_sqft;
 
+  // Chargeable area is the sign's plain size -- e.g. 8ft × 4ft = 32 sq.ft --
+  // with no bleed or waste added on top of it.
+  const chgArea = (wMM / 304.8) * (hMM / 304.8);
+  const printBase = chgArea * cpSqFt;
+
+  // Production area is bleed + waste inclusive, kept purely as a reference
+  // figure (e.g. for the shop's own material-planning) -- it never affects
+  // printCost/printSqFt.
   const pW = (wMM + bleedMM * 2) / 304.8;
   const pH = (hMM + bleedMM * 2) / 304.8;
-  const baseArea = pW * pH;
-  const wasteArea = (baseArea * wPct) / 100;
-  const chgArea = baseArea + wasteArea;
-  const printBase = chgArea * cpSqFt;
+  const productionBase = pW * pH;
+  const productionArea = productionBase + (productionBase * wPct) / 100;
 
   const perimM = (wMM * 2 + hMM * 2) / 1000;
   let finishingCost = 0;
@@ -792,6 +805,7 @@ export function computePrint(
     printCost: Math.round(printBase + finishingCost),
     printSqFt: +chgArea.toFixed(3),
     printCostPerSqFt: cpSqFt,
+    productionSqFt: +productionArea.toFixed(3),
     finishingCost,
     finishingLabel: finLines.length ? finLines.map((f) => f.label).join(", ") : "None",
     finLines,
