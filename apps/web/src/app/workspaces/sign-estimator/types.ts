@@ -65,7 +65,8 @@ export interface DriverSnapshot {
 
 export interface PrintSnapshot {
   mediaName: string;
-  sqFt: number;
+  sqFt: number; // chargeable -- plain sign size, never inflated by bleed/waste
+  productionSqFt: number; // reference only -- incl. bleed + waste, never billed
   costPerSqFt: number;
   finishingLabel: string;
   cost: number;
