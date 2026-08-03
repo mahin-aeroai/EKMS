@@ -58,6 +58,14 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
 
   const c = row.calc as unknown as EstimateSnapshot;
 
+  // Profile snapshot only stores the TOTAL cost across all stock bars
+  // (barsRequired * per-bar cost), not the per-bar rate -- back it out here
+  // so the printed Materials line can show the same per-RFT/per-RM rate the
+  // Estimator wizard's Step 6 Section 1 already surfaces (see EstimatorTab).
+  const profPerBarCost = c.profile && c.profile.barsRequired > 0 ? c.profile.cost / c.profile.barsRequired : 0;
+  const profRatePerRFT = c.profile && c.profile.stockLenMM > 0 ? profPerBarCost / (c.profile.stockLenMM / 304.8) : 0;
+  const profRatePerRM = c.profile && c.profile.stockLenMM > 0 ? profPerBarCost / (c.profile.stockLenMM / 1000) : 0;
+
   function startEdit() {
     setELabour(c.pricing.labour);
     setEInstallSell(c.pricing.installSell ?? 0);
@@ -153,196 +161,214 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
         </Button>
       </div>
 
-      <div className="rounded-lg border border-line bg-surface p-6">
-        <div className="mb-6 flex items-start justify-between border-b border-line pb-4">
+      <div className="rounded-lg border border-line bg-surface p-4">
+        <div className="mb-3 flex items-start justify-between border-b border-line pb-3">
           <div>
-            <div className="text-lg font-bold text-ink">MMDI ONE — Sign Estimator</div>
-            <div className="text-sm text-ink-secondary">Professional Costing System</div>
+            <div className="text-base font-bold text-ink">MMDI ONE — Sign Estimator</div>
+            <div className="text-xs text-ink-secondary">Professional Costing System</div>
           </div>
           <div className="text-right">
-            <div className="text-base font-semibold text-ink">{row.ref}</div>
+            <div className="text-sm font-semibold text-ink">{row.ref}</div>
             <div className="text-xs text-ink-secondary">{new Date(row.created_at).toLocaleString("en-IN")}</div>
-            <div className="text-sm text-ink">
+            <div className="text-xs text-ink">
               Client: <strong>{row.client ?? "—"}</strong>
             </div>
           </div>
         </div>
 
-        <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Card title="Sign Specification">
+        <Card title="Sign Specification">
+          <div className="grid grid-cols-2 gap-x-4 sm:grid-cols-5">
             <KV k="Category" v={c.categoryLabel} />
-            <KV k="Dimensions (entered)" v={`${c.dimW} × ${c.dimH} ${c.dimUnit}`} />
-            <KV k="Dimensions (mm)" v={`${c.widthMM} × ${c.heightMM} mm`} />
-            <KV k="Area" v={`${((c.widthMM / 304.8) * (c.heightMM / 304.8)).toFixed(3)} sq.ft`} />
+            <KV k="Dimensions" v={`${c.dimW} × ${c.dimH} ${c.dimUnit}`} />
+            <KV k="Size (mm)" v={`${c.widthMM} × ${c.heightMM}`} />
+            <KV k="Area" v={`${((c.widthMM / 304.8) * (c.heightMM / 304.8)).toFixed(2)} sq.ft`} />
             <KV k="Quantity" v={`${c.qty} pcs`} />
-          </Card>
-          <Card title="Financial Summary">
-            <KV k="Material Cost" v={fmtRupee(c.pricing.raw)} />
-            <KV k="Selling Price (ex-GST)" v={fmtRupee(c.pricing.sell)} />
-            <KV k="GST Amount" v={fmtRupee(c.pricing.gstAmt)} />
-            <KV k="Final Amount (incl. GST)" v={fmtRupee(c.pricing.final)} strong />
-            <KV k="Gross Margin" v={`${c.pricing.margin}%`} />
-          </Card>
-        </div>
-
-        {c.profile && (
-          <Card title="Profile Costing (FFD Bin-Pack Optimised)" full>
-            <KV k="Profile Type" v={c.profile.name} />
-            <KV k="Stock Bar Length" v={`${c.profile.stockLenMM} mm`} />
-            <KV k="Stock Bars Required" v={String(c.profile.barsRequired)} />
-            <KV k="Material Utilisation" v={`${c.profile.utilPct}%`} />
-            <KV k="Profile Cost" v={fmtRupee(c.profile.cost)} />
-          </Card>
-        )}
-
-        {c.sheet && (
-          <Card title="Backing Sheet (Area-Based Costing)" full>
-            <KV k="Sheet Type" v={c.sheet.name} />
-            <KV k="Sign Area" v={`${c.sheet.signSqFt} sq.ft`} />
-            <KV k="Wastage %" v={`${c.sheet.wastePct}%`} />
-            <KV k="Chargeable Area" v={`${c.sheet.chargeableSqFt} sq.ft`} />
-            <KV k="Sheet Cost" v={fmtRupee(c.sheet.cost)} />
-          </Card>
-        )}
-
-        {c.led && (
-          <Card title="LED Illumination" full>
-            <KV k="Model" v={c.led.modelName} />
-            {c.led.mode === "module" ? (
-              <>
-                <KV k="Grid (Cols × Rows)" v={`${c.led.cols} × ${c.led.rows}`} />
-                <KV k="Total Modules" v={String(c.led.count)} />
-              </>
-            ) : (
-              <>
-                <KV k="Vertical Bars" v={String(c.led.numBars)} />
-                <KV k="Total Pieces" v={String(c.led.totalPieces)} />
-              </>
-            )}
-            <KV k="Total Wattage" v={`${c.led.watt} W`} />
-            <KV k="LED Cost" v={fmtRupee(c.led.cost)} />
-          </Card>
-        )}
-
-        {c.driver && (
-          <Card title="LED Driver" full>
-            <KV k="Requirement" v={`${c.driver.requiredW} W`} />
-            <KV k="Selected" v={`${c.driver.count} × ${c.driver.driverWatt}W`} />
-            <KV k="Utilisation" v={`${c.driver.utilPct}%`} />
-            <KV k="Driver Cost" v={fmtRupee(c.driver.cost)} />
-          </Card>
-        )}
-
-        {c.print && (
-          <Card title="Printing & Finishing" full>
-            <KV k="Print Media" v={c.print.mediaName} />
-            <KV k="Print Area (chargeable)" v={`${c.print.sqFt} sq.ft`} />
-            {c.print.productionSqFt != null && (
-              <KV k="Production Area (ref. only, not charged)" v={`${c.print.productionSqFt} sq.ft`} />
-            )}
-            <KV k="Finishing" v={c.print.finishingLabel} />
-            <KV k="Print Cost" v={fmtRupee(c.print.cost)} />
-          </Card>
-        )}
-
-        {c.accessories.length > 0 && (
-          <Card title="Accessories" full>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="text-xs text-ink-secondary"><tr><th className="p-1 text-left">Item</th><th className="p-1 text-right">Qty</th><th className="p-1 text-right">Unit Cost</th><th className="p-1 text-right">Total</th></tr></thead>
-                <tbody>
-                  {c.accessories.map((a, i) => (
-                    <tr key={i} className="border-t border-line">
-                      <td className="p-1">{a.name}</td><td className="p-1 text-right">{a.qty} {a.unit}</td><td className="p-1 text-right">{fmtRupee(a.unitCost)}</td><td className="p-1 text-right">{fmtRupee(a.lineCost)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-        )}
-
-        <Card title="Signage — Cost-Plus Build-Up" full>
-          <KV k="Raw Material Cost" v={fmtRupee(c.pricing.raw)} />
-          {editing ? (
-            <>
-              <div className="grid grid-cols-2 gap-3 py-2 sm:grid-cols-3">
-                <EditField label="Overhead %" value={eOverheadPct} onChange={setEOverheadPct} />
-                <EditField label="Labour (₹)" value={eLabour} onChange={setELabour} />
-                <EditField label="Markup %" value={eMarkupPct} onChange={setEMarkupPct} />
-                <EditField label="Discount %" value={eDiscountPct} onChange={setEDiscountPct} />
-              </div>
-              {recalced && (
-                <>
-                  <KV k="Signage Production Cost" v={fmtRupee(recalced.costAll)} strong />
-                  <KV k={`Markup (${eMarkupPct}%)`} v={fmtRupee(recalced.sellBD - recalced.costAll)} />
-                  {recalced.discAmt > 0 && <KV k={`Discount (${eDiscountPct}%)`} v={`−${fmtRupee(recalced.discAmt)}`} />}
-                  <KV k="Signage Selling Price (ex-GST)" v={fmtRupee(recalced.signageSell)} strong />
-                </>
-              )}
-            </>
-          ) : (
-            <>
-              <KV k={`Overhead (${c.pricing.ovhPct}%)`} v={fmtRupee(c.pricing.ovh)} />
-              <KV k="Labour" v={fmtRupee(c.pricing.labour)} />
-              <KV k="Signage Production Cost" v={fmtRupee(c.pricing.costAll)} strong />
-              <KV k={`Markup (${c.pricing.markupPct}%)`} v={fmtRupee(c.pricing.sellBD - c.pricing.costAll)} />
-              {c.pricing.discAmt > 0 && <KV k={`Discount (${c.pricing.discPct}%)`} v={`−${fmtRupee(c.pricing.discAmt)}`} />}
-              {c.pricing.signagePriceBasis === "sqft" && c.pricing.signageRatePerSqft != null && (
-                <KV k="Signage Rate" v={`₹${c.pricing.signageRatePerSqft}/sq.ft`} />
-              )}
-              <KV k="Signage Selling Price (ex-GST)" v={fmtRupee(c.pricing.signageSell ?? c.pricing.sell)} strong />
-            </>
-          )}
+          </div>
         </Card>
 
-        <Card title="Printing, Packing & Forwarding, Installation — Posted Selling Price (no cost-plus)" full>
+        <Section title="1. Materials — Profile, Backing Sheet, Accessories, LED">
+          <table className="w-full text-xs">
+            <tbody>
+              {c.profile && (
+                <Row
+                  label="Profile"
+                  detail={
+                    <>
+                      <div>{c.profile.name}</div>
+                      <div>
+                        {(c.profile.stockLenMM / 1000).toFixed(2)}m stock bar @ {fmtRupee(profPerBarCost)}/bar
+                        {" "}(₹{profRatePerRFT.toFixed(2)}/RFT · ₹{profRatePerRM.toFixed(2)}/RM) — {c.profile.barsRequired} bar(s), {c.profile.utilPct}% utilisation
+                      </div>
+                    </>
+                  }
+                  value={fmtRupee(c.profile.cost)}
+                />
+              )}
+              {c.sheet && (
+                <Row
+                  label="Backing Sheet"
+                  detail={
+                    <>
+                      <div>{c.sheet.name}</div>
+                      <div>₹{c.sheet.costPerSqFt}/sq.ft × {c.sheet.chargeableSqFt} sq.ft chargeable ({c.sheet.wastePct}% waste)</div>
+                    </>
+                  }
+                  value={fmtRupee(c.sheet.cost)}
+                />
+              )}
+              {c.accessories.length > 0 && (
+                <Row
+                  label="Accessories"
+                  detail={c.accessories.map((a) => `${a.name} (${a.qty} ${a.unit})`).join(", ")}
+                  value={fmtRupee(c.accessories.reduce((s, a) => s + a.lineCost, 0))}
+                />
+              )}
+              {c.led && (
+                <Row
+                  label={`LED ${c.led.mode === "bar" ? "Bars" : "Modules"}`}
+                  detail={
+                    <>
+                      <div>{c.led.modelName}</div>
+                      <div>
+                        {c.led.mode === "bar"
+                          ? `${c.led.numBars} bar(s), ${c.led.totalPieces} pieces`
+                          : `${c.led.cols} × ${c.led.rows} grid, ${c.led.count} modules`}
+                        {" — "}{c.led.watt} W total
+                      </div>
+                    </>
+                  }
+                  value={fmtRupee(c.led.cost)}
+                />
+              )}
+              {c.driver && (
+                <Row
+                  label="LED Driver"
+                  detail={`Requirement ${c.driver.requiredW} W — ${c.driver.count} × ${c.driver.driverWatt}W selected (${c.driver.utilPct}% utilisation)`}
+                  value={fmtRupee(c.driver.cost)}
+                />
+              )}
+              <Row label="Raw Material Cost — Signage (per sign)" value={fmtRupee(c.pricing.raw)} strong />
+            </tbody>
+          </table>
+        </Section>
+
+        <Section title="2. Printing & Finishing">
+          {c.print && (
+            <table className="w-full text-xs">
+              <tbody>
+                <Row
+                  label="Print Media"
+                  detail={
+                    <>
+                      <div>{c.print.mediaName} — {c.print.finishingLabel}</div>
+                      <div>
+                        {c.print.sqFt} sq.ft chargeable
+                        {c.print.productionSqFt != null && ` (production area ${c.print.productionSqFt} sq.ft, ref. only, not charged)`}
+                      </div>
+                    </>
+                  }
+                  value={fmtRupee(c.print.cost)}
+                />
+              </tbody>
+            </table>
+          )}
           {editing ? (
-            <div className="grid grid-cols-1 gap-3 py-2 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-2 pt-1 sm:grid-cols-3">
               <EditField label="Printing Selling Price (₹)" value={ePrintSell} onChange={setEPrintSell} />
               <EditField label="Packing & Forwarding (₹)" value={eShipping} onChange={setEShipping} />
               <EditField label="Installation Selling Price (₹)" value={eInstallSell} onChange={setEInstallSell} />
             </div>
           ) : (
-            <>
-              {c.pricing.printPriceBasis === "sqft" && c.pricing.printRatePerSqft != null && (
-                <KV k="Printing Rate" v={`₹${c.pricing.printRatePerSqft}/sq.ft`} />
+            <table className="w-full text-xs">
+              <tbody>
+                <Row
+                  label="Printing Selling Price"
+                  detail={c.pricing.printPriceBasis === "sqft" && c.pricing.printRatePerSqft != null ? `₹${c.pricing.printRatePerSqft}/sq.ft` : undefined}
+                  value={fmtRupee(c.pricing.printSell ?? 0)}
+                  strong
+                />
+                <Row label="Packing & Forwarding" value={fmtRupee(c.pricing.shipping ?? 0)} strong />
+                <Row label="Installation Selling Price" value={fmtRupee(c.pricing.installSell ?? 0)} strong />
+              </tbody>
+            </table>
+          )}
+        </Section>
+
+        <Section title="3. Cost Build-Up — Overheads, Labour, Markup">
+          {editing && (
+            <div className="grid grid-cols-2 gap-2 pb-1 sm:grid-cols-4">
+              <EditField label="Overhead %" value={eOverheadPct} onChange={setEOverheadPct} />
+              <EditField label="Labour (₹)" value={eLabour} onChange={setELabour} />
+              <EditField label="Markup %" value={eMarkupPct} onChange={setEMarkupPct} />
+              <EditField label="Discount %" value={eDiscountPct} onChange={setEDiscountPct} />
+            </div>
+          )}
+          <table className="w-full text-xs">
+            <tbody>
+              {editing && recalced ? (
+                <>
+                  <Row label="Raw Material Cost" value={fmtRupee(c.pricing.raw)} />
+                  <Row label="Signage Production Cost" value={fmtRupee(recalced.costAll)} strong />
+                  <Row label={`Markup (${eMarkupPct}%)`} value={fmtRupee(recalced.sellBD - recalced.costAll)} />
+                  {recalced.discAmt > 0 && <Row label={`Discount (${eDiscountPct}%)`} value={`−${fmtRupee(recalced.discAmt)}`} />}
+                  <Row label="Signage Selling Price (ex-GST)" value={fmtRupee(recalced.signageSell)} strong />
+                </>
+              ) : (
+                <>
+                  <Row label="Raw Material Cost" value={fmtRupee(c.pricing.raw)} />
+                  <Row label={`Overhead (${c.pricing.ovhPct}%)`} value={fmtRupee(c.pricing.ovh)} />
+                  <Row label="Labour" value={fmtRupee(c.pricing.labour)} />
+                  <Row label="Signage Production Cost" value={fmtRupee(c.pricing.costAll)} strong />
+                  <Row label={`Markup (${c.pricing.markupPct}%)`} value={fmtRupee(c.pricing.sellBD - c.pricing.costAll)} />
+                  {c.pricing.discAmt > 0 && <Row label={`Discount (${c.pricing.discPct}%)`} value={`−${fmtRupee(c.pricing.discAmt)}`} />}
+                  <Row
+                    label="Signage Selling Price (ex-GST)"
+                    detail={c.pricing.signagePriceBasis === "sqft" && c.pricing.signageRatePerSqft != null ? `₹${c.pricing.signageRatePerSqft}/sq.ft` : undefined}
+                    value={fmtRupee(c.pricing.signageSell ?? c.pricing.sell)}
+                    strong
+                  />
+                </>
               )}
-              <KV k="Printing Selling Price" v={fmtRupee(c.pricing.printSell ?? 0)} />
-              <KV k="Packing & Forwarding" v={fmtRupee(c.pricing.shipping ?? 0)} />
-              <KV k="Installation Selling Price" v={fmtRupee(c.pricing.installSell ?? 0)} />
-            </>
-          )}
-        </Card>
+            </tbody>
+          </table>
+        </Section>
 
-        <Card title="Invoice Total" full>
-          {editing && recalced ? (
-            <>
-              <KV k="Total Selling Price (ex-GST)" v={fmtRupee(recalced.sell)} strong />
-              <div className="grid grid-cols-2 gap-3 py-2 sm:grid-cols-3">
-                <EditField label="GST %" value={eGstPct} onChange={setEGstPct} />
-              </div>
-              <KV k={`GST ${eGstPct}%`} v={fmtRupee(recalced.gstAmt)} />
-              <KV k="Final Amount (incl. GST)" v={fmtRupee(recalced.final)} strong />
-              <KV k="Gross Margin" v={`${recalced.margin}% (${fmtRupee(recalced.mgnAmt)})`} />
-              <div className="mt-3 flex justify-end gap-2 print:hidden">
-                <Button variant="secondary" onClick={() => setEditing(false)}>
-                  <X size={14} /> Cancel
-                </Button>
-                <Button onClick={saveEdit} loading={savingEdit}>Save Changes</Button>
-              </div>
-            </>
-          ) : (
-            <>
-              <KV k="Total Selling Price (ex-GST)" v={fmtRupee(c.pricing.sell)} strong />
-              <KV k={`GST ${c.pricing.gstPct}%`} v={fmtRupee(c.pricing.gstAmt)} />
-              <KV k="Final Amount (incl. GST)" v={fmtRupee(c.pricing.final)} strong />
-              <KV k="Gross Margin" v={`${c.pricing.margin}% (${fmtRupee(c.pricing.mgnAmt)})`} />
-            </>
+        <Section title="4. Total Taxable Value, GST & Total">
+          {editing && (
+            <div className="grid grid-cols-2 gap-2 pb-1 sm:grid-cols-4">
+              <EditField label="GST %" value={eGstPct} onChange={setEGstPct} />
+            </div>
           )}
-        </Card>
+          <table className="w-full text-xs">
+            <tbody>
+              {editing && recalced ? (
+                <>
+                  <Row label="Total Taxable Value (ex-GST)" value={fmtRupee(recalced.sell)} strong big />
+                  <Row label={`GST ${eGstPct}%`} value={fmtRupee(recalced.gstAmt)} />
+                  <Row label="Final Amount (incl. GST)" value={fmtRupee(recalced.final)} strong big />
+                  <Row label="Gross Margin" value={`${recalced.margin}% (${fmtRupee(recalced.mgnAmt)})`} />
+                </>
+              ) : (
+                <>
+                  <Row label="Total Taxable Value (ex-GST)" value={fmtRupee(c.pricing.sell)} strong big />
+                  <Row label={`GST ${c.pricing.gstPct}%`} value={fmtRupee(c.pricing.gstAmt)} />
+                  <Row label="Final Amount (incl. GST)" value={fmtRupee(c.pricing.final)} strong big />
+                  <Row label="Gross Margin" value={`${c.pricing.margin}% (${fmtRupee(c.pricing.mgnAmt)})`} />
+                </>
+              )}
+            </tbody>
+          </table>
+          {editing && recalced && (
+            <div className="mt-2 flex justify-end gap-2 print:hidden">
+              <Button variant="secondary" onClick={() => setEditing(false)}>
+                <X size={14} /> Cancel
+              </Button>
+              <Button onClick={saveEdit} loading={savingEdit}>Save Changes</Button>
+            </div>
+          )}
+        </Section>
 
-        <p className="mt-6 border-t border-line pt-3 text-center text-xs text-ink-muted">
+        <p className="mt-3 border-t border-line pt-2 text-center text-[11px] text-ink-muted">
           Generated by MMDI ONE Sign Estimator • {new Date(row.created_at).toLocaleString("en-IN")} • This is a system-generated estimate
         </p>
       </div>
@@ -350,31 +376,64 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
   );
 }
 
-function Card({ title, children, full }: { title: string; children: React.ReactNode; full?: boolean }) {
+function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className={`mb-4 rounded-lg border border-line p-4 ${full ? "" : ""}`}>
-      <div className="mb-2 text-sm font-semibold text-ink">{title}</div>
+    <div className="mb-3 rounded-lg border border-line p-3">
+      <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-ink-secondary">{title}</div>
       <div className="space-y-1">{children}</div>
     </div>
   );
 }
 function KV({ k, v, strong }: { k: string; v: string; strong?: boolean }) {
   return (
-    <div className={`flex justify-between text-sm ${strong ? "font-semibold text-ink" : "text-ink-secondary"}`}>
+    <div className={`flex justify-between text-xs ${strong ? "font-semibold text-ink" : "text-ink-secondary"}`}>
       <span>{k}</span>
       <span>{v}</span>
     </div>
   );
 }
+// Section/Row mirror the compact card pattern already built for the live
+// Estimator wizard's Step 6 (see EstimatorTab.tsx) -- duplicated here rather
+// than shared, since this is a separate, frozen-snapshot print/detail view
+// with its own editing affordances.
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="mb-3 rounded-lg border border-line bg-surface p-3">
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-secondary">{title}</h3>
+      <div className="space-y-1">{children}</div>
+    </div>
+  );
+}
+function Row({
+  label,
+  detail,
+  value,
+  strong,
+  big,
+}: {
+  label: string;
+  detail?: React.ReactNode;
+  value: string;
+  strong?: boolean;
+  big?: boolean;
+}) {
+  return (
+    <tr className="border-t border-line first:border-t-0">
+      <td className={`p-1 align-top ${strong ? "font-semibold text-ink" : "text-ink-secondary"} ${big ? "text-sm" : "text-xs"}`}>{label}</td>
+      <td className="p-1 align-top text-[11px] text-ink-muted">{detail}</td>
+      <td className={`p-1 whitespace-nowrap text-right align-top ${strong ? "font-semibold text-ink" : "text-ink-secondary"} ${big ? "text-sm" : "text-xs"}`}>{value}</td>
+    </tr>
+  );
+}
 function EditField({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
   return (
     <div>
-      <label className="mb-1 block text-xs font-medium text-ink-secondary">{label}</label>
+      <label className="mb-0.5 block text-[11px] font-medium text-ink-secondary">{label}</label>
       <input
         type="number"
         value={value}
         onChange={(e) => onChange(Number(e.target.value) || 0)}
-        className="h-9 w-full rounded-md border border-line-strong bg-surface px-2 text-sm text-ink outline-none"
+        className="h-8 w-full rounded-md border border-line-strong bg-surface px-2 text-xs text-ink outline-none"
       />
     </div>
   );
