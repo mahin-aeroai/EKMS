@@ -1648,13 +1648,19 @@ export default function EstimateBuilderPage() {
                         : "—"}
                     </td>
                     <td className="px-3 py-2.5">
-                      {/* SQFT-priced lines carry the unit on Width x Height
-                          and UOM is repurposed as the cm/ft/in size-entry
-                          unit there -- so it isn't a real quantity unit and
-                          shouldn't be appended here (was showing e.g. "1 ft"
-                          for a line entered in feet). Only "nos" lines have
-                          a genuine per-piece UOM (Boxes, Rolls, Each, ...). */}
-                      {l.calcMode === "sqft" ? l.quantity : `${l.quantity} ${l.uom}`.trim()}
+                      {/* UOM is repurposed as the cm/ft/in size-entry unit
+                          for Width×Height on ANY line that carries real
+                          dimensions -- including "nos" lines pulled from the
+                          Sign Estimator pool, which still show a real sign
+                          size even though they're not priced by area (see
+                          the Width×Height cell above). That's not a real
+                          per-piece counting unit, so it's excluded here too
+                          (was showing e.g. "1 ft" instead of just "1").
+                          Only genuine "nos" lines with a real counting unit
+                          (Boxes, Rolls, Each, ...) show it appended. */}
+                      {l.calcMode === "sqft" || ["cm", "ft", "in"].includes(l.uom.toLowerCase())
+                        ? l.quantity
+                        : `${l.quantity} ${l.uom}`.trim()}
                     </td>
                     <td className="px-3 py-2.5">{l.calcMode === "sqft" ? sqftTotal(l).toFixed(2) : "—"}</td>
                     <td className="px-3 py-2.5">{rupee(l.unitRate)}</td>

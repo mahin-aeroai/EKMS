@@ -499,11 +499,17 @@ export async function generateEstimatePdf(data: EstimatePdfData): Promise<Blob> 
       // basis -- a "nos"-priced line (e.g. a Sign Estimator pool pull) can
       // still carry a real sign size, and the customer should see it.
       l.widthCm && l.heightCm ? `${l.widthCm}${sizeUnit} × ${l.heightCm}${sizeUnit}` : "—",
-      // The SQFT column already carries the area-priced total, so the
-      // Qty column just shows the bare count there instead of repeating
-      // the unit a second time (e.g. "4" not "4 SQFT") -- the unit still
-      // shows for "nos" lines, where there's no other column carrying it.
-      l.calcMode === "sqft" ? String(l.quantity) : `${l.quantity} ${l.uom ?? ""}`.trim(),
+      // The SQFT column already carries the area-priced total, so the Qty
+      // column just shows the bare count there instead of repeating the
+      // unit a second time (e.g. "4" not "4 SQFT"). Same for a "nos" line
+      // whose uom is actually just the cm/ft/in unit borrowed for the
+      // Width×Height column above (e.g. a Sign Estimator pool pull) --
+      // that's not a real counting unit either, so it's excluded here too
+      // (was showing "1 ft" instead of "1"). Only a genuine "nos" line with
+      // a real counting unit (Boxes, Rolls, Each, ...) shows it appended.
+      l.calcMode === "sqft" || ["cm", "ft", "in"].includes((l.uom ?? "").toLowerCase())
+        ? String(l.quantity)
+        : `${l.quantity} ${l.uom ?? ""}`.trim(),
       l.calcMode === "sqft" ? (l.sqftTotal ?? 0).toFixed(2) : "—",
       rupee(l.unitRate),
       rupee(base),
