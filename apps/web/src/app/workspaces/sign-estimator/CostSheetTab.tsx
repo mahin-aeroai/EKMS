@@ -252,7 +252,57 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
           </table>
         </Section>
 
-        <Section title="2. Printing & Finishing">
+        <Section title="2. Cost Build-Up — Overheads, Labour, Markup">
+          {editing && (
+            <div className="grid grid-cols-2 gap-2 pb-1 sm:grid-cols-4">
+              <EditField label="Overhead %" value={eOverheadPct} onChange={setEOverheadPct} />
+              <EditField label="Labour (₹)" value={eLabour} onChange={setELabour} />
+              <EditField label="Markup %" value={eMarkupPct} onChange={setEMarkupPct} />
+              <EditField label="Discount %" value={eDiscountPct} onChange={setEDiscountPct} />
+            </div>
+          )}
+          <table className="w-full text-xs">
+            <tbody>
+              {editing && recalced ? (
+                <>
+                  <Row label="Raw Material Cost" value={fmtRupee(c.pricing.raw)} />
+                  <Row label="Signage Production Cost" value={fmtRupee(recalced.costAll)} strong />
+                  {/* Markup shown here is the RECONCILED amount (actual selling price
+                      + discount − cost), not the raw markup-% formula result -- when
+                      Signage is priced by an override (₹/sq.ft rate, or a typed lumpsum
+                      figure) rather than pure cost-plus, this keeps Cost + Markup −
+                      Discount always adding up to the actual Signage Selling Price. */}
+                  <Row
+                    label={`Markup (${eMarkupPct}%)`}
+                    value={fmtRupee(recalced.signageSell + recalced.discAmt - recalced.costAll)}
+                  />
+                  {recalced.discAmt > 0 && <Row label={`Discount (${eDiscountPct}%)`} value={`−${fmtRupee(recalced.discAmt)}`} />}
+                  <Row label="Signage Selling Price (ex-GST)" value={fmtRupee(recalced.signageSell)} strong />
+                </>
+              ) : (
+                <>
+                  <Row label="Raw Material Cost" value={fmtRupee(c.pricing.raw)} />
+                  <Row label={`Overhead (${c.pricing.ovhPct}%)`} value={fmtRupee(c.pricing.ovh)} />
+                  <Row label="Labour" value={fmtRupee(c.pricing.labour)} />
+                  <Row label="Signage Production Cost" value={fmtRupee(c.pricing.costAll)} strong />
+                  <Row
+                    label={`Markup (${c.pricing.markupPct}%)`}
+                    value={fmtRupee((c.pricing.signageSell ?? c.pricing.sell) + c.pricing.discAmt - c.pricing.costAll)}
+                  />
+                  {c.pricing.discAmt > 0 && <Row label={`Discount (${c.pricing.discPct}%)`} value={`−${fmtRupee(c.pricing.discAmt)}`} />}
+                  <Row
+                    label="Signage Selling Price (ex-GST)"
+                    detail={c.pricing.signagePriceBasis === "sqft" && c.pricing.signageRatePerSqft != null ? `₹${c.pricing.signageRatePerSqft}/sq.ft` : undefined}
+                    value={fmtRupee(c.pricing.signageSell ?? c.pricing.sell)}
+                    strong
+                  />
+                </>
+              )}
+            </tbody>
+          </table>
+        </Section>
+
+        <Section title="3. Printing & Finishing">
           {c.print && (
             <table className="w-full text-xs">
               <tbody>
@@ -289,48 +339,14 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
                 />
                 <Row label="Packing & Forwarding" value={fmtRupee(c.pricing.shipping ?? 0)} strong />
                 <Row label="Installation Selling Price" value={fmtRupee(c.pricing.installSell ?? 0)} strong />
+                <Row
+                  label="Total — Printing, Packing & Forwarding, Installation"
+                  value={fmtRupee((c.pricing.printSell ?? 0) + (c.pricing.shipping ?? 0) + (c.pricing.installSell ?? 0))}
+                  strong
+                />
               </tbody>
             </table>
           )}
-        </Section>
-
-        <Section title="3. Cost Build-Up — Overheads, Labour, Markup">
-          {editing && (
-            <div className="grid grid-cols-2 gap-2 pb-1 sm:grid-cols-4">
-              <EditField label="Overhead %" value={eOverheadPct} onChange={setEOverheadPct} />
-              <EditField label="Labour (₹)" value={eLabour} onChange={setELabour} />
-              <EditField label="Markup %" value={eMarkupPct} onChange={setEMarkupPct} />
-              <EditField label="Discount %" value={eDiscountPct} onChange={setEDiscountPct} />
-            </div>
-          )}
-          <table className="w-full text-xs">
-            <tbody>
-              {editing && recalced ? (
-                <>
-                  <Row label="Raw Material Cost" value={fmtRupee(c.pricing.raw)} />
-                  <Row label="Signage Production Cost" value={fmtRupee(recalced.costAll)} strong />
-                  <Row label={`Markup (${eMarkupPct}%)`} value={fmtRupee(recalced.sellBD - recalced.costAll)} />
-                  {recalced.discAmt > 0 && <Row label={`Discount (${eDiscountPct}%)`} value={`−${fmtRupee(recalced.discAmt)}`} />}
-                  <Row label="Signage Selling Price (ex-GST)" value={fmtRupee(recalced.signageSell)} strong />
-                </>
-              ) : (
-                <>
-                  <Row label="Raw Material Cost" value={fmtRupee(c.pricing.raw)} />
-                  <Row label={`Overhead (${c.pricing.ovhPct}%)`} value={fmtRupee(c.pricing.ovh)} />
-                  <Row label="Labour" value={fmtRupee(c.pricing.labour)} />
-                  <Row label="Signage Production Cost" value={fmtRupee(c.pricing.costAll)} strong />
-                  <Row label={`Markup (${c.pricing.markupPct}%)`} value={fmtRupee(c.pricing.sellBD - c.pricing.costAll)} />
-                  {c.pricing.discAmt > 0 && <Row label={`Discount (${c.pricing.discPct}%)`} value={`−${fmtRupee(c.pricing.discAmt)}`} />}
-                  <Row
-                    label="Signage Selling Price (ex-GST)"
-                    detail={c.pricing.signagePriceBasis === "sqft" && c.pricing.signageRatePerSqft != null ? `₹${c.pricing.signageRatePerSqft}/sq.ft` : undefined}
-                    value={fmtRupee(c.pricing.signageSell ?? c.pricing.sell)}
-                    strong
-                  />
-                </>
-              )}
-            </tbody>
-          </table>
         </Section>
 
         <Section title="4. Total Taxable Value, GST & Total">
@@ -346,14 +362,12 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
                   <Row label="Total Taxable Value (ex-GST)" value={fmtRupee(recalced.sell)} strong big />
                   <Row label={`GST ${eGstPct}%`} value={fmtRupee(recalced.gstAmt)} />
                   <Row label="Final Amount (incl. GST)" value={fmtRupee(recalced.final)} strong big />
-                  <Row label="Gross Margin" value={`${recalced.margin}% (${fmtRupee(recalced.mgnAmt)})`} />
                 </>
               ) : (
                 <>
                   <Row label="Total Taxable Value (ex-GST)" value={fmtRupee(c.pricing.sell)} strong big />
                   <Row label={`GST ${c.pricing.gstPct}%`} value={fmtRupee(c.pricing.gstAmt)} />
                   <Row label="Final Amount (incl. GST)" value={fmtRupee(c.pricing.final)} strong big />
-                  <Row label="Gross Margin" value={`${c.pricing.margin}% (${fmtRupee(c.pricing.mgnAmt)})`} />
                 </>
               )}
             </tbody>
