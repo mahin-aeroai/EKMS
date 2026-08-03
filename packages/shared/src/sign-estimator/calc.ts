@@ -702,6 +702,13 @@ export function computeAccessoryDefaults(wMM: number, hMM: number, stockLen: num
     if (n.includes("flat joiner")) return flatJ;
     if (n.includes("screw")) return screws;
     if (n.includes("bracket")) return brackets;
+    // Cable defaults, matched space-insensitively so "2 Pair Cable" and
+    // "2Pair Cable" both hit -- these are flat per-job defaults (not
+    // derived from sign dimensions the way brackets/screws are), still
+    // overridable per job like any other accessory qty.
+    const compact = n.replace(/\s+/g, "");
+    if (compact.includes("2pair")) return 5;
+    if (compact.includes("3core")) return 3;
     return 0;
   };
 
