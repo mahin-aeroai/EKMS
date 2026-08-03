@@ -347,30 +347,38 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <UserRoleContext.Provider value={userRole}>
     <UserGroupsContext.Provider value={allowedGroups}>
     <UserToolsContext.Provider value={allowedTools}>
-      <div className="flex h-screen flex-col">
-        <TopNav
-          onOpenNav={() => setNavOpen(true)}
-          onOpenSearch={() => setPaletteOpen(true)}
-          onOpenAI={() => setAiOpen(true)}
-          notificationCount={3}
-          userEmail={userEmail}
-          userRole={userRole}
-          onSignOut={handleSignOut}
-          onOpenAccount={() => router.push("/account")}
-        />
-        <div className="flex flex-1 overflow-hidden">
-          <Sidebar
-            sections={visibleNav}
-            activeId={activeId}
-            onNavigate={(id) => {
-              const item = NAV.flatMap((s) => s.items).find((i) => i.id === id);
-              if (item) router.push(item.href);
-            }}
-            mobileOpen={navOpen}
-            onMobileClose={() => setNavOpen(false)}
+      <div className="flex h-screen flex-col print:block print:h-auto">
+        {/* Chrome (top nav + sidebar) is app furniture, never part of a
+            printed report -- window.print() otherwise captures the whole
+            viewport including these, which is what made printed cost sheets
+            balloon to multiple pages with the sidebar re-tiled on each one. */}
+        <div className="print:hidden">
+          <TopNav
+            onOpenNav={() => setNavOpen(true)}
+            onOpenSearch={() => setPaletteOpen(true)}
+            onOpenAI={() => setAiOpen(true)}
+            notificationCount={3}
+            userEmail={userEmail}
+            userRole={userRole}
+            onSignOut={handleSignOut}
+            onOpenAccount={() => router.push("/account")}
           />
-          <main className="flex-1 overflow-y-auto bg-surface-sunken p-4 sm:p-6">
-            <div className="mx-auto max-w-6xl">{children}</div>
+        </div>
+        <div className="flex flex-1 overflow-hidden print:block print:overflow-visible">
+          <div className="print:hidden">
+            <Sidebar
+              sections={visibleNav}
+              activeId={activeId}
+              onNavigate={(id) => {
+                const item = NAV.flatMap((s) => s.items).find((i) => i.id === id);
+                if (item) router.push(item.href);
+              }}
+              mobileOpen={navOpen}
+              onMobileClose={() => setNavOpen(false)}
+            />
+          </div>
+          <main className="flex-1 overflow-y-auto bg-surface-sunken p-4 sm:p-6 print:overflow-visible print:bg-white print:p-0">
+            <div className="mx-auto max-w-6xl print:mx-0 print:max-w-none">{children}</div>
           </main>
         </div>
         <CommandPalette

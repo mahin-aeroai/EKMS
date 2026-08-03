@@ -55,6 +55,7 @@ export default function SignEstimatorPage() {
   return (
     <ToolAccessGuard toolId="sign-estimator" toolLabel="Sign Estimator">
     <div>
+      <div className="print:hidden">
       <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "Customers" }, { label: "Sign Estimator" }]} />
 
       <div className="mt-4 flex flex-col gap-4 border-b border-line pb-6 sm:flex-row sm:items-start sm:justify-between">
@@ -77,8 +78,9 @@ export default function SignEstimatorPage() {
           </div>
         </div>
       </div>
+      </div>
 
-      <div className="my-6 flex gap-1 overflow-x-auto border-b border-line">
+      <div className="my-6 flex gap-1 overflow-x-auto border-b border-line print:hidden">
         {TABS.map((t) => (
           <button
             key={t.id}

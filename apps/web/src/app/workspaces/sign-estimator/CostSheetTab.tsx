@@ -392,7 +392,7 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="mb-3 rounded-lg border border-line p-3">
+    <div className="mb-3 break-inside-avoid rounded-lg border border-line p-3 print:break-inside-avoid">
       <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-ink-secondary">{title}</div>
       <div className="space-y-1">{children}</div>
     </div>
@@ -412,7 +412,7 @@ function KV({ k, v, strong }: { k: string; v: string; strong?: boolean }) {
 // with its own editing affordances.
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="mb-3 rounded-lg border border-line bg-surface p-3">
+    <div className="mb-3 break-inside-avoid rounded-lg border border-line bg-surface p-3 print:break-inside-avoid">
       <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-secondary">{title}</h3>
       <div className="space-y-1">{children}</div>
     </div>
