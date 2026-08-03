@@ -200,6 +200,12 @@ export default function EstimateBuilderPage() {
   // kept separate from `draft` (a DraftLine doesn't exist as such until
   // addLine() pushes it) so addLine can stamp DraftLine.poolItemId.
   const [pendingPoolItemId, setPendingPoolItemId] = useState<string | null>(null);
+  // Print/Shipping/Installation get pulled out into their own separate line
+  // items (customers ask for these itemized, not folded into one combined
+  // Signage row/amount) -- pickPoolRow precomputes them fully formed here,
+  // and addLine() appends them alongside the (still-editable) primary draft
+  // line when a Sign Estimator pool pick provides any of them.
+  const [pendingPoolExtraLines, setPendingPoolExtraLines] = useState<Omit<DraftLine, "key">[]>([]);
   const [draft, setDraft] = useState<Omit<DraftLine, "key">>(emptyDraft());
   const [lines, setLines] = useState<DraftLine[]>([]);
 
@@ -685,7 +691,12 @@ export default function EstimateBuilderPage() {
   // in as a service, see CostSheetCalcTab's addToPool), for Sign Estimator
   // it's the category + dims, since that tool doesn't track a materials
   // list the same way.
-  function poolItemDescription(item: EstimatePoolItemRow): string {
+  // includePrint=false is used when Print is being split out into its own
+  // dedicated line item (see pickPoolRow's sign_estimator branch below) --
+  // the Signage line's own description shouldn't repeat the print spec that
+  // now has its own row.
+  function poolItemDescription(item: EstimatePoolItemRow, opts?: { includePrint?: boolean }): string {
+    const includePrint = opts?.includePrint ?? true;
     const s = item.summary as {
       description?: string;
       materials?: { name: string; mappedTo: string | null }[];
@@ -717,7 +728,7 @@ export default function EstimateBuilderPage() {
       s.dimW && s.dimH ? `${s.dimW}×${s.dimH} ${s.dimUnit ?? ""}`.trim() : null,
       s.qty ? `qty ${s.qty}` : null,
       profileLine,
-      printLine,
+      includePrint ? printLine : null,
     ];
     return parts.filter(Boolean).join(" — ") || "Sign Estimator job";
   }
@@ -749,6 +760,9 @@ export default function EstimateBuilderPage() {
       dimUnit?: string | null;
       signageSell?: number | null;
       printSell?: number | null;
+      printMediaName?: string | null;
+      printSqFt?: number | null;
+      printRatePerSqft?: number | null;
       shipping?: number | null;
       installSell?: number | null;
     };
@@ -771,6 +785,7 @@ export default function EstimateBuilderPage() {
         quantity: s.qty || 1,
         unitRate: s.unitRatePerSqft ?? 0,
       }));
+      setPendingPoolExtraLines([]);
     } else if (row.source === "sign_estimator") {
       // Sign Estimator's own dims are in mm/feet/inches, not cm/ft/in --
       // convert mm to cm (getSizeUnit has no "mm" case), pass feet/inches
@@ -782,29 +797,73 @@ export default function EstimateBuilderPage() {
       const widthCm = dimUnit === "mm" ? rawW / 10 : rawW;
       const heightCm = dimUnit === "mm" ? rawH / 10 : rawH;
       const qty = s.qty || 1;
-      // Signage + Print are the "base" line amount (unitRate × quantity);
-      // Shipping/Installation ride on their own dedicated per-line fields
-      // instead of being folded into that base -- so quantity × unitRate +
-      // transportationRate + installationRate reconstructs the exact same
-      // total the job was quoted at in Sign Estimator, just split the same
-      // way the rest of this table already splits every other line.
-      const baseTotal = (s.signageSell ?? 0) + (s.printSell ?? 0);
+      const signageSell = s.signageSell ?? 0;
+      // Signage is the only cost left on the primary (still-editable)
+      // draft line now -- Print, Shipping and Installation are each their
+      // own dedicated line item (see pendingPoolExtraLines below), since
+      // customers ask to see these itemized separately rather than folded
+      // into one combined Signage amount.
       setDraft((d) => ({
         ...d,
         isContractItem: false,
         productNo: "",
-        productName: row.label,
-        description: poolItemDescription(row),
+        productName: `${row.label} — Signage`,
+        description: poolItemDescription(row, { includePrint: false }),
         calcMode: "nos",
         sizeEntryMode: "dimensions",
         uom,
         widthCm,
         heightCm,
         quantity: qty,
-        unitRate: qty > 0 ? Math.round(baseTotal / qty) : Math.round(baseTotal),
-        transportationRate: s.shipping ?? 0,
-        installationRate: s.installSell ?? 0,
+        unitRate: qty > 0 ? Math.round(signageSell / qty) : Math.round(signageSell),
+        transportationRate: 0,
+        installationRate: 0,
       }));
+
+      const extras: Omit<DraftLine, "key">[] = [];
+      if (s.printSell) {
+        // Reconstructs the print line at the exact same ₹/sq.ft rate (and
+        // total sq.ft) the job was priced at in Sign Estimator, when that
+        // detail is available -- quantity × bulkSqft × unitRate then
+        // reproduces printSell exactly. Falls back to a plain "nos" line
+        // (no real sq.ft/rate to show) when the job was priced at a flat
+        // lumpsum instead.
+        const havePrintRate = s.printSqFt != null && s.printRatePerSqft != null;
+        extras.push({
+          ...emptyDraft(),
+          productName: `${row.label} — Printing`,
+          description: s.printMediaName ?? "Printing",
+          calcMode: havePrintRate ? "sqft" : "nos",
+          sizeEntryMode: "bulk",
+          uom,
+          widthCm,
+          heightCm,
+          bulkSqft: havePrintRate ? s.printSqFt ?? 0 : 0,
+          quantity: havePrintRate ? qty : 1,
+          unitRate: havePrintRate ? s.printRatePerSqft ?? 0 : s.printSell ?? 0,
+        });
+      }
+      if (s.shipping) {
+        extras.push({
+          ...emptyDraft(),
+          productName: `${row.label} — Shipping`,
+          description: "Packing & Forwarding",
+          calcMode: "nos",
+          quantity: 1,
+          unitRate: s.shipping ?? 0,
+        });
+      }
+      if (s.installSell) {
+        extras.push({
+          ...emptyDraft(),
+          productName: `${row.label} — Installation`,
+          description: "Installation",
+          calcMode: "nos",
+          quantity: 1,
+          unitRate: s.installSell ?? 0,
+        });
+      }
+      setPendingPoolExtraLines(extras);
     } else {
       setDraft((d) => ({
         ...d,
@@ -819,6 +878,7 @@ export default function EstimateBuilderPage() {
         quantity: 1,
         unitRate: row.sell_amount ?? 0,
       }));
+      setPendingPoolExtraLines([]);
     }
     setPendingPoolItemId(row.id);
   }
@@ -836,16 +896,25 @@ export default function EstimateBuilderPage() {
       toast("danger", "Enter the total SQFT for this line");
       return;
     }
+    const poolItemId = source === "pool" ? pendingPoolItemId ?? undefined : undefined;
     setLines((ls) => [
       ...ls,
       {
         ...draft,
         isContractItem: source === "contract",
         key: crypto.randomUUID(),
-        poolItemId: source === "pool" ? pendingPoolItemId ?? undefined : undefined,
+        poolItemId,
       },
+      // Print/Shipping/Installation, precomputed by pickPoolRow -- appended
+      // as their own separate line items right alongside the (editable)
+      // primary line, all tagged with the same poolItemId so the pool item
+      // still gets marked 'used' as one unit on save. Gated on
+      // source === "pool" so switching away to another source without
+      // clicking a new pool item never re-injects stale leftover extras.
+      ...(source === "pool" ? pendingPoolExtraLines.map((l) => ({ ...l, isContractItem: false, key: crypto.randomUUID(), poolItemId })) : []),
     ]);
     setDraft(emptyDraft());
+    setPendingPoolExtraLines([]);
     setRateCardPick("");
     setHistoryPick("");
     setPoolPick("");
