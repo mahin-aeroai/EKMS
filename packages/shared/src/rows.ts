@@ -699,6 +699,25 @@ export interface SignEstimateRow {
   created_at: string;
 }
 
+// ---------- Estimate Pool (supabase-estimate-pool-migration.sql) ----------
+// Shared staging area between Sign Estimator, Cost Sheet, and Estimate
+// Builder -- see that migration's header for the three explicit design
+// choices (explicit "Add to Pool" action, customer-less until pulled into
+// an estimate, marked 'used' once pulled in).
+export interface EstimatePoolItemRow {
+  id: string;
+  source: "sign_estimator" | "cost_sheet";
+  source_ref_id: string | null;
+  label: string;
+  sell_amount: number | null;
+  cost_amount: number | null;
+  summary: Record<string, unknown>;
+  status: "available" | "used";
+  used_in_estimate_id: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
 // ---------- Cost Sheet (supabase-cost-sheet-schema.sql) ----------
 // New standalone Tools workspace -- BOM + Work Centre cost model, per the
 // scoping questions PROJECT_STATUS.md's "Next up" section raised and the

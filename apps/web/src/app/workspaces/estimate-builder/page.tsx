@@ -9,7 +9,7 @@ import { Card, StatCard } from "@/components/ui/Card";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
-import type { CustomerRow, CustomerContactRow, ContractRow, IkeaRateCardRow, AppleRateCardRow, EstimateRow, EstimateCalcMode, EstimateLineItemRow, EstimatePaymentTermsType, EmployeeRow } from "@mmdi/shared/rows";
+import type { CustomerRow, CustomerContactRow, ContractRow, IkeaRateCardRow, AppleRateCardRow, EstimatePoolItemRow, EstimateRow, EstimateCalcMode, EstimateLineItemRow, EstimatePaymentTermsType, EmployeeRow } from "@mmdi/shared/rows";
 import { generateEstimatePdf, downloadBlob, getSizeUnit, type EstimatePdfLine } from "@/lib/estimateBuilder/pdf";
 import { fetchAllRows } from "@/lib/dashboard-queries";
 import { ToolAccessGuard } from "@/components/ToolAccessGuard";
@@ -54,7 +54,13 @@ import { ToolAccessGuard } from "@/components/ToolAccessGuard";
 //   quotes use a location/series-based number (e.g. "Worli-MUM/25-26/
 //   IEPL/39") that the user said they'd supply separately.
 
-type DraftSource = "contract" | "custom" | "history";
+// "pool" added per "connect Sign Estimator, Cost Sheet, and Estimate
+// Builder together -- create a pool where all sign estimates and cost
+// sheet products [go], then it is moved to estimate module and there
+// select the customer and create estimates." Picking a pool item pre-fills
+// the draft below same as "history" does, but from estimate_pool_items
+// (supabase-estimate-pool-migration.sql) instead of past sales.
+type DraftSource = "contract" | "custom" | "history" | "pool";
 
 // One distinct product previously sold to this customer, per
 // sales_transactions -- for customers with no contract/rate card wired up
@@ -101,6 +107,11 @@ interface DraftLine {
   quantity: number;
   transportationRate: number;
   installationRate: number;
+  // Set when this line came from the estimate pool (Sign Estimator/Cost
+  // Sheet) -- lets saveEstimate mark that pool item 'used' once the
+  // estimate is actually saved, so it doesn't accidentally get quoted to
+  // a second customer too. Undefined for every other source.
+  poolItemId?: string;
 }
 
 function emptyDraft(): Omit<DraftLine, "key"> {
@@ -183,6 +194,12 @@ export default function EstimateBuilderPage() {
   const [source, setSource] = useState<DraftSource>("contract");
   const [rateCardPick, setRateCardPick] = useState("");
   const [historyPick, setHistoryPick] = useState("");
+  const [poolItems, setPoolItems] = useState<EstimatePoolItemRow[] | null>(null);
+  const [poolPick, setPoolPick] = useState("");
+  // The pool item id backing the current draft, if source === "pool" --
+  // kept separate from `draft` (a DraftLine doesn't exist as such until
+  // addLine() pushes it) so addLine can stamp DraftLine.poolItemId.
+  const [pendingPoolItemId, setPendingPoolItemId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Omit<DraftLine, "key">>(emptyDraft());
   const [lines, setLines] = useState<DraftLine[]>([]);
 
@@ -258,7 +275,23 @@ export default function EstimateBuilderPage() {
       .then(({ data }) => setContracts((data as ContractRow[]) ?? []));
     fetchAllRows<EmployeeRow>((from, to) => supabase.from("employees").select("*").order("name").range(from, to)).then(setEmployees);
     loadRecent();
+    loadPoolItems();
   }, []);
+
+  // Estimate pool -- Sign Estimator/Cost Sheet items still waiting to be
+  // pulled into a quote. Customer-less by design (see the migration's
+  // header), so this loads once up front rather than per-customer.
+  function loadPoolItems() {
+    supabase
+      .from("estimate_pool_items")
+      .select("*")
+      .eq("status", "available")
+      .order("created_at", { ascending: false })
+      .then(({ data, error }) => {
+        if (error) return;
+        setPoolItems((data as EstimatePoolItemRow[]) ?? []);
+      });
+  }
 
   function loadRecent() {
     supabase
@@ -646,6 +679,45 @@ export default function EstimateBuilderPage() {
     }));
   }
 
+  // Small human-readable line built from a pool item's denormalized
+  // summary -- the two source tools' snapshots have different shapes
+  // (Cost Sheet: fgCode/description/uom/width/height/qty/sqft; Sign
+  // Estimator: category/categoryLabel/dimW/dimH/dimUnit/qty), so this
+  // just picks out whatever's present rather than assuming one shape.
+  function poolItemDescription(item: EstimatePoolItemRow): string {
+    const s = item.summary as Record<string, unknown>;
+    const parts =
+      item.source === "cost_sheet"
+        ? [s.description, s.width && s.height ? `${s.width}×${s.height} ${s.uom ?? ""}`.trim() : null, s.qty ? `qty ${s.qty}` : null]
+        : [s.categoryLabel, s.dimW && s.dimH ? `${s.dimW}×${s.dimH} ${s.dimUnit ?? ""}`.trim() : null, s.qty ? `qty ${s.qty}` : null];
+    const label = parts.filter(Boolean).join(" — ");
+    return label || (item.source === "cost_sheet" ? "Cost Sheet job" : "Sign Estimator job");
+  }
+
+  // Picking a pool item pre-fills the draft as a single "nos" line at the
+  // pool item's already-computed sell amount -- it's a whole priced job
+  // (Sign Estimator/Cost Sheet already did the sqft/qty math), not a
+  // per-unit rate to multiply again.
+  function pickPoolRow(idx: string) {
+    setPoolPick(idx);
+    const row = poolItems?.[Number(idx)];
+    if (!row) return;
+    setDraft((d) => ({
+      ...d,
+      isContractItem: false,
+      productNo: "",
+      productName: row.label,
+      description: poolItemDescription(row),
+      calcMode: "nos",
+      sizeEntryMode: "dimensions",
+      widthCm: 0,
+      heightCm: 0,
+      quantity: 1,
+      unitRate: row.sell_amount ?? 0,
+    }));
+    setPendingPoolItemId(row.id);
+  }
+
   function addLine() {
     if (!draft.productName.trim()) {
       toast("danger", "Enter or select a product first");
@@ -659,10 +731,20 @@ export default function EstimateBuilderPage() {
       toast("danger", "Enter the total SQFT for this line");
       return;
     }
-    setLines((ls) => [...ls, { ...draft, isContractItem: source === "contract", key: crypto.randomUUID() }]);
+    setLines((ls) => [
+      ...ls,
+      {
+        ...draft,
+        isContractItem: source === "contract",
+        key: crypto.randomUUID(),
+        poolItemId: source === "pool" ? pendingPoolItemId ?? undefined : undefined,
+      },
+    ]);
     setDraft(emptyDraft());
     setRateCardPick("");
     setHistoryPick("");
+    setPoolPick("");
+    setPendingPoolItemId(null);
   }
 
   function removeLine(key: string) {
@@ -784,6 +866,23 @@ export default function EstimateBuilderPage() {
         }))
       );
       if (linesError) throw linesError;
+
+      // Mark any pool items this estimate drew from as 'used' -- best
+      // effort, isolated from the outer try/catch so a hiccup here (e.g. a
+      // pool item already claimed by someone else in the meantime) never
+      // makes the already-saved estimate look like it failed.
+      const usedPoolItemIds = lines.map((l) => l.poolItemId).filter((id): id is string => !!id);
+      if (usedPoolItemIds.length > 0) {
+        const { error: poolUpdateError } = await supabase
+          .from("estimate_pool_items")
+          .update({ status: "used", used_in_estimate_id: estimate.id })
+          .in("id", usedPoolItemIds);
+        if (poolUpdateError) {
+          toast("warning", `Estimate saved, but couldn't mark ${usedPoolItemIds.length} pool item(s) as used: ${poolUpdateError.message}`);
+        } else {
+          loadPoolItems();
+        }
+      }
 
       const blob = await generateEstimatePdf({
         quoteNumber: quoteNumberData,
@@ -998,7 +1097,41 @@ export default function EstimateBuilderPage() {
           >
             Non-contract / unlisted product
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              setSource("pool");
+              setDraft((d) => ({ ...d, isContractItem: false }));
+            }}
+            className={`rounded-md px-3 py-1.5 text-xs font-medium ${source === "pool" ? "bg-primary-tint text-primary" : "text-ink-secondary hover:bg-surface-sunken"}`}
+          >
+            From estimate pool{poolItems && poolItems.length > 0 ? ` (${poolItems.length})` : ""}
+          </button>
         </div>
+
+        {source === "pool" && (
+          <>
+            {poolItems === null ? (
+              <p className="text-sm text-ink-muted">Loading the estimate pool…</p>
+            ) : poolItems.length === 0 ? (
+              <p className="text-sm text-ink-muted">
+                Nothing waiting in the pool yet — save a job from Sign Estimator or Cost Sheet with &ldquo;Add to Estimate
+                Pool&rdquo; and it&apos;ll show up here.
+              </p>
+            ) : (
+              <Dropdown
+                label={`Waiting in the pool (${poolItems.length})`}
+                placeholder="Search Sign Estimator / Cost Sheet jobs saved to the pool"
+                options={poolItems.map((item, i) => ({
+                  value: String(i),
+                  label: `${item.source === "cost_sheet" ? "Cost Sheet" : "Sign Estimator"} — ${item.label}${item.sell_amount != null ? ` — ${rupee(item.sell_amount)}` : ""}`,
+                }))}
+                value={poolPick}
+                onChange={(v) => pickPoolRow(v as string)}
+              />
+            )}
+          </>
+        )}
 
         {source === "history" && (
           <>

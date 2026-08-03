@@ -39,6 +39,7 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
   const [step, setStep] = useState(1);
   const [masters, setMasters] = useState<Masters | null>(null);
   const [saving, setSaving] = useState(false);
+  const [addingToPool, setAddingToPool] = useState(false);
 
   // ── Step 1 ──
   const [jobName, setJobName] = useState("");
@@ -373,6 +374,64 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
       return;
     }
     toast("success", `Cost sheet ${ref} saved`);
+    onSaved?.();
+  }
+
+  // "Create a pool where all sign estimates and cost sheet products [go],
+  // then it is moved to estimate module and there select the customers
+  // and create estimates." Explicit, separate from the plain "Generate
+  // Cost Sheet" save above (per the user's choice, items only join the
+  // pool when asked to, not on every save) -- also saves a sign_estimates
+  // row the same way, then adds a lightweight, customer-less pointer to it
+  // in estimate_pool_items. Estimate Builder's "From estimate pool" picker
+  // reads that pool table, not sign_estimates directly.
+  async function addToPool() {
+    if (!wMM || !hMM) { toast("danger", "Enter width and height first."); return; }
+    setAddingToPool(true);
+    const now = new Date();
+    const ref = `QUOTE-${now.getFullYear()}-${String(now.getTime()).slice(-5)}`;
+    const snapshot = buildSnapshot();
+    const { data: userData } = await supabase.auth.getUser();
+    const { data: saved, error } = await supabase
+      .from("sign_estimates")
+      .insert({
+        ref,
+        client: jobName || null,
+        category,
+        dim_w: w === "" ? 0 : w,
+        dim_h: h === "" ? 0 : h,
+        dim_unit: unit,
+        width_mm: wMM,
+        height_mm: hMM,
+        qty,
+        sell: pricing.sell,
+        final_amount: pricing.final,
+        margin: pricing.margin,
+        calc: snapshot,
+        created_by: userData?.user?.id ?? null,
+      })
+      .select()
+      .single();
+    if (error) {
+      setAddingToPool(false);
+      toast("danger", `Couldn't save: ${error.message}`);
+      return;
+    }
+    const { error: poolError } = await supabase.from("estimate_pool_items").insert({
+      source: "sign_estimator",
+      source_ref_id: saved.id,
+      label: `${jobName || ref} — ${CATEGORY_LABELS[category] ?? category}`,
+      sell_amount: pricing.final,
+      cost_amount: pricing.costAll ?? null,
+      summary: { ref, category, categoryLabel: CATEGORY_LABELS[category] ?? category, qty, dimW: w, dimH: h, dimUnit: unit, margin: pricing.margin },
+      created_by: userData?.user?.id ?? null,
+    });
+    setAddingToPool(false);
+    if (poolError) {
+      toast("danger", `Saved as ${ref}, but couldn't add it to the estimate pool: ${poolError.message}`);
+      return;
+    }
+    toast("success", `${ref} saved and added to the estimate pool — pull it into a quote from Estimate Builder`);
     onSaved?.();
   }
 
@@ -837,7 +896,10 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
 
           <div className="flex justify-between">
             <Button variant="secondary" onClick={() => goStep(5)}>Back</Button>
-            <Button onClick={generateCostSheet} loading={saving}>Generate Cost Sheet</Button>
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={addToPool} loading={addingToPool}>Add to Estimate Pool</Button>
+              <Button onClick={generateCostSheet} loading={saving}>Generate Cost Sheet</Button>
+            </div>
           </div>
         </div>
       )}
