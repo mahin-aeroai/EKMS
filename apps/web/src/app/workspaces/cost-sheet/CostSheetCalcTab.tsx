@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/dashboard-queries";
@@ -27,11 +28,12 @@ function priceLabel(m: RawMaterialRow) {
 // Sheet tab but reading live from bom_templates / bom_template_lines /
 // raw_materials / work_centre_rates instead of a spreadsheet snapshot.
 //
-// Deliberately NOT persisted anywhere yet (no "save this run" button) --
-// that wasn't part of what was scoped this session (see
-// supabase-cost-sheet-schema.sql's header). A `cost_sheet_runs` table
-// mirroring sign_estimates (one row per saved calculation) would be the
-// natural next step if MMDI wants a history/audit trail here too.
+// A calculation itself still isn't saved as its own row anywhere (no
+// `cost_sheet_runs` history/audit-trail table -- see
+// supabase-cost-sheet-schema.sql's header) -- but "Add to Estimate Pool"
+// below is a real, explicit save: it hands a snapshot of this job off to
+// estimate_pool_items (supabase-estimate-pool-migration.sql), from which
+// Estimate Builder can pull it into an actual customer quote.
 export function CostSheetCalcTab() {
   const { toast } = useToast();
   const [templates, setTemplates] = useState<BomTemplateRow[]>([]);
@@ -56,6 +58,7 @@ export function CostSheetCalcTab() {
   // actual GP shown in the results.
   const [gpMethod, setGpMethod] = useState<GpMethod>("total_cost");
   const [targetGpPct, setTargetGpPct] = useState<number | "">(30);
+  const [addingToPool, setAddingToPool] = useState(false);
   // Work centres a specific job doesn't need this time -- e.g. the
   // customer is doing their own packing, or a job skips a process the FG
   // code normally goes through. Deliberately local/ephemeral state, NOT
@@ -255,6 +258,51 @@ export function CostSheetCalcTab() {
 
   function selectMaterialForLine(lineId: string, code: string | null) {
     setSelectedMaterialByLine((prev) => ({ ...prev, [lineId]: code }));
+  }
+
+  // "Create a pool where all sign estimates and cost sheet products [go],
+  // then it is moved to estimate module and there select the customers
+  // and create estimates." Cost Sheet calculations were never persisted
+  // anywhere (see this file's header) -- this is that first save
+  // mechanism, doubling as the explicit, opt-in hand-off to Estimate
+  // Builder's "From estimate pool" picker. Customer-less by design: you
+  // pick who it's for later, inside Estimate Builder.
+  async function addToPool() {
+    if (!template || !result) return;
+    setAddingToPool(true);
+    const { data: userData } = await supabase.auth.getUser();
+    // Prefer whatever you've actually typed as the selling price; fall
+    // back to the GP-target suggester's recent-basis number if you were
+    // using that instead and never filled in Selling Price / SqFt.
+    const sellAmount = sellPrice !== "" ? result.sellingAmount : priceSuggestion?.totalRecent ?? null;
+    const { error } = await supabase.from("estimate_pool_items").insert({
+      source: "cost_sheet",
+      source_ref_id: null,
+      label: `${template.code} — ${salesOrder || "Untitled job"}`,
+      sell_amount: sellAmount,
+      cost_amount: result.totalCostRecent,
+      summary: {
+        fgCode: template.code,
+        description: template.description,
+        salesOrder: salesOrder || null,
+        uom,
+        width: width === "" ? null : width,
+        height: height === "" ? null : height,
+        qty: qty === "" ? null : qty,
+        sqft: result.sqft,
+        materialCostRecent: result.materialCostRecent,
+        totalProcessCost: result.totalProcessCost,
+        totalCostRecent: result.totalCostRecent,
+        totalCostAvg: result.totalCostAvg,
+      },
+      created_by: userData?.user?.id ?? null,
+    });
+    setAddingToPool(false);
+    if (error) {
+      toast("danger", `Couldn't add to the estimate pool: ${error.message}`);
+      return;
+    }
+    toast("success", `${template.code} added to the estimate pool — pull it into a quote from Estimate Builder`);
   }
 
   const unmappedLines = effectiveLines.filter((l) => !l.raw_material_code);
@@ -524,6 +572,15 @@ export function CostSheetCalcTab() {
                 <Metric label="Total Cost (avg)" value={fmtRupee(result.totalCostAvg)} />
                 <Metric label="GP (recent)" value={fmtRupee(result.gpRecent)} sub={pct(result.gpRecentPct)} />
                 <Metric label="GP (avg)" value={fmtRupee(result.gpAvg)} sub={pct(result.gpAvgPct)} />
+              </div>
+              <div className="mt-3 flex items-center justify-between gap-3 border-t border-line pt-3">
+                <p className="text-[11px] text-ink-muted">
+                  Save this job so it can be pulled into a customer quote from Estimate Builder — customer-less for now, you
+                  pick who it&apos;s for over there.
+                </p>
+                <Button variant="secondary" size="sm" onClick={addToPool} loading={addingToPool} className="shrink-0">
+                  Add to Estimate Pool
+                </Button>
               </div>
             </div>
 
