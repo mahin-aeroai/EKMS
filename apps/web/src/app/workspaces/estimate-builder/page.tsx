@@ -798,11 +798,11 @@ export default function EstimateBuilderPage() {
       const heightCm = dimUnit === "mm" ? rawH / 10 : rawH;
       const qty = s.qty || 1;
       const signageSell = s.signageSell ?? 0;
-      // Signage is the only cost left on the primary (still-editable)
-      // draft line now -- Print, Shipping and Installation are each their
-      // own dedicated line item (see pendingPoolExtraLines below), since
-      // customers ask to see these itemized separately rather than folded
-      // into one combined Signage amount.
+      // Only Print gets split into its own dedicated line item (see
+      // pendingPoolExtraLines below) -- Shipping/Installation go right back
+      // onto the Signage line's own transportationRate/installationRate
+      // fields, using the columns this table already has for exactly that,
+      // rather than becoming separate rows too.
       setDraft((d) => ({
         ...d,
         isContractItem: false,
@@ -816,8 +816,8 @@ export default function EstimateBuilderPage() {
         heightCm,
         quantity: qty,
         unitRate: qty > 0 ? Math.round(signageSell / qty) : Math.round(signageSell),
-        transportationRate: 0,
-        installationRate: 0,
+        transportationRate: s.shipping ?? 0,
+        installationRate: s.installSell ?? 0,
       }));
 
       const extras: Omit<DraftLine, "key">[] = [];
@@ -841,26 +841,6 @@ export default function EstimateBuilderPage() {
           bulkSqft: havePrintRate ? s.printSqFt ?? 0 : 0,
           quantity: havePrintRate ? qty : 1,
           unitRate: havePrintRate ? s.printRatePerSqft ?? 0 : s.printSell ?? 0,
-        });
-      }
-      if (s.shipping) {
-        extras.push({
-          ...emptyDraft(),
-          productName: `${row.label} — Shipping`,
-          description: "Packing & Forwarding",
-          calcMode: "nos",
-          quantity: 1,
-          unitRate: s.shipping ?? 0,
-        });
-      }
-      if (s.installSell) {
-        extras.push({
-          ...emptyDraft(),
-          productName: `${row.label} — Installation`,
-          description: "Installation",
-          calcMode: "nos",
-          quantity: 1,
-          unitRate: s.installSell ?? 0,
         });
       }
       setPendingPoolExtraLines(extras);
