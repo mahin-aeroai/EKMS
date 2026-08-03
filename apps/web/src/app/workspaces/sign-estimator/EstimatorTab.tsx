@@ -1022,6 +1022,17 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
                 <span>Signage Selling Price (ex-GST)</span>
                 <span>{fmtRupee(pricing.signageSell)}</span>
               </div>
+              {/* Whichever way it was priced, always show the OTHER basis
+                  too -- typing a lumpsum still needs to read as a ₹/sq.ft
+                  number (and vice versa) to judge "should this go up or
+                  down per sq.ft," without switching the toggle back and
+                  forth just to see it. */}
+              {signSqft > 0 && (
+                <div className="flex justify-between text-xs text-ink-muted">
+                  <span>≈ per sq.ft ({signSqft.toFixed(2)} sq.ft)</span>
+                  <span>₹{(pricing.signageSell / signSqft).toFixed(2)}/sq.ft</span>
+                </div>
+              )}
             </div>
           </Section>
 
@@ -1054,6 +1065,12 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
                 <span>Printing Selling Price (ex-GST)</span>
                 <span>{fmtRupee(pricing.printSell)}</span>
               </div>
+              {printResult && printResult.printSqFt > 0 && (
+                <div className="flex justify-between text-xs text-ink-muted">
+                  <span>≈ per sq.ft ({printResult.printSqFt} sq.ft)</span>
+                  <span>₹{(pricing.printSell / printResult.printSqFt).toFixed(2)}/sq.ft</span>
+                </div>
+              )}
             </div>
           </Section>
 
