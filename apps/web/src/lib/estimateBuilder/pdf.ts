@@ -292,20 +292,23 @@ function ensure(ctx: Ctx, state: { page: PDFPage; y: number }, need: number) {
 // gstPercent ("GST@18%") rather than a generic "Tax" -- the user quotes at
 // different GST rates per estimate and wants the rate visible in the
 // header rather than having to infer it from Tax/Amount.
+// Numeric columns are right-aligned within their cell (so digits line up
+// on their ones place the way any spreadsheet/invoice would show them) --
+// Product No./Design/W×H stay left-aligned since they're text, not numbers.
 function tableCols(gstPercent: number) {
   return [
-    { label: "Product No.", width: mm(15) },
-    { label: "Design / Product", width: mm(33) },
-    { label: "W × H", width: mm(17) },
-    { label: "Qty", width: mm(8) },
-    { label: "SQFT", width: mm(12) },
-    { label: "Rate", width: mm(12) },
-    { label: "Amount", width: mm(13) },
-    { label: "Shipping", width: mm(13) },
-    { label: "Instl.", width: mm(12) },
-    { label: `GST @${gstPercent}%`, width: mm(12) },
-    { label: "Grand Total", width: mm(23) },
-  ] as const;
+    { label: "Product No.", width: mm(15), align: "left" as const },
+    { label: "Design / Product", width: mm(33), align: "left" as const },
+    { label: "W × H", width: mm(17), align: "left" as const },
+    { label: "Qty", width: mm(8), align: "right" as const },
+    { label: "SQFT", width: mm(12), align: "right" as const },
+    { label: "Rate", width: mm(12), align: "right" as const },
+    { label: "Amount", width: mm(13), align: "right" as const },
+    { label: "Shipping", width: mm(13), align: "right" as const },
+    { label: "Instl.", width: mm(12), align: "right" as const },
+    { label: `GST @${gstPercent}%`, width: mm(12), align: "right" as const },
+    { label: "Grand Total", width: mm(23), align: "right" as const },
+  ];
 }
 
 function tableWidth(cols: readonly { width: number }[]) {
@@ -338,7 +341,7 @@ function rowHeightFor(wrapped: string[][]): number {
 
 function drawWrappedCells(
   page: PDFPage,
-  cols: readonly { width: number }[],
+  cols: readonly { width: number; align?: "left" | "right" }[],
   wrapped: string[][],
   rowH: number,
   y: number,
@@ -348,13 +351,18 @@ function drawWrappedCells(
   let x = MARGIN;
   wrapped.forEach((lines, i) => {
     const col = cols[i];
+    // Right-aligned cells (numeric columns) sit flush against the column's
+    // right edge, 3pt in -- same inset the left-aligned side already uses.
+    const cellX = (text: string) =>
+      col.align === "right" ? x + col.width - 3 - font.widthOfTextAtSize(text, size) : x + 3;
     if (lines.length <= 1) {
       // Single line: centered vertically in the row.
-      page.drawText(lines[0] ?? "", { x: x + 3, y: y - rowH / 2 - size / 2 + 1, size, font, color: INK });
+      const text = lines[0] ?? "";
+      page.drawText(text, { x: cellX(text), y: y - rowH / 2 - size / 2 + 1, size, font, color: INK });
     } else {
       const firstBaseline = y - ROW_V_PAD - size;
       lines.forEach((line, j) => {
-        page.drawText(line, { x: x + 3, y: firstBaseline - j * ROW_LINE_H, size, font, color: INK });
+        page.drawText(line, { x: cellX(line), y: firstBaseline - j * ROW_LINE_H, size, font, color: INK });
       });
     }
     x += col.width;
@@ -533,15 +541,29 @@ export async function generateEstimatePdf(data: EstimatePdfData): Promise<Blob> 
 
   // The line-item table has no room left for a pre-tax subtotal column
   // (Tax already has to squeeze in ahead of Grand Total at 12mm), so the
-  // taxable value / GST / final value breakdown lives here instead, as
-  // three separate lines rather than one opaque "Grand Total" figure.
-  ensure(ctx, state, 48);
-  state.page.drawText(`Total Taxable Value (INR): ${rupee(taxableTotal)}`, { x: MARGIN, y: state.y, size: size + 1, font: bold, color: INK });
-  state.y -= 16;
-  state.page.drawText(`GST @${data.gstPercent}% (INR): ${rupee(gstAmount)}`, { x: MARGIN, y: state.y, size: size + 1, font: bold, color: INK });
-  state.y -= 16;
-  state.page.drawText(`Total Value (INR): ${rupee(grandTotal)}`, { x: MARGIN, y: state.y, size: size + 1, font: bold, color: INK });
-  state.y -= 22;
+  // taxable value / GST / final value breakdown lives here instead -- one
+  // compact line at body text size rather than three separate lines all
+  // bold and a size up, which read as unnecessarily heavy. Only the final
+  // Total Value stays bold, as the one figure that actually needs to stand
+  // out; Taxable Value and GST are supporting detail leading up to it.
+  // Falls back to two lines only if the combined text would run past the
+  // page's content width (very large totals), rather than ever overflowing
+  // off the page.
+  ensure(ctx, state, 40);
+  const leadSeg = `Total Taxable Value (INR): ${rupee(taxableTotal)}     GST @${data.gstPercent}% (INR): ${rupee(gstAmount)}     `;
+  const totalSeg = `Total Value (INR): ${rupee(grandTotal)}`;
+  const leadWidth = font.widthOfTextAtSize(leadSeg, size);
+  const totalWidth = bold.widthOfTextAtSize(totalSeg, size);
+  if (leadWidth + totalWidth <= contentW) {
+    state.page.drawText(leadSeg, { x: MARGIN, y: state.y, size, font, color: INK });
+    state.page.drawText(totalSeg, { x: MARGIN + leadWidth, y: state.y, size, font: bold, color: INK });
+    state.y -= 20;
+  } else {
+    state.page.drawText(leadSeg.trim(), { x: MARGIN, y: state.y, size, font, color: INK });
+    state.y -= 15;
+    state.page.drawText(totalSeg, { x: MARGIN, y: state.y, size, font: bold, color: INK });
+    state.y -= 20;
+  }
 
   // ---- Prices / Job completion / Delivery / Payment schedule — exact
   // wording the user specified, kept fixed rather than derived. ----
