@@ -1424,16 +1424,41 @@ export default function EstimateBuilderPage() {
                 value={draft.calcMode}
                 onChange={(e) => {
                   const mode = e.target.value as EstimateCalcMode;
-                  setDraft((d) => ({
-                    ...d,
-                    calcMode: mode,
-                    // Switching to SQFT always normalizes uom to a valid
-                    // cm/ft/in selection (defaulting to cm) so the dropdown
-                    // below has a real value to show; switching to Nos
-                    // clears a leftover cm/ft/in value so there's a blank
-                    // field ready for a real counting-unit label instead.
-                    uom: mode === "sqft" ? getSizeUnit(d.uom) : ["cm", "ft", "in"].includes(d.uom.toLowerCase()) ? "" : d.uom,
-                  }));
+                  setDraft((d) => {
+                    if (mode === d.calcMode) return d;
+                    // Switching Pricing basis used to leave `unitRate`
+                    // untouched, so a Nos rate meant as "total cost for this
+                    // line" (e.g. ₹25,440 for qty 1) got silently
+                    // reinterpreted as a ₹/sq.ft rate the moment SQFT was
+                    // selected -- multiplying by the sign's real area and
+                    // massively inflating the Amount (₹25,440 × 32 sq.ft =
+                    // ₹8,14,080 instead of the intended ₹25,440). Back-solve
+                    // a fresh unitRate from the CURRENT total instead, so
+                    // toggling the basis keeps the line's Amount the same
+                    // right up until the user actually changes something --
+                    // it only re-expresses the same total as a different
+                    // rate, it never re-derives a new total from the old
+                    // rate under the new formula.
+                    const currentTotal = lineSubtotal(d);
+                    let unitRate = d.unitRate;
+                    if (mode === "sqft") {
+                      const sqft = sqftTotal({ ...d, calcMode: "sqft" });
+                      if (sqft > 0) unitRate = Math.round((currentTotal / sqft) * 100) / 100;
+                    } else {
+                      if (d.quantity > 0) unitRate = Math.round((currentTotal / d.quantity) * 100) / 100;
+                    }
+                    return {
+                      ...d,
+                      calcMode: mode,
+                      unitRate,
+                      // Switching to SQFT always normalizes uom to a valid
+                      // cm/ft/in selection (defaulting to cm) so the dropdown
+                      // below has a real value to show; switching to Nos
+                      // clears a leftover cm/ft/in value so there's a blank
+                      // field ready for a real counting-unit label instead.
+                      uom: mode === "sqft" ? getSizeUnit(d.uom) : ["cm", "ft", "in"].includes(d.uom.toLowerCase()) ? "" : d.uom,
+                    };
+                  });
                 }}
                 className="h-10 rounded-md border border-line-strong bg-surface px-3 text-sm text-ink outline-none"
               >
