@@ -108,8 +108,10 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
   const [labour, setLabour] = useState(0);
   const [install, setInstall] = useState(0);
   const [shipping, setShipping] = useState(0);
-  const [overheadPct, setOverheadPct] = useState(10);
-  const [markupPct, setMarkupPct] = useState(30);
+  // Defaults per request: Labour/Overhead start at 0% (posted per job,
+  // not assumed), Markup defaults to 50%.
+  const [overheadPct, setOverheadPct] = useState(0);
+  const [markupPct, setMarkupPct] = useState(50);
   const [discountPct, setDiscountPct] = useState(0);
   const [gstPct, setGstPct] = useState(18);
   // Printing selling price -- "" means "use the cost-plus estimate below as
@@ -936,7 +938,14 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
                 />
                 <Row
                   label="Accessories"
-                  detail={`${accessories.filter((a) => a.qty > 0).length} item(s)`}
+                  detail={
+                    accessories.filter((a) => a.qty > 0).length > 0
+                      ? accessories
+                          .filter((a) => a.qty > 0)
+                          .map((a) => `${a.name} (${a.qty} ${a.unit})`)
+                          .join(", ")
+                      : ""
+                  }
                   value={fmtRupee(accCost)}
                 />
                 <Row
