@@ -34,6 +34,7 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
   const [eLabour, setELabour] = useState(0);
   const [eInstallSell, setEInstallSell] = useState(0);
   const [ePrintSell, setEPrintSell] = useState(0);
+  const [eShipping, setEShipping] = useState(0);
   const [eOverheadPct, setEOverheadPct] = useState(0);
   const [eMarkupPct, setEMarkupPct] = useState(0);
   const [eDiscountPct, setEDiscountPct] = useState(0);
@@ -61,6 +62,7 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
     setELabour(c.pricing.labour);
     setEInstallSell(c.pricing.installSell ?? 0);
     setEPrintSell(c.pricing.printSell ?? 0);
+    setEShipping(c.pricing.shipping ?? 0);
     setEOverheadPct(c.pricing.ovhPct);
     setEMarkupPct(c.pricing.markupPct);
     setEDiscountPct(c.pricing.discPct);
@@ -70,9 +72,14 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
 
   // Re-runs the pricing formula with the edited terms, but against the SAME
   // frozen signage raw material cost (c.pricing.raw) -- only Signage runs
-  // cost-plus; Printing and Installation are edited directly as posted
-  // selling prices, same split as the live Estimator's Step 6 (see
-  // calc.ts's computePricing doc comment for why).
+  // cost-plus; Printing, Shipping and Installation are edited directly as
+  // posted selling prices, same split as the live Estimator's Step 6 (see
+  // calc.ts's computePricing doc comment for why). Passing `null` for the
+  // signage override always re-derives Signage from cost-plus terms here --
+  // if the original estimate priced Signage at a ₹/sq.ft rate instead (see
+  // signagePriceBasis), editing pricing on this saved cost sheet switches it
+  // back to cost-plus rather than re-applying that rate; the sqft rate is
+  // only adjustable from the live Estimator wizard.
   // Plain (non-memoized) recompute -- deliberately NOT a useMemo/useState
   // hook, since it's derived after this component's two early returns above
   // (no row yet / still loading) and calling a hook there conditionally
@@ -81,8 +88,10 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
   const recalced = editing
     ? computePricing(
         { profCost: c.pricing.raw, sheetCost: 0, accCost: 0, ledCost: 0, drvCost: 0 },
+        null,
         c.pricing.printCostRef ?? 0,
         ePrintSell,
+        eShipping,
         eInstallSell,
         { qty: c.qty, labour: eLabour, overheadPct: eOverheadPct, markupPct: eMarkupPct, discountPct: eDiscountPct, gstPct: eGstPct }
       )
@@ -107,6 +116,7 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
         signageSell: recalced.signageSell,
         printCostRef: recalced.printCostRef,
         printSell: recalced.printSell,
+        shipping: recalced.shipping,
         installSell: recalced.installSell,
         sell: recalced.sell,
         gstPct: eGstPct,
@@ -275,20 +285,28 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
               <KV k="Signage Production Cost" v={fmtRupee(c.pricing.costAll)} strong />
               <KV k={`Markup (${c.pricing.markupPct}%)`} v={fmtRupee(c.pricing.sellBD - c.pricing.costAll)} />
               {c.pricing.discAmt > 0 && <KV k={`Discount (${c.pricing.discPct}%)`} v={`−${fmtRupee(c.pricing.discAmt)}`} />}
+              {c.pricing.signagePriceBasis === "sqft" && c.pricing.signageRatePerSqft != null && (
+                <KV k="Signage Rate" v={`₹${c.pricing.signageRatePerSqft}/sq.ft`} />
+              )}
               <KV k="Signage Selling Price (ex-GST)" v={fmtRupee(c.pricing.signageSell ?? c.pricing.sell)} strong />
             </>
           )}
         </Card>
 
-        <Card title="Printing & Installation — Posted Selling Price (no cost-plus)" full>
+        <Card title="Printing, Shipping & Installation — Posted Selling Price (no cost-plus)" full>
           {editing ? (
-            <div className="grid grid-cols-1 gap-3 py-2 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3 py-2 sm:grid-cols-3">
               <EditField label="Printing Selling Price (₹)" value={ePrintSell} onChange={setEPrintSell} />
+              <EditField label="Shipping (₹)" value={eShipping} onChange={setEShipping} />
               <EditField label="Installation Selling Price (₹)" value={eInstallSell} onChange={setEInstallSell} />
             </div>
           ) : (
             <>
+              {c.pricing.printPriceBasis === "sqft" && c.pricing.printRatePerSqft != null && (
+                <KV k="Printing Rate" v={`₹${c.pricing.printRatePerSqft}/sq.ft`} />
+              )}
               <KV k="Printing Selling Price" v={fmtRupee(c.pricing.printSell ?? 0)} />
+              <KV k="Shipping" v={fmtRupee(c.pricing.shipping ?? 0)} />
               <KV k="Installation Selling Price" v={fmtRupee(c.pricing.installSell ?? 0)} />
             </>
           )}

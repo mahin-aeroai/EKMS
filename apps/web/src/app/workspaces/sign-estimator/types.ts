@@ -84,17 +84,28 @@ export interface PricingSnapshot {
   discPct: number;
   discAmt: number;
   signageSell: number;
+  // Signage can be invoiced either as the cost-plus suggestion/override
+  // (lumpsum) or as a ₹/sq.ft rate × sign area -- both recorded so a past
+  // estimate's cost sheet shows exactly how the posted price was arrived at.
+  signagePriceBasis: "lumpsum" | "sqft";
+  signageRatePerSqft: number | null;
 
   // Printing -- posted selling price, no cost-plus (printCostRef is
   // reference-only, computed on a cost-plus basis for margin visibility).
+  // Same lumpsum-vs-₹/sqft basis as signage above.
   printCostRef: number;
   printSell: number;
+  printPriceBasis: "lumpsum" | "sqft";
+  printRatePerSqft: number | null;
+
+  // Shipping -- posted selling price, no cost tracked.
+  shipping: number;
 
   // Installation -- posted selling price, no cost tracked.
   installSell: number;
 
-  // Combined invoice total (signageSell + printSell + installSell), GST
-  // applied once on that combined total.
+  // Combined invoice total (signageSell + printSell + shipping +
+  // installSell), GST applied once on that combined total.
   sell: number;
   gstPct: number;
   gstAmt: number;

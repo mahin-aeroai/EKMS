@@ -495,7 +495,10 @@ export async function generateEstimatePdf(data: EstimatePdfData): Promise<Blob> 
     drawTableRow(ctx, state, [
       l.productNo || "—",
       productCell,
-      l.calcMode === "sqft" && l.widthCm && l.heightCm ? `${l.widthCm}${sizeUnit} × ${l.heightCm}${sizeUnit}` : "—",
+      // Shows whenever the line has real dimensions, regardless of pricing
+      // basis -- a "nos"-priced line (e.g. a Sign Estimator pool pull) can
+      // still carry a real sign size, and the customer should see it.
+      l.widthCm && l.heightCm ? `${l.widthCm}${sizeUnit} × ${l.heightCm}${sizeUnit}` : "—",
       // The SQFT column already carries the area-priced total, so the
       // Qty column just shows the bare count there instead of repeating
       // the unit a second time (e.g. "4" not "4 SQFT") -- the unit still

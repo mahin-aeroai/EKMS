@@ -694,12 +694,31 @@ export default function EstimateBuilderPage() {
       dimH?: number;
       dimUnit?: string;
       qty?: number;
+      profileName?: string | null;
+      printMediaName?: string | null;
+      printSqFt?: number | null;
+      printRatePerSqft?: number | null;
     };
     if (item.source === "cost_sheet") {
       const materialsLine = (s.materials ?? []).map((m) => (m.mappedTo ? `${m.name}: ${m.mappedTo}` : m.name)).join("; ");
       return [s.description, materialsLine].filter(Boolean).join(" — ") || "Cost Sheet job";
     }
-    const parts = [s.categoryLabel, s.dimW && s.dimH ? `${s.dimW}×${s.dimH} ${s.dimUnit ?? ""}`.trim() : null, s.qty ? `qty ${s.qty}` : null];
+    // Profile and print detail are shown as their own segments (not folded
+    // into a single generic line) so the profile spec (e.g. "70mm SEG
+    // Profile") and the print media's own sq.ft + ₹/sq.ft rate are each
+    // clearly visible on the quote, instead of only the combined total.
+    const profileLine = s.profileName ? `Profile: ${s.profileName}` : null;
+    const printLine =
+      s.printMediaName && s.printSqFt != null && s.printRatePerSqft != null
+        ? `Print: ${s.printMediaName} — ${s.printSqFt} sq.ft @ ₹${s.printRatePerSqft}/sq.ft`
+        : s.printMediaName ?? null;
+    const parts = [
+      s.categoryLabel,
+      s.dimW && s.dimH ? `${s.dimW}×${s.dimH} ${s.dimUnit ?? ""}`.trim() : null,
+      s.qty ? `qty ${s.qty}` : null,
+      profileLine,
+      printLine,
+    ];
     return parts.filter(Boolean).join(" — ") || "Sign Estimator job";
   }
 
@@ -708,15 +727,31 @@ export default function EstimateBuilderPage() {
   // costed at -- NOT the whole-job total treated as a per-sqft rate, which
   // would massively overprice the line the moment someone entered real
   // dimensions) since that's exactly how Cost Sheet itself prices; Sign
-  // Estimator items still come in as a single "nos" line at the whole
-  // job's sell amount, since that tool doesn't produce a clean ₹/sqft rate
-  // (LED/profile/print costs don't divide evenly across area the way a
-  // BOM's per-sqft material+process cost does).
+  // Estimator items come in as a "nos" line (LED/profile/print costs don't
+  // divide evenly across area the way a BOM's per-sqft material+process
+  // cost does, so there's no single clean ₹/sqft rate for the whole job)
+  // but still carry the sign's real Width×Height -- "Width height to be
+  // mentioned irrespective of price method" -- plus Shipping/Installation
+  // split out into their own dedicated columns instead of being buried in
+  // one lump sell_amount, same as every other line already does.
   function pickPoolRow(idx: string) {
     setPoolPick(idx);
     const row = poolItems?.[Number(idx)];
     if (!row) return;
-    const s = row.summary as { width?: number | null; height?: number | null; uom?: string; qty?: number | null; unitRatePerSqft?: number | null };
+    const s = row.summary as {
+      width?: number | null;
+      height?: number | null;
+      uom?: string;
+      qty?: number | null;
+      unitRatePerSqft?: number | null;
+      dimW?: number | null;
+      dimH?: number | null;
+      dimUnit?: string | null;
+      signageSell?: number | null;
+      printSell?: number | null;
+      shipping?: number | null;
+      installSell?: number | null;
+    };
     if (row.source === "cost_sheet" && s.width && s.height && s.unitRatePerSqft != null) {
       setDraft((d) => ({
         ...d,
@@ -735,6 +770,40 @@ export default function EstimateBuilderPage() {
         heightCm: s.height ?? 0,
         quantity: s.qty || 1,
         unitRate: s.unitRatePerSqft ?? 0,
+      }));
+    } else if (row.source === "sign_estimator") {
+      // Sign Estimator's own dims are in mm/feet/inches, not cm/ft/in --
+      // convert mm to cm (getSizeUnit has no "mm" case), pass feet/inches
+      // straight through since those units already match.
+      const dimUnit = s.dimUnit ?? "mm";
+      const uom = dimUnit === "feet" ? "ft" : dimUnit === "inches" ? "in" : "cm";
+      const rawW = s.dimW ?? 0;
+      const rawH = s.dimH ?? 0;
+      const widthCm = dimUnit === "mm" ? rawW / 10 : rawW;
+      const heightCm = dimUnit === "mm" ? rawH / 10 : rawH;
+      const qty = s.qty || 1;
+      // Signage + Print are the "base" line amount (unitRate × quantity);
+      // Shipping/Installation ride on their own dedicated per-line fields
+      // instead of being folded into that base -- so quantity × unitRate +
+      // transportationRate + installationRate reconstructs the exact same
+      // total the job was quoted at in Sign Estimator, just split the same
+      // way the rest of this table already splits every other line.
+      const baseTotal = (s.signageSell ?? 0) + (s.printSell ?? 0);
+      setDraft((d) => ({
+        ...d,
+        isContractItem: false,
+        productNo: "",
+        productName: row.label,
+        description: poolItemDescription(row),
+        calcMode: "nos",
+        sizeEntryMode: "dimensions",
+        uom,
+        widthCm,
+        heightCm,
+        quantity: qty,
+        unitRate: qty > 0 ? Math.round(baseTotal / qty) : Math.round(baseTotal),
+        transportationRate: s.shipping ?? 0,
+        installationRate: s.installSell ?? 0,
       }));
     } else {
       setDraft((d) => ({
@@ -1492,7 +1561,17 @@ export default function EstimateBuilderPage() {
                       </div>
                     </td>
                     <td className="px-3 py-2.5">
-                      {l.calcMode !== "sqft" ? "—" : l.sizeEntryMode === "bulk" ? `${l.bulkSqft} sqft (bulk)` : `${l.widthCm}${sizeUnit} × ${l.heightCm}${sizeUnit}`}
+                      {/* Width×Height shows whenever the line actually has
+                          dimensions, regardless of pricing basis -- a "nos"
+                          line (e.g. a Sign Estimator pool pull priced as a
+                          flat lumpsum) still carries a real sign size and
+                          the customer should still see it, not just SQFT-
+                          priced lines. */}
+                      {l.calcMode === "sqft" && l.sizeEntryMode === "bulk"
+                        ? `${l.bulkSqft} sqft (bulk)`
+                        : l.widthCm && l.heightCm
+                        ? `${l.widthCm}${sizeUnit} × ${l.heightCm}${sizeUnit}`
+                        : "—"}
                     </td>
                     <td className="px-3 py-2.5">
                       {/* SQFT-priced lines carry the unit on Width x Height

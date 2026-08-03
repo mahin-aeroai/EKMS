@@ -107,6 +107,7 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
   // PricingInputs' cost-plus math below; it's summed in after markup.
   const [labour, setLabour] = useState(0);
   const [install, setInstall] = useState(0);
+  const [shipping, setShipping] = useState(0);
   const [overheadPct, setOverheadPct] = useState(10);
   const [markupPct, setMarkupPct] = useState(30);
   const [discountPct, setDiscountPct] = useState(0);
@@ -115,6 +116,19 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
   // a starting suggestion"; once the shop posts their real quoted rate they
   // type over it here, same no-costing-needed pattern as Installation.
   const [printSellOverride, setPrintSellOverride] = useState<number | "">("");
+  // "Make a provision to adjust price with sqft price or lumpsum price for
+  // both signage and print" -- once cost-plus/print-cost-plus arrives at a
+  // suggestion, the shop can post the final invoiced price either as a flat
+  // lumpsum (the pre-existing behaviour above) or as a ₹/sq.ft rate ×
+  // that component's own area (sign area for Signage, printed area
+  // including bleed/waste for Printing). Basis is picked independently for
+  // each component since a job might sell signage on a per-sqft rate card
+  // but still post printing as a flat number, or vice-versa.
+  const [signagePriceBasis, setSignagePriceBasis] = useState<"lumpsum" | "sqft">("lumpsum");
+  const [signageSellOverride, setSignageSellOverride] = useState<number | "">("");
+  const [signageRatePerSqft, setSignageRatePerSqft] = useState<number | "">("");
+  const [printPriceBasis, setPrintPriceBasis] = useState<"lumpsum" | "sqft">("lumpsum");
+  const [printRatePerSqft, setPrintRatePerSqft] = useState<number | "">("");
 
   useEffect(() => {
     async function loadMasters() {
@@ -273,7 +287,28 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
   // What printing would cost the shop on a cost-plus basis, × qty -- shown
   // as a reference only; the actual printSell below is what gets invoiced.
   const printSellDefault = Math.round((printResult?.printCost ?? 0) * qty);
-  const printSell = printSellOverride === "" ? printSellDefault : printSellOverride;
+  // Lumpsum-basis print total: either the posted override or the cost-plus
+  // suggestion. Sqft-basis print total: the posted ₹/sq.ft rate × the
+  // actual printed area (which already includes bleed + waste, NOT the bare
+  // sign area) × qty -- this is the number the "₹130/sq.ft" quote is really
+  // against, not the sign's own sqft.
+  const printSellLumpsum = printSellOverride === "" ? printSellDefault : printSellOverride;
+  const printSellFromSqft = Math.round((printRatePerSqft === "" ? 0 : printRatePerSqft) * (printResult?.printSqFt ?? 0) * qty);
+  const printSell = printPriceBasis === "sqft" ? printSellFromSqft : printSellLumpsum;
+
+  // Sign area (frame face, no bleed/waste) -- the basis for a ₹/sq.ft
+  // signage rate, as opposed to printSqFt above which is print-specific.
+  const signSqft = wMM > 0 && hMM > 0 ? (wMM / 304.8) * (hMM / 304.8) : 0;
+  // null here (lumpsum basis, no override typed yet) tells computePricing
+  // to keep using its own cost-plus suggestion -- same "" -> suggestion
+  // pattern as printSellOverride, just expressed as null since 0 is a
+  // legitimate override value.
+  const signageSellOverrideTotal =
+    signagePriceBasis === "sqft"
+      ? Math.round((signageRatePerSqft === "" ? 0 : signageRatePerSqft) * signSqft * qty)
+      : signageSellOverride === ""
+      ? null
+      : signageSellOverride;
 
   const pricing = useMemo(() => {
     return computePricing(
@@ -284,12 +319,17 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
         ledCost,
         drvCost: driverFinal?.totalCost ?? 0,
       },
+      signageSellOverrideTotal,
       printResult?.printCost ?? 0,
       printSell,
+      shipping,
       install,
       { qty, labour, overheadPct, markupPct, discountPct, gstPct }
     );
-  }, [profResult, sheetResult, accCost, ledCost, driverFinal, printResult, printSell, install, qty, labour, overheadPct, markupPct, discountPct, gstPct]);
+  }, [
+    profResult, sheetResult, accCost, ledCost, driverFinal, signageSellOverrideTotal, printResult, printSell, shipping, install,
+    qty, labour, overheadPct, markupPct, discountPct, gstPct,
+  ]);
 
   function goStep(n: number) {
     if (n >= 2 && !category) { toast("danger", "Select a sign category first."); return; }
@@ -337,7 +377,10 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
         raw: pricing.raw, ovh: pricing.ovh, ovhPct: overheadPct, labour,
         costPer: pricing.costPer, costAll: pricing.costAll, sellBD: pricing.sellBD,
         markupPct, discPct: discountPct, discAmt: pricing.discAmt, signageSell: pricing.signageSell,
+        signagePriceBasis, signageRatePerSqft: signagePriceBasis === "sqft" ? (signageRatePerSqft === "" ? 0 : signageRatePerSqft) : null,
         printCostRef: pricing.printCostRef, printSell: pricing.printSell,
+        printPriceBasis, printRatePerSqft: printPriceBasis === "sqft" ? (printRatePerSqft === "" ? 0 : printRatePerSqft) : null,
+        shipping: pricing.shipping,
         installSell: pricing.installSell,
         sell: pricing.sell, gstPct, gstAmt: pricing.gstAmt, final: pricing.final,
         margin: pricing.margin, mgnAmt: pricing.mgnAmt,
@@ -417,13 +460,40 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
       toast("danger", `Couldn't save: ${error.message}`);
       return;
     }
+    // Profile + print detail weren't carried into the pool item before --
+    // Estimate Builder's description just showed category + dims, hiding
+    // which profile ("70mm SEG Profile") and print media/rate ("Digital UV
+    // Print — 37.15 sq.ft @ ₹130/sq.ft") the job was actually quoted with.
+    // printRatePerSqft here is always the EFFECTIVE rate actually charged
+    // (printSell ÷ printSqFt ÷ qty), regardless of whether it was posted as
+    // a lumpsum or typed directly as a ₹/sq.ft rate -- so the figure shown
+    // downstream is always real, never a stale cost-plus reference.
+    const printSqFtTotal = (printResult?.printSqFt ?? 0) * qty;
+    const effectivePrintRatePerSqft = printSqFtTotal > 0 ? +(pricing.printSell / printSqFtTotal).toFixed(2) : null;
     const { error: poolError } = await supabase.from("estimate_pool_items").insert({
       source: "sign_estimator",
       source_ref_id: saved.id,
       label: `${jobName || ref} — ${CATEGORY_LABELS[category] ?? category}`,
       sell_amount: pricing.final,
       cost_amount: pricing.costAll ?? null,
-      summary: { ref, category, categoryLabel: CATEGORY_LABELS[category] ?? category, qty, dimW: w, dimH: h, dimUnit: unit, margin: pricing.margin },
+      summary: {
+        ref,
+        category,
+        categoryLabel: CATEGORY_LABELS[category] ?? category,
+        qty,
+        dimW: w,
+        dimH: h,
+        dimUnit: unit,
+        margin: pricing.margin,
+        profileName: profile?.name ?? null,
+        printMediaName: media?.name ?? null,
+        printSqFt: printResult?.printSqFt ?? null,
+        printRatePerSqft: effectivePrintRatePerSqft,
+        signageSell: pricing.signageSell,
+        printSell: pricing.printSell,
+        shipping: pricing.shipping,
+        installSell: pricing.installSell,
+      },
       created_by: userData?.user?.id ?? null,
     });
     setAddingToPool(false);
@@ -458,7 +528,7 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
         <SignSizeHeader
           w={w} h={h} unit={unit}
           onW={setW} onH={setH} onUnit={(v) => setUnit(v)}
-          sqft={wMM > 0 && hMM > 0 ? (wMM / 304.8) * (hMM / 304.8) : 0}
+          sqft={signSqft}
           rft={(wMM * 2 + hMM * 2) / 304.8}
           sheetLine={sheetResult ? `${sheetResult.chargeable.toFixed(2)} sq.ft · ${fmtRupee(sheetResult.chargedCost)}` : null}
         />
@@ -812,14 +882,50 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
 
           <div className="rounded-lg border border-line bg-surface-sunken p-3">
             <p className="mb-2 text-xs font-medium text-ink-secondary">
-              Printing and Installation are sold as separate components — post the final price directly, no cost-plus needed.
+              Signage selling price — post it as a flat lumpsum (starting from the cost-plus suggestion above), or at a ₹/sq.ft
+              rate × {signSqft.toFixed(2)} sq.ft sign area.
             </p>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <PriceBasisToggle value={signagePriceBasis} onChange={setSignagePriceBasis} />
+            {signagePriceBasis === "lumpsum" ? (
+              <NumberField
+                label={signageSellOverride === "" ? "Signage Selling Price (₹) — suggested" : "Signage Selling Price (₹)"}
+                value={signageSellOverride === "" ? pricing.signageSellSuggested : signageSellOverride}
+                onChange={setSignageSellOverride}
+              />
+            ) : (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <NumberField label="Signage Rate (₹/sq.ft)" value={signageRatePerSqft} onChange={setSignageRatePerSqft} />
+                <Metric label="Signage Selling Price" value={fmtRupee(pricing.signageSell)} />
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-lg border border-line bg-surface-sunken p-3">
+            <p className="mb-2 text-xs font-medium text-ink-secondary">
+              Printing selling price — post it as a flat lumpsum (starting from the cost-plus reference below), or at a ₹/sq.ft
+              rate × {printResult ? printResult.printSqFt : 0} sq.ft printed area (bleed + waste already included).
+            </p>
+            <PriceBasisToggle value={printPriceBasis} onChange={setPrintPriceBasis} />
+            {printPriceBasis === "lumpsum" ? (
               <NumberField
                 label={printSellOverride === "" ? "Printing Selling Price (₹) — suggested" : "Printing Selling Price (₹)"}
                 value={printSellOverride === "" ? printSellDefault : printSellOverride}
                 onChange={setPrintSellOverride}
               />
+            ) : (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <NumberField label="Printing Rate (₹/sq.ft)" value={printRatePerSqft} onChange={setPrintRatePerSqft} />
+                <Metric label="Printing Selling Price" value={fmtRupee(pricing.printSell)} />
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-lg border border-line bg-surface-sunken p-3">
+            <p className="mb-2 text-xs font-medium text-ink-secondary">
+              Shipping and Installation are posted directly, no cost-plus needed.
+            </p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <NumberField label="Shipping (₹)" value={shipping} onChange={(v) => setShipping(v || 0)} />
               <NumberField label="Installation Selling Price (₹)" value={install} onChange={(v) => setInstall(v || 0)} />
             </div>
           </div>
@@ -875,15 +981,26 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
                 <Row label="Signage Production Cost" value={fmtRupee(pricing.costAll)} strong />
                 <Row label={`Markup (${markupPct}%)`} value={fmtRupee(pricing.sellBD - pricing.costAll)} />
                 {pricing.discAmt > 0 && <Row label={`Discount (${discountPct}%)`} value={`−${fmtRupee(pricing.discAmt)}`} />}
-                <Row label="Signage Selling Price (ex-GST)" value={fmtRupee(pricing.signageSell)} strong />
+                <Row
+                  label="Signage Selling Price (ex-GST)"
+                  detail={signagePriceBasis === "sqft" ? `₹${signageRatePerSqft || 0}/sq.ft × ${signSqft.toFixed(2)} sq.ft × qty ${qty}` : ""}
+                  value={fmtRupee(pricing.signageSell)}
+                  strong
+                />
 
                 <Row
                   label="Printing & Finishing (cost reference, per sign)"
                   detail={printResult ? `${printResult.printSqFt} sq.ft — not used in pricing` : ""}
                   value={fmtRupee(pricing.printCostRef)}
                 />
-                <Row label="Printing Selling Price (ex-GST)" value={fmtRupee(pricing.printSell)} strong />
+                <Row
+                  label="Printing Selling Price (ex-GST)"
+                  detail={printPriceBasis === "sqft" ? `₹${printRatePerSqft || 0}/sq.ft × ${printResult?.printSqFt ?? 0} sq.ft × qty ${qty}` : ""}
+                  value={fmtRupee(pricing.printSell)}
+                  strong
+                />
 
+                <Row label="Shipping (ex-GST)" value={fmtRupee(pricing.shipping)} strong />
                 <Row label="Installation Selling Price (ex-GST)" value={fmtRupee(pricing.installSell)} strong />
 
                 <Row label="Total Selling Price (ex-GST)" value={fmtRupee(pricing.sell)} strong big />
@@ -943,6 +1060,27 @@ function CheckField({ label, checked, onChange }: { label: string; checked: bool
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="h-4 w-4 rounded border-line-strong" />
       {label}
     </label>
+  );
+}
+// Shared lumpsum/₹-per-sqft basis picker for Signage and Printing in Step 6
+// -- same two options, independent state per component (a job might sell
+// signage on a per-sqft rate card but still post printing as a flat number).
+function PriceBasisToggle({ value, onChange }: { value: "lumpsum" | "sqft"; onChange: (v: "lumpsum" | "sqft") => void }) {
+  return (
+    <div className="mb-2 flex gap-2">
+      {(["lumpsum", "sqft"] as const).map((v) => (
+        <button
+          key={v}
+          type="button"
+          onClick={() => onChange(v)}
+          className={`rounded-full border px-3 py-1 text-xs font-medium ${
+            value === v ? "border-primary bg-primary-tint text-primary" : "border-line text-ink-secondary hover:bg-surface-sunken"
+          }`}
+        >
+          {v === "lumpsum" ? "Lumpsum" : "₹ / SqFt"}
+        </button>
+      ))}
+    </div>
   );
 }
 function Metric({ label, value, sub }: { label: string; value: string; sub?: string }) {
