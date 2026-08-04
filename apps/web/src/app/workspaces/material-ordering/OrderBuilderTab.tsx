@@ -49,9 +49,24 @@ type SizeUnit = "sqm" | "linear_m" | "count";
 // has to take on faith. `contribution` is in the same unit as the parent
 // line's consumptionUnit (linear metres for roll, sqm for sheet); null for
 // 'simple' lines, which never sum anything.
+//
+// `packsForThisSku` is a second, independent figure: when the row has
+// qty_per_pack on file (how many pieces of THIS SKU nest on one pack, per
+// the user's own layout knowledge -- see supabase-material-ordering-
+// qty-per-pack-migration.sql), this is ceil(order_qty / qty_per_pack) --
+// materially more accurate than the geometric SQM/pack-area estimate, but
+// only available where the sheet has that nesting data filled in. Shown in
+// the breakdown for every unit type as a cross-check; also summed to
+// prefill 'simple' lines (which otherwise have no computed default at all).
 interface SourceRowDetail {
   row: MaterialConsumptionRowRow;
   contribution: number | null;
+  packsForThisSku: number | null;
+}
+
+function computePacksForSku(row: MaterialConsumptionRowRow): number | null {
+  if (!row.qty_per_pack || row.qty_per_pack <= 0 || row.order_qty == null) return null;
+  return Math.ceil(row.order_qty / row.qty_per_pack);
 }
 
 interface WorkingLine {
@@ -192,9 +207,18 @@ export function OrderBuilderTab() {
 
         if (item.unit_type === "simple") {
           // Always shown -- these materials have no consumption data to sum
-          // (that's the point of 'simple'), so the user just types in a
-          // count. Note whether anything in the selected programs actually
-          // touches this material, purely informational.
+          // (that's the point of 'simple'), so there's normally nothing to
+          // prefill and the user just types in a count. BUT if any matching
+          // rows have qty_per_pack on file (nesting data -- see
+          // computePacksForSku), sum those into a real default instead of
+          // leaving it at 0; still fully editable either way.
+          const sourceRows: SourceRowDetail[] = matches.map((row) => ({
+            row,
+            contribution: null,
+            packsForThisSku: computePacksForSku(row),
+          }));
+          const suggestedPacks = sourceRows.reduce((sum, s) => sum + (s.packsForThisSku ?? 0), 0);
+          const someMissingNesting = sourceRows.some((s) => s.packsForThisSku == null) && suggestedPacks > 0;
           newLines.push({
             key: crypto.randomUUID(),
             supplierItemId: item.id,
@@ -204,12 +228,16 @@ export function OrderBuilderTab() {
             consumptionUnit: "count",
             availablePackOptions: item.pack_options,
             packOptionIndex: 0,
-            packsOrdered: 0,
+            packsOrdered: suggestedPacks,
             notes:
               matches.length === 0
                 ? "No matching consumption rows in the selected programs — enter quantity manually"
-                : undefined,
-            sourceRows: matches.map((row) => ({ row, contribution: null })),
+                : suggestedPacks > 0
+                  ? someMissingNesting
+                    ? "Suggested from nesting data below (some rows have none on file) — review before saving"
+                    : "Suggested from nesting data below — review before saving"
+                  : undefined,
+            sourceRows,
           });
           continue;
         }
@@ -236,6 +264,7 @@ export function OrderBuilderTab() {
             const sourceRows: SourceRowDetail[] = widthRows.map((row) => ({
               row,
               contribution: row.total_required_material,
+              packsForThisSku: computePacksForSku(row),
             }));
             if (packs.length === 0) {
               newLines.push({
@@ -280,7 +309,7 @@ export function OrderBuilderTab() {
           for (const r of matches) {
             const contribution = (r.sqm ?? 0) * (r.order_qty ?? 0);
             totalSqm += contribution;
-            sourceRows.push({ row: r, contribution });
+            sourceRows.push({ row: r, contribution, packsForThisSku: computePacksForSku(r) });
           }
           if (totalSqm <= 0) continue;
           const packs = item.pack_options;
@@ -603,10 +632,12 @@ export function OrderBuilderTab() {
                                     <th className="py-1 pr-3 font-medium">Width × Height (mm)</th>
                                     <th className="py-1 pr-3 font-medium">Qty</th>
                                     <th className="py-1 pr-3 font-medium">Contribution</th>
+                                    <th className="py-1 pr-3 font-medium">Qty/pack</th>
+                                    <th className="py-1 pr-3 font-medium">Packs needed (this SKU)</th>
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {l.sourceRows.map(({ row, contribution }, i) => (
+                                  {l.sourceRows.map(({ row, contribution, packsForThisSku }, i) => (
                                     <tr key={`${l.key}-${row.id}-${i}`} className="border-t border-line/40">
                                       <td className="py-1 pr-3 text-ink">{skuLabel(row)}</td>
                                       <td className="py-1 pr-3 text-ink-secondary">{row.program ?? "—"}</td>
@@ -617,10 +648,18 @@ export function OrderBuilderTab() {
                                       <td className="py-1 pr-3 font-medium text-ink">
                                         {contributionLabel(l.consumptionUnit, contribution)}
                                       </td>
+                                      <td className="py-1 pr-3 text-ink-secondary">{row.qty_per_pack ?? "—"}</td>
+                                      <td className="py-1 pr-3 font-medium text-ink">{packsForThisSku ?? "—"}</td>
                                     </tr>
                                   ))}
                                 </tbody>
                               </table>
+                              {l.sourceRows.some((s) => s.packsForThisSku != null) && (
+                                <p className="mt-1.5 text-[10px] italic text-ink-muted">
+                                  &quot;Packs needed&quot; comes from per-SKU nesting data on file (how many pieces fit per pack) —
+                                  more accurate than an area estimate where it&apos;s available.
+                                </p>
+                              )}
                             </td>
                           </tr>
                         )}

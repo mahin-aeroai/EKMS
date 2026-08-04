@@ -90,10 +90,22 @@ create index if not exists material_supplier_items_material_name_idx on public.m
 -- the sheet's own headers (Product Name, SKU ID, Category, SKU Description,
 -- Bill Rate, Program, Raw Material 1/2/3, SKU, Width (MM), Height (MM),
 -- SQM, Per Program Order Qty (Max), Print Length, Material Width, Linear
--- Metres Count, Total Required Material incl. Wastage) so the import stays
--- a direct, auditable transcription -- any consumption-total math the
--- sheet itself already did (roll/linear materials) is carried straight
--- through in total_required_material rather than recomputed.
+-- Metres Count, Total Required Material incl. Wastage, Qty can be
+-- accomodated withing pack size) so the import stays a direct, auditable
+-- transcription -- any consumption-total math the sheet itself already did
+-- (roll/linear materials) is carried straight through in
+-- total_required_material rather than recomputed.
+--
+-- qty_per_pack ("Qty can be accomodated withing pack size" in the sheet):
+-- how many finished pieces of THIS SKU nest on one pack/sheet/reel of the
+-- material, per the user's own layout knowledge -- not something we can
+-- derive from width/height alone (real nesting accounts for rotation,
+-- trim, etc). When present, this is a materially better basis for
+-- packs-needed than the SQM/pack-area estimate (see OrderBuilderTab.tsx),
+-- since it's the user's actual answer rather than a geometric guess. Only
+-- some rows have it -- the sheet fills it in per-SKU as that knowledge
+-- becomes available, so it's nullable and the Order Builder falls back to
+-- the area estimate wherever it's missing.
 create table if not exists public.material_consumption_rows (
   id uuid primary key default gen_random_uuid(),
   product_name text,
@@ -114,6 +126,7 @@ create table if not exists public.material_consumption_rows (
   material_width_mm numeric,
   linear_metres numeric,
   total_required_material numeric,
+  qty_per_pack numeric,
   imported_at timestamptz not null default now()
 );
 create index if not exists material_consumption_rows_program_idx on public.material_consumption_rows (program);
