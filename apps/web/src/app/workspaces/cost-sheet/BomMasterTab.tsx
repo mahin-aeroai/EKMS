@@ -793,6 +793,7 @@ export function BomMasterTab() {
                                   materials={materials}
                                   value={line.raw_material_code}
                                   onChange={(code) => mapLineToMaterial(t.id, line, code)}
+                                  preferredCategory={mappedMaterial?.category ?? null}
                                 />
                                 {!line.raw_material_code && line.suggested_codes && (
                                   <div className="mt-1 max-w-xs text-[11px] italic text-ink-muted">{line.suggested_codes}</div>
@@ -827,6 +828,11 @@ export function BomMasterTab() {
                                     materials={materials}
                                     value={null}
                                     onChange={(code) => code && addAlternative(line.id, code)}
+                                    // An alternative should be interchangeable with the
+                                    // currently-mapped material -- same category, so
+                                    // e.g. picking an alt for a Vinyl line surfaces
+                                    // other Vinyl materials first, not Fixed Assets.
+                                    preferredCategory={mappedMaterial?.category ?? null}
                                   />
                                 </div>
                               </td>

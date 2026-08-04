@@ -14,26 +14,39 @@ export function RawMaterialPicker({
   materials,
   value,
   onChange,
+  preferredCategory,
 }: {
   materials: RawMaterialRow[];
   value: string | null;
   onChange: (code: string | null) => void;
+  // When set, this category's materials are listed first, ahead of every
+  // other category -- e.g. picking an ALTERNATIVE for a line already mapped
+  // to a Vinyl material should surface other Vinyl materials immediately,
+  // not bury them below unrelated categories like "Fixed Assets" or
+  // "General Items" that happen to sort earlier alphabetically.
+  preferredCategory?: string | null;
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
 
   const selected = value ? materials.find((m) => m.code === value) ?? null : null;
 
+  // Only the empty-query "browse" view is capped -- a real search should
+  // never silently hide the one item you typed for. 1,558 raw materials
+  // filtered down by a search term is small enough to render in full; the
+  // uncapped default browse list (with 1,558 rows, category-grouped and
+  // sorted with preferredCategory first) stays perfectly usable too, but a
+  // cap there keeps the very first paint light before you've typed anything.
   const matches = useMemo(() => {
-    if (!query.trim()) return materials.slice(0, 60);
+    if (!query.trim()) return materials.slice(0, 200);
     const q = query.toLowerCase();
-    return materials.filter((m) => m.code.toLowerCase().includes(q) || m.name.toLowerCase().includes(q)).slice(0, 60);
+    return materials.filter((m) => m.code.toLowerCase().includes(q) || m.name.toLowerCase().includes(q));
   }, [materials, query]);
 
   // Grouped by category (the categories from Raw Materials.xlsx --
   // Accessories, Flags, Vinyl, etc.) so a long result list is scannable
-  // instead of one flat block. Materials with no category sort under
-  // "Uncategorized" at the end rather than disappearing from the list.
+  // instead of one flat block. preferredCategory (when given) sorts first;
+  // "Uncategorized" always sorts last; everything else alphabetically.
   const grouped = useMemo(() => {
     const byCategory = new Map<string, RawMaterialRow[]>();
     for (const m of matches) {
@@ -42,8 +55,16 @@ export function RawMaterialPicker({
       list.push(m);
       byCategory.set(cat, list);
     }
-    return [...byCategory.entries()].sort(([a], [b]) => (a === "Uncategorized" ? 1 : b === "Uncategorized" ? -1 : a.localeCompare(b)));
-  }, [matches]);
+    return [...byCategory.entries()].sort(([a], [b]) => {
+      if (preferredCategory) {
+        if (a === preferredCategory && b !== preferredCategory) return -1;
+        if (b === preferredCategory && a !== preferredCategory) return 1;
+      }
+      if (a === "Uncategorized") return 1;
+      if (b === "Uncategorized") return -1;
+      return a.localeCompare(b);
+    });
+  }, [matches, preferredCategory]);
 
   if (selected) {
     return (
