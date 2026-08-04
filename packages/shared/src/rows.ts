@@ -867,6 +867,10 @@ export interface MaterialConsumptionRowRow {
   material_width_mm: number | null;
   linear_metres: number | null;
   total_required_material: number | null;
+  // "Qty can be accomodated withing pack size" in the sheet -- how many
+  // finished pieces of this SKU nest onto one pack/sheet/reel, per the
+  // user's own layout knowledge. Only some rows have this filled in.
+  qty_per_pack: number | null;
   imported_at: string;
 }
 
