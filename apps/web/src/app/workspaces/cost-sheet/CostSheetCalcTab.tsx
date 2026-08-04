@@ -297,16 +297,16 @@ export function CostSheetCalcTab() {
         return category !== "ink" && !name.includes("ink") && !name.includes("layer");
       })
       .map((lc) => ({ name: lc.line.material_name, mappedTo: lc.rawMaterial?.name ?? null }));
-    // The client-facing quote shouldn't carry legacy/discontinued brand
-    // names baked into the master description (e.g. "MegaRich" surviving
-    // in the text after the BOM's actual substrate was swapped to a
-    // different brand) -- strip those out rather than editing the BOM
-    // template's own description, which is internal record-keeping.
-    const clientFacingDescription = template.description
-      .replace(/\bmegarich\b/gi, "")
-      .replace(/\s{2,}/g, " ")
-      .replace(/\s*-\s*$/, "")
-      .trim();
+    // The client-facing quote shouldn't carry a material/brand name baked
+    // into the master description (it goes stale the moment a different
+    // alternative material is mapped for that FG code's substrate line --
+    // see supabase-bom-templates-strip-material-suffix-migration.sql, which
+    // strips this same " -  <material>" suffix from bom_templates.description
+    // at rest). This mirrors that same split as a display-time safety net,
+    // in case a template's description still has one baked in (not yet
+    // migrated, or typed in again later) -- editing the BOM template's own
+    // description is internal record-keeping, not done here.
+    const clientFacingDescription = template.description.split(" -  ")[0].trim();
     const { error } = await supabase.from("estimate_pool_items").insert({
       source: "cost_sheet",
       source_ref_id: null,
