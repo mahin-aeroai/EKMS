@@ -807,6 +807,20 @@ export type MaterialUnitType = "roll" | "sheet" | "simple";
 export type MaterialOrderMethod = "consumption" | "simple_count";
 export type MaterialOrderStatus = "draft" | "sent";
 
+// How a material's consumption is actually computed -- a separate axis
+// from MaterialUnitType (which only describes pack shape). See
+// supabase-material-ordering-schema.sql's header for the full explanation
+// of each value.
+export type MaterialConsumptionBasis =
+  | "total_required_material"
+  | "perimeter_x2"
+  | "qty_per_pack_by_sheet_size"
+  | "wastage_running_length"
+  | "qty_direct_wastage"
+  | "sqft_direct_to_rolls"
+  | "fixed_pieces_per_roll"
+  | "manual";
+
 // pack_options shape depends on unit_type -- see the migration header:
 //   roll   -- { label, width_mm?, length_m }
 //   sheet  -- { label, width_mm, height_mm }
@@ -841,6 +855,9 @@ export interface MaterialSupplierItemRow {
   unit_type: MaterialUnitType;
   order_method: MaterialOrderMethod;
   pack_options: MaterialPackOption[];
+  consumption_basis: MaterialConsumptionBasis;
+  // Only meaningful when consumption_basis === "fixed_pieces_per_roll".
+  pieces_per_pack: number | null;
   created_at: string;
 }
 
