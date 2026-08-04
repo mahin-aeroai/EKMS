@@ -794,3 +794,111 @@ export interface WorkCentreRateRow {
   note: string | null;
   created_at: string;
 }
+
+// ---------- Material Ordering (supabase-material-ordering-schema.sql) ----------
+// New standalone Tools workspace -- pick a supplier + a set of production
+// programs, get back a computed order list (pack/roll/sheet counts, not raw
+// consumption totals) ready to send. See that migration's header for why
+// this is its own set of tables rather than reusing Suppliers/Procurement/
+// raw_materials (none had real address/pack-size/consumption data behind
+// them yet).
+
+export type MaterialUnitType = "roll" | "sheet" | "simple";
+export type MaterialOrderMethod = "consumption" | "simple_count";
+export type MaterialOrderStatus = "draft" | "sent";
+
+// pack_options shape depends on unit_type -- see the migration header:
+//   roll   -- { label, width_mm?, length_m }
+//   sheet  -- { label, width_mm, height_mm }
+//   simple -- informational only, same shape as roll, no calc reads it
+export interface MaterialPackOption {
+  label: string;
+  width_mm?: number;
+  height_mm?: number;
+  length_m?: number;
+  gsm?: number;
+  weight_kg?: number;
+}
+
+export interface MaterialSupplierRow {
+  id: string;
+  name: string;
+  address: string | null;
+  contact_person: string | null;
+  phone: string | null;
+  email: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface MaterialSupplierItemRow {
+  id: string;
+  supplier_id: string;
+  // Matches material_consumption_rows.material_1/2/3 exactly, so the Order
+  // Builder can group consumption by this string with no fuzzy matching.
+  material_name: string;
+  raw_material_code: string | null;
+  unit_type: MaterialUnitType;
+  order_method: MaterialOrderMethod;
+  pack_options: MaterialPackOption[];
+  created_at: string;
+}
+
+// One row per SKU from the imported program-wise consumption sheet. Column
+// names mirror the sheet's own headers -- see supabase-material-ordering-
+// consumption-import.sql.
+export interface MaterialConsumptionRowRow {
+  id: string;
+  product_name: string | null;
+  sku_id: string | null;
+  category: string | null;
+  sku_description: string | null;
+  bill_rate: number | null;
+  program: string | null;
+  material_1: string | null;
+  material_2: string | null;
+  material_3: string | null;
+  sku: string | null;
+  width_mm: number | null;
+  height_mm: number | null;
+  sqm: number | null;
+  order_qty: number | null;
+  print_length_mm: number | null;
+  material_width_mm: number | null;
+  linear_metres: number | null;
+  total_required_material: number | null;
+  imported_at: string;
+}
+
+// One computed line within a saved material_orders.lines snapshot.
+export interface MaterialOrderLine {
+  material_name: string;
+  total_consumption: number;
+  consumption_unit: "sqm" | "linear_m" | "count";
+  pack_option: MaterialPackOption;
+  packs_ordered: number;
+  notes?: string;
+}
+
+export interface MaterialOrderRow {
+  id: string;
+  ref: string;
+  supplier_id: string | null;
+  // Frozen at save time, same convention as EstimateRow.customer_address --
+  // a sent order keeps showing exactly what was requested even if the
+  // supplier's address/contact details change later.
+  supplier_snapshot: {
+    name: string;
+    address: string | null;
+    contact_person: string | null;
+    phone: string | null;
+    email: string | null;
+  };
+  programs: string[];
+  status: MaterialOrderStatus;
+  notes: string | null;
+  lines: MaterialOrderLine[];
+  created_by: string | null;
+  created_at: string;
+  sent_at: string | null;
+}
