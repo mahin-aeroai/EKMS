@@ -137,7 +137,19 @@ export function OrderBuilderTab() {
   const [suppliers, setSuppliers] = useState<MaterialSupplierRow[] | null>(null);
   const [selectedSupplierId, setSelectedSupplierId] = useState("");
 
-  const [programs, setPrograms] = useState<string[] | null>(null);
+  // Lightweight -- just the 4 columns needed to work out, per supplier,
+  // which programs actually touch one of that supplier's materials. Loaded
+  // once (the table is small, ~80 rows); `programs` (the full checkbox
+  // list) and `relevantProgramSet` (which of those a selected supplier
+  // actually supplies into) are both derived from this.
+  const [consumptionProgramMaterials, setConsumptionProgramMaterials] = useState<
+    Pick<MaterialConsumptionRowRow, "program" | "material_1" | "material_2" | "material_3">[] | null
+  >(null);
+  // Names of the materials the selected supplier provides -- null while no
+  // supplier is chosen (or its items are still loading), in which case
+  // every program stays selectable rather than flashing "all disabled".
+  const [supplierMaterialNames, setSupplierMaterialNames] = useState<string[] | null>(null);
+
   const [selectedPrograms, setSelectedPrograms] = useState<string[]>([]);
 
   const [lines, setLines] = useState<WorkingLine[]>([]);
@@ -154,15 +166,33 @@ export function OrderBuilderTab() {
     fetchAllRows<MaterialSupplierRow>((from, to) => supabase.from("material_suppliers").select("*").order("name").range(from, to)).then(
       setSuppliers
     );
-    fetchAllRows<{ program: string | null }>((from, to) =>
-      supabase.from("material_consumption_rows").select("program").range(from, to)
-    ).then((rows) => {
-      const distinct = [...new Set(rows.map((r) => r.program).filter((p): p is string => !!p))].sort();
-      setPrograms(distinct);
-    });
+    fetchAllRows<Pick<MaterialConsumptionRowRow, "program" | "material_1" | "material_2" | "material_3">>((from, to) =>
+      supabase.from("material_consumption_rows").select("program, material_1, material_2, material_3").range(from, to)
+    ).then(setConsumptionProgramMaterials);
   }, []);
 
   const selectedSupplier = suppliers?.find((s) => s.id === selectedSupplierId) ?? null;
+
+  const programs = useMemo(() => {
+    if (!consumptionProgramMaterials) return null;
+    return [...new Set(consumptionProgramMaterials.map((r) => r.program).filter((p): p is string => !!p))].sort();
+  }, [consumptionProgramMaterials]);
+
+  // Which programs actually use one of the selected supplier's materials --
+  // null (meaning "don't restrict anything yet") until a supplier is picked
+  // and its items have loaded.
+  const relevantProgramSet = useMemo(() => {
+    if (!supplierMaterialNames || !consumptionProgramMaterials) return null;
+    const names = new Set(supplierMaterialNames);
+    const relevant = new Set<string>();
+    for (const row of consumptionProgramMaterials) {
+      if (!row.program) continue;
+      if (names.has(row.material_1 ?? "") || names.has(row.material_2 ?? "") || names.has(row.material_3 ?? "")) {
+        relevant.add(row.program);
+      }
+    }
+    return relevant;
+  }, [supplierMaterialNames, consumptionProgramMaterials]);
 
   function onSupplierChange(id: string) {
     setSelectedSupplierId(id);
@@ -170,6 +200,17 @@ export function OrderBuilderTab() {
     setHasComputed(false);
     setLastSavedRef(null);
     setExpandedKey(null);
+    setSelectedPrograms([]);
+    setSupplierMaterialNames(null);
+    if (!id) return;
+    supabase
+      .from("material_supplier_items")
+      .select("material_name")
+      .eq("supplier_id", id)
+      .then(({ data, error }) => {
+        if (error || !data) return;
+        setSupplierMaterialNames(data.map((d) => d.material_name as string));
+      });
   }
 
   function toggleProgram(program: string) {
@@ -518,19 +559,35 @@ export function OrderBuilderTab() {
           ) : programs.length === 0 ? (
             <p className="py-4 text-center text-sm text-ink-muted">No consumption data on file yet.</p>
           ) : (
-            <div className="grid max-h-64 grid-cols-2 gap-x-4 gap-y-1 overflow-y-auto rounded-md border border-line p-3 sm:grid-cols-3 lg:grid-cols-4">
-              {programs.map((p) => (
-                <label key={p} className="flex items-center gap-1.5 text-sm text-ink">
-                  <input
-                    type="checkbox"
-                    checked={selectedPrograms.includes(p)}
-                    onChange={() => toggleProgram(p)}
-                    className="h-3.5 w-3.5 rounded border-line-strong"
-                  />
-                  {p}
-                </label>
-              ))}
-            </div>
+            <>
+              {relevantProgramSet && relevantProgramSet.size === 0 && (
+                <p className="text-xs text-warning">
+                  No program on file uses a material from {selectedSupplier.name} yet — check the mapping in Suppliers &amp;
+                  Materials.
+                </p>
+              )}
+              <div className="grid max-h-64 grid-cols-2 gap-x-4 gap-y-1 overflow-y-auto rounded-md border border-line p-3 sm:grid-cols-3 lg:grid-cols-4">
+                {programs.map((p) => {
+                  const isRelevant = !relevantProgramSet || relevantProgramSet.has(p);
+                  return (
+                    <label
+                      key={p}
+                      className={`flex items-center gap-1.5 text-sm ${isRelevant ? "text-ink" : "cursor-not-allowed text-ink-muted"}`}
+                      title={isRelevant ? undefined : `No consumption row in ${p} uses a material from ${selectedSupplier.name}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedPrograms.includes(p)}
+                        disabled={!isRelevant}
+                        onChange={() => toggleProgram(p)}
+                        className="h-3.5 w-3.5 rounded border-line-strong disabled:cursor-not-allowed disabled:opacity-50"
+                      />
+                      {p}
+                    </label>
+                  );
+                })}
+              </div>
+            </>
           )}
           <div>
             <Button variant="primary" size="sm" onClick={buildOrder} loading={computing} disabled={selectedPrograms.length === 0}>
