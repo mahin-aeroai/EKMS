@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Download, Loader2, Save, Send } from "lucide-react";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import { ChevronDown, ChevronRight, Download, Loader2, Save, Send } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { useToast } from "@/components/ui/Notifications";
@@ -44,6 +44,16 @@ import { generateMaterialOrderPdf, downloadBlob } from "@/lib/materialOrdering/p
 //             sum), packs_ordered starts at 0 and is typed in by hand.
 type SizeUnit = "sqm" | "linear_m" | "count";
 
+// One consumption_rows row that fed into a computed line's total, plus the
+// exact number it contributed -- so the total isn't a black box the user
+// has to take on faith. `contribution` is in the same unit as the parent
+// line's consumptionUnit (linear metres for roll, sqm for sheet); null for
+// 'simple' lines, which never sum anything.
+interface SourceRowDetail {
+  row: MaterialConsumptionRowRow;
+  contribution: number | null;
+}
+
 interface WorkingLine {
   key: string;
   supplierItemId: string;
@@ -55,6 +65,7 @@ interface WorkingLine {
   packOptionIndex: number;
   packsOrdered: number;
   notes?: string;
+  sourceRows: SourceRowDetail[];
 }
 
 function computePacksOrdered(unitType: MaterialUnitType, totalConsumption: number, pack: MaterialPackOption | undefined): number {
@@ -90,6 +101,21 @@ function consumptionLabel(line: WorkingLine): string {
   return "—";
 }
 
+function contributionLabel(unit: SizeUnit, contribution: number | null): string {
+  if (contribution == null) return "—";
+  if (unit === "linear_m") return `${contribution.toFixed(1)} m`;
+  if (unit === "sqm") return `${contribution.toFixed(2)} sqm`;
+  return "—";
+}
+
+// A row from material_consumption_rows may not have a Product Name/SKU
+// filled in (the bare reference rows -- see supabase-material-ordering-
+// consumption-import.sql's header) -- fall back through whatever's
+// actually present so the breakdown never shows a blank cell.
+function skuLabel(row: MaterialConsumptionRowRow): string {
+  return row.sku_description || row.product_name || row.sku_id || row.sku || "—";
+}
+
 export function OrderBuilderTab() {
   const { toast } = useToast();
 
@@ -102,6 +128,7 @@ export function OrderBuilderTab() {
   const [lines, setLines] = useState<WorkingLine[]>([]);
   const [computing, setComputing] = useState(false);
   const [hasComputed, setHasComputed] = useState(false);
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
@@ -127,6 +154,7 @@ export function OrderBuilderTab() {
     setLines([]);
     setHasComputed(false);
     setLastSavedRef(null);
+    setExpandedKey(null);
   }
 
   function toggleProgram(program: string) {
@@ -144,6 +172,7 @@ export function OrderBuilderTab() {
     }
     setComputing(true);
     setLastSavedRef(null);
+    setExpandedKey(null);
     try {
       const [itemsRes, rows] = await Promise.all([
         supabase.from("material_supplier_items").select("*").eq("supplier_id", selectedSupplier.id),
@@ -180,6 +209,7 @@ export function OrderBuilderTab() {
               matches.length === 0
                 ? "No matching consumption rows in the selected programs — enter quantity manually"
                 : undefined,
+            sourceRows: matches.map((row) => ({ row, contribution: null })),
           });
           continue;
         }
@@ -188,16 +218,25 @@ export function OrderBuilderTab() {
 
         if (item.unit_type === "roll") {
           const byWidth = new Map<number, number>();
+          const rowsByWidth = new Map<number, MaterialConsumptionRowRow[]>();
           for (const r of matches) {
             if (r.total_required_material == null) continue; // rows without precomputed linear metres don't apply to roll materials
             const width = r.material_width_mm ?? 0;
             byWidth.set(width, (byWidth.get(width) ?? 0) + r.total_required_material);
+            const list = rowsByWidth.get(width) ?? [];
+            list.push(r);
+            rowsByWidth.set(width, list);
           }
           const packs = item.pack_options;
           const sortedByWidth = [...packs].sort((a, b) => (a.width_mm ?? 0) - (b.width_mm ?? 0));
 
           for (const [width, summedLength] of byWidth) {
             if (summedLength <= 0) continue;
+            const widthRows = rowsByWidth.get(width) ?? [];
+            const sourceRows: SourceRowDetail[] = widthRows.map((row) => ({
+              row,
+              contribution: row.total_required_material,
+            }));
             if (packs.length === 0) {
               newLines.push({
                 key: crypto.randomUUID(),
@@ -210,6 +249,7 @@ export function OrderBuilderTab() {
                 packOptionIndex: -1,
                 packsOrdered: 0,
                 notes: "No pack sizes configured for this material — add one in Suppliers & Materials",
+                sourceRows,
               });
               continue;
             }
@@ -231,12 +271,16 @@ export function OrderBuilderTab() {
               packOptionIndex,
               packsOrdered: computePacksOrdered("roll", summedLength, packs[packOptionIndex]),
               notes: flagNote,
+              sourceRows,
             });
           }
         } else if (item.unit_type === "sheet") {
           let totalSqm = 0;
+          const sourceRows: SourceRowDetail[] = [];
           for (const r of matches) {
-            totalSqm += (r.sqm ?? 0) * (r.order_qty ?? 0);
+            const contribution = (r.sqm ?? 0) * (r.order_qty ?? 0);
+            totalSqm += contribution;
+            sourceRows.push({ row: r, contribution });
           }
           if (totalSqm <= 0) continue;
           const packs = item.pack_options;
@@ -252,6 +296,7 @@ export function OrderBuilderTab() {
               packOptionIndex: -1,
               packsOrdered: 0,
               notes: "No pack sizes configured for this material — add one in Suppliers & Materials",
+              sourceRows,
             });
             continue;
           }
@@ -265,6 +310,7 @@ export function OrderBuilderTab() {
             availablePackOptions: packs,
             packOptionIndex: 0,
             packsOrdered: computePacksOrdered("sheet", totalSqm, packs[0]),
+            sourceRows,
           });
         }
       }
@@ -478,6 +524,7 @@ export function OrderBuilderTab() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-line bg-surface-sunken text-left text-ink-secondary">
+                    <th className="px-3 py-2" />
                     <th className="px-3 py-2">Material</th>
                     <th className="px-3 py-2">Consumption required</th>
                     <th className="px-3 py-2">Pack size</th>
@@ -486,39 +533,100 @@ export function OrderBuilderTab() {
                   </tr>
                 </thead>
                 <tbody>
-                  {lines.map((l) => (
-                    <tr key={l.key} className="border-b border-line/60 last:border-0">
-                      <td className="px-3 py-1.5 font-medium text-ink">{l.materialName}</td>
-                      <td className="px-3 py-1.5 text-ink-secondary">{consumptionLabel(l)}</td>
-                      <td className="px-3 py-1.5">
-                        {l.availablePackOptions.length > 1 ? (
-                          <select
-                            value={l.packOptionIndex}
-                            onChange={(e) => updatePackOption(l.key, Number(e.target.value))}
-                            className="h-8 rounded-md border border-line-strong bg-surface px-2 text-xs text-ink outline-none"
-                          >
-                            {l.availablePackOptions.map((p, i) => (
-                              <option key={p.label} value={i}>
-                                {p.label}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <span className="text-ink-secondary">{l.availablePackOptions[0]?.label ?? "—"}</span>
+                  {lines.map((l) => {
+                    const isExpanded = expandedKey === l.key;
+                    return (
+                      <Fragment key={l.key}>
+                        <tr className="border-b border-line/60 last:border-0">
+                          <td className="px-3 py-1.5">
+                            {l.sourceRows.length > 0 && (
+                              <button
+                                type="button"
+                                aria-label={isExpanded ? "Hide breakdown" : "Show breakdown"}
+                                onClick={() => setExpandedKey(isExpanded ? null : l.key)}
+                                className="text-ink-muted hover:text-ink"
+                              >
+                                {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                              </button>
+                            )}
+                          </td>
+                          <td className="px-3 py-1.5 font-medium text-ink">
+                            {l.materialName}
+                            {l.sourceRows.length > 0 && (
+                              <span className="ml-1.5 font-normal text-ink-muted">
+                                ({l.sourceRows.length} item{l.sourceRows.length === 1 ? "" : "s"})
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-3 py-1.5 text-ink-secondary">{consumptionLabel(l)}</td>
+                          <td className="px-3 py-1.5">
+                            {l.availablePackOptions.length > 1 ? (
+                              <select
+                                value={l.packOptionIndex}
+                                onChange={(e) => updatePackOption(l.key, Number(e.target.value))}
+                                className="h-8 rounded-md border border-line-strong bg-surface px-2 text-xs text-ink outline-none"
+                              >
+                                {l.availablePackOptions.map((p, i) => (
+                                  <option key={p.label} value={i}>
+                                    {p.label}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <span className="text-ink-secondary">{l.availablePackOptions[0]?.label ?? "—"}</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-1.5">
+                            <input
+                              type="number"
+                              min={0}
+                              value={l.packsOrdered}
+                              onChange={(e) => updatePacksOrdered(l.key, Number(e.target.value))}
+                              className="h-8 w-20 rounded-md border border-line-strong bg-surface px-2 text-xs text-ink outline-none"
+                            />
+                          </td>
+                          <td className="px-3 py-1.5 text-warning">{l.notes ?? ""}</td>
+                        </tr>
+                        {isExpanded && (
+                          <tr className="border-b border-line/60 bg-surface-sunken/60 last:border-0">
+                            <td />
+                            <td colSpan={5} className="px-3 py-2">
+                              <p className="mb-1.5 text-[10px] uppercase tracking-wide text-ink-muted">
+                                Item-wise consumption behind this total — {l.sourceRows.length} SKU
+                                {l.sourceRows.length === 1 ? "" : "s"} across the selected programs
+                              </p>
+                              <table className="w-full text-[11px]">
+                                <thead>
+                                  <tr className="text-left text-ink-muted">
+                                    <th className="py-1 pr-3 font-medium">SKU / Description</th>
+                                    <th className="py-1 pr-3 font-medium">Program</th>
+                                    <th className="py-1 pr-3 font-medium">Width × Height (mm)</th>
+                                    <th className="py-1 pr-3 font-medium">Qty</th>
+                                    <th className="py-1 pr-3 font-medium">Contribution</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {l.sourceRows.map(({ row, contribution }, i) => (
+                                    <tr key={`${l.key}-${row.id}-${i}`} className="border-t border-line/40">
+                                      <td className="py-1 pr-3 text-ink">{skuLabel(row)}</td>
+                                      <td className="py-1 pr-3 text-ink-secondary">{row.program ?? "—"}</td>
+                                      <td className="py-1 pr-3 text-ink-secondary">
+                                        {row.width_mm != null && row.height_mm != null ? `${row.width_mm} × ${row.height_mm}` : "—"}
+                                      </td>
+                                      <td className="py-1 pr-3 text-ink-secondary">{row.order_qty ?? "—"}</td>
+                                      <td className="py-1 pr-3 font-medium text-ink">
+                                        {contributionLabel(l.consumptionUnit, contribution)}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </td>
+                          </tr>
                         )}
-                      </td>
-                      <td className="px-3 py-1.5">
-                        <input
-                          type="number"
-                          min={0}
-                          value={l.packsOrdered}
-                          onChange={(e) => updatePacksOrdered(l.key, Number(e.target.value))}
-                          className="h-8 w-20 rounded-md border border-line-strong bg-surface px-2 text-xs text-ink outline-none"
-                        />
-                      </td>
-                      <td className="px-3 py-1.5 text-warning">{l.notes ?? ""}</td>
-                    </tr>
-                  ))}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
