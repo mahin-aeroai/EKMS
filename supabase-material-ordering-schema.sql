@@ -55,23 +55,75 @@ create table if not exists public.material_suppliers (
   created_at timestamptz not null default now()
 );
 
--- unit_type drives which order-quantity calculation the Order Builder uses:
---   'roll'   -- pack_options entries carry width_mm + length_m; consumption
---               is summed (linear metres) per matching width, packs_required
---               = ceil(total_length_m / length_m) for that width's pack.
---   'sheet'  -- pack_options entries carry width_mm + height_mm; consumption
---               is summed (sq.m, incl. wastage buffer) and divided by the
---               chosen pack's area, rounded up (simple area math -- not
---               nested/optimised cutting, see the header note in
---               MaterialOrderBuilderTab.tsx for why).
---   'simple' -- no consumption calculation at all; pack_options is purely
---               informational (what a "roll"/"pack" of this material is),
---               and the ordered quantity is typed in directly.
--- order_method mirrors this at the supplier-item level for display/filter
--- purposes ('consumption' vs 'simple_count') -- kept as its own column
--- (rather than only deriving it from unit_type) since 'simple' unit_type
--- items are always order_method 'simple_count', but it reads clearer with
--- both stated explicitly, matching how the user described each supplier.
+-- unit_type describes the PACK SHAPE -- what a "pack" of this material
+-- physically is, which drives what pack_options carries and how a chosen
+-- pack converts into a packs-ordered count:
+--   'roll'   -- pack_options entries carry width_mm (sometimes omitted, see
+--               below) + length_m.
+--   'sheet'  -- pack_options entries carry width_mm + height_mm.
+--   'simple' -- pack_options is purely informational; packs_ordered has no
+--               formula behind it and is typed in directly.
+-- order_method mirrors this for display/filter purposes ('consumption' vs
+-- 'simple_count').
+--
+-- consumption_basis describes HOW MUCH of the material a SKU actually
+-- consumes -- a separate axis from unit_type, because materials that are
+-- physically the same pack shape can be consumed completely differently
+-- (a fabric roll consumed by print length is not the same math as a gasket
+-- roll consumed by trim perimeter). Corrected per the user's own
+-- supplier-by-supplier knowledge after reviewing the first cut of computed
+-- order lists:
+--   'total_required_material'   -- sum material_consumption_rows.
+--         total_required_material (the sheet's own precomputed, wastage-
+--         inclusive linear metres) per matching material_width_mm group.
+--         The original/default basis -- correct for materials whose print
+--         length was directly given in the sheet (Recycled Rhine, MT 3180,
+--         Transjet Industrial).
+--   'perimeter_x2'  -- consumption = 2*(width_mm + height_mm)/1000 *
+--         order_qty, summed across all matching rows into one line (no
+--         pack width to group by). For trim/edge materials that wrap a
+--         piece's perimeter rather than its face -- Silicon Gasket,
+--         Rubber Magnet. (Both of these previously either produced wrong
+--         numbers or nothing at all, because they were reusing
+--         total_required_material -- computed for the FACE fabric on the
+--         same row, not for a perimeter trim.)
+--   'qty_per_pack_by_sheet_size'  -- group matching rows by
+--         material_width_mm (their sheet size), and within each group sum
+--         ceil(order_qty / qty_per_pack) per row where qty_per_pack is on
+--         file, falling back to sqm*order_qty / pack-area for rows without
+--         it. One order line per sheet size -- sizes are never blended
+--         together into a single average, and multi-up nesting (several
+--         small pieces per sheet, e.g. Primex's GPS18/19) is counted
+--         correctly via qty_per_pack instead of undercounted by treating
+--         each sheet as one piece. For Primex Styrene.
+--   'wastage_running_length'  -- per matching row, derive the running
+--         length by comparing width_mm/height_mm against
+--         material_width_mm (whichever side fits within the material's
+--         width is the cross-web side; the other is the running length),
+--         then apply a flat 40% wastage multiplier. Rows with no
+--         material_width_mm on file (or where neither side fits) can't be
+--         computed this way and are skipped from the running-metres total,
+--         but a packs-ordered default is still suggested from any
+--         qty_per_pack data those rows carry. For Sappi Magno Satin.
+--   'qty_direct_wastage'  -- order_qty (per program_qty (max)) IS the
+--         consumption already in metres for these bare reference rows
+--         with no width/height on file (the sheet gave a running-metres
+--         figure directly, not a piece count) -- apply the same flat 40%
+--         wastage multiplier, sum, convert to rolls. For Endutex BWX 500
+--         / Back EX Banner.
+--   'sqft_direct_to_rolls'  -- order_qty is the program's total
+--         consumption in SQ.FT already (again, a bare reference row with
+--         no per-piece dimensions) -- convert to sq.m, divide by the
+--         material's roll width to get metres, convert to rolls. For
+--         Aslan DFP25 Blockout Film.
+--   'fixed_pieces_per_roll'  -- a fixed, material-level (not per-SKU)
+--         pieces-per-pack constant in pieces_per_pack below -- packs
+--         needed per row = ceil(order_qty / pieces_per_pack), summed. For
+--         Aslan SL 109 Lamination Film (200 pieces/roll).
+--   'manual'  -- no consumption calculation at all (was unit_type
+--         'simple''s old meaning) -- packs_ordered typed in directly,
+--         though still pre-filled from qty_per_pack where a row happens to
+--         carry it. For Arrow Inc's papers, Visual Magnetics.
 create table if not exists public.material_supplier_items (
   id uuid primary key default gen_random_uuid(),
   supplier_id uuid not null references public.material_suppliers (id) on delete cascade,
@@ -80,6 +132,13 @@ create table if not exists public.material_supplier_items (
   unit_type text not null check (unit_type in ('roll', 'sheet', 'simple')),
   order_method text not null check (order_method in ('consumption', 'simple_count')),
   pack_options jsonb not null default '[]',
+  consumption_basis text not null default 'total_required_material' check (consumption_basis in (
+    'total_required_material', 'perimeter_x2', 'qty_per_pack_by_sheet_size',
+    'wastage_running_length', 'qty_direct_wastage', 'sqft_direct_to_rolls',
+    'fixed_pieces_per_roll', 'manual'
+  )),
+  -- Only meaningful for consumption_basis = 'fixed_pieces_per_roll'.
+  pieces_per_pack numeric,
   created_at timestamptz not null default now(),
   unique (supplier_id, material_name)
 );

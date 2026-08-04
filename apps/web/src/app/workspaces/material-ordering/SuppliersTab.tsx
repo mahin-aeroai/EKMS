@@ -60,6 +60,31 @@ export function SuppliersTab() {
       .join(", ") || "—";
   }
 
+  // See supabase-material-ordering-schema.sql's header for what each basis
+  // actually computes -- this is just a readable label for this table.
+  function consumptionBasisLabel(basis: MaterialSupplierItemRow["consumption_basis"]) {
+    switch (basis) {
+      case "total_required_material":
+        return "Sheet's own linear metres";
+      case "perimeter_x2":
+        return "Perimeter (2×W+H) × qty";
+      case "qty_per_pack_by_sheet_size":
+        return "Nesting per sheet size";
+      case "wastage_running_length":
+        return "Running length + 40% wastage";
+      case "qty_direct_wastage":
+        return "Qty is metres + 40% wastage";
+      case "sqft_direct_to_rolls":
+        return "Sq.ft → rolls (via width)";
+      case "fixed_pieces_per_roll":
+        return "Fixed pieces/roll";
+      case "manual":
+        return "Manual — no calculation";
+      default:
+        return basis;
+    }
+  }
+
   if (!suppliers) return <p className="py-8 text-center text-sm text-ink-muted">Loading…</p>;
 
   return (
@@ -134,6 +159,7 @@ export function SuppliersTab() {
                     <th className="px-3 py-1.5">Raw material code</th>
                     <th className="px-3 py-1.5">Unit type</th>
                     <th className="px-3 py-1.5">Order method</th>
+                    <th className="px-3 py-1.5">Consumption basis</th>
                     <th className="px-3 py-1.5">Pack sizes</th>
                   </tr>
                 </thead>
@@ -146,12 +172,18 @@ export function SuppliersTab() {
                       <td className="px-3 py-1.5 text-ink-secondary">
                         {item.order_method === "consumption" ? "By consumption" : "Simple count"}
                       </td>
+                      <td className="px-3 py-1.5 text-ink-secondary">
+                        {consumptionBasisLabel(item.consumption_basis)}
+                        {item.consumption_basis === "fixed_pieces_per_roll" && item.pieces_per_pack
+                          ? ` (${item.pieces_per_pack}/roll)`
+                          : ""}
+                      </td>
                       <td className="px-3 py-1.5 text-ink-secondary">{formatPackOptions(item)}</td>
                     </tr>
                   ))}
                   {itemsFor(s.id).length === 0 && (
                     <tr>
-                      <td colSpan={5} className="px-3 py-3 text-center text-ink-muted">
+                      <td colSpan={6} className="px-3 py-3 text-center text-ink-muted">
                         No materials on file for this supplier yet.
                       </td>
                     </tr>

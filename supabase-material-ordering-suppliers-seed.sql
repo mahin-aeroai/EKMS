@@ -53,62 +53,84 @@ insert into public.material_suppliers (name) values
   ('Visual Magnetics')
 on conflict (name) do nothing;
 
-insert into public.material_supplier_items (supplier_id, material_name, unit_type, order_method, pack_options)
-select s.id, x.material_name, x.unit_type, x.order_method, x.pack_options::jsonb
+-- consumption_basis / pieces_per_pack: see supabase-material-ordering-
+-- schema.sql's header for what each basis means -- these reflect the
+-- corrected formulas from supabase-material-ordering-consumption-basis-
+-- migration.sql, folded in here so a fresh install seeds them right the
+-- first time instead of needing that follow-up migration too.
+insert into public.material_supplier_items
+  (supplier_id, material_name, unit_type, order_method, pack_options, consumption_basis, pieces_per_pack)
+select s.id, x.material_name, x.unit_type, x.order_method, x.pack_options::jsonb, x.consumption_basis, x.pieces_per_pack
 from (values
   ('Toray Textiles Europe Ltd', 'Recycled Rhine', 'roll', 'consumption',
     '[{"label":"1400mm x 100m","width_mm":1400,"length_m":100},
       {"label":"1600mm x 100m","width_mm":1600,"length_m":100},
-      {"label":"2600mm x 100m","width_mm":2600,"length_m":100}]'),
+      {"label":"2600mm x 100m","width_mm":2600,"length_m":100}]',
+    'total_required_material', null::numeric),
 
   ('Primex Plastics', 'Primex - Styrene', 'sheet', 'consumption',
     '[{"label":"2000 x 1300mm","width_mm":2000,"height_mm":1300},
       {"label":"1500 x 1300mm","width_mm":1500,"height_mm":1300},
-      {"label":"1828.8 x 1300mm","width_mm":1828.8,"height_mm":1300}]'),
+      {"label":"1828.8 x 1300mm","width_mm":1828.8,"height_mm":1300}]',
+    'qty_per_pack_by_sheet_size', null::numeric),
 
   ('Megatexx', 'MT 3180', 'roll', 'consumption',
     '[{"label":"1400mm x 100m","width_mm":1400,"length_m":100},
-      {"label":"2600mm x 100m","width_mm":2600,"length_m":100}]'),
+      {"label":"2600mm x 100m","width_mm":2600,"length_m":100}]',
+    'total_required_material', null::numeric),
 
   ('Sappi Mills', '350GSM, Sappi-Magno Satin', 'simple', 'simple_count',
-    '[{"label":"900mm x 350GSM x 684kg reel","width_mm":900,"gsm":350,"weight_kg":684}]'),
+    '[{"label":"900mm x 350GSM x 684kg reel","width_mm":900,"gsm":350,"weight_kg":684}]',
+    'wastage_running_length', null::numeric),
 
   ('Transjet Industrial', 'Transjet Industrial 100', 'roll', 'consumption',
-    '[{"label":"3200mm x 120m","width_mm":3200,"length_m":120}]'),
+    '[{"label":"3200mm x 120m","width_mm":3200,"length_m":120}]',
+    'total_required_material', null::numeric),
 
   ('Roffelsen', 'Silicon Gasket', 'roll', 'consumption',
-    '[{"label":"200m reel","length_m":200}]'),
+    '[{"label":"200m reel","length_m":200}]',
+    'perimeter_x2', null::numeric),
 
   ('Magnum Magnetics', 'Rubber Magnet', 'roll', 'consumption',
-    '[{"label":"100ft roll","length_m":30.48}]'),
+    '[{"label":"100ft roll","length_m":30.48}]',
+    'perimeter_x2', null::numeric),
 
   ('3A Composites', 'SmartX', 'sheet', 'consumption',
-    '[{"label":"8 x 4ft","width_mm":2438.4,"height_mm":1219.2}]'),
+    '[{"label":"8 x 4ft","width_mm":2438.4,"height_mm":1219.2}]',
+    'total_required_material', null::numeric),
 
   ('Endutex', 'Endutex BWX 500', 'roll', 'consumption',
-    '[{"label":"126in x 50m","width_mm":3200.4,"length_m":50}]'),
+    '[{"label":"126in x 50m","width_mm":3200.4,"length_m":50}]',
+    'qty_direct_wastage', null::numeric),
 
   ('Endutex', 'Endutex Back EX Banner', 'roll', 'consumption',
-    '[{"label":"5000mm x 50m","width_mm":5000,"length_m":50}]'),
+    '[{"label":"5000mm x 50m","width_mm":5000,"length_m":50}]',
+    'qty_direct_wastage', null::numeric),
 
   ('Aslan', 'Aslan DFP25 Blockout Film', 'roll', 'consumption',
-    '[{"label":"54in x 25m","width_mm":1371.6,"length_m":25}]'),
+    '[{"label":"54in x 25m","width_mm":1371.6,"length_m":25}]',
+    'sqft_direct_to_rolls', null::numeric),
 
   ('Aslan', 'Aslan SL 109 Lamination Film', 'roll', 'consumption',
-    '[{"label":"1370mm x 50m","width_mm":1370,"length_m":50}]'),
+    '[{"label":"1370mm x 50m","width_mm":1370,"length_m":50}]',
+    'fixed_pieces_per_roll', 200::numeric),
 
   ('Arrow Inc', 'Epson Proofing Paper S042150', 'simple', 'simple_count',
-    '[{"label":"24in x 100ft","width_mm":609.6,"length_m":30.48}]'),
+    '[{"label":"24in x 100ft","width_mm":609.6,"length_m":30.48}]',
+    'manual', null::numeric),
 
   ('Arrow Inc', 'Window Bond Film', 'simple', 'simple_count',
-    '[{"label":"51in x 50m","width_mm":1295.4,"length_m":50}]'),
+    '[{"label":"51in x 50m","width_mm":1295.4,"length_m":50}]',
+    'manual', null::numeric),
 
   ('Arrow Inc', 'Pearl Proof Super V GRACoL', 'simple', 'simple_count',
-    '[{"label":"24in x 150ft","width_mm":609.6,"length_m":45.72}]'),
+    '[{"label":"24in x 150ft","width_mm":609.6,"length_m":45.72}]',
+    'manual', null::numeric),
 
   ('Visual Magnetics', 'VM PolyMatt Magnetic Vinyl', 'simple', 'simple_count',
-    '[{"label":"60in x 100ft","width_mm":1524,"length_m":30.48}]')
-) as x(supplier_name, material_name, unit_type, order_method, pack_options)
+    '[{"label":"60in x 100ft","width_mm":1524,"length_m":30.48}]',
+    'manual', null::numeric)
+) as x(supplier_name, material_name, unit_type, order_method, pack_options, consumption_basis, pieces_per_pack)
 join public.material_suppliers s on s.name = x.supplier_name
 on conflict (supplier_id, material_name) do nothing;
 

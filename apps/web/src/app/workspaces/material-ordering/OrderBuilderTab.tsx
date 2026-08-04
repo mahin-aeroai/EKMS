@@ -25,23 +25,16 @@ import { generateMaterialOrderPdf, downloadBlob } from "@/lib/materialOrdering/p
 // roll/sheet/pack counts, edit anything that needs a human override, then
 // save as Draft/Sent and/or download the PDF.
 //
-// Calculation (see supabase-material-ordering-schema.sql's header for the
-// full reasoning behind unit_type):
-//   roll   -- group matching consumption rows by material_width_mm, sum
-//             total_required_material (already wastage-inclusive linear
-//             metres) per width group, pick the narrowest pack_option that's
-//             still >= that width (falls back to the widest available and
-//             flags it), packs_ordered = ceil(length / pack.length_m).
-//   sheet  -- sum sqm * order_qty across all matching rows (nulls treated as
-//             0), divide by the chosen pack_option's area, packs_ordered =
-//             ceil(total_sqm / pack_area_sqm). Defaults to the first pack
-//             option; a dropdown lets the user pick a different one if the
-//             supplier has more than one sheet size.
-//   simple -- no calculation at all -- always shown (informational, so the
-//             "just tell me a roll count" materials -- Arrow Inc's papers,
-//             Visual Magnetics, Sappi Magno Satin -- are never silently
-//             dropped just because they have no linear-metres/sqm data to
-//             sum), packs_ordered starts at 0 and is typed in by hand.
+// Calculation dispatches on each material_supplier_items row's
+// consumption_basis -- see supabase-material-ordering-schema.sql's header
+// for the full reasoning behind every basis (there are 8: the original
+// 'total_required_material'/'manual' pair, plus 6 more the user corrected
+// per-supplier after reviewing real computed order lists: perimeter_x2,
+// qty_per_pack_by_sheet_size, wastage_running_length, qty_direct_wastage,
+// sqft_direct_to_rolls, fixed_pieces_per_roll). unitType on WorkingLine
+// below is a separate, simpler axis -- just the PACK SHAPE (roll vs sheet
+// vs no formula), used only to pick which pack_option fields make sense
+// and how computePacksOrdered() converts a chosen pack into a count.
 type SizeUnit = "sqm" | "linear_m" | "count";
 
 // One consumption_rows row that fed into a computed line's total, plus the
@@ -96,6 +89,75 @@ function computePacksOrdered(unitType: MaterialUnitType, totalConsumption: numbe
     return Math.ceil(totalConsumption / areaSqm);
   }
   return 0;
+}
+
+const SQFT_TO_SQM = 0.09290304;
+// Flat wastage multiplier for the two bases the user specified it for
+// (Sappi Magno Satin's running length, Endutex's direct metres) -- not a
+// per-material configurable value since only these two bases use it.
+const WASTAGE_MULTIPLIER = 1.4;
+
+// Perimeter of one piece (2*(width+height)) x qty, in metres -- for
+// trim/edge materials consumed around a piece's perimeter rather than its
+// face (Silicon Gasket, Rubber Magnet). Not the same math as the fabric
+// those pieces are cut from, which is why these can't reuse
+// total_required_material off the same row.
+function perimeterContribution(row: MaterialConsumptionRowRow): number | null {
+  if (row.width_mm == null || row.height_mm == null || row.order_qty == null) return null;
+  return ((2 * (row.width_mm + row.height_mm)) / 1000) * row.order_qty;
+}
+
+// Running length for a SKU cut from a wide roll, derived (not given) from
+// its own width/height vs the roll's material_width_mm: whichever side
+// fits within the roll's width is the cross-web side, the other is the
+// running length consumed. Returns null where it can't be determined (no
+// material_width_mm on file for that row, or neither side fits within it).
+function runningLengthContribution(row: MaterialConsumptionRowRow): number | null {
+  if (row.width_mm == null || row.height_mm == null || row.order_qty == null || !row.material_width_mm) return null;
+  const w = row.width_mm;
+  const h = row.height_mm;
+  const mw = row.material_width_mm;
+  let runDim: number | null = null;
+  if (w <= mw && h <= mw) runDim = Math.min(w, h); // both fit -- orient for the shorter run
+  else if (w <= mw) runDim = h;
+  else if (h <= mw) runDim = w;
+  if (runDim == null) return null;
+  return (runDim / 1000) * row.order_qty;
+}
+
+// Shared by the three bases that reduce to "sum a linear-metres total
+// across every matching row into ONE line, then convert to rolls via the
+// material's (single) pack option" -- perimeter_x2, qty_direct_wastage,
+// sqft_direct_to_rolls.
+function buildSingleRollLine(item: MaterialSupplierItemRow, sourceRows: SourceRowDetail[], totalM: number): WorkingLine {
+  const packs = item.pack_options;
+  if (packs.length === 0) {
+    return {
+      key: crypto.randomUUID(),
+      supplierItemId: item.id,
+      unitType: "roll",
+      materialName: item.material_name,
+      totalConsumption: totalM,
+      consumptionUnit: "linear_m",
+      availablePackOptions: [],
+      packOptionIndex: -1,
+      packsOrdered: 0,
+      notes: "No pack sizes configured for this material — add one in Suppliers & Materials",
+      sourceRows,
+    };
+  }
+  return {
+    key: crypto.randomUUID(),
+    supplierItemId: item.id,
+    unitType: "roll",
+    materialName: item.material_name,
+    totalConsumption: totalM,
+    consumptionUnit: "linear_m",
+    availablePackOptions: packs,
+    packOptionIndex: 0,
+    packsOrdered: computePacksOrdered("roll", totalM, packs[0]),
+    sourceRows,
+  };
 }
 
 function toOrderLine(line: WorkingLine): MaterialOrderLine {
@@ -246,9 +308,9 @@ export function OrderBuilderTab() {
           (r) => r.material_1 === item.material_name || r.material_2 === item.material_name || r.material_3 === item.material_name
         );
 
-        if (item.unit_type === "simple") {
+        if (item.consumption_basis === "manual") {
           // Always shown -- these materials have no consumption data to sum
-          // (that's the point of 'simple'), so there's normally nothing to
+          // (that's the point of 'manual'), so there's normally nothing to
           // prefill and the user just types in a count. BUT if any matching
           // rows have qty_per_pack on file (nesting data -- see
           // computePacksForSku), sum those into a real default instead of
@@ -263,7 +325,7 @@ export function OrderBuilderTab() {
           newLines.push({
             key: crypto.randomUUID(),
             supplierItemId: item.id,
-            unitType: "simple",
+            unitType: item.unit_type,
             materialName: item.material_name,
             totalConsumption: 0,
             consumptionUnit: "count",
@@ -283,13 +345,18 @@ export function OrderBuilderTab() {
           continue;
         }
 
-        if (matches.length === 0) continue; // skip roll/sheet items with zero matches
+        if (matches.length === 0) continue; // skip every other basis when nothing in the selected programs touches this material
 
-        if (item.unit_type === "roll") {
+        if (item.consumption_basis === "total_required_material") {
+          // Group by material_width_mm -- the sheet's own precomputed,
+          // wastage-inclusive linear metres (Print Length x Qty x 1.4) is
+          // correct as-is for these materials (Recycled Rhine, MT 3180,
+          // Transjet Industrial) -- just sum per matching roll width and
+          // pick a pack for each.
           const byWidth = new Map<number, number>();
           const rowsByWidth = new Map<number, MaterialConsumptionRowRow[]>();
           for (const r of matches) {
-            if (r.total_required_material == null) continue; // rows without precomputed linear metres don't apply to roll materials
+            if (r.total_required_material == null) continue;
             const width = r.material_width_mm ?? 0;
             byWidth.set(width, (byWidth.get(width) ?? 0) + r.total_required_material);
             const list = rowsByWidth.get(width) ?? [];
@@ -344,42 +411,178 @@ export function OrderBuilderTab() {
               sourceRows,
             });
           }
-        } else if (item.unit_type === "sheet") {
-          let totalSqm = 0;
-          const sourceRows: SourceRowDetail[] = [];
+        } else if (item.consumption_basis === "qty_per_pack_by_sheet_size") {
+          // Group by material_width_mm (the sheet size each SKU actually
+          // used) so different sizes are never blended into one average --
+          // one order line per sheet size. Within a group, prefer the
+          // per-row nesting count (qty_per_pack) wherever it's on file --
+          // this is what correctly counts multi-up sheets (several small
+          // pieces per sheet, e.g. GPS18/19) instead of undercounting them
+          // via a pure area estimate -- and only falls back to sq.m/pack-
+          // area for rows that don't have qty_per_pack yet.
+          const byWidth = new Map<number, MaterialConsumptionRowRow[]>();
           for (const r of matches) {
-            const contribution = (r.sqm ?? 0) * (r.order_qty ?? 0);
-            totalSqm += contribution;
-            sourceRows.push({ row: r, contribution, packsForThisSku: computePacksForSku(r) });
+            const width = r.material_width_mm ?? 0;
+            if (width <= 0) continue; // no sheet size on file for this row -- can't group it
+            const list = byWidth.get(width) ?? [];
+            list.push(r);
+            byWidth.set(width, list);
           }
-          if (totalSqm <= 0) continue;
           const packs = item.pack_options;
-          if (packs.length === 0) {
+          const sortedByWidth = [...packs].sort((a, b) => (a.width_mm ?? 0) - (b.width_mm ?? 0));
+
+          for (const [width, widthRows] of byWidth) {
+            let totalSqm = 0;
+            let packsFromNesting = 0;
+            let sqmFromFallbackRows = 0;
+            const sourceRows: SourceRowDetail[] = [];
+            for (const r of widthRows) {
+              const contribution = (r.sqm ?? 0) * (r.order_qty ?? 0);
+              totalSqm += contribution;
+              const packsForThisSku = computePacksForSku(r);
+              if (packsForThisSku != null) packsFromNesting += packsForThisSku;
+              else sqmFromFallbackRows += contribution;
+              sourceRows.push({ row: r, contribution, packsForThisSku });
+            }
+            if (totalSqm <= 0) continue;
+            let chosen = sortedByWidth.find((p) => (p.width_mm ?? 0) >= width);
+            let flagNote: string | undefined;
+            if (!chosen && packs.length > 0) {
+              chosen = sortedByWidth[sortedByWidth.length - 1];
+              flagNote = `No sheet ≥ ${width}mm wide on file — using widest available (${chosen.label})`;
+            }
+            if (!chosen) {
+              newLines.push({
+                key: crypto.randomUUID(),
+                supplierItemId: item.id,
+                unitType: "sheet",
+                materialName: `${item.material_name} (sheet ${width}mm)`,
+                totalConsumption: totalSqm,
+                consumptionUnit: "sqm",
+                availablePackOptions: [],
+                packOptionIndex: -1,
+                packsOrdered: packsFromNesting,
+                notes: "No sheet sizes configured for this material — add one in Suppliers & Materials",
+                sourceRows,
+              });
+              continue;
+            }
+            const packOptionIndex = Math.max(0, packs.indexOf(chosen));
+            const areaFallbackPacks = computePacksOrdered("sheet", sqmFromFallbackRows, chosen);
             newLines.push({
               key: crypto.randomUUID(),
               supplierItemId: item.id,
               unitType: "sheet",
-              materialName: item.material_name,
+              materialName: `${item.material_name} (sheet ${width}mm)`,
               totalConsumption: totalSqm,
               consumptionUnit: "sqm",
-              availablePackOptions: [],
-              packOptionIndex: -1,
-              packsOrdered: 0,
-              notes: "No pack sizes configured for this material — add one in Suppliers & Materials",
+              availablePackOptions: packs,
+              packOptionIndex,
+              packsOrdered: packsFromNesting + areaFallbackPacks,
+              notes: flagNote,
               sourceRows,
             });
-            continue;
+          }
+        } else if (item.consumption_basis === "perimeter_x2") {
+          // Trim/edge material wrapped around each piece's perimeter, not
+          // its face -- Silicon Gasket, Rubber Magnet. Sums into one line
+          // (these materials don't come in different widths on file).
+          let totalM = 0;
+          const sourceRows: SourceRowDetail[] = [];
+          for (const r of matches) {
+            const contribution = perimeterContribution(r);
+            if (contribution != null) totalM += contribution;
+            sourceRows.push({ row: r, contribution, packsForThisSku: computePacksForSku(r) });
+          }
+          if (totalM <= 0) continue;
+          newLines.push(buildSingleRollLine(item, sourceRows, totalM));
+        } else if (item.consumption_basis === "wastage_running_length") {
+          // Sappi Magno Satin -- running length derived per-SKU from
+          // width/height vs the roll's material_width_mm, +40% wastage.
+          // Rows with no material_width_mm on file can't be computed this
+          // way (contribution stays null) but may still carry qty_per_pack
+          // nesting data, which is summed separately into the packs-ordered
+          // default since there's no known reel length to convert metres
+          // into a reel count.
+          let totalM = 0;
+          let packsFromNesting = 0;
+          const sourceRows: SourceRowDetail[] = [];
+          for (const r of matches) {
+            const raw = runningLengthContribution(r);
+            const contribution = raw != null ? raw * WASTAGE_MULTIPLIER : null;
+            if (contribution != null) totalM += contribution;
+            const packsForThisSku = computePacksForSku(r);
+            if (packsForThisSku != null) packsFromNesting += packsForThisSku;
+            sourceRows.push({ row: r, contribution, packsForThisSku });
           }
           newLines.push({
             key: crypto.randomUUID(),
             supplierItemId: item.id,
-            unitType: "sheet",
+            unitType: item.unit_type,
             materialName: item.material_name,
-            totalConsumption: totalSqm,
-            consumptionUnit: "sqm",
-            availablePackOptions: packs,
+            totalConsumption: totalM,
+            consumptionUnit: "linear_m",
+            availablePackOptions: item.pack_options,
             packOptionIndex: 0,
-            packsOrdered: computePacksOrdered("sheet", totalSqm, packs[0]),
+            packsOrdered: packsFromNesting,
+            notes:
+              totalM > 0
+                ? "Running metres shown include 40% wastage. No reel length on file to convert metres to reels — packs ordered is suggested from nesting data below where available."
+                : undefined,
+            sourceRows,
+          });
+        } else if (item.consumption_basis === "qty_direct_wastage") {
+          // Endutex -- these bare reference rows have no width/height, so
+          // order_qty ("Per Program Order Qty (Max)") IS the running-metres
+          // figure directly, not a piece count. +40% wastage, sum, convert
+          // to rolls.
+          let totalM = 0;
+          const sourceRows: SourceRowDetail[] = [];
+          for (const r of matches) {
+            const contribution = r.order_qty != null ? r.order_qty * WASTAGE_MULTIPLIER : null;
+            if (contribution != null) totalM += contribution;
+            sourceRows.push({ row: r, contribution, packsForThisSku: null });
+          }
+          if (totalM <= 0) continue;
+          newLines.push(buildSingleRollLine(item, sourceRows, totalM));
+        } else if (item.consumption_basis === "sqft_direct_to_rolls") {
+          // Aslan DFP25 Blockout Film -- order_qty is total SQ.FT for the
+          // program (again, a bare reference row with no per-piece
+          // dimensions), converted to sq.m then to running metres via the
+          // roll's own width.
+          const pack = item.pack_options[0];
+          const widthM = pack?.width_mm ? pack.width_mm / 1000 : 0;
+          let totalM = 0;
+          const sourceRows: SourceRowDetail[] = [];
+          for (const r of matches) {
+            const contribution = r.order_qty != null && widthM > 0 ? (r.order_qty * SQFT_TO_SQM) / widthM : null;
+            if (contribution != null) totalM += contribution;
+            sourceRows.push({ row: r, contribution, packsForThisSku: null });
+          }
+          if (totalM <= 0) continue;
+          newLines.push(buildSingleRollLine(item, sourceRows, totalM));
+        } else if (item.consumption_basis === "fixed_pieces_per_roll") {
+          // Aslan SL 109 Lamination Film -- a fixed, material-level pieces-
+          // per-roll constant (200), not derived per SKU like qty_per_pack.
+          const perPack = item.pieces_per_pack ?? 0;
+          let totalPacks = 0;
+          const sourceRows: SourceRowDetail[] = [];
+          for (const r of matches) {
+            const packsForThisSku = perPack > 0 && r.order_qty != null ? Math.ceil(r.order_qty / perPack) : null;
+            if (packsForThisSku != null) totalPacks += packsForThisSku;
+            sourceRows.push({ row: r, contribution: null, packsForThisSku });
+          }
+          newLines.push({
+            key: crypto.randomUUID(),
+            supplierItemId: item.id,
+            unitType: item.unit_type,
+            materialName: item.material_name,
+            totalConsumption: 0,
+            consumptionUnit: "count",
+            availablePackOptions: item.pack_options,
+            packOptionIndex: 0,
+            packsOrdered: totalPacks,
+            notes: perPack <= 0 ? "No pieces-per-pack on file for this material — add one in Suppliers & Materials" : undefined,
             sourceRows,
           });
         }
