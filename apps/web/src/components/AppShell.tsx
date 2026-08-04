@@ -38,6 +38,7 @@ import {
   QrCode,
   FileSpreadsheet,
   Layers,
+  PackageCheck,
 } from "lucide-react";
 import { Sidebar, type SidebarSection } from "@/components/ui/Sidebar";
 import { TopNav } from "@/components/ui/TopNav";
@@ -159,6 +160,7 @@ export const NAV: SidebarSection[] = [
       { id: "qr-label-tool", label: "QR Label Tool", icon: <QrCode size={16} />, href: "/workspaces/qr-label-tool" },
       { id: "estimate-builder", label: "Estimate Builder", icon: <FileSpreadsheet size={16} />, href: "/workspaces/estimate-builder" },
       { id: "cost-sheet", label: "Cost Sheet", icon: <Layers size={16} />, href: "/workspaces/cost-sheet" },
+      { id: "material-ordering", label: "Material Ordering", icon: <PackageCheck size={16} />, href: "/workspaces/material-ordering" },
     ],
   },
 ];
