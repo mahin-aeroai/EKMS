@@ -923,3 +923,56 @@ export interface MaterialOrderRow {
   created_at: string;
   sent_at: string | null;
 }
+
+// ---------- Import Duty / Landing Cost Calculator ----------
+// (supabase-import-duty-schema.sql) -- new standalone Tools workspace,
+// ports "Import Duty calculation.xlsx". See that migration's header for
+// the full formula and the 2 additions beyond the original sheet (IGST,
+// multi-currency). BCD/SW Cess/IGST % are per LINE, not per shipment, since
+// real shipments mix HS codes with different duty rates.
+
+export type ImportDutyStatus = "draft" | "final";
+
+export interface ImportDutyLine {
+  product_name: string;
+  qty: number;
+  // The sheet's own "Rate" column -- the line's total invoice value in
+  // `currency`, NOT a per-unit price (see schema header for why).
+  rate: number;
+  currency: string;
+  exchange_rate: number;
+  fee: number;
+  freight: number;
+  freight_ex_works: number;
+  clearing_charges: number;
+  bcd_percent: number;
+  sw_cess_percent: number;
+  igst_percent: number;
+  // Computed + frozen at save time (see schema header for the formulas).
+  inv_value: number;
+  assessable_value: number;
+  bcd_amount: number;
+  sw_cess_amount: number;
+  igst_amount: number;
+  total_duty: number;
+  total_cost: number;
+  cost_per_qty: number;
+}
+
+export interface ImportDutyCalculationRow {
+  id: string;
+  ref: string;
+  status: ImportDutyStatus;
+  supplier_name: string | null;
+  invoice_no: string | null;
+  invoice_date: string | null;
+  bill_of_entry_no: string | null;
+  bill_of_entry_date: string | null;
+  notes: string | null;
+  lines: ImportDutyLine[];
+  total_cost: number;
+  total_duty: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
