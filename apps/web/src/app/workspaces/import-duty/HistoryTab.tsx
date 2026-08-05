@@ -188,7 +188,9 @@ export function HistoryTab() {
                                   <tr key={i} className="border-b border-line/60 bg-surface last:border-0">
                                     <td className="px-3 py-1.5 font-medium text-ink">{l.product_name}</td>
                                     <td className="px-3 py-1.5 text-ink-secondary">
-                                      {l.size_mode === "roll" ? `${l.width} ${l.uom} wide (roll)` : `${l.width}×${l.height} ${l.uom}`}
+                                      {l.size_mode === "roll"
+                                        ? `${l.qty} ${l.length_uom} × ${l.width} ${l.uom} wide (roll)`
+                                        : `${l.width}×${l.height} ${l.uom}`}
                                     </td>
                                     <td className="px-3 py-1.5 text-ink-secondary">{l.qty}</td>
                                     <td className="px-3 py-1.5 text-ink-secondary">{l.sqft_total.toFixed(2)}</td>
