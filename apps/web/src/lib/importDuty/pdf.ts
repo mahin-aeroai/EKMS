@@ -181,7 +181,7 @@ function tableCols() {
     { label: "Sq.Ft", width: mm(13), align: "right" as const },
     { label: "Inv. Value (INR)", width: mm(19), align: "right" as const },
     { label: "Assessable Value (INR)", width: mm(20), align: "right" as const },
-    { label: "Total Duty (INR)", width: mm(17), align: "right" as const },
+    { label: "Duty (INR)", width: mm(17), align: "right" as const },
     { label: "Total Cost (INR)", width: mm(21), align: "right" as const },
     { label: "Cost / Qty (INR)", width: mm(18), align: "right" as const },
     { label: "Cost / Sq.Ft (INR)", width: mm(18), align: "right" as const },
@@ -375,8 +375,8 @@ export async function generateImportDutyPdf(data: ImportDutyPdfData): Promise<Bl
   const dutyBits = [
     `Total BCD: Rs. ${fmtNum(totalBcd)}`,
     `Total SW Cess: Rs. ${fmtNum(totalSwCess)}`,
-    `Total IGST: Rs. ${fmtNum(totalIgst)}`,
-    `Total Duty: Rs. ${fmtNum(totalDuty)}`,
+    `Total Duty (BCD + Cess): Rs. ${fmtNum(totalDuty)}`,
+    `Total IGST (GST): Rs. ${fmtNum(totalIgst)}`,
   ];
   for (const line of dutyBits) {
     ensure(ctx, state, 12);

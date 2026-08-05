@@ -88,10 +88,18 @@
 --                             duty-free HS code) doesn't also zero out Cess.
 --     igst_amount          = (assessable_value + bcd_amount + sw_cess_amount)
 --                             * igst_percent / 100
---     total_duty           = bcd_amount + sw_cess_amount + igst_amount
+--     total_duty           = bcd_amount + sw_cess_amount  -- NOT + igst_amount.
+--                             "Duty" (Customs Duty) and IGST (a GST levy
+--                             collected at import) are distinct concepts --
+--                             corrected per the user: a line with BCD=0 and
+--                             SW Cess=0 but IGST>0 was still showing a
+--                             nonzero "Total Duty" equal to the IGST amount.
+--                             IGST is still real money and still flows into
+--                             total_cost below, just kept out of "Duty".
 --     total_cost           = inv_value + apportioned_freight
 --                             + apportioned_freight_ex_works
 --                             + apportioned_clearing_charges + total_duty
+--                             + igst_amount
 --     cost_per_qty         = total_cost / qty
 --     cost_per_sqft        = total_cost / sqft_total
 --
