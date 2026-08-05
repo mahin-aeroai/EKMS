@@ -49,6 +49,10 @@ export function HistoryTab() {
         bill_of_entry_no: row.bill_of_entry_no,
         bill_of_entry_date: row.bill_of_entry_date,
         notes: row.notes,
+        freight: row.freight,
+        freight_ex_works: row.freight_ex_works,
+        clearing_charges: row.clearing_charges,
+        insurance_percent: row.insurance_percent,
         lines: row.lines,
       });
       downloadBlob(blob, `${row.ref}.pdf`);
@@ -157,6 +161,10 @@ export function HistoryTab() {
                               Bill of Entry: {r.bill_of_entry_no || "—"}
                               {r.bill_of_entry_date ? ` (${new Date(r.bill_of_entry_date).toLocaleDateString("en-IN")})` : ""}
                             </p>
+                            <p className="mt-1">
+                              Freight: {fmt(r.freight)} · Freight (Ex Works): {fmt(r.freight_ex_works)} · Clearing: {fmt(r.clearing_charges)} ·
+                              Insurance: {r.insurance_percent}%
+                            </p>
                           </div>
 
                           <div className="overflow-x-auto rounded-md border border-line">
@@ -164,29 +172,37 @@ export function HistoryTab() {
                               <thead>
                                 <tr className="border-b border-line bg-surface-sunken text-left text-ink-secondary">
                                   <th className="px-3 py-1.5">Product</th>
+                                  <th className="px-3 py-1.5">Size</th>
                                   <th className="px-3 py-1.5">Qty</th>
+                                  <th className="px-3 py-1.5">Sq.Ft</th>
                                   <th className="px-3 py-1.5">Inv. Value</th>
                                   <th className="px-3 py-1.5">Assessable Value</th>
                                   <th className="px-3 py-1.5">Total Duty</th>
                                   <th className="px-3 py-1.5">Total Cost</th>
                                   <th className="px-3 py-1.5">Cost / Qty</th>
+                                  <th className="px-3 py-1.5">Cost / Sq.Ft</th>
                                 </tr>
                               </thead>
                               <tbody>
                                 {r.lines.map((l, i) => (
                                   <tr key={i} className="border-b border-line/60 bg-surface last:border-0">
                                     <td className="px-3 py-1.5 font-medium text-ink">{l.product_name}</td>
+                                    <td className="px-3 py-1.5 text-ink-secondary">
+                                      {l.size_mode === "roll" ? `${l.width} ${l.uom} wide (roll)` : `${l.width}×${l.height} ${l.uom}`}
+                                    </td>
                                     <td className="px-3 py-1.5 text-ink-secondary">{l.qty}</td>
+                                    <td className="px-3 py-1.5 text-ink-secondary">{l.sqft_total.toFixed(2)}</td>
                                     <td className="px-3 py-1.5 text-ink-secondary">{fmt(l.inv_value)}</td>
                                     <td className="px-3 py-1.5 text-ink-secondary">{fmt(l.assessable_value)}</td>
                                     <td className="px-3 py-1.5 text-ink-secondary">{fmt(l.total_duty)}</td>
                                     <td className="px-3 py-1.5 font-medium text-ink">{fmt(l.total_cost)}</td>
                                     <td className="px-3 py-1.5 font-medium text-ink">{fmt(l.cost_per_qty)}</td>
+                                    <td className="px-3 py-1.5 font-medium text-ink">{fmt(l.cost_per_sqft)}</td>
                                   </tr>
                                 ))}
                                 {r.lines.length === 0 && (
                                   <tr>
-                                    <td colSpan={7} className="px-3 py-3 text-center text-ink-muted">
+                                    <td colSpan={10} className="px-3 py-3 text-center text-ink-muted">
                                       No lines on this calculation.
                                     </td>
                                   </tr>

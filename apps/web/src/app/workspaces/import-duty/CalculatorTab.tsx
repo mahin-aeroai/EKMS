@@ -6,118 +6,205 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
-import type { ImportDutyLine, ImportDutyStatus } from "@mmdi/shared/rows";
+import type { ImportDutyLine, ImportDutySizeMode, ImportDutyStatus, ImportDutyUom } from "@mmdi/shared/rows";
 import { generateImportDutyPdf, downloadBlob } from "@/lib/importDuty/pdf";
 
 // The core calculator. No cross-table lookups needed (unlike Material
 // Ordering's Order Builder, which has to query consumption data) -- every
-// field a line's computed outputs depend on already lives ON that line, so
-// this is a pure client-side reactive form: edit any input, every computed
-// figure on that line (and the shipment totals below) recomputes
-// immediately, no "Build" button. See supabase-import-duty-schema.sql's
-// header comment for the exact formula this mirrors.
+// field a line's computed outputs depend on already lives ON this form, so
+// this is a pure client-side reactive form: edit any input (a line's own
+// fields, or one of the shipment-level cost fields), every computed figure
+// recomputes immediately, no "Build" button. See
+// supabase-import-duty-schema.sql's header comment for the exact formula
+// this mirrors.
 //
-// `WorkingLine` is `ImportDutyLine` (the exact frozen-jsonb shape the DB
-// stores) plus a local-only `key` for stable React list identity -- opened
-// out at save/PDF time via `stripKey`.
-interface WorkingLine extends ImportDutyLine {
+// Raw, user-editable fields live in `LineInput` (+ a local-only `key` for
+// stable React list identity). Every computed output (inv_value, sqft_total,
+// each apportioned_* share, duty amounts, totals) is derived by computeAll()
+// from ALL lines together, not line-by-line -- because apportioning
+// Freight/Insurance/Freight-from-Ex-Works/Clearing Charges across lines
+// needs each line's share of the SHIPMENT's total invoice value, which
+// isn't knowable from a single line in isolation.
+
+interface LineInput {
   key: string;
+  product_name: string;
+  qty: number;
+  rate: number;
+  currency: string;
+  exchange_rate: number;
+  width: number;
+  height: number;
+  uom: ImportDutyUom;
+  size_mode: ImportDutySizeMode;
+  bcd_percent: number;
+  sw_cess_percent: number;
+  igst_percent: number;
 }
 
-type NumericField =
-  | "qty"
-  | "rate"
-  | "exchange_rate"
-  | "insurance_percent"
-  | "freight"
-  | "freight_ex_works"
-  | "clearing_charges"
-  | "bcd_percent"
-  | "sw_cess_percent"
-  | "igst_percent";
+interface ComputedLine extends LineInput {
+  inv_value: number;
+  sqft_total: number;
+  apportioned_freight: number;
+  apportioned_insurance: number;
+  apportioned_freight_ex_works: number;
+  apportioned_clearing_charges: number;
+  assessable_value: number;
+  bcd_amount: number;
+  sw_cess_amount: number;
+  igst_amount: number;
+  total_duty: number;
+  total_cost: number;
+  cost_per_qty: number;
+  cost_per_sqft: number;
+}
 
-// Recomputes every derived field on a line from its raw inputs. Mirrors
-// supabase-import-duty-schema.sql's header comment exactly.
+interface ShipmentCosts {
+  freight: number;
+  freight_ex_works: number;
+  clearing_charges: number;
+  insurance_percent: number;
+}
+
+type LineNumericField = "qty" | "rate" | "exchange_rate" | "width" | "height" | "bcd_percent" | "sw_cess_percent" | "igst_percent";
+type ShipmentNumericField = keyof ShipmentCosts;
+
+const CURRENCY_OPTIONS = ["USD", "EUR", "INR"];
+const UOM_OPTIONS: { value: ImportDutyUom; label: string }[] = [
+  { value: "mm", label: "mm" },
+  { value: "cm", label: "cm" },
+  { value: "inch", label: "inch" },
+  { value: "ft", label: "ft" },
+  { value: "m", label: "m" },
+];
+
+// Converts any of the supported UOMs to feet, so sqft_total is always
+// derived in feet regardless of what the line was entered in.
+const UOM_TO_FT: Record<ImportDutyUom, number> = {
+  mm: 1 / 304.8,
+  cm: 1 / 30.48,
+  inch: 1 / 12,
+  ft: 1,
+  m: 3.280839895,
+};
+
+function toFt(value: number, uom: ImportDutyUom): number {
+  return value * UOM_TO_FT[uom];
+}
+
+// See ImportDutySizeMode in packages/shared/src/rows.ts for what 'pieces'
+// vs 'roll' means.
+function computeSqft(line: LineInput): number {
+  if (line.size_mode === "roll") {
+    return toFt(line.qty, line.uom) * toFt(line.width, line.uom);
+  }
+  return line.qty * toFt(line.width, line.uom) * toFt(line.height, line.uom);
+}
+
+// Recomputes every derived field, for every line, from the raw line inputs
+// PLUS the shipment-level cost fields. Mirrors supabase-import-duty-
+// schema.sql's header comment exactly.
 //
-// inv_value = qty * rate * exchange_rate -- corrected from the original
-// sheet's single-row formula (rate * exchange_rate, no qty) after checking
-// a real supplier invoice: "Rate" is a per-unit price (e.g. price per
-// metre), and Qty * Rate is the line's actual invoice value in that
-// currency (matches the invoice's own "Value" column exactly) -- the
-// original sheet's one sample row didn't multiply by qty, which turns out
-// to have been wrong, not an intentional "Rate is a lump total" design.
+// inv_value = qty * rate * exchange_rate -- "Rate" is a per-unit price
+// (e.g. price per metre or per piece); Qty * Rate * Exchange rate is the
+// line's actual invoice value in INR (matches a real invoice's own "Value"
+// column exactly -- verified against a Toray Textiles invoice).
 //
-// insurance_amount = inv_value * insurance_percent / 100 -- standard
-// Indian customs notional insurance (1.125% of invoice/FOB value) used
-// when actual insurance isn't separately known, per Customs Valuation
-// Rules 2007 Rule 10(2). Replaces the old flat "Fee" input.
-function computeLine(line: WorkingLine): WorkingLine {
-  const inv_value = line.qty * line.rate * line.exchange_rate;
-  const insurance_amount = (inv_value * line.insurance_percent) / 100;
-  const assessable_value = inv_value + line.freight + insurance_amount;
-  const bcd_amount = (assessable_value * line.bcd_percent) / 100;
-  const sw_cess_amount = (bcd_amount * line.sw_cess_percent) / 100;
-  const igst_amount = ((assessable_value + bcd_amount + sw_cess_amount) * line.igst_percent) / 100;
-  const total_duty = bcd_amount + sw_cess_amount + igst_amount;
-  const total_cost = inv_value + line.freight + line.freight_ex_works + line.clearing_charges + total_duty;
-  const cost_per_qty = line.qty > 0 ? total_cost / line.qty : 0;
+// Freight / Insurance / Freight-from-Ex-Works / Clearing Charges are paid
+// once for the whole shipment (one Bill of Entry), not per product line --
+// each line's ratio = its share of the shipment's TOTAL invoice value, and
+// that ratio is applied to each shipment total to get this line's
+// apportioned share. This is the standard customs practice for splitting
+// shipment-level costs across multiple line items on one Bill of Entry.
+//
+// Freight and Insurance ARE part of the assessable (dutiable) value;
+// Freight-from-Ex-Works and Clearing Charges are NOT -- they're added
+// straight into total_cost after duty is calculated (pre-shipment domestic
+// freight and post-clearance charges aren't part of the CIF assessable
+// value under standard customs valuation).
+function computeAll(lines: LineInput[], shipment: ShipmentCosts): ComputedLine[] {
+  const withInvValue = lines.map((l) => ({
+    ...l,
+    inv_value: l.qty * l.rate * l.exchange_rate,
+    sqft_total: computeSqft(l),
+  }));
+
+  const totalInvValue = withInvValue.reduce((s, l) => s + l.inv_value, 0);
+  const insuranceAmountTotal = (totalInvValue * shipment.insurance_percent) / 100;
+
+  return withInvValue.map((l) => {
+    const ratio = totalInvValue > 0 ? l.inv_value / totalInvValue : withInvValue.length > 0 ? 1 / withInvValue.length : 0;
+
+    const apportioned_freight = shipment.freight * ratio;
+    const apportioned_insurance = insuranceAmountTotal * ratio;
+    const apportioned_freight_ex_works = shipment.freight_ex_works * ratio;
+    const apportioned_clearing_charges = shipment.clearing_charges * ratio;
+
+    const assessable_value = l.inv_value + apportioned_freight + apportioned_insurance;
+    const bcd_amount = (assessable_value * l.bcd_percent) / 100;
+    const sw_cess_amount = (bcd_amount * l.sw_cess_percent) / 100;
+    const igst_amount = ((assessable_value + bcd_amount + sw_cess_amount) * l.igst_percent) / 100;
+    const total_duty = bcd_amount + sw_cess_amount + igst_amount;
+    const total_cost = l.inv_value + apportioned_freight + apportioned_freight_ex_works + apportioned_clearing_charges + total_duty;
+    const cost_per_qty = l.qty > 0 ? total_cost / l.qty : 0;
+    const cost_per_sqft = l.sqft_total > 0 ? total_cost / l.sqft_total : 0;
+
+    return {
+      ...l,
+      apportioned_freight,
+      apportioned_insurance,
+      apportioned_freight_ex_works,
+      apportioned_clearing_charges,
+      assessable_value,
+      bcd_amount,
+      sw_cess_amount,
+      igst_amount,
+      total_duty,
+      total_cost,
+      cost_per_qty,
+      cost_per_sqft,
+    };
+  });
+}
+
+function newLine(): LineInput {
   return {
-    ...line,
-    inv_value,
-    insurance_amount,
-    assessable_value,
-    bcd_amount,
-    sw_cess_amount,
-    igst_amount,
-    total_duty,
-    total_cost,
-    cost_per_qty,
-  };
-}
-
-function newLine(): WorkingLine {
-  return computeLine({
     key: crypto.randomUUID(),
     product_name: "",
     qty: 1,
     rate: 0,
     currency: "EUR",
     exchange_rate: 0,
-    insurance_percent: 1.125,
-    freight: 0,
-    freight_ex_works: 0,
-    clearing_charges: 0,
+    width: 0,
+    height: 0,
+    uom: "m",
+    size_mode: "pieces",
     bcd_percent: 15,
     sw_cess_percent: 10,
     igst_percent: 0,
-    inv_value: 0,
-    insurance_amount: 0,
-    assessable_value: 0,
-    bcd_amount: 0,
-    sw_cess_amount: 0,
-    igst_amount: 0,
-    total_duty: 0,
-    total_cost: 0,
-    cost_per_qty: 0,
-  });
+  };
 }
 
-function stripKey(line: WorkingLine): ImportDutyLine {
+function toImportDutyLine(line: ComputedLine): ImportDutyLine {
   return {
     product_name: line.product_name,
     qty: line.qty,
     rate: line.rate,
     currency: line.currency,
     exchange_rate: line.exchange_rate,
-    insurance_percent: line.insurance_percent,
-    freight: line.freight,
-    freight_ex_works: line.freight_ex_works,
-    clearing_charges: line.clearing_charges,
+    width: line.width,
+    height: line.height,
+    uom: line.uom,
+    size_mode: line.size_mode,
     bcd_percent: line.bcd_percent,
     sw_cess_percent: line.sw_cess_percent,
     igst_percent: line.igst_percent,
     inv_value: line.inv_value,
-    insurance_amount: line.insurance_amount,
+    sqft_total: line.sqft_total,
+    apportioned_freight: line.apportioned_freight,
+    apportioned_insurance: line.apportioned_insurance,
+    apportioned_freight_ex_works: line.apportioned_freight_ex_works,
+    apportioned_clearing_charges: line.apportioned_clearing_charges,
     assessable_value: line.assessable_value,
     bcd_amount: line.bcd_amount,
     sw_cess_amount: line.sw_cess_amount,
@@ -125,6 +212,7 @@ function stripKey(line: WorkingLine): ImportDutyLine {
     total_duty: line.total_duty,
     total_cost: line.total_cost,
     cost_per_qty: line.cost_per_qty,
+    cost_per_sqft: line.cost_per_sqft,
   };
 }
 
@@ -132,8 +220,13 @@ function fmt(n: number): string {
   return `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 }
 
+function fmtSqft(n: number): string {
+  return `${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })} sqft`;
+}
+
 const NUM_INPUT_CLASS = "h-9 w-full rounded-md border border-line-strong bg-surface px-2 text-sm text-ink outline-none";
 const TEXT_INPUT_CLASS = "h-9 w-full rounded-md border border-line-strong bg-surface px-2 text-sm text-ink outline-none";
+const SELECT_CLASS = "h-9 w-full rounded-md border border-line-strong bg-surface px-2 text-sm text-ink outline-none";
 const LABEL_CLASS = "flex flex-col gap-1 text-xs font-medium text-ink-secondary";
 
 export function CalculatorTab() {
@@ -146,46 +239,79 @@ export function CalculatorTab() {
   const [boeDate, setBoeDate] = useState("");
   const [notes, setNotes] = useState("");
 
-  const [lines, setLines] = useState<WorkingLine[]>([]);
+  // Shipment-level cost fields -- paid once for the whole shipment, then
+  // apportioned pro-rata across lines by invoice value (see computeAll()).
+  const [freight, setFreight] = useState(0);
+  const [freightExWorks, setFreightExWorks] = useState(0);
+  const [clearingCharges, setClearingCharges] = useState(0);
+  const [insurancePercent, setInsurancePercent] = useState(1.125);
+
+  const [lines, setLines] = useState<LineInput[]>([]);
   const [saving, setSaving] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [lastSavedRef, setLastSavedRef] = useState<string | null>(null);
   const [lastSavedStatus, setLastSavedStatus] = useState<ImportDutyStatus | null>(null);
 
-  function addLine() {
-    setLines((ls) => [...ls, newLine()]);
+  const shipmentCosts: ShipmentCosts = useMemo(
+    () => ({ freight, freight_ex_works: freightExWorks, clearing_charges: clearingCharges, insurance_percent: insurancePercent }),
+    [freight, freightExWorks, clearingCharges, insurancePercent]
+  );
+
+  const computedLines = useMemo(() => computeAll(lines, shipmentCosts), [lines, shipmentCosts]);
+
+  function clearSavedState() {
     setLastSavedRef(null);
     setLastSavedStatus(null);
+  }
+
+  function addLine() {
+    setLines((ls) => [...ls, newLine()]);
+    clearSavedState();
   }
 
   function removeLine(key: string) {
     setLines((ls) => ls.filter((l) => l.key !== key));
-    setLastSavedRef(null);
-    setLastSavedStatus(null);
+    clearSavedState();
   }
 
-  function updateNumeric(key: string, field: NumericField, value: number) {
-    setLines((ls) => ls.map((l) => (l.key === key ? computeLine({ ...l, [field]: value }) : l)));
-    setLastSavedRef(null);
-    setLastSavedStatus(null);
+  function updateLineNumeric(key: string, field: LineNumericField, value: number) {
+    setLines((ls) => ls.map((l) => (l.key === key ? { ...l, [field]: value } : l)));
+    clearSavedState();
   }
 
   function updateProductName(key: string, value: string) {
     setLines((ls) => ls.map((l) => (l.key === key ? { ...l, product_name: value } : l)));
-    setLastSavedRef(null);
-    setLastSavedStatus(null);
+    clearSavedState();
   }
 
   function updateCurrency(key: string, value: string) {
     setLines((ls) => ls.map((l) => (l.key === key ? { ...l, currency: value } : l)));
-    setLastSavedRef(null);
-    setLastSavedStatus(null);
+    clearSavedState();
+  }
+
+  function updateUom(key: string, value: ImportDutyUom) {
+    setLines((ls) => ls.map((l) => (l.key === key ? { ...l, uom: value } : l)));
+    clearSavedState();
+  }
+
+  function updateSizeMode(key: string, value: ImportDutySizeMode) {
+    setLines((ls) => ls.map((l) => (l.key === key ? { ...l, size_mode: value } : l)));
+    clearSavedState();
+  }
+
+  function updateShipmentNumeric(field: ShipmentNumericField, value: number) {
+    if (field === "freight") setFreight(value);
+    else if (field === "freight_ex_works") setFreightExWorks(value);
+    else if (field === "clearing_charges") setClearingCharges(value);
+    else setInsurancePercent(value);
+    clearSavedState();
   }
 
   const totals = useMemo(() => {
-    return lines.reduce(
+    const sums = computedLines.reduce(
       (acc, l) => ({
         inv_value: acc.inv_value + l.inv_value,
+        sqft_total: acc.sqft_total + l.sqft_total,
         assessable_value: acc.assessable_value + l.assessable_value,
         bcd_amount: acc.bcd_amount + l.bcd_amount,
         sw_cess_amount: acc.sw_cess_amount + l.sw_cess_amount,
@@ -193,9 +319,10 @@ export function CalculatorTab() {
         total_duty: acc.total_duty + l.total_duty,
         total_cost: acc.total_cost + l.total_cost,
       }),
-      { inv_value: 0, assessable_value: 0, bcd_amount: 0, sw_cess_amount: 0, igst_amount: 0, total_duty: 0, total_cost: 0 }
+      { inv_value: 0, sqft_total: 0, assessable_value: 0, bcd_amount: 0, sw_cess_amount: 0, igst_amount: 0, total_duty: 0, total_cost: 0 }
     );
-  }, [lines]);
+    return { ...sums, cost_per_sqft: sums.sqft_total > 0 ? sums.total_cost / sums.sqft_total : 0 };
+  }, [computedLines]);
 
   const canSave = supplierName.trim() !== "" || lines.some((l) => l.product_name.trim() !== "");
   const hasDownloadableLine = lines.some((l) => l.product_name.trim() !== "");
@@ -237,7 +364,11 @@ export function CalculatorTab() {
           bill_of_entry_no: boeNo || null,
           bill_of_entry_date: boeDate || null,
           notes: notes || null,
-          lines: lines.map(stripKey),
+          freight,
+          freight_ex_works: freightExWorks,
+          clearing_charges: clearingCharges,
+          insurance_percent: insurancePercent,
+          lines: computedLines.map(toImportDutyLine),
           total_cost: totals.total_cost,
           total_duty: totals.total_duty,
           created_by: userData.user?.id ?? null,
@@ -270,7 +401,11 @@ export function CalculatorTab() {
         bill_of_entry_no: boeNo || null,
         bill_of_entry_date: boeDate || null,
         notes: notes || null,
-        lines: lines.map(stripKey),
+        freight,
+        freight_ex_works: freightExWorks,
+        clearing_charges: clearingCharges,
+        insurance_percent: insurancePercent,
+        lines: computedLines.map(toImportDutyLine),
       });
       downloadBlob(blob, `${lastSavedRef ?? "import-duty-draft"}.pdf`);
     } catch (err) {
@@ -331,6 +466,61 @@ export function CalculatorTab() {
         </label>
       </Card>
 
+      {/* Shipment-level costs -- paid once for the whole shipment, then
+          apportioned across product lines below by invoice-value share */}
+      <Card interactive={false} className="flex flex-col gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-ink">Shipment-level costs</h3>
+          <p className="text-xs text-ink-muted">
+            Freight, Freight from Ex Works, Clearing Charges and Insurance apply once to the whole shipment — each product
+            line below gets its share, apportioned by that line&apos;s % of the total invoice value.
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <label className={LABEL_CLASS}>
+            Freight (INR)
+            <input
+              type="number"
+              value={freight}
+              onChange={(e) => updateShipmentNumeric("freight", Number(e.target.value))}
+              className={NUM_INPUT_CLASS}
+            />
+          </label>
+          <label className={LABEL_CLASS}>
+            Freight from Ex Works (INR)
+            <input
+              type="number"
+              value={freightExWorks}
+              onChange={(e) => updateShipmentNumeric("freight_ex_works", Number(e.target.value))}
+              className={NUM_INPUT_CLASS}
+            />
+          </label>
+          <label className={LABEL_CLASS}>
+            Clearing Charges (INR)
+            <input
+              type="number"
+              value={clearingCharges}
+              onChange={(e) => updateShipmentNumeric("clearing_charges", Number(e.target.value))}
+              className={NUM_INPUT_CLASS}
+            />
+          </label>
+          <label className={LABEL_CLASS}>
+            Insurance %
+            <input
+              type="number"
+              step="0.001"
+              value={insurancePercent}
+              onChange={(e) => updateShipmentNumeric("insurance_percent", Number(e.target.value))}
+              className={NUM_INPUT_CLASS}
+            />
+            <span className="text-[10px] font-normal normal-case text-ink-muted">
+              Defaults to 1.125% of total invoice value — the standard notional rate customs uses when actual insurance
+              isn&apos;t known
+            </span>
+          </label>
+        </div>
+      </Card>
+
       {/* Product lines */}
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-ink">Product lines</h3>
@@ -340,13 +530,13 @@ export function CalculatorTab() {
         </Button>
       </div>
 
-      {lines.length === 0 && (
+      {computedLines.length === 0 && (
         <Card interactive={false}>
           <p className="py-6 text-center text-sm text-ink-muted">No product lines yet — add one to begin.</p>
         </Card>
       )}
 
-      {lines.map((l, idx) => (
+      {computedLines.map((l, idx) => (
         <Card key={l.key} interactive={false} className="flex flex-col gap-3">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Line {idx + 1}</span>
@@ -376,19 +566,22 @@ export function CalculatorTab() {
               <input
                 type="number"
                 value={l.qty}
-                onChange={(e) => updateNumeric(l.key, "qty", Number(e.target.value))}
+                onChange={(e) => updateLineNumeric(l.key, "qty", Number(e.target.value))}
                 className={NUM_INPUT_CLASS}
               />
+              {l.size_mode === "roll" && (
+                <span className="text-[10px] font-normal normal-case text-ink-muted">Running length, in {l.uom}</span>
+              )}
             </label>
             <label className={LABEL_CLASS}>
               Currency
-              <input
-                type="text"
-                value={l.currency}
-                onChange={(e) => updateCurrency(l.key, e.target.value)}
-                className={TEXT_INPUT_CLASS}
-                placeholder="EUR"
-              />
+              <select value={l.currency} onChange={(e) => updateCurrency(l.key, e.target.value)} className={SELECT_CLASS}>
+                {CURRENCY_OPTIONS.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
             </label>
 
             <label className={LABEL_CLASS}>
@@ -396,11 +589,11 @@ export function CalculatorTab() {
               <input
                 type="number"
                 value={l.rate}
-                onChange={(e) => updateNumeric(l.key, "rate", Number(e.target.value))}
+                onChange={(e) => updateLineNumeric(l.key, "rate", Number(e.target.value))}
                 className={NUM_INPUT_CLASS}
               />
               <span className="text-[10px] font-normal normal-case text-ink-muted">
-                Price per unit in {l.currency || "the invoice currency"} — Inv. Value below = Qty × Rate × Exchange rate
+                Price per unit in {l.currency} — Inv. Value below = Qty × Rate × Exchange rate
               </span>
             </label>
             <label className={LABEL_CLASS}>
@@ -408,57 +601,59 @@ export function CalculatorTab() {
               <input
                 type="number"
                 value={l.exchange_rate}
-                onChange={(e) => updateNumeric(l.key, "exchange_rate", Number(e.target.value))}
-                className={NUM_INPUT_CLASS}
-              />
-            </label>
-            <label className={LABEL_CLASS}>
-              Insurance %
-              <input
-                type="number"
-                step="0.001"
-                value={l.insurance_percent}
-                onChange={(e) => updateNumeric(l.key, "insurance_percent", Number(e.target.value))}
-                className={NUM_INPUT_CLASS}
-              />
-              <span className="text-[10px] font-normal normal-case text-ink-muted">
-                Defaults to 1.125% of Inv. Value — the standard notional rate customs uses when actual insurance isn&apos;t known
-              </span>
-            </label>
-            <label className={LABEL_CLASS}>
-              Freight (INR)
-              <input
-                type="number"
-                value={l.freight}
-                onChange={(e) => updateNumeric(l.key, "freight", Number(e.target.value))}
+                onChange={(e) => updateLineNumeric(l.key, "exchange_rate", Number(e.target.value))}
                 className={NUM_INPUT_CLASS}
               />
             </label>
 
             <label className={LABEL_CLASS}>
-              Freight from Ex Works (INR)
-              <input
-                type="number"
-                value={l.freight_ex_works}
-                onChange={(e) => updateNumeric(l.key, "freight_ex_works", Number(e.target.value))}
-                className={NUM_INPUT_CLASS}
-              />
+              Sizing
+              <select
+                value={l.size_mode}
+                onChange={(e) => updateSizeMode(l.key, e.target.value as ImportDutySizeMode)}
+                className={SELECT_CLASS}
+              >
+                <option value="pieces">Pieces (Qty × W × H)</option>
+                <option value="roll">Roll (running length × width)</option>
+              </select>
             </label>
             <label className={LABEL_CLASS}>
-              Clearing Charges (INR)
+              UOM
+              <select value={l.uom} onChange={(e) => updateUom(l.key, e.target.value as ImportDutyUom)} className={SELECT_CLASS}>
+                {UOM_OPTIONS.map((u) => (
+                  <option key={u.value} value={u.value}>
+                    {u.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={LABEL_CLASS}>
+              {l.size_mode === "roll" ? "Width (roll)" : "Width"}
               <input
                 type="number"
-                value={l.clearing_charges}
-                onChange={(e) => updateNumeric(l.key, "clearing_charges", Number(e.target.value))}
+                value={l.width}
+                onChange={(e) => updateLineNumeric(l.key, "width", Number(e.target.value))}
                 className={NUM_INPUT_CLASS}
               />
             </label>
+            {l.size_mode === "pieces" && (
+              <label className={LABEL_CLASS}>
+                Height
+                <input
+                  type="number"
+                  value={l.height}
+                  onChange={(e) => updateLineNumeric(l.key, "height", Number(e.target.value))}
+                  className={NUM_INPUT_CLASS}
+                />
+              </label>
+            )}
+
             <label className={LABEL_CLASS}>
               BCD %
               <input
                 type="number"
                 value={l.bcd_percent}
-                onChange={(e) => updateNumeric(l.key, "bcd_percent", Number(e.target.value))}
+                onChange={(e) => updateLineNumeric(l.key, "bcd_percent", Number(e.target.value))}
                 className={NUM_INPUT_CLASS}
               />
             </label>
@@ -467,7 +662,7 @@ export function CalculatorTab() {
               <input
                 type="number"
                 value={l.sw_cess_percent}
-                onChange={(e) => updateNumeric(l.key, "sw_cess_percent", Number(e.target.value))}
+                onChange={(e) => updateLineNumeric(l.key, "sw_cess_percent", Number(e.target.value))}
                 className={NUM_INPUT_CLASS}
               />
             </label>
@@ -476,21 +671,29 @@ export function CalculatorTab() {
               <input
                 type="number"
                 value={l.igst_percent}
-                onChange={(e) => updateNumeric(l.key, "igst_percent", Number(e.target.value))}
+                onChange={(e) => updateLineNumeric(l.key, "igst_percent", Number(e.target.value))}
                 className={NUM_INPUT_CLASS}
               />
             </label>
           </div>
 
           {/* Computed outputs -- mini receipt, read-only */}
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-md bg-surface-sunken p-3 text-xs sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-md bg-surface-sunken p-3 text-xs sm:grid-cols-3 lg:grid-cols-6">
             <div>
               <p className="text-ink-muted">Inv. Value</p>
               <p className="font-medium text-ink">{fmt(l.inv_value)}</p>
             </div>
             <div>
-              <p className="text-ink-muted">Insurance Amount</p>
-              <p className="font-medium text-ink">{fmt(l.insurance_amount)}</p>
+              <p className="text-ink-muted">Sq.Ft</p>
+              <p className="font-medium text-ink">{fmtSqft(l.sqft_total)}</p>
+            </div>
+            <div>
+              <p className="text-ink-muted">Apportioned Freight</p>
+              <p className="font-medium text-ink">{fmt(l.apportioned_freight)}</p>
+            </div>
+            <div>
+              <p className="text-ink-muted">Apportioned Insurance</p>
+              <p className="font-medium text-ink">{fmt(l.apportioned_insurance)}</p>
             </div>
             <div>
               <p className="text-ink-muted">Assessable Value</p>
@@ -520,18 +723,26 @@ export function CalculatorTab() {
               <p className="text-ink-muted">Cost / Qty</p>
               <p className="font-semibold text-primary">{fmt(l.cost_per_qty)}</p>
             </div>
+            <div>
+              <p className="text-ink-muted">Cost / Sq.Ft</p>
+              <p className="font-semibold text-primary">{fmt(l.cost_per_sqft)}</p>
+            </div>
           </div>
         </Card>
       ))}
 
       {/* Shipment totals */}
-      {lines.length > 0 && (
+      {computedLines.length > 0 && (
         <Card interactive={false} className="flex flex-col gap-4">
           <h3 className="text-sm font-semibold text-ink">Shipment totals</h3>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
             <div>
               <p className="text-xs text-ink-secondary">Total Invoice Value</p>
               <p className="text-base font-semibold text-ink">{fmt(totals.inv_value)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-ink-secondary">Total Sq.Ft</p>
+              <p className="text-base font-semibold text-ink">{fmtSqft(totals.sqft_total)}</p>
             </div>
             <div>
               <p className="text-xs text-ink-secondary">Total Assessable Value</p>
@@ -553,6 +764,10 @@ export function CalculatorTab() {
               <p className="text-xs text-ink-secondary">Total Duty</p>
               <p className="text-base font-semibold text-ink">{fmt(totals.total_duty)}</p>
             </div>
+            <div>
+              <p className="text-xs text-ink-secondary">Blended Cost / Sq.Ft</p>
+              <p className="text-base font-semibold text-ink">{fmt(totals.cost_per_sqft)}</p>
+            </div>
           </div>
           <div className="flex items-center justify-between border-t border-line pt-3">
             <span className="text-sm font-medium text-ink-secondary">Grand Total Landed Cost</span>
@@ -562,7 +777,7 @@ export function CalculatorTab() {
       )}
 
       {/* Save / download */}
-      {lines.length > 0 && (
+      {computedLines.length > 0 && (
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="primary" size="sm" onClick={() => saveCalculation("draft")} loading={saving} disabled={!canSave}>
             <Save size={14} />
