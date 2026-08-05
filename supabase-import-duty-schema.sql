@@ -7,14 +7,32 @@
 -- user's request to make the duty-rate percentages and every cost
 -- component freely editable rather than baked into one static sheet.
 --
--- Two additions beyond the original sheet (per the user's own "if I missed
--- something add it too" and the clarifying answers given before building):
+-- Additions beyond the original sheet (per the user's own "if I missed
+-- something add it too", the clarifying answers given before building, and
+-- one correction made after checking a real supplier invoice against the
+-- first version of this tool):
 --   1. IGST -- the sheet only computed BCD + SW Cess. Real imports into
 --      India are also charged IGST at the port, calculated on (Assessable
 --      Value + BCD + SW Cess). Added as its own editable per-line %.
 --   2. Multi-currency -- the sheet only had a EUR exchange-rate column.
 --      currency + exchange_rate now live on each line, so a shipment
 --      mixing EUR/USD/GBP invoices computes correctly.
+--   3. inv_value corrected to qty * rate * exchange_rate -- the original
+--      sheet's one sample row computed rate * exchange_rate with no qty
+--      multiplication, which this tool initially preserved exactly. Once
+--      the user tried it against a real Toray Textiles invoice, it was
+--      clear "Rate" is a per-unit price (price per metre) and Qty * Rate
+--      is the actual line value -- confirmed by matching the invoice's own
+--      "Value" column (Metres x Price) exactly. The original sheet's
+--      formula was simply wrong, not an intentional "Rate is a lump total"
+--      design -- there was only ever the one sample row to go by.
+--   4. Fee replaced with Insurance % (default 1.125) -- the flat "Fee"
+--      input is now insurance_percent, and insurance_amount = inv_value *
+--      insurance_percent / 100 feeds into the assessable value instead.
+--      1.125% of invoice/FOB value is the standard notional insurance rate
+--      Indian customs uses when actual insurance isn't separately known
+--      (Customs Valuation Rules 2007, Rule 10(2)) -- a real, commonly used
+--      default, not an arbitrary placeholder.
 -- BCD / SW Cess / IGST rates are editable PER PRODUCT LINE (not one rate
 -- for the whole shipment) since real shipments mix HS codes with different
 -- duty rates -- per the user's explicit answer.
@@ -27,17 +45,10 @@
 -- every shipment's products, rates and duty % are typically different), so
 -- there's nothing to normalize into a separate table.
 --
--- Formula per line (mirrors the sheet's own formulas exactly, extended for
--- IGST -- see CalculatorTab.tsx for the live implementation):
---   inv_value          = rate * exchange_rate
---                         (NOTE: matches the sheet's own E2=D2*C2 exactly --
---                         "Rate" in the source sheet is the line's total
---                         invoice value in that currency, not a per-unit
---                         price; Qty is only used at the very end to get a
---                         per-unit landed cost. Flagged to the user in case
---                         their sheet meant "Rate" as per-unit and this was
---                         an existing bug -- easy to change if so.)
---   assessable_value   = inv_value + freight + fee
+-- Formula per line (see CalculatorTab.tsx for the live implementation):
+--   inv_value          = qty * rate * exchange_rate
+--   insurance_amount   = inv_value * insurance_percent / 100
+--   assessable_value   = inv_value + freight + insurance_amount
 --   bcd_amount         = assessable_value * bcd_percent / 100
 --   sw_cess_amount     = bcd_amount * sw_cess_percent / 100
 --   igst_amount        = (assessable_value + bcd_amount + sw_cess_amount)
@@ -62,8 +73,9 @@ create table if not exists public.import_duty_calculations (
   notes text,
   -- Array of line items -- see CalculatorTab.tsx's ImportDutyLine shape for
   -- the exact fields (product_name, qty, rate, currency, exchange_rate,
-  -- fee, freight, freight_ex_works, clearing_charges, bcd_percent,
-  -- sw_cess_percent, igst_percent, plus every computed output above).
+  -- insurance_percent, freight, freight_ex_works, clearing_charges,
+  -- bcd_percent, sw_cess_percent, igst_percent, plus every computed output
+  -- above).
   lines jsonb not null default '[]',
   -- Shipment-level rollups (sum of every line's total_cost / total_duty) --
   -- denormalized onto the header row purely so History can list/sort

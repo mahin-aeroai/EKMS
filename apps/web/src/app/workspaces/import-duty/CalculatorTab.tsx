@@ -28,7 +28,7 @@ type NumericField =
   | "qty"
   | "rate"
   | "exchange_rate"
-  | "fee"
+  | "insurance_percent"
   | "freight"
   | "freight_ex_works"
   | "clearing_charges"
@@ -38,16 +38,41 @@ type NumericField =
 
 // Recomputes every derived field on a line from its raw inputs. Mirrors
 // supabase-import-duty-schema.sql's header comment exactly.
+//
+// inv_value = qty * rate * exchange_rate -- corrected from the original
+// sheet's single-row formula (rate * exchange_rate, no qty) after checking
+// a real supplier invoice: "Rate" is a per-unit price (e.g. price per
+// metre), and Qty * Rate is the line's actual invoice value in that
+// currency (matches the invoice's own "Value" column exactly) -- the
+// original sheet's one sample row didn't multiply by qty, which turns out
+// to have been wrong, not an intentional "Rate is a lump total" design.
+//
+// insurance_amount = inv_value * insurance_percent / 100 -- standard
+// Indian customs notional insurance (1.125% of invoice/FOB value) used
+// when actual insurance isn't separately known, per Customs Valuation
+// Rules 2007 Rule 10(2). Replaces the old flat "Fee" input.
 function computeLine(line: WorkingLine): WorkingLine {
-  const inv_value = line.rate * line.exchange_rate;
-  const assessable_value = inv_value + line.freight + line.fee;
+  const inv_value = line.qty * line.rate * line.exchange_rate;
+  const insurance_amount = (inv_value * line.insurance_percent) / 100;
+  const assessable_value = inv_value + line.freight + insurance_amount;
   const bcd_amount = (assessable_value * line.bcd_percent) / 100;
   const sw_cess_amount = (bcd_amount * line.sw_cess_percent) / 100;
   const igst_amount = ((assessable_value + bcd_amount + sw_cess_amount) * line.igst_percent) / 100;
   const total_duty = bcd_amount + sw_cess_amount + igst_amount;
   const total_cost = inv_value + line.freight + line.freight_ex_works + line.clearing_charges + total_duty;
   const cost_per_qty = line.qty > 0 ? total_cost / line.qty : 0;
-  return { ...line, inv_value, assessable_value, bcd_amount, sw_cess_amount, igst_amount, total_duty, total_cost, cost_per_qty };
+  return {
+    ...line,
+    inv_value,
+    insurance_amount,
+    assessable_value,
+    bcd_amount,
+    sw_cess_amount,
+    igst_amount,
+    total_duty,
+    total_cost,
+    cost_per_qty,
+  };
 }
 
 function newLine(): WorkingLine {
@@ -58,7 +83,7 @@ function newLine(): WorkingLine {
     rate: 0,
     currency: "EUR",
     exchange_rate: 0,
-    fee: 0,
+    insurance_percent: 1.125,
     freight: 0,
     freight_ex_works: 0,
     clearing_charges: 0,
@@ -66,6 +91,7 @@ function newLine(): WorkingLine {
     sw_cess_percent: 10,
     igst_percent: 0,
     inv_value: 0,
+    insurance_amount: 0,
     assessable_value: 0,
     bcd_amount: 0,
     sw_cess_amount: 0,
@@ -83,7 +109,7 @@ function stripKey(line: WorkingLine): ImportDutyLine {
     rate: line.rate,
     currency: line.currency,
     exchange_rate: line.exchange_rate,
-    fee: line.fee,
+    insurance_percent: line.insurance_percent,
     freight: line.freight,
     freight_ex_works: line.freight_ex_works,
     clearing_charges: line.clearing_charges,
@@ -91,6 +117,7 @@ function stripKey(line: WorkingLine): ImportDutyLine {
     sw_cess_percent: line.sw_cess_percent,
     igst_percent: line.igst_percent,
     inv_value: line.inv_value,
+    insurance_amount: line.insurance_amount,
     assessable_value: line.assessable_value,
     bcd_amount: line.bcd_amount,
     sw_cess_amount: line.sw_cess_amount,
@@ -365,7 +392,7 @@ export function CalculatorTab() {
             </label>
 
             <label className={LABEL_CLASS}>
-              Rate (invoice value)
+              Rate (per unit)
               <input
                 type="number"
                 value={l.rate}
@@ -373,7 +400,7 @@ export function CalculatorTab() {
                 className={NUM_INPUT_CLASS}
               />
               <span className="text-[10px] font-normal normal-case text-ink-muted">
-                Total invoice value for this line, not a per-unit price
+                Price per unit in {l.currency || "the invoice currency"} — Inv. Value below = Qty × Rate × Exchange rate
               </span>
             </label>
             <label className={LABEL_CLASS}>
@@ -386,13 +413,17 @@ export function CalculatorTab() {
               />
             </label>
             <label className={LABEL_CLASS}>
-              Fee (INR)
+              Insurance %
               <input
                 type="number"
-                value={l.fee}
-                onChange={(e) => updateNumeric(l.key, "fee", Number(e.target.value))}
+                step="0.001"
+                value={l.insurance_percent}
+                onChange={(e) => updateNumeric(l.key, "insurance_percent", Number(e.target.value))}
                 className={NUM_INPUT_CLASS}
               />
+              <span className="text-[10px] font-normal normal-case text-ink-muted">
+                Defaults to 1.125% of Inv. Value — the standard notional rate customs uses when actual insurance isn&apos;t known
+              </span>
             </label>
             <label className={LABEL_CLASS}>
               Freight (INR)
@@ -456,6 +487,10 @@ export function CalculatorTab() {
             <div>
               <p className="text-ink-muted">Inv. Value</p>
               <p className="font-medium text-ink">{fmt(l.inv_value)}</p>
+            </div>
+            <div>
+              <p className="text-ink-muted">Insurance Amount</p>
+              <p className="font-medium text-ink">{fmt(l.insurance_amount)}</p>
             </div>
             <div>
               <p className="text-ink-muted">Assessable Value</p>

@@ -936,12 +936,15 @@ export type ImportDutyStatus = "draft" | "final";
 export interface ImportDutyLine {
   product_name: string;
   qty: number;
-  // The sheet's own "Rate" column -- the line's total invoice value in
-  // `currency`, NOT a per-unit price (see schema header for why).
+  // Price per unit in `currency` -- inv_value = qty * rate * exchange_rate
+  // (see schema header for why this isn't rate * exchange_rate alone).
   rate: number;
   currency: string;
   exchange_rate: number;
-  fee: number;
+  // % of inv_value -- defaults to 1.125, the standard Indian customs
+  // notional insurance rate used when actual insurance isn't known
+  // (Customs Valuation Rules 2007, Rule 10(2)).
+  insurance_percent: number;
   freight: number;
   freight_ex_works: number;
   clearing_charges: number;
@@ -950,6 +953,7 @@ export interface ImportDutyLine {
   igst_percent: number;
   // Computed + frozen at save time (see schema header for the formulas).
   inv_value: number;
+  insurance_amount: number;
   assessable_value: number;
   bcd_amount: number;
   sw_cess_amount: number;
