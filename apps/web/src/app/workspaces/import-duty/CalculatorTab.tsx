@@ -64,7 +64,7 @@ interface ShipmentCosts {
   freight: number;
   freight_ex_works: number;
   clearing_charges: number;
-  insurance_percent: number;
+  insurance: number;
 }
 
 type LineNumericField = "qty" | "rate" | "exchange_rate" | "width" | "height" | "bcd_percent" | "sw_cess_percent" | "igst_percent";
@@ -122,6 +122,12 @@ function computeSqft(line: LineInput): number {
 // apportioned share. This is the standard customs practice for splitting
 // shipment-level costs across multiple line items on one Bill of Entry.
 //
+// Insurance is a flat INR value, same as Freight/Freight-Ex-Works/Clearing
+// Charges -- typed in directly from the actual insurance invoice/policy
+// rather than derived as a % of invoice value (that was the original
+// design; per the user, insurance should just be entered as a known amount
+// like the other three shipment costs).
+//
 // Freight and Insurance ARE part of the assessable (dutiable) value;
 // Freight-from-Ex-Works and Clearing Charges are NOT -- they're added
 // straight into total_cost after duty is calculated (pre-shipment domestic
@@ -141,13 +147,12 @@ function computeAll(lines: LineInput[], shipment: ShipmentCosts): ComputedLine[]
   }));
 
   const totalInvValue = withInvValue.reduce((s, l) => s + l.inv_value, 0);
-  const insuranceAmountTotal = (totalInvValue * shipment.insurance_percent) / 100;
 
   return withInvValue.map((l) => {
     const ratio = totalInvValue > 0 ? l.inv_value / totalInvValue : withInvValue.length > 0 ? 1 / withInvValue.length : 0;
 
     const apportioned_freight = shipment.freight * ratio;
-    const apportioned_insurance = insuranceAmountTotal * ratio;
+    const apportioned_insurance = shipment.insurance * ratio;
     const apportioned_freight_ex_works = shipment.freight_ex_works * ratio;
     const apportioned_clearing_charges = shipment.clearing_charges * ratio;
 
@@ -257,7 +262,7 @@ export function CalculatorTab() {
   const [freight, setFreight] = useState(0);
   const [freightExWorks, setFreightExWorks] = useState(0);
   const [clearingCharges, setClearingCharges] = useState(0);
-  const [insurancePercent, setInsurancePercent] = useState(1.125);
+  const [insurance, setInsurance] = useState(0);
 
   const [lines, setLines] = useState<LineInput[]>([]);
   const [saving, setSaving] = useState(false);
@@ -266,8 +271,8 @@ export function CalculatorTab() {
   const [lastSavedStatus, setLastSavedStatus] = useState<ImportDutyStatus | null>(null);
 
   const shipmentCosts: ShipmentCosts = useMemo(
-    () => ({ freight, freight_ex_works: freightExWorks, clearing_charges: clearingCharges, insurance_percent: insurancePercent }),
-    [freight, freightExWorks, clearingCharges, insurancePercent]
+    () => ({ freight, freight_ex_works: freightExWorks, clearing_charges: clearingCharges, insurance }),
+    [freight, freightExWorks, clearingCharges, insurance]
   );
 
   const computedLines = useMemo(() => computeAll(lines, shipmentCosts), [lines, shipmentCosts]);
@@ -321,7 +326,7 @@ export function CalculatorTab() {
     if (field === "freight") setFreight(value);
     else if (field === "freight_ex_works") setFreightExWorks(value);
     else if (field === "clearing_charges") setClearingCharges(value);
-    else setInsurancePercent(value);
+    else setInsurance(value);
     clearSavedState();
   }
 
@@ -341,12 +346,6 @@ export function CalculatorTab() {
     );
     return { ...sums, cost_per_sqft: sums.sqft_total > 0 ? sums.total_cost / sums.sqft_total : 0 };
   }, [computedLines]);
-
-  // Sum of each line's apportioned share should always reconcile back to
-  // the shipment input it was apportioned from -- shown here so that's
-  // visibly true rather than a black box (matches the shipment-level input
-  // fields above almost exactly, up to rounding).
-  const insuranceAmountTotal = (totals.inv_value * insurancePercent) / 100;
 
   const canSave = supplierName.trim() !== "" || lines.some((l) => l.product_name.trim() !== "");
   const hasDownloadableLine = lines.some((l) => l.product_name.trim() !== "");
@@ -391,7 +390,7 @@ export function CalculatorTab() {
           freight,
           freight_ex_works: freightExWorks,
           clearing_charges: clearingCharges,
-          insurance_percent: insurancePercent,
+          insurance,
           lines: computedLines.map(toImportDutyLine),
           total_cost: totals.total_cost,
           total_duty: totals.total_duty,
@@ -428,7 +427,7 @@ export function CalculatorTab() {
         freight,
         freight_ex_works: freightExWorks,
         clearing_charges: clearingCharges,
-        insurance_percent: insurancePercent,
+        insurance,
         lines: computedLines.map(toImportDutyLine),
       });
       downloadBlob(blob, `${lastSavedRef ?? "import-duty-draft"}.pdf`);
@@ -496,8 +495,8 @@ export function CalculatorTab() {
         <div>
           <h3 className="text-sm font-semibold text-ink">Shipment-level costs</h3>
           <p className="text-xs text-ink-muted">
-            Freight, Freight from Ex Works, Clearing Charges and Insurance apply once to the whole shipment — each product
-            line below gets its share, apportioned by that line&apos;s % of the total invoice value.
+            Freight, Freight from Ex Works, Clearing Charges and Insurance are each a single value for the whole shipment
+            — each product line below gets its share, apportioned by that line&apos;s % of the total invoice value.
           </p>
         </div>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -529,19 +528,13 @@ export function CalculatorTab() {
             />
           </label>
           <label className={LABEL_CLASS}>
-            Insurance %
+            Insurance (INR)
             <input
               type="number"
-              step="0.001"
-              value={insurancePercent}
-              onChange={(e) => updateShipmentNumeric("insurance_percent", Number(e.target.value))}
+              value={insurance}
+              onChange={(e) => updateShipmentNumeric("insurance", Number(e.target.value))}
               className={NUM_INPUT_CLASS}
             />
-            <span className="text-[10px] font-normal normal-case text-ink-muted">
-              Defaults to 1.125% of total invoice value — the standard notional rate customs uses when actual insurance
-              isn&apos;t known. Each line below gets exactly {insurancePercent}% of its OWN invoice value, not an extra
-              shared charge.
-            </span>
           </label>
         </div>
       </Card>
@@ -839,8 +832,8 @@ export function CalculatorTab() {
               <p className="text-sm font-medium text-ink">{fmt(clearingCharges)}</p>
             </div>
             <div>
-              <p className="text-xs text-ink-secondary">Insurance ({insurancePercent}% of Inv. Value)</p>
-              <p className="text-sm font-medium text-ink">{fmt(insuranceAmountTotal)}</p>
+              <p className="text-xs text-ink-secondary">Insurance (apportioned)</p>
+              <p className="text-sm font-medium text-ink">{fmt(insurance)}</p>
             </div>
           </div>
           <div className="flex items-center justify-between border-t border-line pt-3">

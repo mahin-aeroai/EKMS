@@ -26,17 +26,18 @@
 --      "Value" column (Metres x Price) exactly. The original sheet's
 --      formula was simply wrong, not an intentional "Rate is a lump total"
 --      design -- there was only ever the one sample row to go by.
---   4. Fee replaced with Insurance % (default 1.125) -- the flat "Fee"
---      input is now insurance_percent, and insurance_amount = inv_value *
---      insurance_percent / 100 feeds into the assessable value instead.
---      1.125% of invoice/FOB value is the standard notional insurance rate
---      Indian customs uses when actual insurance isn't separately known
---      (Customs Valuation Rules 2007, Rule 10(2)) -- a real, commonly used
---      default, not an arbitrary placeholder.
---   5. Freight / Freight-from-Ex-Works / Clearing Charges / Insurance %
+--   4. Fee replaced with Insurance (default 0) -- the flat "Fee" input is
+--      now `insurance`, a flat INR value like Freight/Freight-Ex-Works/
+--      Clearing Charges (originally built as a 1.125% notional-insurance
+--      % of invoice value -- the standard rate Indian customs uses when
+--      actual insurance isn't separately known, Customs Valuation Rules
+--      2007 Rule 10(2) -- but changed to a flat value per the user's own
+--      preference, so it's entered directly from the actual policy/
+--      invoice rather than estimated).
+--   5. Freight / Freight-from-Ex-Works / Clearing Charges / Insurance
 --      moved from PER-LINE inputs to SHIPMENT-LEVEL columns (freight,
---      freight_ex_works, clearing_charges, insurance_percent below), per
---      the user's correction: a shipment is one Bill of Entry and these
+--      freight_ex_works, clearing_charges, insurance below), per the
+--      user's correction: a shipment is one Bill of Entry and these
 --      costs are paid once for the whole shipment, not per product. Each
 --      line's share is now derived by apportioning these shipment totals
 --      pro-rata by that line's share of total invoice value -- see
@@ -71,11 +72,10 @@
 --     inv_value            = qty * rate * exchange_rate
 --     sqft_total            = see ImportDutySizeMode above
 --     ratio                = line.inv_value / SUM(all lines' inv_value)
---   Once per shipment:
---     insurance_amount_total = SUM(inv_value) * insurance_percent / 100
---   Per line (apportioned):
+--   Per line (apportioned, freight/insurance/ex-works/clearing are all flat
+--   shipment-level INR values -- see the table columns below):
 --     apportioned_freight            = freight * ratio
---     apportioned_insurance          = insurance_amount_total * ratio
+--     apportioned_insurance          = insurance * ratio
 --     apportioned_freight_ex_works   = freight_ex_works * ratio
 --     apportioned_clearing_charges   = clearing_charges * ratio
 --     assessable_value     = inv_value + apportioned_freight + apportioned_insurance
@@ -114,7 +114,7 @@ create table if not exists public.import_duty_calculations (
   freight numeric not null default 0,
   freight_ex_works numeric not null default 0,
   clearing_charges numeric not null default 0,
-  insurance_percent numeric not null default 1.125,
+  insurance numeric not null default 0,
   -- Array of line items -- see CalculatorTab.tsx's ImportDutyLine shape for
   -- the exact fields (product_name, qty, rate, currency, exchange_rate,
   -- width, height, uom, size_mode, bcd_percent, sw_cess_percent,

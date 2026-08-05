@@ -52,7 +52,7 @@ export function HistoryTab() {
         freight: row.freight,
         freight_ex_works: row.freight_ex_works,
         clearing_charges: row.clearing_charges,
-        insurance_percent: row.insurance_percent,
+        insurance: row.insurance,
         lines: row.lines,
       });
       downloadBlob(blob, `${row.ref}.pdf`);
@@ -163,7 +163,7 @@ export function HistoryTab() {
                             </p>
                             <p className="mt-1">
                               Freight: {fmt(r.freight)} · Freight (Ex Works): {fmt(r.freight_ex_works)} · Clearing: {fmt(r.clearing_charges)} ·
-                              Insurance: {r.insurance_percent}%
+                              Insurance: {fmt(r.insurance)}
                             </p>
                           </div>
 

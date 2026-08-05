@@ -1019,10 +1019,11 @@ export interface ImportDutyCalculationRow {
   freight: number;
   freight_ex_works: number;
   clearing_charges: number;
-  // % of TOTAL shipment invoice value -- defaults to 1.125, the standard
-  // Indian customs notional insurance rate used when actual insurance
-  // isn't known (Customs Valuation Rules 2007, Rule 10(2)).
-  insurance_percent: number;
+  // Flat INR value, same as freight/freight_ex_works/clearing_charges --
+  // typed in directly from the actual insurance invoice/policy. Originally
+  // a % of total invoice value (the standard 1.125% notional customs rate),
+  // changed to a flat value per the user's own preference.
+  insurance: number;
   lines: ImportDutyLine[];
   total_cost: number;
   total_duty: number;
