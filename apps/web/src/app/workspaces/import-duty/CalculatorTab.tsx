@@ -36,6 +36,7 @@ interface LineInput {
   width: number;
   height: number;
   uom: ImportDutyUom;
+  length_uom: ImportDutyUom;
   size_mode: ImportDutySizeMode;
   bcd_percent: number;
   sw_cess_percent: number;
@@ -93,10 +94,14 @@ function toFt(value: number, uom: ImportDutyUom): number {
 }
 
 // See ImportDutySizeMode in packages/shared/src/rows.ts for what 'pieces'
-// vs 'roll' means.
+// vs 'roll' means, and why 'roll' mode uses TWO separate unit fields
+// (length_uom for qty, uom for width) instead of one shared unit -- a real
+// roll's running length (metres) and roll width (mm) are almost never given
+// in the same unit, and forcing them to share one caused a 1000x-off sqft
+// figure the first time this was tried against a real invoice.
 function computeSqft(line: LineInput): number {
   if (line.size_mode === "roll") {
-    return toFt(line.qty, line.uom) * toFt(line.width, line.uom);
+    return toFt(line.qty, line.length_uom) * toFt(line.width, line.uom);
   }
   return line.qty * toFt(line.width, line.uom) * toFt(line.height, line.uom);
 }
@@ -177,7 +182,8 @@ function newLine(): LineInput {
     exchange_rate: 0,
     width: 0,
     height: 0,
-    uom: "m",
+    uom: "mm",
+    length_uom: "m",
     size_mode: "pieces",
     bcd_percent: 15,
     sw_cess_percent: 10,
@@ -195,6 +201,7 @@ function toImportDutyLine(line: ComputedLine): ImportDutyLine {
     width: line.width,
     height: line.height,
     uom: line.uom,
+    length_uom: line.length_uom,
     size_mode: line.size_mode,
     bcd_percent: line.bcd_percent,
     sw_cess_percent: line.sw_cess_percent,
@@ -294,6 +301,11 @@ export function CalculatorTab() {
     clearSavedState();
   }
 
+  function updateLengthUom(key: string, value: ImportDutyUom) {
+    setLines((ls) => ls.map((l) => (l.key === key ? { ...l, length_uom: value } : l)));
+    clearSavedState();
+  }
+
   function updateSizeMode(key: string, value: ImportDutySizeMode) {
     setLines((ls) => ls.map((l) => (l.key === key ? { ...l, size_mode: value } : l)));
     clearSavedState();
@@ -323,6 +335,12 @@ export function CalculatorTab() {
     );
     return { ...sums, cost_per_sqft: sums.sqft_total > 0 ? sums.total_cost / sums.sqft_total : 0 };
   }, [computedLines]);
+
+  // Sum of each line's apportioned share should always reconcile back to
+  // the shipment input it was apportioned from -- shown here so that's
+  // visibly true rather than a black box (matches the shipment-level input
+  // fields above almost exactly, up to rounding).
+  const insuranceAmountTotal = (totals.inv_value * insurancePercent) / 100;
 
   const canSave = supplierName.trim() !== "" || lines.some((l) => l.product_name.trim() !== "");
   const hasDownloadableLine = lines.some((l) => l.product_name.trim() !== "");
@@ -515,7 +533,8 @@ export function CalculatorTab() {
             />
             <span className="text-[10px] font-normal normal-case text-ink-muted">
               Defaults to 1.125% of total invoice value — the standard notional rate customs uses when actual insurance
-              isn&apos;t known
+              isn&apos;t known. Each line below gets exactly {insurancePercent}% of its OWN invoice value, not an extra
+              shared charge.
             </span>
           </label>
         </div>
@@ -562,17 +581,33 @@ export function CalculatorTab() {
               />
             </label>
             <label className={LABEL_CLASS}>
-              Qty
+              {l.size_mode === "roll" ? "Qty (running length)" : "Qty"}
               <input
                 type="number"
                 value={l.qty}
                 onChange={(e) => updateLineNumeric(l.key, "qty", Number(e.target.value))}
                 className={NUM_INPUT_CLASS}
               />
-              {l.size_mode === "roll" && (
-                <span className="text-[10px] font-normal normal-case text-ink-muted">Running length, in {l.uom}</span>
-              )}
             </label>
+            {l.size_mode === "roll" && (
+              <label className={LABEL_CLASS}>
+                Length UOM
+                <select
+                  value={l.length_uom}
+                  onChange={(e) => updateLengthUom(l.key, e.target.value as ImportDutyUom)}
+                  className={SELECT_CLASS}
+                >
+                  {UOM_OPTIONS.map((u) => (
+                    <option key={u.value} value={u.value}>
+                      {u.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-[10px] font-normal normal-case text-ink-muted">
+                  Unit for Qty above — usually different from the roll&apos;s width unit
+                </span>
+              </label>
+            )}
             <label className={LABEL_CLASS}>
               Currency
               <select value={l.currency} onChange={(e) => updateCurrency(l.key, e.target.value)} className={SELECT_CLASS}>
@@ -618,7 +653,7 @@ export function CalculatorTab() {
               </select>
             </label>
             <label className={LABEL_CLASS}>
-              UOM
+              {l.size_mode === "roll" ? "Width UOM" : "UOM"}
               <select value={l.uom} onChange={(e) => updateUom(l.key, e.target.value as ImportDutyUom)} className={SELECT_CLASS}>
                 {UOM_OPTIONS.map((u) => (
                   <option key={u.value} value={u.value}>
@@ -626,6 +661,9 @@ export function CalculatorTab() {
                   </option>
                 ))}
               </select>
+              {l.size_mode === "pieces" && (
+                <span className="text-[10px] font-normal normal-case text-ink-muted">Applies to both Width and Height</span>
+              )}
             </label>
             <label className={LABEL_CLASS}>
               {l.size_mode === "roll" ? "Width (roll)" : "Width"}
@@ -696,6 +734,14 @@ export function CalculatorTab() {
               <p className="font-medium text-ink">{fmt(l.apportioned_insurance)}</p>
             </div>
             <div>
+              <p className="text-ink-muted">Apportioned Freight (Ex Works)</p>
+              <p className="font-medium text-ink">{fmt(l.apportioned_freight_ex_works)}</p>
+            </div>
+            <div>
+              <p className="text-ink-muted">Apportioned Clearing Charges</p>
+              <p className="font-medium text-ink">{fmt(l.apportioned_clearing_charges)}</p>
+            </div>
+            <div>
               <p className="text-ink-muted">Assessable Value</p>
               <p className="font-medium text-ink">{fmt(l.assessable_value)}</p>
             </div>
@@ -708,7 +754,7 @@ export function CalculatorTab() {
               <p className="font-medium text-ink">{fmt(l.sw_cess_amount)}</p>
             </div>
             <div>
-              <p className="text-ink-muted">IGST Amount</p>
+              <p className="text-ink-muted">IGST Amount (GST)</p>
               <p className="font-medium text-ink">{fmt(l.igst_amount)}</p>
             </div>
             <div>
@@ -757,7 +803,7 @@ export function CalculatorTab() {
               <p className="text-base font-semibold text-ink">{fmt(totals.sw_cess_amount)}</p>
             </div>
             <div>
-              <p className="text-xs text-ink-secondary">Total IGST</p>
+              <p className="text-xs text-ink-secondary">Total IGST (GST)</p>
               <p className="text-base font-semibold text-ink">{fmt(totals.igst_amount)}</p>
             </div>
             <div>
@@ -767,6 +813,24 @@ export function CalculatorTab() {
             <div>
               <p className="text-xs text-ink-secondary">Blended Cost / Sq.Ft</p>
               <p className="text-base font-semibold text-ink">{fmt(totals.cost_per_sqft)}</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4 border-t border-line pt-3 sm:grid-cols-4">
+            <div>
+              <p className="text-xs text-ink-secondary">Freight (apportioned across lines)</p>
+              <p className="text-sm font-medium text-ink">{fmt(freight)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-ink-secondary">Freight Ex Works (apportioned)</p>
+              <p className="text-sm font-medium text-ink">{fmt(freightExWorks)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-ink-secondary">Clearing Charges (apportioned)</p>
+              <p className="text-sm font-medium text-ink">{fmt(clearingCharges)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-ink-secondary">Insurance ({insurancePercent}% of Inv. Value)</p>
+              <p className="text-sm font-medium text-ink">{fmt(insuranceAmountTotal)}</p>
             </div>
           </div>
           <div className="flex items-center justify-between border-t border-line pt-3">

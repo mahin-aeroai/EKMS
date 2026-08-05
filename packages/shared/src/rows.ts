@@ -951,9 +951,16 @@ export type ImportDutyUom = "mm" | "cm" | "inch" | "ft" | "m";
 // per the user's own two real scenarios:
 //   'pieces' -- Qty is a piece count; Width x Height is the size of ONE
 //         piece (in `uom`). sqft_total = qty * width_ft * height_ft.
-//   'roll'   -- Qty is a running length, already in `uom` (e.g. 715 metres
-//         of fabric off a roll); Width is the roll's width. Height isn't
-//         meaningful for a roll and is ignored. sqft_total = qty_ft * width_ft.
+//   'roll'   -- Qty is a running length, in `length_uom` (e.g. 715 METRES
+//         of fabric off a roll); Width is the roll's width, in `uom` (e.g.
+//         2600 MM). Length and width are almost never given in the same
+//         real-world unit for a roll (running length in metres, roll width
+//         in mm), so these are two SEPARATE unit fields, not one shared
+//         `uom` -- forcing a single shared unit was the original bug here
+//         (a real 715m x 2600mm roll came out as 715mm x 2600mm = 20 sqft
+//         instead of ~20,000 sqft once mm and m got conflated). Height
+//         isn't meaningful for a roll and is ignored.
+//         sqft_total = toFt(qty, length_uom) * toFt(width, uom).
 export type ImportDutySizeMode = "pieces" | "roll";
 
 export interface ImportDutyLine {
@@ -967,7 +974,12 @@ export interface ImportDutyLine {
   exchange_rate: number;
   width: number;
   height: number;
+  // UOM for width (and, in 'pieces' mode, also height). In 'roll' mode this
+  // is the roll-width unit only -- see length_uom for the running length.
   uom: ImportDutyUom;
+  // UOM for qty when size_mode = 'roll' (qty is a running length). Not used
+  // in 'pieces' mode, where qty is a plain count. See ImportDutySizeMode.
+  length_uom: ImportDutyUom;
   size_mode: ImportDutySizeMode;
   bcd_percent: number;
   sw_cess_percent: number;

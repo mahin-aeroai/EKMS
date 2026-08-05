@@ -60,7 +60,7 @@ export interface ImportDutyPdfData {
 // room for separate Width/Height/UOM columns in the compact table below.
 function describeSize(l: ImportDutyLine): string {
   if (l.size_mode === "roll") {
-    return `${fmtNum(l.width)} ${l.uom} wide (roll)`;
+    return `${fmtNum(l.qty)} ${l.length_uom} x ${fmtNum(l.width)} ${l.uom} wide (roll)`;
   }
   if (l.width > 0 || l.height > 0) {
     return `${fmtNum(l.width)} × ${fmtNum(l.height)} ${l.uom}`;
