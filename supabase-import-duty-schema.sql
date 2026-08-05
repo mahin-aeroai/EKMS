@@ -80,7 +80,12 @@
 --     apportioned_clearing_charges   = clearing_charges * ratio
 --     assessable_value     = inv_value + apportioned_freight + apportioned_insurance
 --     bcd_amount           = assessable_value * bcd_percent / 100
---     sw_cess_amount       = bcd_amount * sw_cess_percent / 100
+--     sw_cess_amount       = assessable_value * sw_cess_percent / 100  -- NOT
+--                             bcd_amount * sw_cess_percent -- corrected per
+--                             the user's own real usage: BCD and SW Cess
+--                             are each their own independent % of
+--                             Assessable Value, so a 0% BCD line (a
+--                             duty-free HS code) doesn't also zero out Cess.
 --     igst_amount          = (assessable_value + bcd_amount + sw_cess_amount)
 --                             * igst_percent / 100
 --     total_duty           = bcd_amount + sw_cess_amount + igst_amount

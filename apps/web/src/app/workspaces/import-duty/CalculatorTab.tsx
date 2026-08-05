@@ -127,6 +127,12 @@ function computeSqft(line: LineInput): number {
 // straight into total_cost after duty is calculated (pre-shipment domestic
 // freight and post-clearance charges aren't part of the CIF assessable
 // value under standard customs valuation).
+//
+// SW Cess is a % of ASSESSABLE VALUE, same base as BCD -- NOT a % of the
+// BCD amount. Originally built as cess-on-BCD-amount per the user's own
+// first description, but that meant a 0% BCD line (e.g. a duty-free HS
+// code) always zeroed out Cess too, even when Cess itself should still
+// apply -- corrected per the user's own real usage.
 function computeAll(lines: LineInput[], shipment: ShipmentCosts): ComputedLine[] {
   const withInvValue = lines.map((l) => ({
     ...l,
@@ -147,7 +153,7 @@ function computeAll(lines: LineInput[], shipment: ShipmentCosts): ComputedLine[]
 
     const assessable_value = l.inv_value + apportioned_freight + apportioned_insurance;
     const bcd_amount = (assessable_value * l.bcd_percent) / 100;
-    const sw_cess_amount = (bcd_amount * l.sw_cess_percent) / 100;
+    const sw_cess_amount = (assessable_value * l.sw_cess_percent) / 100;
     const igst_amount = ((assessable_value + bcd_amount + sw_cess_amount) * l.igst_percent) / 100;
     const total_duty = bcd_amount + sw_cess_amount + igst_amount;
     const total_cost = l.inv_value + apportioned_freight + apportioned_freight_ex_works + apportioned_clearing_charges + total_duty;
@@ -694,6 +700,7 @@ export function CalculatorTab() {
                 onChange={(e) => updateLineNumeric(l.key, "bcd_percent", Number(e.target.value))}
                 className={NUM_INPUT_CLASS}
               />
+              <span className="text-[10px] font-normal normal-case text-ink-muted">% of Assessable Value</span>
             </label>
             <label className={LABEL_CLASS}>
               SW Cess %
@@ -703,6 +710,9 @@ export function CalculatorTab() {
                 onChange={(e) => updateLineNumeric(l.key, "sw_cess_percent", Number(e.target.value))}
                 className={NUM_INPUT_CLASS}
               />
+              <span className="text-[10px] font-normal normal-case text-ink-muted">
+                % of Assessable Value — applies independently of BCD, not zeroed out when BCD is 0
+              </span>
             </label>
             <label className={LABEL_CLASS}>
               IGST %
