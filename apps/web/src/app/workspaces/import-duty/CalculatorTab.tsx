@@ -139,6 +139,14 @@ function computeSqft(line: LineInput): number {
 // first description, but that meant a 0% BCD line (e.g. a duty-free HS
 // code) always zeroed out Cess too, even when Cess itself should still
 // apply -- corrected per the user's own real usage.
+//
+// total_duty = BCD + SW Cess ONLY -- "Duty" (Customs Duty) is a distinct
+// concept from IGST (a GST levy collected at import, not a customs duty)
+// even though both get paid on the same Bill of Entry. Originally
+// total_duty included igst_amount, so a line with BCD=0 and SW Cess=0 but
+// IGST>0 still showed a nonzero "Total Duty" -- corrected per the user:
+// IGST stays its own line (still real money, still added into total_cost
+// below), just not folded into "Duty".
 function computeAll(lines: LineInput[], shipment: ShipmentCosts): ComputedLine[] {
   const withInvValue = lines.map((l) => ({
     ...l,
@@ -160,8 +168,9 @@ function computeAll(lines: LineInput[], shipment: ShipmentCosts): ComputedLine[]
     const bcd_amount = (assessable_value * l.bcd_percent) / 100;
     const sw_cess_amount = (assessable_value * l.sw_cess_percent) / 100;
     const igst_amount = ((assessable_value + bcd_amount + sw_cess_amount) * l.igst_percent) / 100;
-    const total_duty = bcd_amount + sw_cess_amount + igst_amount;
-    const total_cost = l.inv_value + apportioned_freight + apportioned_freight_ex_works + apportioned_clearing_charges + total_duty;
+    const total_duty = bcd_amount + sw_cess_amount;
+    const total_cost =
+      l.inv_value + apportioned_freight + apportioned_freight_ex_works + apportioned_clearing_charges + total_duty + igst_amount;
     const cost_per_qty = l.qty > 0 ? total_cost / l.qty : 0;
     const cost_per_sqft = l.sqft_total > 0 ? total_cost / l.sqft_total : 0;
 
@@ -761,7 +770,7 @@ export function CalculatorTab() {
               <p className="font-medium text-ink">{fmt(l.igst_amount)}</p>
             </div>
             <div>
-              <p className="text-ink-muted">Total Duty</p>
+              <p className="text-ink-muted">Duty (BCD + Cess)</p>
               <p className="font-medium text-ink">{fmt(l.total_duty)}</p>
             </div>
             <div>
@@ -810,7 +819,7 @@ export function CalculatorTab() {
               <p className="text-base font-semibold text-ink">{fmt(totals.igst_amount)}</p>
             </div>
             <div>
-              <p className="text-xs text-ink-secondary">Total Duty</p>
+              <p className="text-xs text-ink-secondary">Total Duty (BCD + Cess)</p>
               <p className="text-base font-semibold text-ink">{fmt(totals.total_duty)}</p>
             </div>
             <div>

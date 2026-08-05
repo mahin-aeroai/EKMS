@@ -177,7 +177,8 @@ export function HistoryTab() {
                                   <th className="px-3 py-1.5">Sq.Ft</th>
                                   <th className="px-3 py-1.5">Inv. Value</th>
                                   <th className="px-3 py-1.5">Assessable Value</th>
-                                  <th className="px-3 py-1.5">Total Duty</th>
+                                  <th className="px-3 py-1.5">Duty (BCD+Cess)</th>
+                                  <th className="px-3 py-1.5">IGST (GST)</th>
                                   <th className="px-3 py-1.5">Total Cost</th>
                                   <th className="px-3 py-1.5">Cost / Qty</th>
                                   <th className="px-3 py-1.5">Cost / Sq.Ft</th>
@@ -197,6 +198,7 @@ export function HistoryTab() {
                                     <td className="px-3 py-1.5 text-ink-secondary">{fmt(l.inv_value)}</td>
                                     <td className="px-3 py-1.5 text-ink-secondary">{fmt(l.assessable_value)}</td>
                                     <td className="px-3 py-1.5 text-ink-secondary">{fmt(l.total_duty)}</td>
+                                    <td className="px-3 py-1.5 text-ink-secondary">{fmt(l.igst_amount)}</td>
                                     <td className="px-3 py-1.5 font-medium text-ink">{fmt(l.total_cost)}</td>
                                     <td className="px-3 py-1.5 font-medium text-ink">{fmt(l.cost_per_qty)}</td>
                                     <td className="px-3 py-1.5 font-medium text-ink">{fmt(l.cost_per_sqft)}</td>
@@ -204,7 +206,7 @@ export function HistoryTab() {
                                 ))}
                                 {r.lines.length === 0 && (
                                   <tr>
-                                    <td colSpan={10} className="px-3 py-3 text-center text-ink-muted">
+                                    <td colSpan={11} className="px-3 py-3 text-center text-ink-muted">
                                       No lines on this calculation.
                                     </td>
                                   </tr>
