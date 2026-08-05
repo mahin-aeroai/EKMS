@@ -51,7 +51,7 @@ export interface ImportDutyPdfData {
   freight: number;
   freight_ex_works: number;
   clearing_charges: number;
-  insurance_percent: number;
+  insurance: number;
   lines: ImportDutyLine[];
 }
 
@@ -318,7 +318,7 @@ export async function generateImportDutyPdf(data: ImportDutyPdfData): Promise<Bl
     `Freight: Rs. ${fmtNum(data.freight)}`,
     `Freight (Ex Works): Rs. ${fmtNum(data.freight_ex_works)}`,
     `Clearing Charges: Rs. ${fmtNum(data.clearing_charges)}`,
-    `Insurance: ${fmtNum(data.insurance_percent)}%`,
+    `Insurance: Rs. ${fmtNum(data.insurance)}`,
   ].join("   |   ");
   state.page.drawText(shipmentBits, { x: MARGIN, y: state.y, size: size - 1, font, color: MUTED });
   state.y -= 18;
