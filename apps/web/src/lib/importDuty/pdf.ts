@@ -46,7 +46,26 @@ export interface ImportDutyPdfData {
   bill_of_entry_no: string | null;
   bill_of_entry_date: string | null;
   notes: string | null;
+  // Shipment-level costs -- see supabase-import-duty-schema.sql's header;
+  // apportioned per line inside `lines` (apportioned_freight etc.).
+  freight: number;
+  freight_ex_works: number;
+  clearing_charges: number;
+  insurance_percent: number;
   lines: ImportDutyLine[];
+}
+
+// e.g. "1.2 m × 0.8 m" for a piece, "2.59 m wide (roll)" for a running-
+// length material -- shown alongside the product name since there's no
+// room for separate Width/Height/UOM columns in the compact table below.
+function describeSize(l: ImportDutyLine): string {
+  if (l.size_mode === "roll") {
+    return `${fmtNum(l.width)} ${l.uom} wide (roll)`;
+  }
+  if (l.width > 0 || l.height > 0) {
+    return `${fmtNum(l.width)} × ${fmtNum(l.height)} ${l.uom}`;
+  }
+  return "";
 }
 
 function ordinal(n: number): string {
@@ -149,19 +168,23 @@ function ensure(ctx: Ctx, state: { page: PDFPage; y: number }, need: number) {
 
 // Widths sum to 170mm = PAGE_WIDTH(210mm) - MARGIN(20mm) * 2. Only the
 // figures a reviewer actually needs to sanity-check a line at a glance —
-// duty-rate % and the fee/freight/clearing breakdown are visible on-screen
-// and in the History tab's expanded view, but would make this table
-// unreadable, so this stays to the landed-cost chain: invoice value ->
-// assessable value -> total duty -> total cost -> cost per unit.
+// duty-rate % and the apportioned freight/insurance/clearing breakdown are
+// visible on-screen and in the History tab's expanded view, but would make
+// this table unreadable, so this stays to the landed-cost chain: invoice
+// value -> assessable value -> total duty -> total cost -> cost per unit /
+// per sq.ft. The Product cell also carries the line's size (width x height
+// or roll width) since there's no room for separate columns.
 function tableCols() {
   return [
-    { label: "Product", width: mm(40), align: "left" as const },
-    { label: "Qty", width: mm(12), align: "right" as const },
-    { label: "Inv. Value (INR)", width: mm(22), align: "right" as const },
-    { label: "Assessable Value (INR)", width: mm(24), align: "right" as const },
-    { label: "Total Duty (INR)", width: mm(22), align: "right" as const },
-    { label: "Total Cost (INR)", width: mm(26), align: "right" as const },
-    { label: "Cost / Qty (INR)", width: mm(24), align: "right" as const },
+    { label: "Product", width: mm(34), align: "left" as const },
+    { label: "Qty", width: mm(10), align: "right" as const },
+    { label: "Sq.Ft", width: mm(13), align: "right" as const },
+    { label: "Inv. Value (INR)", width: mm(19), align: "right" as const },
+    { label: "Assessable Value (INR)", width: mm(20), align: "right" as const },
+    { label: "Total Duty (INR)", width: mm(17), align: "right" as const },
+    { label: "Total Cost (INR)", width: mm(21), align: "right" as const },
+    { label: "Cost / Qty (INR)", width: mm(18), align: "right" as const },
+    { label: "Cost / Sq.Ft (INR)", width: mm(18), align: "right" as const },
   ];
 }
 
@@ -288,11 +311,22 @@ export async function generateImportDutyPdf(data: ImportDutyPdfData): Promise<Bl
     `Bill of Entry Date: ${formatLongDate(data.bill_of_entry_date)}`,
   ].join("   |   ");
   state.page.drawText(detailLine2, { x: MARGIN, y: state.y, size, font, color: INK });
-  state.y -= 20;
+  state.y -= 16;
+
+  // ---- Shipment-level costs (apportioned per line below) ----
+  const shipmentBits = [
+    `Freight: Rs. ${fmtNum(data.freight)}`,
+    `Freight (Ex Works): Rs. ${fmtNum(data.freight_ex_works)}`,
+    `Clearing Charges: Rs. ${fmtNum(data.clearing_charges)}`,
+    `Insurance: ${fmtNum(data.insurance_percent)}%`,
+  ].join("   |   ");
+  state.page.drawText(shipmentBits, { x: MARGIN, y: state.y, size: size - 1, font, color: MUTED });
+  state.y -= 18;
 
   // ---- Line items table ----
   drawTableHeader(ctx, state);
   let totalInv = 0;
+  let totalSqft = 0;
   let totalAssessable = 0;
   let totalBcd = 0;
   let totalSwCess = 0;
@@ -301,23 +335,37 @@ export async function generateImportDutyPdf(data: ImportDutyPdfData): Promise<Bl
   let totalCost = 0;
   for (const l of data.lines) {
     totalInv += l.inv_value;
+    totalSqft += l.sqft_total;
     totalAssessable += l.assessable_value;
     totalBcd += l.bcd_amount;
     totalSwCess += l.sw_cess_amount;
     totalIgst += l.igst_amount;
     totalDuty += l.total_duty;
     totalCost += l.total_cost;
+    const size = describeSize(l);
     drawTableRow(ctx, state, [
-      l.product_name || "—",
+      size ? `${l.product_name || "—"} (${size})` : l.product_name || "—",
       String(l.qty),
+      fmtNum(l.sqft_total),
       fmtNum(l.inv_value),
       fmtNum(l.assessable_value),
       fmtNum(l.total_duty),
       fmtNum(l.total_cost),
       fmtNum(l.cost_per_qty),
+      fmtNum(l.cost_per_sqft),
     ]);
   }
-  drawTotalsRow(ctx, state, ["TOTAL", "", fmtNum(totalInv), fmtNum(totalAssessable), fmtNum(totalDuty), fmtNum(totalCost), ""]);
+  drawTotalsRow(ctx, state, [
+    "TOTAL",
+    "",
+    fmtNum(totalSqft),
+    fmtNum(totalInv),
+    fmtNum(totalAssessable),
+    fmtNum(totalDuty),
+    fmtNum(totalCost),
+    "",
+    "",
+  ]);
   state.y -= 16;
 
   // ---- Duty breakdown ----
@@ -336,6 +384,11 @@ export async function generateImportDutyPdf(data: ImportDutyPdfData): Promise<Bl
     state.y -= 12;
   }
   state.y -= 8;
+
+  ensure(ctx, state, 12);
+  const blendedCostPerSqft = totalSqft > 0 ? totalCost / totalSqft : 0;
+  state.page.drawText(`Blended Cost / Sq.Ft: Rs. ${fmtNum(blendedCostPerSqft)}`, { x: MARGIN, y: state.y, size, font, color: INK });
+  state.y -= 20;
 
   ensure(ctx, state, 20);
   state.page.drawText(`Grand Total Landed Cost: Rs. ${fmtNum(totalCost)}`, {

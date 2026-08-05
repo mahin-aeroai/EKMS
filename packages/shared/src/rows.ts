@@ -927,11 +927,34 @@ export interface MaterialOrderRow {
 // ---------- Import Duty / Landing Cost Calculator ----------
 // (supabase-import-duty-schema.sql) -- new standalone Tools workspace,
 // ports "Import Duty calculation.xlsx". See that migration's header for
-// the full formula and the 2 additions beyond the original sheet (IGST,
-// multi-currency). BCD/SW Cess/IGST % are per LINE, not per shipment, since
-// real shipments mix HS codes with different duty rates.
+// the full formula. BCD/SW Cess/IGST % are per LINE, not per shipment,
+// since real shipments mix HS codes with different duty rates.
+//
+// Freight, Freight-from-Ex-Works, Clearing Charges and Insurance % are
+// SHIPMENT-level (one invoice/shipment is one Bill of Entry, and these 4
+// cost components are paid once for the whole shipment, not per product) --
+// per the user's own correction after using the first version of this tool,
+// which had them as per-line inputs. Each line's share of these totals is
+// apportioned pro-rata by that line's share of total invoice value (the
+// standard customs practice for apportioning shipment-level costs across
+// multiple line items), producing apportioned_freight / apportioned_insurance
+// / apportioned_freight_ex_works / apportioned_clearing_charges on each line
+// -- see CalculatorTab.tsx's computeAll().
 
 export type ImportDutyStatus = "draft" | "final";
+
+// Unit of measure for width/height. Converted to feet internally to derive
+// sqft_total (see UOM_TO_FT in CalculatorTab.tsx).
+export type ImportDutyUom = "mm" | "cm" | "inch" | "ft" | "m";
+
+// How Qty/Width/Height combine into a total sq.ft figure for the line --
+// per the user's own two real scenarios:
+//   'pieces' -- Qty is a piece count; Width x Height is the size of ONE
+//         piece (in `uom`). sqft_total = qty * width_ft * height_ft.
+//   'roll'   -- Qty is a running length, already in `uom` (e.g. 715 metres
+//         of fabric off a roll); Width is the roll's width. Height isn't
+//         meaningful for a roll and is ignored. sqft_total = qty_ft * width_ft.
+export type ImportDutySizeMode = "pieces" | "roll";
 
 export interface ImportDutyLine {
   product_name: string;
@@ -939,21 +962,25 @@ export interface ImportDutyLine {
   // Price per unit in `currency` -- inv_value = qty * rate * exchange_rate
   // (see schema header for why this isn't rate * exchange_rate alone).
   rate: number;
+  // Dropdown: USD | EUR | INR (see CalculatorTab.tsx's CURRENCY_OPTIONS).
   currency: string;
   exchange_rate: number;
-  // % of inv_value -- defaults to 1.125, the standard Indian customs
-  // notional insurance rate used when actual insurance isn't known
-  // (Customs Valuation Rules 2007, Rule 10(2)).
-  insurance_percent: number;
-  freight: number;
-  freight_ex_works: number;
-  clearing_charges: number;
+  width: number;
+  height: number;
+  uom: ImportDutyUom;
+  size_mode: ImportDutySizeMode;
   bcd_percent: number;
   sw_cess_percent: number;
   igst_percent: number;
   // Computed + frozen at save time (see schema header for the formulas).
   inv_value: number;
-  insurance_amount: number;
+  sqft_total: number;
+  // This line's pro-rata share (by inv_value) of the shipment-level totals
+  // below on ImportDutyCalculationRow.
+  apportioned_freight: number;
+  apportioned_insurance: number;
+  apportioned_freight_ex_works: number;
+  apportioned_clearing_charges: number;
   assessable_value: number;
   bcd_amount: number;
   sw_cess_amount: number;
@@ -961,6 +988,7 @@ export interface ImportDutyLine {
   total_duty: number;
   total_cost: number;
   cost_per_qty: number;
+  cost_per_sqft: number;
 }
 
 export interface ImportDutyCalculationRow {
@@ -973,6 +1001,16 @@ export interface ImportDutyCalculationRow {
   bill_of_entry_no: string | null;
   bill_of_entry_date: string | null;
   notes: string | null;
+  // Shipment-level cost components -- apportioned pro-rata across `lines`
+  // by each line's share of total invoice value (see ImportDutyLine's
+  // apportioned_* fields and CalculatorTab.tsx's computeAll()).
+  freight: number;
+  freight_ex_works: number;
+  clearing_charges: number;
+  // % of TOTAL shipment invoice value -- defaults to 1.125, the standard
+  // Indian customs notional insurance rate used when actual insurance
+  // isn't known (Customs Valuation Rules 2007, Rule 10(2)).
+  insurance_percent: number;
   lines: ImportDutyLine[];
   total_cost: number;
   total_duty: number;

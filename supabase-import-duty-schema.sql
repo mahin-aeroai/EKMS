@@ -33,9 +33,30 @@
 --      Indian customs uses when actual insurance isn't separately known
 --      (Customs Valuation Rules 2007, Rule 10(2)) -- a real, commonly used
 --      default, not an arbitrary placeholder.
+--   5. Freight / Freight-from-Ex-Works / Clearing Charges / Insurance %
+--      moved from PER-LINE inputs to SHIPMENT-LEVEL columns (freight,
+--      freight_ex_works, clearing_charges, insurance_percent below), per
+--      the user's correction: a shipment is one Bill of Entry and these
+--      costs are paid once for the whole shipment, not per product. Each
+--      line's share is now derived by apportioning these shipment totals
+--      pro-rata by that line's share of total invoice value -- see
+--      CalculatorTab.tsx's computeAll() and each line's apportioned_*
+--      fields inside `lines`.
+--   6. Width / Height / UOM / Sq.Ft -- added per line so a landed cost
+--      per SQ.FT can be shown alongside cost per Qty (not every imported
+--      product is priced/compared by piece count). uom converts
+--      mm/cm/inch/ft/m to feet; size_mode picks whether Qty is a piece
+--      count (sqft = qty * width_ft * height_ft) or a running length off a
+--      roll (sqft = qty_ft * width_ft, height not applicable) -- see
+--      ImportDutySizeMode in packages/shared/src/rows.ts.
 -- BCD / SW Cess / IGST rates are editable PER PRODUCT LINE (not one rate
 -- for the whole shipment) since real shipments mix HS codes with different
--- duty rates -- per the user's explicit answer.
+-- duty rates -- per the user's explicit answer. Freight and Insurance ARE
+-- part of the assessable (dutiable) value; Freight-from-Ex-Works and
+-- Clearing Charges are NOT -- they're added straight into total_cost after
+-- duty is calculated, matching standard CIF-based customs valuation
+-- (pre-shipment domestic freight and post-clearance charges aren't part of
+-- the import assessable value).
 --
 -- Single table, frozen jsonb `lines` -- same convention as
 -- material_orders.lines / sign_estimates.calc: once a calculation is
@@ -45,18 +66,29 @@
 -- every shipment's products, rates and duty % are typically different), so
 -- there's nothing to normalize into a separate table.
 --
--- Formula per line (see CalculatorTab.tsx for the live implementation):
---   inv_value          = qty * rate * exchange_rate
---   insurance_amount   = inv_value * insurance_percent / 100
---   assessable_value   = inv_value + freight + insurance_amount
---   bcd_amount         = assessable_value * bcd_percent / 100
---   sw_cess_amount     = bcd_amount * sw_cess_percent / 100
---   igst_amount        = (assessable_value + bcd_amount + sw_cess_amount)
---                         * igst_percent / 100
---   total_duty         = bcd_amount + sw_cess_amount + igst_amount
---   total_cost         = inv_value + freight + freight_ex_works
---                         + clearing_charges + total_duty
---   cost_per_qty       = total_cost / qty
+-- Formula (see CalculatorTab.tsx's computeAll() for the live implementation):
+--   Per line:
+--     inv_value            = qty * rate * exchange_rate
+--     sqft_total            = see ImportDutySizeMode above
+--     ratio                = line.inv_value / SUM(all lines' inv_value)
+--   Once per shipment:
+--     insurance_amount_total = SUM(inv_value) * insurance_percent / 100
+--   Per line (apportioned):
+--     apportioned_freight            = freight * ratio
+--     apportioned_insurance          = insurance_amount_total * ratio
+--     apportioned_freight_ex_works   = freight_ex_works * ratio
+--     apportioned_clearing_charges   = clearing_charges * ratio
+--     assessable_value     = inv_value + apportioned_freight + apportioned_insurance
+--     bcd_amount           = assessable_value * bcd_percent / 100
+--     sw_cess_amount       = bcd_amount * sw_cess_percent / 100
+--     igst_amount          = (assessable_value + bcd_amount + sw_cess_amount)
+--                             * igst_percent / 100
+--     total_duty           = bcd_amount + sw_cess_amount + igst_amount
+--     total_cost           = inv_value + apportioned_freight
+--                             + apportioned_freight_ex_works
+--                             + apportioned_clearing_charges + total_duty
+--     cost_per_qty         = total_cost / qty
+--     cost_per_sqft        = total_cost / sqft_total
 --
 -- RLS: plain authenticated-only, matching every other internal-ops-tool
 -- table in this schema family (see supabase-material-ordering-schema.sql).
@@ -71,11 +103,18 @@ create table if not exists public.import_duty_calculations (
   bill_of_entry_no text,
   bill_of_entry_date date,
   notes text,
+  -- Shipment-level cost components, paid once for the whole shipment (not
+  -- per product) -- apportioned pro-rata across `lines` by invoice value,
+  -- see header note above and each line's apportioned_* fields.
+  freight numeric not null default 0,
+  freight_ex_works numeric not null default 0,
+  clearing_charges numeric not null default 0,
+  insurance_percent numeric not null default 1.125,
   -- Array of line items -- see CalculatorTab.tsx's ImportDutyLine shape for
   -- the exact fields (product_name, qty, rate, currency, exchange_rate,
-  -- insurance_percent, freight, freight_ex_works, clearing_charges,
-  -- bcd_percent, sw_cess_percent, igst_percent, plus every computed output
-  -- above).
+  -- width, height, uom, size_mode, bcd_percent, sw_cess_percent,
+  -- igst_percent, plus every computed output above, including the
+  -- apportioned_* shares of this row's shipment-level costs).
   lines jsonb not null default '[]',
   -- Shipment-level rollups (sum of every line's total_cost / total_duty) --
   -- denormalized onto the header row purely so History can list/sort
