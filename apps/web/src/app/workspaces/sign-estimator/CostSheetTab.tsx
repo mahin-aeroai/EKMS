@@ -198,10 +198,16 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
                       <div>
                         {(c.profile.stockLenMM / 1000).toFixed(2)}m stock bar @ {fmtRupee(profPerBarCost)}/bar
                         {" "}(₹{profRatePerRFT.toFixed(2)}/RFT · ₹{profRatePerRM.toFixed(2)}/RM) — {c.profile.barsRequired} bar(s), {c.profile.utilPct}% utilisation
+                        {c.qty > 1 ? ` (nested across all ${c.qty} signs — ${fmtRupee(c.profile.cost)} total)` : ""}
                       </div>
                     </>
                   }
-                  value={fmtRupee(c.profile.cost)}
+                  // c.profile.cost is the WHOLE-ORDER nested total (see the
+                  // ProfileSnapshot doc comment in types.ts) -- every other
+                  // row here, and "Raw Material Cost -- Signage (per sign)"
+                  // below, is per-sign, so divide by qty to keep this row on
+                  // the same basis. Whole-order total still shown above.
+                  value={fmtRupee(c.qty > 0 ? c.profile.cost / c.qty : 0)}
                 />
               )}
               {c.sheet && (
