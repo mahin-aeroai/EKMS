@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Copy, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight, Copy, Pencil, Plus, Trash2, X } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
@@ -74,13 +74,40 @@ export function BomMasterTab() {
   const [creatingTemplate, setCreatingTemplate] = useState(false);
   const [cloningId, setCloningId] = useState<string | null>(null);
   const [cloneCodeDraft, setCloneCodeDraft] = useState("");
+  const [cloneDescriptionDraft, setCloneDescriptionDraft] = useState("");
   const [savingCloneId, setSavingCloneId] = useState<string | null>(null);
+  // "Give an option to edit names" -- code/description used to be
+  // permanently fixed at creation (or clone) time, plain text with no way
+  // to fix a typo or rename a variant later. Same editable-badge pattern as
+  // print_mode/substrate_type below, just for both fields at once since
+  // they're shown together as one title line.
+  const [editingNameId, setEditingNameId] = useState<string | null>(null);
+  const [codeDraft, setCodeDraft] = useState("");
+  const [descriptionDraft, setDescriptionDraft] = useState("");
+  const [savingNameId, setSavingNameId] = useState<string | null>(null);
+  const [savingOrderId, setSavingOrderId] = useState<string | null>(null);
   const materialsByCode = useMemo(() => new Map(materials.map((m) => [m.code, m])), [materials]);
+
+  // Every render's stable, sort_order-aware view of `templates` -- feeds
+  // groupByCategory below and moveTemplate's neighbor-finding, so both
+  // always agree on what "next/previous in this category" means regardless
+  // of the order rows happened to arrive from Supabase or get appended to
+  // local state (new/cloned templates are always pushed onto the end of
+  // the `templates` array, not spliced into position -- this sort is what
+  // actually places them correctly on screen).
+  const sortedTemplates = useMemo(
+    () =>
+      [...templates ?? []].sort(
+        (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.code.localeCompare(b.code)
+      ),
+    [templates]
+  );
 
   useEffect(() => {
     supabase
       .from("bom_templates")
       .select("*")
+      .order("sort_order", { ascending: true, nullsFirst: false })
       .order("code")
       .then(({ data, error }) => {
         if (error) {
@@ -322,6 +349,76 @@ export function BomMasterTab() {
     setSavingSubstrateId(null);
   }
 
+  // Persists a whole category group's manual order in one go -- used by
+  // moveTemplate (swap two neighbors) and by create/cloneTemplate (insert a
+  // new FG code at a specific position) so sort_order values stay clean,
+  // gap-free integers (0, 10, 20, ...) instead of accumulating collisions
+  // from one-off edits. Partial upsert -- each row only carries id +
+  // sort_order, so nothing else on these templates gets touched.
+  async function renumberCategory(orderedIds: string[]): Promise<void> {
+    const rows = orderedIds.map((id, i) => ({ id, sort_order: i * 10 }));
+    const { error } = await supabase.from("bom_templates").upsert(rows, { onConflict: "id" });
+    if (error) {
+      toast("danger", `Couldn't save the new order: ${error.message}`);
+      return;
+    }
+    setTemplates((prev) => {
+      if (!prev) return prev;
+      const nextOrder = new Map(rows.map((r) => [r.id, r.sort_order]));
+      return prev.map((t) => (nextOrder.has(t.id) ? { ...t, sort_order: nextOrder.get(t.id)! } : t));
+    });
+  }
+
+  // "Place them in order" -- swaps a template with its neighbor directly
+  // above/below it WITHIN THE SAME CATEGORY (the grouping the screen
+  // already shows -- moving across categories isn't supported, that's a
+  // recategorize, not a reorder), then renumbers that whole group so the
+  // new order sticks.
+  async function moveTemplate(template: BomTemplateRow, direction: "up" | "down") {
+    const group = sortedTemplates.filter((t) => t.category === template.category);
+    const idx = group.findIndex((t) => t.id === template.id);
+    const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+    if (idx === -1 || swapIdx < 0 || swapIdx >= group.length) return;
+    const reordered = [...group];
+    [reordered[idx], reordered[swapIdx]] = [reordered[swapIdx], reordered[idx]];
+    setSavingOrderId(template.id);
+    await renumberCategory(reordered.map((t) => t.id));
+    setSavingOrderId(null);
+  }
+
+  // "Give an option to edit names" -- code and description used to be
+  // permanently fixed once created. Both are safe to rename in place --
+  // nothing else in the schema joins on bom_templates.code (lines/rates key
+  // on template_id and print_mode+substrate instead), and every place that
+  // DISPLAYS a code elsewhere (Estimate Pool items, saved cost sheets) is
+  // already a frozen snapshot that doesn't retroactively change -- same
+  // "don't rewrite history" convention as everywhere else in this app.
+  async function updateTemplateNames(template: BomTemplateRow, rawNewCode: string, rawNewDescription: string) {
+    const newCode = rawNewCode.trim();
+    const newDescription = rawNewDescription.trim();
+    if (!newCode || !newDescription) {
+      toast("danger", "Code and description can't be empty.");
+      return;
+    }
+    if (newCode === template.code && newDescription === template.description) {
+      setEditingNameId(null);
+      return;
+    }
+    setSavingNameId(template.id);
+    const { error } = await supabase
+      .from("bom_templates")
+      .update({ code: newCode, description: newDescription })
+      .eq("id", template.id);
+    setSavingNameId(null);
+    if (error) {
+      toast("danger", error.code === "23505" ? `"${newCode}" already exists` : `Couldn't save: ${error.message}`);
+      return;
+    }
+    setTemplates((prev) => prev?.map((t) => (t.id === template.id ? { ...t, code: newCode, description: newDescription } : t)) ?? null);
+    setEditingNameId(null);
+    toast("success", "Saved");
+  }
+
   // "I can't create new BOM or clone it and change it?" -- adds a brand
   // new FG code from scratch (no lines, no work centres yet -- add those
   // below same as any template). See cloneTemplate below for the other
@@ -337,6 +434,10 @@ export function BomMasterTab() {
       return;
     }
     setCreatingTemplate(true);
+    // New from-scratch FG codes don't have an obvious "place after X" --
+    // append to the end of their category's own order.
+    const categoryGroup = sortedTemplates.filter((t) => t.category === newTemplateDraft.category);
+    const newSortOrder = categoryGroup.length > 0 ? Math.max(...categoryGroup.map((t) => t.sort_order ?? 0)) + 10 : 0;
     const { data, error } = await supabase
       .from("bom_templates")
       .insert({
@@ -346,6 +447,7 @@ export function BomMasterTab() {
         print_mode: printMode,
         substrate_type: substrateType,
         work_centres: [],
+        sort_order: newSortOrder,
       })
       .select()
       .single();
@@ -368,21 +470,29 @@ export function BomMasterTab() {
   // Copies a template's own fields plus every material line (and each
   // line's alternatives) under a new code -- the fast path for "start from
   // a working FG code, then change its print mode/substrate/lines for a
-  // variant" instead of rebuilding one from scratch.
-  async function cloneTemplate(source: BomTemplateRow, rawNewCode: string) {
+  // variant" instead of rebuilding one from scratch. The clone is placed
+  // immediately after its source in the category's display order ("place
+  // them in order") regardless of what the new code string happens to be --
+  // no more relying on the new code sorting nearby alphabetically by luck.
+  async function cloneTemplate(source: BomTemplateRow, rawNewCode: string, rawNewDescription: string) {
     const code = rawNewCode.trim();
+    const description = rawNewDescription.trim() || `${source.description} (copy)`;
     if (!code) return;
     setSavingCloneId(source.id);
+
+    const categoryGroup = sortedTemplates.filter((t) => t.category === source.category);
+    const initialSortOrder = categoryGroup.length > 0 ? Math.max(...categoryGroup.map((t) => t.sort_order ?? 0)) + 10 : 0;
 
     const { data: newTemplateData, error: templateError } = await supabase
       .from("bom_templates")
       .insert({
         code,
-        description: `${source.description} (copy)`,
+        description,
         category: source.category,
         print_mode: source.print_mode,
         substrate_type: source.substrate_type,
         work_centres: source.work_centres,
+        sort_order: initialSortOrder,
       })
       .select()
       .single();
@@ -447,6 +557,12 @@ export function BomMasterTab() {
     await ensureRateCombos(newTemplate.work_centres, newTemplate.print_mode, newTemplate.substrate_type, newTemplate.code);
 
     setTemplates((prev) => (prev ? [...prev, newTemplate] : [newTemplate]));
+    // Slot the clone in directly after its source, then renumber the whole
+    // group so that sticks -- see the function doc comment above.
+    const sourceIdx = categoryGroup.findIndex((t) => t.id === source.id);
+    const reordered = [...categoryGroup];
+    reordered.splice(sourceIdx + 1, 0, newTemplate);
+    await renumberCategory(reordered.map((t) => t.id));
     setLinesByTemplate((prev) => ({ ...prev, [newTemplate.id]: newLines }));
     if (newAlternatives.length > 0) {
       setAlternativesByLine((prev) => {
@@ -499,7 +615,7 @@ export function BomMasterTab() {
   const unmappedCount = Object.values(linesByTemplate)
     .flat()
     .filter((l) => !l.raw_material_code).length;
-  const templateGroups = groupByCategory(templates);
+  const templateGroups = groupByCategory(sortedTemplates);
 
   return (
     <div>
@@ -612,20 +728,122 @@ export function BomMasterTab() {
           <div key={group.category}>
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">{group.category}</h3>
             <div className="flex flex-col gap-2">
-              {group.items.map((t) => (
+              {group.items.map((t, idx) => (
                 <div key={t.id} className="rounded-lg border border-line bg-surface">
             <div className="flex w-full items-center justify-between gap-3 px-4 py-3">
-              <button type="button" onClick={() => toggle(t.id)} className="flex min-w-0 items-center gap-2 text-left">
+              {/* "Place them in order" -- move this FG code up/down within
+                  its category (the same grouping shown on screen). Separate
+                  from the expand/collapse button below so a click here
+                  doesn't also toggle the row open. */}
+              <div className="flex shrink-0 flex-col" onClick={(e) => e.stopPropagation()}>
+                <button
+                  type="button"
+                  aria-label="Move up"
+                  title="Move up"
+                  disabled={idx === 0 || savingOrderId === t.id}
+                  onClick={() => moveTemplate(t, "up")}
+                  className="text-ink-muted hover:text-primary disabled:opacity-30"
+                >
+                  <ArrowUp size={13} />
+                </button>
+                <button
+                  type="button"
+                  aria-label="Move down"
+                  title="Move down"
+                  disabled={idx === group.items.length - 1 || savingOrderId === t.id}
+                  onClick={() => moveTemplate(t, "down")}
+                  className="text-ink-muted hover:text-primary disabled:opacity-30"
+                >
+                  <ArrowDown size={13} />
+                </button>
+              </div>
+              {/* A native <button> can't contain the Edit/Save/Cancel
+                  buttons and text inputs rendered below (invalid HTML,
+                  browsers silently break the DOM) -- a div with the same
+                  click-to-toggle behavior, kept keyboard-accessible. */}
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={() => toggle(t.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    toggle(t.id);
+                  }
+                }}
+                className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
+              >
                 {expanded === t.id ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-medium text-ink">
-                    {t.code} <span className="font-normal text-ink-secondary">— {t.description}</span>
-                  </div>
+                  {editingNameId === t.id ? (
+                    <div className="flex flex-wrap items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="text"
+                        autoFocus
+                        value={codeDraft}
+                        onChange={(e) => setCodeDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") updateTemplateNames(t, codeDraft, descriptionDraft);
+                          if (e.key === "Escape") setEditingNameId(null);
+                        }}
+                        placeholder="Code"
+                        className="h-7 w-40 rounded-md border border-line-strong bg-surface px-1.5 text-xs font-medium text-ink outline-none"
+                      />
+                      <input
+                        type="text"
+                        value={descriptionDraft}
+                        onChange={(e) => setDescriptionDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") updateTemplateNames(t, codeDraft, descriptionDraft);
+                          if (e.key === "Escape") setEditingNameId(null);
+                        }}
+                        placeholder="Description"
+                        className="h-7 w-64 rounded-md border border-line-strong bg-surface px-1.5 text-xs text-ink outline-none"
+                      />
+                      <button
+                        type="button"
+                        aria-label="Save name"
+                        disabled={savingNameId === t.id}
+                        onClick={() => updateTemplateNames(t, codeDraft, descriptionDraft)}
+                        className="text-primary hover:text-primary-hover disabled:opacity-50"
+                      >
+                        <Check size={15} />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Cancel"
+                        onClick={() => setEditingNameId(null)}
+                        className="text-ink-muted hover:text-danger"
+                      >
+                        <X size={15} />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1">
+                      <div className="truncate text-sm font-medium text-ink">
+                        {t.code} <span className="font-normal text-ink-secondary">— {t.description}</span>
+                      </div>
+                      <button
+                        type="button"
+                        aria-label="Edit code/description"
+                        title="Edit code/description"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCodeDraft(t.code);
+                          setDescriptionDraft(t.description);
+                          setEditingNameId(t.id);
+                        }}
+                        className="shrink-0 text-ink-muted hover:text-primary"
+                      >
+                        <Pencil size={12} />
+                      </button>
+                    </div>
+                  )}
                   <div className="mt-0.5 flex flex-wrap items-center gap-1">
                     <Badge status="info">{t.category}</Badge>
                   </div>
                 </div>
-              </button>
+              </div>
               <div className="flex shrink-0 flex-wrap items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
                 {editingPrintModeId === t.id ? (
                   <input
@@ -711,15 +929,26 @@ export function BomMasterTab() {
                       value={cloneCodeDraft}
                       onChange={(e) => setCloneCodeDraft(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === "Enter") cloneTemplate(t, cloneCodeDraft);
+                        if (e.key === "Enter") cloneTemplate(t, cloneCodeDraft, cloneDescriptionDraft);
                         if (e.key === "Escape") setCloningId(null);
                       }}
                       placeholder="new code"
                       className="h-7 w-32 rounded-md border border-line-strong bg-surface px-1.5 text-xs text-ink outline-none"
                     />
+                    <input
+                      type="text"
+                      value={cloneDescriptionDraft}
+                      onChange={(e) => setCloneDescriptionDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") cloneTemplate(t, cloneCodeDraft, cloneDescriptionDraft);
+                        if (e.key === "Escape") setCloningId(null);
+                      }}
+                      placeholder="new description"
+                      className="h-7 w-52 rounded-md border border-line-strong bg-surface px-1.5 text-xs text-ink outline-none"
+                    />
                     <button
                       type="button"
-                      onClick={() => cloneTemplate(t, cloneCodeDraft)}
+                      onClick={() => cloneTemplate(t, cloneCodeDraft, cloneDescriptionDraft)}
                       disabled={savingCloneId === t.id}
                       className="rounded-md bg-primary px-2 py-1 text-[11px] font-medium text-white disabled:opacity-50"
                     >
@@ -740,6 +969,7 @@ export function BomMasterTab() {
                     title="Clone this FG code"
                     onClick={() => {
                       setCloneCodeDraft(`${t.code}-COPY`);
+                      setCloneDescriptionDraft(`${t.description} (copy)`);
                       setCloningId(t.id);
                     }}
                     className="text-ink-muted hover:text-primary"

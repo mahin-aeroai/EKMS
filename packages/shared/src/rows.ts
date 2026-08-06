@@ -746,6 +746,11 @@ export interface BomTemplateRow {
   print_mode: string;
   substrate_type: string;
   work_centres: string[];
+  // Manual display order within `category` -- lower sorts first. Null on
+  // any row created before this existed (falls back to sorting by `code`
+  // alphabetically, same as the app always did). See
+  // supabase-bom-templates-sort-order-migration.sql.
+  sort_order: number | null;
   created_at: string;
 }
 

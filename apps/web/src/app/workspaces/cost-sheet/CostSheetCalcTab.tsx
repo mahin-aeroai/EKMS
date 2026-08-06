@@ -93,7 +93,10 @@ export function CostSheetCalcTab() {
     // full set, same fix already used for customers/employees in
     // Estimate Builder.
     Promise.all([
-      supabase.from("bom_templates").select("*").order("code"),
+      // sort_order-aware, same as BOM Master -- so a manually-reordered FG
+      // code list (e.g. a clone placed right after its source) shows up in
+      // that same order here, not back to plain alphabetical.
+      supabase.from("bom_templates").select("*").order("sort_order", { ascending: true, nullsFirst: false }).order("code"),
       supabase.from("work_centre_rates").select("*"),
       fetchAllRows<RawMaterialRow>((from, to) => supabase.from("raw_materials").select("*").order("code").range(from, to)),
     ]).then(([t, r, materialRows]) => {
