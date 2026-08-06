@@ -79,6 +79,8 @@ export function RawMaterialPicker({
   value,
   onChange,
   preferredCategory,
+  multiple,
+  onAddMultiple,
 }: {
   materials: RawMaterialRow[];
   value: string | null;
@@ -89,10 +91,40 @@ export function RawMaterialPicker({
   // not bury them below unrelated categories like "Fixed Assets" or
   // "General Items" that happen to sort earlier alphabetically.
   preferredCategory?: string | null;
+  // "can i have selection ticks so that i can do it at once" -- adding
+  // several alternatives one at a time meant reopening/re-searching the
+  // dropdown after every single pick (it closes on select, same as the
+  // primary picker). multiple=true swaps that click-to-pick-and-close
+  // behavior for checkboxes plus an explicit "Add" button, so several
+  // materials can be ticked in one pass through the (possibly re-searched)
+  // list before anything is actually added. onChange is unused in this mode.
+  multiple?: boolean;
+  onAddMultiple?: (codes: string[]) => void;
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
+  const [selectedCodes, setSelectedCodes] = useState<Set<string>>(new Set());
   const containerRef = useRef<HTMLDivElement>(null);
+
+  function closeDropdown() {
+    setOpen(false);
+    setSelectedCodes(new Set());
+  }
+
+  function toggleCode(code: string) {
+    setSelectedCodes((prev) => {
+      const next = new Set(prev);
+      if (next.has(code)) next.delete(code);
+      else next.add(code);
+      return next;
+    });
+  }
+
+  function confirmMultiple() {
+    if (selectedCodes.size > 0) onAddMultiple?.([...selectedCodes]);
+    setQuery("");
+    closeDropdown();
+  }
 
   // "Once i start selecting materials when i end up i can't close the
   // selection box" -- picking a row removes that button from the DOM (the
@@ -108,11 +140,11 @@ export function RawMaterialPicker({
     if (!open) return;
     function onPointerDown(e: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
+        closeDropdown();
       }
     }
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") closeDropdown();
     }
     document.addEventListener("mousedown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
@@ -191,7 +223,7 @@ export function RawMaterialPicker({
     });
   }, [matches, preferredCanonical]);
 
-  if (selected) {
+  if (selected && !multiple) {
     return (
       <div className="flex items-center gap-1.5">
         <span className="rounded-md bg-surface-sunken px-2 py-1 text-xs text-ink">
@@ -224,16 +256,37 @@ export function RawMaterialPicker({
       />
       {open && (
         <div className="absolute z-10 mt-1 max-h-80 w-96 overflow-y-auto rounded-md border border-line-strong bg-surface shadow-2">
-          <div className="sticky top-0 z-10 flex justify-end border-b border-line bg-surface px-1 py-1">
-            <button
-              type="button"
-              aria-label="Close"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => setOpen(false)}
-              className="rounded p-0.5 text-ink-muted hover:bg-surface-sunken hover:text-ink"
-            >
-              <X size={14} />
-            </button>
+          <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-line bg-surface px-2 py-1">
+            {multiple ? (
+              <span className="text-[11px] text-ink-muted">
+                {selectedCodes.size > 0 ? `${selectedCodes.size} selected` : "Tick materials to add"}
+              </span>
+            ) : (
+              <span />
+            )}
+            <div className="flex items-center gap-1.5">
+              {multiple && (
+                <button
+                  type="button"
+                  aria-label="Add selected materials"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={confirmMultiple}
+                  disabled={selectedCodes.size === 0}
+                  className="rounded bg-primary px-2 py-0.5 text-[11px] font-medium text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Add{selectedCodes.size > 0 ? ` (${selectedCodes.size})` : ""}
+                </button>
+              )}
+              <button
+                type="button"
+                aria-label="Close"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={closeDropdown}
+                className="rounded p-0.5 text-ink-muted hover:bg-surface-sunken hover:text-ink"
+              >
+                <X size={14} />
+              </button>
+            </div>
           </div>
           {matches.length === 0 && <div className="px-3 py-2 text-xs text-ink-muted">No matches</div>}
           {grouped.map(([category, items]) => (
@@ -241,31 +294,51 @@ export function RawMaterialPicker({
               <div className="sticky top-6 bg-surface-sunken px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-ink-muted">
                 {category}
               </div>
-              {items.map((m) => (
-                <button
-                  key={m.code}
-                  type="button"
-                  // Prevents the browser's default mousedown behavior of
-                  // shifting focus onto this button -- without this, picking
-                  // a row removes the button from the DOM and focus bounces
-                  // back to the input above, whose onFocus reopens the
-                  // dropdown right away (see the effect above for the fuller
-                  // explanation). Keeping focus on the input the whole time
-                  // means there's no stray focus event to reopen it.
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => {
-                    onChange(m.code);
-                    setQuery("");
-                    setOpen(false);
-                  }}
-                  className="block w-full truncate px-3 py-1.5 text-left text-xs text-ink hover:bg-surface-sunken"
-                >
-                  <span className="font-medium">{m.code}</span> — {m.name}
-                  {m.unit_cost_recent !== null && (
-                    <span className="text-ink-muted"> (₹{m.unit_cost_recent.toFixed(2)})</span>
-                  )}
-                </button>
-              ))}
+              {items.map((m) =>
+                multiple ? (
+                  <label
+                    key={m.code}
+                    className="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-xs text-ink hover:bg-surface-sunken"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedCodes.has(m.code)}
+                      onChange={() => toggleCode(m.code)}
+                      className="h-3.5 w-3.5 shrink-0 rounded border-line-strong"
+                    />
+                    <span className="truncate">
+                      <span className="font-medium">{m.code}</span> — {m.name}
+                      {m.unit_cost_recent !== null && (
+                        <span className="text-ink-muted"> (₹{m.unit_cost_recent.toFixed(2)})</span>
+                      )}
+                    </span>
+                  </label>
+                ) : (
+                  <button
+                    key={m.code}
+                    type="button"
+                    // Prevents the browser's default mousedown behavior of
+                    // shifting focus onto this button -- without this, picking
+                    // a row removes the button from the DOM and focus bounces
+                    // back to the input above, whose onFocus reopens the
+                    // dropdown right away (see the effect above for the fuller
+                    // explanation). Keeping focus on the input the whole time
+                    // means there's no stray focus event to reopen it.
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      onChange(m.code);
+                      setQuery("");
+                      setOpen(false);
+                    }}
+                    className="block w-full truncate px-3 py-1.5 text-left text-xs text-ink hover:bg-surface-sunken"
+                  >
+                    <span className="font-medium">{m.code}</span> — {m.name}
+                    {m.unit_cost_recent !== null && (
+                      <span className="text-ink-muted"> (₹{m.unit_cost_recent.toFixed(2)})</span>
+                    )}
+                  </button>
+                )
+              )}
             </div>
           ))}
         </div>

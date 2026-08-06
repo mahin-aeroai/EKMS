@@ -601,6 +601,30 @@ export function BomMasterTab() {
     setAlternativesByLine((prev) => ({ ...prev, [lineId]: [...(prev[lineId] ?? []), data as BomTemplateLineAlternativeRow] }));
   }
 
+  // "can i have selection ticks so that i can do it at once" -- ticking
+  // several materials in the picker and adding them in one pass, instead of
+  // reopening/re-searching the dropdown after every single addAlternative
+  // call. ignoreDuplicates so re-ticking an already-added alternative (or a
+  // stray double-click) is a silent no-op, same as addAlternative's 23505
+  // handling above -- and .select() only returns the rows actually
+  // inserted, so local state doesn't end up with duplicate entries either.
+  async function addAlternatives(lineId: string, codes: string[]) {
+    const { data, error } = await supabase
+      .from("bom_template_line_alternatives")
+      .upsert(
+        codes.map((code) => ({ line_id: lineId, raw_material_code: code })),
+        { onConflict: "line_id,raw_material_code", ignoreDuplicates: true }
+      )
+      .select();
+    if (error) {
+      toast("danger", `Couldn't add alternatives: ${error.message}`);
+      return;
+    }
+    const inserted = (data ?? []) as BomTemplateLineAlternativeRow[];
+    if (inserted.length === 0) return;
+    setAlternativesByLine((prev) => ({ ...prev, [lineId]: [...(prev[lineId] ?? []), ...inserted] }));
+  }
+
   async function removeAlternative(lineId: string, altId: string) {
     const { error } = await supabase.from("bom_template_line_alternatives").delete().eq("id", altId);
     if (error) {
@@ -1063,6 +1087,8 @@ export function BomMasterTab() {
                                     // e.g. picking an alt for a Vinyl line surfaces
                                     // other Vinyl materials first, not Fixed Assets.
                                     preferredCategory={mappedMaterial?.category ?? null}
+                                    multiple
+                                    onAddMultiple={(codes) => addAlternatives(line.id, codes)}
                                   />
                                 </div>
                               </td>
