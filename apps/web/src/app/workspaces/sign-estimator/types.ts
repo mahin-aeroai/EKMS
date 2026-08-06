@@ -28,6 +28,13 @@ export interface ProfileSnapshot {
 
 export interface SheetSnapshot {
   name: string;
+  // Sheet colour as typed in for this job (e.g. "White", "Black", "RAL 9016")
+  // -- ACP/aluminium composite sheets come in many colours at the same
+  // price/size, so it's a per-job choice, not a property of the sheet
+  // master row. Required whenever a sheet is selected -- easy to forget,
+  // per the user's own experience, so the Estimator blocks moving past
+  // Step 3 with a sheet chosen but no colour typed in.
+  color: string;
   signSqFt: number;
   wastePct: number;
   chargeableSqFt: number;

@@ -669,9 +669,14 @@ export const DriverOpt = {
 
 // ═══════════════════════════════════════════════════════════
 //  ACCESSORY AUTO-QUANTITIES
-//  Ported from initAccs() -- auto-computes qty for the 4 "structural"
+//  Ported from initAccs() -- auto-computes qty for the "structural"
 //  accessory line items based on sign size/profile; anything else in the
 //  accessories master defaults to 0 until the user ticks it on.
+//  Wall Bracket is intentionally NOT auto-quantified (defaults to 0, same
+//  as any optional accessory) -- per the user's explicit request, since not
+//  every sign is wall-mounted and a nonzero default was silently adding a
+//  cost line to jobs that don't need it. Still fully editable/addable like
+//  any other accessory.
 // ═══════════════════════════════════════════════════════════
 export interface AccessoryLine {
   id: string;
@@ -690,7 +695,6 @@ export function computeAccessoryDefaults(wMM: number, hMM: number, stockLen: num
   const needJoin = wMM > stockLen || hMM > stockLen;
   const flatJ = needJoin ? Math.ceil((wMM + hMM) / 2 / stockLen) : 0;
   const screws = corners * 4 + flatJ * 2;
-  const brackets = Math.max(2, Math.ceil((wMM + hMM) / 1000 / 0.8));
 
   // Mapped by position in the master list the same way the original mapped
   // by fixed ids (ac1..ac4) -- Corner Joiner, Flat Joiner, Screw, Bracket.
@@ -701,7 +705,9 @@ export function computeAccessoryDefaults(wMM: number, hMM: number, stockLen: num
     if (n.includes("corner")) return corners;
     if (n.includes("flat joiner")) return flatJ;
     if (n.includes("screw")) return screws;
-    if (n.includes("bracket")) return brackets;
+    // Wall Bracket: no auto-quantity -- defaults to 0, see header note
+    // above. Left out of this dispatch on purpose so it falls through to
+    // the final `return 0`, same as any other non-structural accessory.
     // Cable defaults, matched space-insensitively so "2 Pair Cable" and
     // "2Pair Cable" both hit -- these are flat per-job defaults (not
     // derived from sign dimensions the way brackets/screws are), still
