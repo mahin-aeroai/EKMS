@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Printer, Pencil, X } from "lucide-react";
+import { Download, Pencil, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
 import type { SignEstimateRow } from "@mmdi/shared/rows";
 import { fmtRupee, computePricing } from "@mmdi/shared/sign-estimator/calc";
+import { generateSignEstimatorPdf, downloadBlob } from "@/lib/signEstimator/pdf";
 import type { EstimateSnapshot } from "./types";
 
 // Re-renders a saved estimate's cost sheet from its stored `calc` JSON
@@ -40,6 +41,7 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
   const [eDiscountPct, setEDiscountPct] = useState(0);
   const [eGstPct, setEGstPct] = useState(0);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     const query = estimateRef
@@ -148,6 +150,25 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
     toast("success", "Pricing updated");
   }
 
+  // "Instead of print pdf give download pdf" -- window.print() just opened
+  // the browser's print dialog and made the user manually choose "Save as
+  // PDF" as a destination. This builds and downloads a real .pdf file
+  // directly, same one-click pattern as Import Duty/Material Ordering's own
+  // "Download PDF" buttons (see @/lib/signEstimator/pdf.ts).
+  async function downloadPdf() {
+    if (!row) return;
+    setDownloading(true);
+    try {
+      const blob = await generateSignEstimatorPdf({ ref: row.ref, createdAt: row.created_at, client: row.client, calc: c });
+      downloadBlob(blob, `${row.ref}.pdf`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Couldn't build this PDF";
+      toast("danger", message);
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   return (
     <div>
       <div className="mb-4 flex justify-end gap-2 print:hidden">
@@ -156,8 +177,8 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
             <Pencil size={14} /> Edit Pricing
           </Button>
         )}
-        <Button variant="secondary" onClick={() => window.print()}>
-          <Printer size={14} /> Print / PDF
+        <Button variant="secondary" onClick={downloadPdf} loading={downloading}>
+          <Download size={14} /> Download PDF
         </Button>
       </div>
 
