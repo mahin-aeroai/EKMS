@@ -4,6 +4,70 @@ import { useMemo, useState } from "react";
 import { X } from "lucide-react";
 import type { RawMaterialRow } from "@mmdi/shared/rows";
 
+// raw_materials.category is a real mess -- confirmed via a live audit query
+// (58 distinct category strings across ~1,558 rows): old Tally-style ALL
+// CAPS buckets ("RM - BACKLIT SIGNAGE MATERIALS", 436 rows) sit alongside
+// the newer Raw Materials.xlsx taxonomy ("Backlit Flex", only 8 rows) that
+// only ever got applied to a subset of codes -- so e.g. RM-12002..12005
+// ("3M/LG/JINDAL/QSTAR BACKLIT FLEX") never got migrated off the old bucket
+// and don't group with RM-12001/12006 in the picker even though they're
+// obviously the same product family. Per the user's own review of that
+// audit: merge the known old<->new pairs below (UI-only, database
+// untouched -- confirmed with real material names, not guessed) so they at
+// least group together here; anything not in this list just keeps showing
+// under its own literal category rather than risk a wrong guess.
+const CATEGORY_ALIASES: Record<string, string> = {
+  "rm - rigid materials": "Rigid Materials",
+  "rigid materials": "Rigid Materials",
+  "rm - backlit materials": "Backlit Flex",
+  "rm - backlit signage materials": "Backlit Flex",
+  "rm - soft signage backlit materials": "Backlit Flex",
+  "backlit flex": "Backlit Flex",
+  "rm - paper materials": "Paper",
+  paper: "Paper",
+  "rm - soft signage frontlit materials": "Frontlit Flex",
+  "frontlit flex": "Frontlit Flex",
+  "rm - dye sub textile materials": "Dye Sub Fabrics",
+  "dye sub fabrics": "Dye Sub Fabrics",
+};
+
+// Categories confirmed (per the same audit, and the user's own call on each)
+// to not be pickable raw materials at all: Fixed Assets/Spare Parts/General
+// Services aren't production materials; "SI - Margins" and "Flag Costing
+// (placeholder)" are pricing scratch rows, not materials; the "FG - ...
+// Applications" categories and "BPCL Signages"/"...Soft Signs" are Finished
+// Goods product-type labels, not raw materials -- these are exactly what
+// showed up as junk ("FG - 41004 -- BACKLIT SIGNAGES" etc.) in the picker.
+// "General Items" (739 rows, ~half the table) is hidden too per the user's
+// own choice, even though some of it may be legitimate -- those materials
+// need a real category before they're pickable here again.
+const EXCLUDED_CATEGORIES = new Set(
+  [
+    "GENERAL ITEMS",
+    "FIXED ASSETS",
+    "GENERAL SERVICES",
+    "SPARE PARTS FOR MACHINARY",
+    "SI - MARGINS",
+    "Flag Costing (placeholder)",
+    "FG - PAPER APPLICATIONS",
+    "FG - ADHESIVE APPLICATIONS",
+    "FG - RIGID BOARDS APPLICATIONS",
+    "FG - TEXTILE APPLICATIONS",
+    "FG - NONLIT APPLICATIONS",
+    "FG - BACKLIT APPLICATIONS",
+    "FG - FURNITURE",
+    "BPCL SIGNAGES",
+    "BACKLIT SOFT SIGNS",
+    "NONLIT SOFT SIGNS",
+  ].map((c) => c.toLowerCase())
+);
+
+function canonicalCategory(raw: string | null | undefined): string {
+  const trimmed = raw?.trim();
+  if (!trimmed) return "Uncategorized";
+  return CATEGORY_ALIASES[trimmed.toLowerCase()] ?? trimmed;
+}
+
 // Lightweight client-side-filtered picker for mapping a BOM line to a real
 // raw_materials.code. A full async ContactPicker-style search (see
 // components/ui/ContactPicker.tsx) queries Supabase per keystroke -- not
@@ -35,14 +99,19 @@ export function RawMaterialPicker({
   // Goods reference codes (e.g. "FG - 41004 -- BACKLIT SIGNAGES"), not raw
   // materials at all -- these were meant for inventory_skus, judging by
   // import-finished-goods.sql using the exact same "FG - 41004" code/name
-  // pairs. They're the "general items" the user kept seeing at the top of
-  // the picker. Real raw material codes (including the legitimately mixed
+  // pairs. Real raw material codes (including the legitimately mixed
   // RM-/FG-/GE- prefixes from the original Tally import, e.g. "FG-13300",
   // "GE-23096") never have a space on both sides of the dash -- only this
-  // contaminated batch does ("FG - 41004" vs "FG-13300") -- so that's a
-  // safe, precise signature to filter out here without hiding any real
-  // material that happens to share an FG/GE prefix.
-  const usable = useMemo(() => materials.filter((m) => !/\s-\s/.test(m.code)), [materials]);
+  // contaminated batch does ("FG - 41004" vs "FG-13300") -- a precise
+  // signature to drop the junk without hiding any real material. Combined
+  // with the category exclusions above (which also catch same-batch rows
+  // that happen not to have the spaced dash, e.g. "FG-41123").
+  const usable = useMemo(
+    () => materials.filter((m) => !/\s-\s/.test(m.code) && !EXCLUDED_CATEGORIES.has((m.category?.trim() || "").toLowerCase())),
+    [materials]
+  );
+
+  const preferredCanonical = preferredCategory ? canonicalCategory(preferredCategory) : null;
 
   // Only the empty-query "browse" view is capped -- a real search should
   // never silently hide the one item you typed for. 1,558 raw materials
@@ -53,43 +122,45 @@ export function RawMaterialPicker({
   //
   // preferredCategory's items are pulled out and kept in full BEFORE the
   // cap is applied (not just sorted-first afterwards) -- otherwise, on a
-  // line whose category has items than sort late among 1,558 codes, the
+  // line whose category has items that sort late among 1,558 codes, the
   // very items you actually want could be squeezed out of the first 200
   // entirely, matching the "some materials only show up if I search by
-  // number" complaint.
+  // number" complaint. Matched via canonicalCategory so old-Tally and
+  // new-taxonomy duplicates of the same category (see CATEGORY_ALIASES
+  // above) are treated as one.
   const matches = useMemo(() => {
     if (query.trim()) {
       const q = query.toLowerCase();
       return usable.filter((m) => m.code.toLowerCase().includes(q) || m.name.toLowerCase().includes(q));
     }
-    if (!preferredCategory) return usable.slice(0, 200);
-    const preferred = usable.filter((m) => (m.category?.trim() || "Uncategorized") === preferredCategory);
-    const rest = usable.filter((m) => (m.category?.trim() || "Uncategorized") !== preferredCategory);
+    if (!preferredCanonical) return usable.slice(0, 200);
+    const preferred = usable.filter((m) => canonicalCategory(m.category) === preferredCanonical);
+    const rest = usable.filter((m) => canonicalCategory(m.category) !== preferredCanonical);
     return [...preferred, ...rest.slice(0, Math.max(0, 200 - preferred.length))];
-  }, [usable, query, preferredCategory]);
+  }, [usable, query, preferredCanonical]);
 
-  // Grouped by category (the categories from Raw Materials.xlsx --
-  // Accessories, Flags, Vinyl, etc.) so a long result list is scannable
-  // instead of one flat block. preferredCategory (when given) sorts first;
-  // "Uncategorized" always sorts last; everything else alphabetically.
+  // Grouped by category (canonicalized -- see CATEGORY_ALIASES above) so a
+  // long result list is scannable instead of one flat block.
+  // preferredCategory (when given) sorts first; "Uncategorized" always
+  // sorts last; everything else alphabetically.
   const grouped = useMemo(() => {
     const byCategory = new Map<string, RawMaterialRow[]>();
     for (const m of matches) {
-      const cat = m.category?.trim() || "Uncategorized";
+      const cat = canonicalCategory(m.category);
       const list = byCategory.get(cat) ?? [];
       list.push(m);
       byCategory.set(cat, list);
     }
     return [...byCategory.entries()].sort(([a], [b]) => {
-      if (preferredCategory) {
-        if (a === preferredCategory && b !== preferredCategory) return -1;
-        if (b === preferredCategory && a !== preferredCategory) return 1;
+      if (preferredCanonical) {
+        if (a === preferredCanonical && b !== preferredCanonical) return -1;
+        if (b === preferredCanonical && a !== preferredCanonical) return 1;
       }
       if (a === "Uncategorized") return 1;
       if (b === "Uncategorized") return -1;
       return a.localeCompare(b);
     });
-  }, [matches, preferredCategory]);
+  }, [matches, preferredCanonical]);
 
   if (selected) {
     return (
