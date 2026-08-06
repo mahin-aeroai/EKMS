@@ -31,17 +31,42 @@ export function RawMaterialPicker({
 
   const selected = value ? materials.find((m) => m.code === value) ?? null : null;
 
+  // raw_materials has picked up a batch of rows that are really Finished
+  // Goods reference codes (e.g. "FG - 41004 -- BACKLIT SIGNAGES"), not raw
+  // materials at all -- these were meant for inventory_skus, judging by
+  // import-finished-goods.sql using the exact same "FG - 41004" code/name
+  // pairs. They're the "general items" the user kept seeing at the top of
+  // the picker. Real raw material codes (including the legitimately mixed
+  // RM-/FG-/GE- prefixes from the original Tally import, e.g. "FG-13300",
+  // "GE-23096") never have a space on both sides of the dash -- only this
+  // contaminated batch does ("FG - 41004" vs "FG-13300") -- so that's a
+  // safe, precise signature to filter out here without hiding any real
+  // material that happens to share an FG/GE prefix.
+  const usable = useMemo(() => materials.filter((m) => !/\s-\s/.test(m.code)), [materials]);
+
   // Only the empty-query "browse" view is capped -- a real search should
   // never silently hide the one item you typed for. 1,558 raw materials
   // filtered down by a search term is small enough to render in full; the
   // uncapped default browse list (with 1,558 rows, category-grouped and
   // sorted with preferredCategory first) stays perfectly usable too, but a
   // cap there keeps the very first paint light before you've typed anything.
+  //
+  // preferredCategory's items are pulled out and kept in full BEFORE the
+  // cap is applied (not just sorted-first afterwards) -- otherwise, on a
+  // line whose category has items than sort late among 1,558 codes, the
+  // very items you actually want could be squeezed out of the first 200
+  // entirely, matching the "some materials only show up if I search by
+  // number" complaint.
   const matches = useMemo(() => {
-    if (!query.trim()) return materials.slice(0, 200);
-    const q = query.toLowerCase();
-    return materials.filter((m) => m.code.toLowerCase().includes(q) || m.name.toLowerCase().includes(q));
-  }, [materials, query]);
+    if (query.trim()) {
+      const q = query.toLowerCase();
+      return usable.filter((m) => m.code.toLowerCase().includes(q) || m.name.toLowerCase().includes(q));
+    }
+    if (!preferredCategory) return usable.slice(0, 200);
+    const preferred = usable.filter((m) => (m.category?.trim() || "Uncategorized") === preferredCategory);
+    const rest = usable.filter((m) => (m.category?.trim() || "Uncategorized") !== preferredCategory);
+    return [...preferred, ...rest.slice(0, Math.max(0, 200 - preferred.length))];
+  }, [usable, query, preferredCategory]);
 
   // Grouped by category (the categories from Raw Materials.xlsx --
   // Accessories, Flags, Vinyl, etc.) so a long result list is scannable
