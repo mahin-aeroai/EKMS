@@ -209,7 +209,7 @@ export function CostSheetTab({ estimateRef }: { estimateRef: string | null }) {
                   label="Backing Sheet"
                   detail={
                     <>
-                      <div>{c.sheet.name}</div>
+                      <div>{c.sheet.name}{c.sheet.color && c.sheet.color !== "—" ? ` — ${c.sheet.color}` : ""}</div>
                       <div>₹{c.sheet.costPerSqFt}/sq.ft × {c.sheet.chargeableSqFt} sq.ft chargeable ({c.sheet.wastePct}% waste)</div>
                     </>
                   }

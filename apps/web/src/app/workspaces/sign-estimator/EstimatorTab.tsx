@@ -54,6 +54,7 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
 
   // ── Step 3 ──
   const [sheetId, setSheetId] = useState("");
+  const [sheetColor, setSheetColor] = useState("");
   const [sheetWaste, setSheetWaste] = useState<number | "">("");
   const [sheetCost, setSheetCost] = useState<number | "">("");
   // Accessory quantities/costs are DERIVED (via useMemo below) from the
@@ -208,16 +209,32 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
     const cuts = [wMM, wMM, hMM, hMM];
     // Labelled per-member (not just a flat [w,w,h,h] array) so the cutting
     // diagram below can colour Width cuts differently from Height cuts.
-    const members = [
-      { length: wMM, label: "Width 1" },
-      { length: wMM, label: "Width 2" },
-      { length: hMM, label: "Height 1" },
-      { length: hMM, label: "Height 2" },
-    ];
+    //
+    // Built for ALL `qty` copies of the frame, not just one -- previously
+    // this only ever planned a single unit's 4 pieces, so CutOpt.packMembers
+    // had no idea a 2nd/3rd unit even existed and could never nest its cuts
+    // into the first unit's leftover offcut, even when there was clearly
+    // enough of it left (e.g. a 2.10m frame leaves 2.90m on a 5m bar --
+    // easily enough for a 2nd 2.10m frame, but a per-unit-only plan just
+    // shows that 2.90m as unused "Reusable Offcut" and opens a fresh bar
+    // for unit 2 anyway). Bin-packing the whole qty together lets the
+    // existing best-fit/offcut-reuse logic in planFabrication() do this
+    // correctly, exactly like it already does for a single sign's Width 1
+    // vs Width 2 vs Height 1 vs Height 2.
+    const members: { length: number; label: string }[] = [];
+    for (let unit = 1; unit <= qty; unit++) {
+      const suffix = qty > 1 ? ` (unit ${unit}/${qty})` : "";
+      members.push(
+        { length: wMM, label: `Width 1${suffix}` },
+        { length: wMM, label: `Width 2${suffix}` },
+        { length: hMM, label: `Height 1${suffix}` },
+        { length: hMM, label: `Height 2${suffix}` }
+      );
+    }
     const bins = CutOpt.packMembers(members, profile.stock_len);
     const analysis = CutOpt.analyse(bins, profile.stock_len, profile.cost);
     return { bins, analysis, cuts };
-  }, [profile, wMM, hMM]);
+  }, [profile, wMM, hMM, qty]);
 
   const sheet = masters?.sheets.find((s) => s.id === sheetId) ?? null;
   const sheetResult = useMemo(() => {
@@ -320,7 +337,14 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
   const pricing = useMemo(() => {
     return computePricing(
       {
-        profCost: profResult?.analysis.totalCost ?? 0,
+        // profResult.analysis.totalCost is now the TOTAL profile cost for
+        // the whole qty order (see profResult's own comment) -- every other
+        // cost component here (sheet/acc/led/driver) is still a PER-SIGN
+        // figure that computePricing multiplies by qty itself
+        // (costAll = costPer * qty), so divide back down to the per-sign
+        // equivalent here rather than letting the whole-order total get
+        // multiplied by qty a second time.
+        profCost: profResult ? profResult.analysis.totalCost / qty : 0,
         sheetCost: sheetResult?.chargedCost ?? 0,
         accCost,
         ledCost,
@@ -341,6 +365,10 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
   function goStep(n: number) {
     if (n >= 2 && !category) { toast("danger", "Select a sign category first."); return; }
     if (n >= 3 && (!wMM || !hMM)) { toast("danger", "Enter width and height first."); return; }
+    // Sheet colour is easy to forget (per the user's own experience) --
+    // once a Sheet Material is picked, block leaving Step 3 until a colour
+    // is typed in, same pattern as the width/height guard above.
+    if (n >= 4 && sheetId && !sheetColor.trim()) { toast("danger", "Enter the backing sheet color first."); return; }
     setStep(n);
   }
 
@@ -361,7 +389,7 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
         scrapCost: Math.round(profResult.analysis.scrapCost), cost: Math.round(profResult.analysis.totalCost),
       } : null,
       sheet: sheet && sheetResult ? {
-        name: sheet.name, signSqFt: sheetResult.sigSqFt, wastePct: sheetResult.wPct,
+        name: sheet.name, color: sheetColor.trim() || "—", signSqFt: sheetResult.sigSqFt, wastePct: sheetResult.wPct,
         chargeableSqFt: sheetResult.chargeable, costPerSqFt: sheetResult.cpSqFt, cost: sheetResult.chargedCost,
       } : null,
       accessories: accessories.filter((a) => a.qty > 0).map((a) => ({
@@ -624,6 +652,12 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
         <div className="space-y-4">
           <section>
             <h3 className="mb-1.5 text-sm font-semibold text-ink">Profile Costing (Fabrication-Planned)</h3>
+            {qty > 1 && (
+              <p className="mb-1.5 text-xs text-ink-muted">
+                Nested across all {qty} signs on this job — later units reuse an earlier bar&apos;s leftover wherever it fits,
+                instead of each one opening a fresh bar.
+              </p>
+            )}
             {!profile ? (
               <Alert>No profile selected — go back to Step 1.</Alert>
             ) : profResult ? (
@@ -651,7 +685,9 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
                     </tbody>
                   </table>
                 </div>
-                <p className="mt-2 text-sm font-medium text-ink">Profile total: {fmtRupee(profResult.analysis.totalCost)}</p>
+                <p className="mt-2 text-sm font-medium text-ink">
+                  Profile total{qty > 1 ? ` (all ${qty} signs)` : ""}: {fmtRupee(profResult.analysis.totalCost)}
+                </p>
                 <CuttingDiagram bins={profResult.bins} stockLen={profile.stock_len} />
               </div>
             ) : (
@@ -662,6 +698,19 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
           <section>
             <h3 className="mb-2 text-sm font-semibold text-ink">Backing Sheet</h3>
             <SelectField label="Sheet Material" value={sheetId} onChange={setSheetId} options={(masters.sheets ?? []).map((s) => ({ value: s.id, label: `${s.name} (${s.width}×${s.height}mm · ₹${s.cost_per_sheet}/sheet)` }))} />
+            {sheetId && (
+              <div className="mt-3">
+                <TextField
+                  label="Sheet Color *"
+                  value={sheetColor}
+                  onChange={setSheetColor}
+                  placeholder="e.g. White, Black, Silver, RAL 9016"
+                />
+                {!sheetColor.trim() && (
+                  <p className="mt-1 text-xs text-danger">Required — easy to forget, so this blocks moving past this step until it&apos;s filled in.</p>
+                )}
+              </div>
+            )}
             {sheetId && (
               <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <NumberField label="Wastage % Override" value={sheetWaste} onChange={setSheetWaste} />
@@ -925,6 +974,7 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
                         <div>
                           {sheet.name}
                           {sheet.thickness ? ` (${sheet.thickness}mm)` : ""}
+                          {sheetColor.trim() ? ` — ${sheetColor.trim()}` : ""}
                         </div>
                         <div>
                           ₹{sheetResult.cpSqFt}/sq.ft × {sheetResult.chargeable.toFixed(2)} sq.ft chargeable
@@ -1128,11 +1178,11 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
 // information" -- h-8 inputs and tight label spacing instead of h-10, same
 // pattern Cost Sheet Calc already uses, applied here across every step
 // since these four are shared by the whole wizard.
-function TextField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+function TextField({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
   return (
     <div>
       <label className="mb-0.5 block text-xs font-medium text-ink-secondary">{label}</label>
-      <input type="text" value={value} onChange={(e) => onChange(e.target.value)}
+      <input type="text" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
         className="h-8 w-full rounded-md border border-line-strong bg-surface px-2.5 text-sm text-ink outline-none" />
     </div>
   );
