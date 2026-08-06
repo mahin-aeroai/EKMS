@@ -488,7 +488,17 @@ export function CostSheetCalcTab() {
                             ? `${defaultMaterial.code} — ${defaultMaterial.name} — ${priceLabel(defaultMaterial)} (default)`
                             : "— unmapped (default) —",
                         });
+                        // "The selection is duplicate" -- some lines had
+                        // their current default material also saved as one
+                        // of its own alternatives (usually from before it
+                        // was promoted to the default), so it showed up
+                        // twice: once as "(default)", once plain. A
+                        // material can't be its own alternative, so skip
+                        // any alt that matches the default here too --
+                        // belt-and-braces alongside the fix at the source
+                        // in BomMasterTab (addAlternative/mapLineToMaterial).
                         for (const alt of alts) {
+                          if (alt.raw_material_code === originalLine?.raw_material_code) continue;
                           const m = materialsByCode.get(alt.raw_material_code);
                           options.push({
                             code: alt.raw_material_code,

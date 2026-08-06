@@ -198,6 +198,17 @@ export function BomMasterTab() {
   function mapLineToMaterial(templateId: string, line: BomTemplateLineRow, code: string | null) {
     const material = code ? materialsByCode.get(code) ?? null : null;
     void updateLine(templateId, line, { raw_material_code: code, material_category: material?.category ?? null });
+    // "The selection is duplicate" -- if the code just made the default
+    // mapping was already sitting in this line's alternatives (e.g. it
+    // used to be an alternative before someone promoted it to the main
+    // mapping), the Cost Sheet tab's Mapped-to dropdown showed it twice --
+    // once as "(default)", once plain. A material can't be its own
+    // alternative, so drop it from the alternatives list the moment it
+    // becomes the default.
+    if (code) {
+      const dupeAlt = (alternativesByLine[line.id] ?? []).find((a) => a.raw_material_code === code);
+      if (dupeAlt) void removeAlternative(line.id, dupeAlt.id);
+    }
   }
 
   // "Add material" builds the BOM by hand, line by line, instead of
@@ -588,6 +599,16 @@ export function BomMasterTab() {
   // fulfilling the same "RSD Flex 340GSM" line) the Cost Sheet tab can
   // offer as a per-job choice.
   async function addAlternative(lineId: string, code: string) {
+    // A material can't be its own alternative -- without this, picking the
+    // line's current default out of the "+ alternative material" picker
+    // (easy to do since it's still listed there) made it show up twice on
+    // the Cost Sheet tab's Mapped-to dropdown: once as "(default)", once
+    // plain. See the matching check in mapLineToMaterial for the reverse
+    // direction (promoting an existing alternative to the default).
+    const currentDefault = Object.values(linesByTemplate)
+      .flat()
+      .find((l) => l.id === lineId)?.raw_material_code;
+    if (code === currentDefault) return;
     const { data, error } = await supabase
       .from("bom_template_line_alternatives")
       .insert({ line_id: lineId, raw_material_code: code })
@@ -609,10 +630,18 @@ export function BomMasterTab() {
   // handling above -- and .select() only returns the rows actually
   // inserted, so local state doesn't end up with duplicate entries either.
   async function addAlternatives(lineId: string, codes: string[]) {
+    // Same "can't be its own alternative" guard as addAlternative above --
+    // ticking the line's current default among several checked boxes
+    // shouldn't add a duplicate entry of it.
+    const currentDefault = Object.values(linesByTemplate)
+      .flat()
+      .find((l) => l.id === lineId)?.raw_material_code;
+    const filteredCodes = codes.filter((code) => code !== currentDefault);
+    if (filteredCodes.length === 0) return;
     const { data, error } = await supabase
       .from("bom_template_line_alternatives")
       .upsert(
-        codes.map((code) => ({ line_id: lineId, raw_material_code: code })),
+        filteredCodes.map((code) => ({ line_id: lineId, raw_material_code: code })),
         { onConflict: "line_id,raw_material_code", ignoreDuplicates: true }
       )
       .select();
