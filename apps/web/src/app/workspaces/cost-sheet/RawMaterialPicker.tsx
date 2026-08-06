@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import type { RawMaterialRow } from "@mmdi/shared/rows";
 
@@ -92,6 +92,35 @@ export function RawMaterialPicker({
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // "Once i start selecting materials when i end up i can't close the
+  // selection box" -- picking a row removes that button from the DOM (the
+  // list re-renders), which the browser handles by shifting focus back onto
+  // the still-visible search input right above it. That refocus fired the
+  // input's own onFocus handler, which immediately reopened the dropdown --
+  // so closing it by picking something (or clicking away) looked like it
+  // never actually closed. Two fixes: close on any click outside this
+  // component (a real close path independent of focus), and Escape to
+  // close -- both standard for a custom dropdown that isn't a native
+  // <select>.
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
 
   const selected = value ? materials.find((m) => m.code === value) ?? null : null;
 
@@ -181,7 +210,7 @@ export function RawMaterialPicker({
   }
 
   return (
-    <div className="relative">
+    <div className="relative" ref={containerRef}>
       <input
         type="text"
         value={query}
@@ -195,16 +224,35 @@ export function RawMaterialPicker({
       />
       {open && (
         <div className="absolute z-10 mt-1 max-h-80 w-96 overflow-y-auto rounded-md border border-line-strong bg-surface shadow-2">
+          <div className="sticky top-0 z-10 flex justify-end border-b border-line bg-surface px-1 py-1">
+            <button
+              type="button"
+              aria-label="Close"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setOpen(false)}
+              className="rounded p-0.5 text-ink-muted hover:bg-surface-sunken hover:text-ink"
+            >
+              <X size={14} />
+            </button>
+          </div>
           {matches.length === 0 && <div className="px-3 py-2 text-xs text-ink-muted">No matches</div>}
           {grouped.map(([category, items]) => (
             <div key={category}>
-              <div className="sticky top-0 bg-surface-sunken px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-ink-muted">
+              <div className="sticky top-6 bg-surface-sunken px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-ink-muted">
                 {category}
               </div>
               {items.map((m) => (
                 <button
                   key={m.code}
                   type="button"
+                  // Prevents the browser's default mousedown behavior of
+                  // shifting focus onto this button -- without this, picking
+                  // a row removes the button from the DOM and focus bounces
+                  // back to the input above, whose onFocus reopens the
+                  // dropdown right away (see the effect above for the fuller
+                  // explanation). Keeping focus on the input the whole time
+                  // means there's no stray focus event to reopen it.
+                  onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
                     onChange(m.code);
                     setQuery("");
