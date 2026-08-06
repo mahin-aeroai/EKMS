@@ -958,13 +958,23 @@ export function EstimatorTab({ onSaved }: { onSaved?: () => void }) {
                         <div>
                           {(profile.stock_len / 1000).toFixed(2)}m stock bar @ {fmtRupee(profile.cost)}/bar (₹{profRatePerRFT.toFixed(2)}/RFT
                           {" · "}₹{profRatePerRM.toFixed(2)}/RM) — {profResult.analysis.totalBars} bar(s), {(profResult.analysis.totalUsed / 304.8).toFixed(1)} RFT used
+                          {qty > 1 ? ` (nested across all ${qty} signs — ${fmtRupee(profResult.analysis.totalCost)} total)` : ""}
                         </div>
                       </>
                     ) : (
                       ""
                     )
                   }
-                  value={fmtRupee(profResult?.analysis.totalCost ?? 0)}
+                  // profResult.analysis.totalCost is the WHOLE-ORDER nested
+                  // total (all qty signs combined -- see the profCost comment
+                  // in the pricing useMemo below), but every other row in
+                  // this section is a per-sign figure and "Raw Material Cost
+                  // -- Signage (per sign)" below sums them all as per-sign --
+                  // divide by qty here so this row doesn't look inflated
+                  // next to Backing Sheet/Accessories/LED and so the section
+                  // actually adds up to that per-sign total. The whole-order
+                  // total is still shown in the detail line above when qty > 1.
+                  value={fmtRupee(profResult ? profResult.analysis.totalCost / qty : 0)}
                 />
                 <Row
                   label="Backing Sheet"
