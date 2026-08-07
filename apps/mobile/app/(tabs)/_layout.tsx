@@ -4,11 +4,23 @@ import { useColorScheme } from "react-native";
 import { themes } from "@mmdi/shared/theme";
 
 /**
- * Five tabs. Installation report *capture* lives here (Reports tab + the
- * report/[id] wizard outside this group); PDF *generation* stays on the web
- * app (depends on pdf-lib + canvas, out of scope for native) -- see plan
- * section 5, not built yet. A submitted report is reviewed and turned into a
- * PDF from the web tool once section 5 lands.
+ * "remove documents, and rename reports as Basil Installtions and add ...
+ * sales by rep" -- Documents dropped entirely (documents.tsx deleted, not
+ * just unlisted here); the installation-report tab keeps its route name
+ * (reports.tsx / report/[id]) but now shows as "Basil Installations" in the
+ * tab bar and native header, since renaming the route itself would touch
+ * every router.push("/report/...") call for no real benefit. Installation
+ * report *capture* lives here; PDF *generation* stays on the web app
+ * (depends on pdf-lib + canvas, out of scope for native) -- see plan
+ * section 5, not built yet.
+ *
+ * Sales by Rep is the first of several "Tools"-section web workspaces being
+ * ported natively -- Estimate Builder and Cost Sheet are next (queued
+ * separately, each is a real native build in its own right, not a quick
+ * add) per the user's own sequencing call. Five tabs total still fits
+ * directly in the tab bar (iOS shows up to 5 before needing a "More"
+ * overflow tab) -- revisit this file's structure once Estimate Builder and
+ * Cost Sheet bring the count to 7.
  *
  * SF Symbols via expo-symbols rather than an icon font: they align to the text
  * baseline, respond to weight, and pick the right optical size automatically.
@@ -60,17 +72,17 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="documents"
+        name="reports"
         options={{
-          title: "Documents",
-          tabBarIcon: ({ color }) => <SymbolView name="folder" tintColor={color} size={26} />,
+          title: "Basil Installations",
+          tabBarIcon: ({ color }) => <SymbolView name="list.clipboard" tintColor={color} size={26} />,
         }}
       />
       <Tabs.Screen
-        name="reports"
+        name="sales-by-rep"
         options={{
-          title: "Reports",
-          tabBarIcon: ({ color }) => <SymbolView name="list.clipboard" tintColor={color} size={26} />,
+          title: "Sales by Rep",
+          tabBarIcon: ({ color }) => <SymbolView name="chart.line.uptrend.xyaxis" tintColor={color} size={26} />,
         }}
       />
     </Tabs>
