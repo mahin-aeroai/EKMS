@@ -300,6 +300,16 @@ export default function EstimatorScreen() {
   const printSell = printSellOverride === "" ? printSellDefault : printSellOverride;
 
   const pricing = useMemo(() => {
+    // computePricing's signature grew two params since this call site was
+    // first written (signageSellOverrideTotal, for the web app's sqft-basis
+    // signage pricing, and shippingTotal) -- neither has a mobile UI yet, so
+    // they're passed as "no override"/0 rather than silently shifting every
+    // later positional arg down by one, which is what was happening before
+    // (installSellTotal was landing in shippingTotal's slot and `p` was
+    // undefined, crashing every Estimate screen load with "Cannot read
+    // property 'overheadPct' of undefined"). See
+    // apps/web/.../EstimatorTab.tsx's own computePricing call for the full
+    // 7-arg shape this mirrors.
     return computePricing(
       {
         profCost: profResult?.analysis.totalCost ?? 0,
@@ -308,8 +318,10 @@ export default function EstimatorScreen() {
         ledCost,
         drvCost: driverFinal?.totalCost ?? 0,
       },
+      null,
       printResult?.printCost ?? 0,
       printSell,
+      0,
       numOr0(install),
       { qty, labour: numOr0(labour), overheadPct: numOr0(overheadPct), markupPct: numOr0(markupPct), discountPct: numOr0(discountPct), gstPct: numOr0(gstPct) }
     );
