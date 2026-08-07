@@ -16,10 +16,20 @@ import { vibrant } from "../../theme/vibrant";
  * Sales by Rep is the first of several "Tools"-section web workspaces being
  * ported natively -- Estimate Builder and Cost Sheet are next (queued
  * separately, each is a real native build in its own right, not a quick
- * add) per the user's own sequencing call. Five tabs total still fits
- * directly in the tab bar (iOS shows up to 5 before needing a "More"
+ * add) per the user's own sequencing call. Five *visible* tabs total still
+ * fits directly in the tab bar (iOS shows up to 5 before needing a "More"
  * overflow tab) -- revisit this file's structure once Estimate Builder and
  * Cost Sheet bring the count to 7.
+ *
+ * "lets create a beautiful home page after login instead directly get into
+ * copilot" -- index.tsx is now a Home screen (greeting, quick actions,
+ * recent activity) instead of Copilot, since "index" is this group's
+ * default/landing route. Per the user's own call on where Copilot should
+ * live: Copilot moved to copilot.tsx and is reached from a hero
+ * quick-action card on Home, NOT from the tab bar -- `href: null` below
+ * keeps it a real, pushable route (router.push("/copilot")) while hiding
+ * its tab bar button, so the visible tab count stays at 5 (Home, Surveys,
+ * Estimate, Basil Installations, Sales by Rep) rather than growing to 6.
  *
  * SF Symbols via expo-symbols rather than an icon font: they align to the text
  * baseline, respond to weight, and pick the right optical size automatically.
@@ -55,10 +65,8 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: "Copilot",
-          tabBarIcon: ({ color }) => (
-            <SymbolView name="bubble.left.and.text.bubble.right" tintColor={color} size={26} />
-          ),
+          title: "Home",
+          tabBarIcon: ({ color }) => <SymbolView name="house.fill" tintColor={color} size={26} />,
         }}
       />
       <Tabs.Screen
@@ -87,6 +95,16 @@ export default function TabLayout() {
         options={{
           title: "Sales by Rep",
           tabBarIcon: ({ color }) => <SymbolView name="chart.line.uptrend.xyaxis" tintColor={color} size={26} />,
+        }}
+      />
+      <Tabs.Screen
+        name="copilot"
+        options={{
+          title: "Copilot",
+          // Hidden from the tab bar (see the file header comment) -- still
+          // a real route, reached via router.push("/copilot") from Home's
+          // hero quick-action card.
+          href: null,
         }}
       />
     </Tabs>
