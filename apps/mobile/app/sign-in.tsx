@@ -10,7 +10,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { vibrant, type VibrantTheme } from "../theme/vibrant";
+import { vibrant, fonts, type VibrantTheme } from "../theme/vibrant";
 import { GradientButton } from "../theme/components";
 import { useSession } from "@/context/auth";
 
@@ -93,7 +93,8 @@ const styles = (t: VibrantTheme) =>
     screen: { flex: 1, backgroundColor: t.surface, justifyContent: "center", padding: 24 },
     card: { gap: 12, alignItems: "stretch" },
     logo: { width: 64, height: 64, borderRadius: 16, alignSelf: "center", marginBottom: 4 },
-    heading: { fontSize: 28, fontWeight: "700", color: t.ink, textAlign: "center" },
+    // "use Lora serif font with very small size" -- was fontSize 28 sans.
+    heading: { fontSize: 18, fontFamily: fonts.serifBold, color: t.ink, textAlign: "center" },
     subheading: { fontSize: 15, color: t.inkSecondary, textAlign: "center", marginBottom: 16 },
     // Filled + colored border rather than a hairline on a near-white
     // background -- an input field should read as "the thing you type

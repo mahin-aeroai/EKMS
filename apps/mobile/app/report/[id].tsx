@@ -587,7 +587,7 @@ const styles = (t: VibrantTheme) =>
     contentInner: { padding: 16, gap: 20, paddingBottom: 32 },
 
     section: { gap: 16, padding: 18 },
-    sectionTitle: { fontSize: 12, fontFamily: fonts.bold, color: t.inkMuted, textTransform: "uppercase", letterSpacing: 0.4 },
+    sectionTitle: { fontSize: 11, fontFamily: fonts.serifBold, color: t.inkMuted, textTransform: "uppercase", letterSpacing: 0.4 },
 
     field: { gap: 6 },
     label: { fontSize: 12, fontFamily: fonts.medium, color: t.inkSecondary },

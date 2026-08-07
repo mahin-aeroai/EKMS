@@ -5,7 +5,7 @@ import { SymbolView } from "expo-symbols";
 import { supabase } from "../../lib/supabase";
 import { useSession } from "../../context/auth";
 import { listDrafts } from "../../lib/installationReports/draftStore";
-import { vibrant, type VibrantTheme } from "../../theme/vibrant";
+import { vibrant, fonts, type VibrantTheme } from "../../theme/vibrant";
 import { GradientCard, SoftCard } from "../../theme/components";
 
 /**
@@ -233,7 +233,9 @@ const styles = (t: VibrantTheme) =>
     content: { padding: 16, paddingBottom: 32, gap: 14 },
 
     greetRow: { flexDirection: "row", alignItems: "center", gap: 12 },
-    greeting: { fontSize: 26, fontWeight: "700", color: t.ink },
+    // "use Lora serif font with very small size" -- was fontSize 26 sans;
+    // now a small serif wordmark-style greeting instead of a big bold one.
+    greeting: { fontSize: 19, fontFamily: fonts.serifBold, color: t.ink },
     subGreeting: { fontSize: 15, color: t.inkSecondary, marginTop: -8 },
     logo: { width: 40, height: 40, borderRadius: 10 },
 
@@ -251,7 +253,7 @@ const styles = (t: VibrantTheme) =>
     statValue: { fontSize: 24, fontWeight: "700", color: t.ink },
     statLabel: { fontSize: 12, color: t.inkSecondary },
 
-    sectionTitle: { fontSize: 15, fontWeight: "600", color: t.ink, marginTop: 4 },
+    sectionTitle: { fontSize: 13, fontFamily: fonts.serifBold, color: t.ink, marginTop: 4 },
 
     grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
     gridItem: { flexBasis: "47%", flexGrow: 1 },

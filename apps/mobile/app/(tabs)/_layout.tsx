@@ -1,6 +1,6 @@
 import { Tabs } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { vibrant } from "../../theme/vibrant";
+import { vibrant, fonts } from "../../theme/vibrant";
 
 /**
  * "remove documents, and rename reports as Basil Installtions and add ...
@@ -47,18 +47,22 @@ export default function TabLayout() {
       screenOptions={{
         // Dark tab bar deliberately, even though every screen above it is
         // light -- matches the reference dashboard-kit exactly (its whole
-        // UI is light/card-forward except a solid dark bottom bar). Violet
-        // primary reads clearly against near-black; inactive icons use a
+        // UI is light/card-forward except a solid dark bottom bar). Brand
+        // red reads clearly against near-black; inactive icons use a
         // dedicated muted tone (tabBarInactive) rather than the light-mode
         // inkMuted, which is far too dark to read on this background.
         tabBarActiveTintColor: t.primary,
         tabBarInactiveTintColor: t.tabBarInactive,
+        // "use Lora serif font with very small size" -- applies to every
+        // tab's label via screenOptions rather than per-Tabs.Screen.
+        tabBarLabelStyle: { fontFamily: fonts.serif, fontSize: 10 },
         // Large titles are a native-stack-only feature (UINavigationController);
         // Tabs' header is a plain JS-drawn @react-navigation/elements Header
         // with no equivalent -- see the NativeTabs note above for the real
         // way to get native tab-bar/header behaviour.
         headerStyle: { backgroundColor: t.surface },
         headerTintColor: t.ink,
+        headerTitleStyle: { fontFamily: fonts.serifBold, fontSize: 16 },
         tabBarStyle: { backgroundColor: t.tabBarBg, borderTopColor: t.tabBarBg },
       }}
     >

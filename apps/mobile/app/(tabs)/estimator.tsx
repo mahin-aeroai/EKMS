@@ -1004,7 +1004,7 @@ const styles = (t: VibrantTheme) =>
     contentInner: { padding: 16, paddingBottom: 32, gap: 16 },
     stepGap: { gap: 16 },
 
-    sectionTitle: { fontSize: 15, fontFamily: fonts.bold, color: t.ink, marginTop: 4 },
+    sectionTitle: { fontSize: 13, fontFamily: fonts.serifBold, color: t.ink, marginTop: 4 },
     sectionLabel: { fontSize: 12, fontFamily: fonts.medium, color: t.inkSecondary, textTransform: "uppercase", letterSpacing: 0.3 },
     helperText: { fontSize: 12, fontFamily: fonts.regular, color: t.inkSecondary },
     totalLine: { fontSize: 14, fontFamily: fonts.bold, color: t.ink },
