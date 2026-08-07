@@ -14,11 +14,12 @@ import {
   Text,
   TextInput,
   View,
-  useColorScheme,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
-import { themes, radius, type Theme } from "@mmdi/shared/theme";
+import { radius } from "@mmdi/shared/theme";
+import { vibrant, fonts, type VibrantTheme } from "../../theme/vibrant";
+import { SoftCard, GradientButton } from "../../theme/components";
 import { supabase } from "@/lib/supabase";
 import { loadDraft, saveDraft } from "@/lib/installationReports/draftStore";
 import { capturePhoto, PhotoPermissionDeniedError } from "@/lib/installationReports/photo";
@@ -57,8 +58,7 @@ const SITE_PHOTO_LABELS: Record<SiteLevelKind, string> = {
 };
 
 export default function ReportScreen() {
-  const scheme = useColorScheme();
-  const t = themes[scheme === "dark" ? "dark" : "light"];
+  const t = vibrant;
   const s = styles(t);
   const headerHeight = useHeaderHeight();
   const router = useRouter();
@@ -356,7 +356,7 @@ export default function ReportScreen() {
           </View>
 
           {draft.sites.map((site, i) => (
-            <View key={site.id} style={s.siteCard}>
+            <SoftCard key={site.id} style={s.siteCard}>
               <View style={s.siteCardHead}>
                 <Text style={s.siteCardTitle}>Installation Site {i + 1}</Text>
                 {draft.sites.length > 1 && (
@@ -400,7 +400,7 @@ export default function ReportScreen() {
                   />
                 ))}
               </View>
-            </View>
+            </SoftCard>
           ))}
         </Section>
 
@@ -420,9 +420,12 @@ export default function ReportScreen() {
             {submitProgress.phase === "done" && "Done."}
           </Text>
         )}
-        <Pressable style={s.submitBtn} onPress={handleSubmit} disabled={submitting || !draft.storeName.trim()}>
-          {submitting ? <ActivityIndicator color={t.onBrand} /> : <Text style={s.submitBtnText}>Submit Report</Text>}
-        </Pressable>
+        <GradientButton
+          label="Submit Report"
+          onPress={handleSubmit}
+          loading={submitting}
+          disabled={!draft.storeName.trim()}
+        />
       </View>
     </KeyboardAvoidingView>
   );
@@ -430,17 +433,17 @@ export default function ReportScreen() {
 
 // ── Subcomponents ────────────────────────────────────────────────────────
 
-function Section({ t, title, children }: { t: Theme; title: string; children: React.ReactNode }) {
+function Section({ t, title, children }: { t: VibrantTheme; title: string; children: React.ReactNode }) {
   const s = styles(t);
   return (
-    <View style={s.section}>
+    <SoftCard style={s.section}>
       <Text style={s.sectionTitle}>{title}</Text>
       {children}
-    </View>
+    </SoftCard>
   );
 }
 
-function Field({ t, label, children }: { t: Theme; label: string; children: React.ReactNode }) {
+function Field({ t, label, children }: { t: VibrantTheme; label: string; children: React.ReactNode }) {
   const s = styles(t);
   return (
     <View style={s.field}>
@@ -450,7 +453,7 @@ function Field({ t, label, children }: { t: Theme; label: string; children: Reac
   );
 }
 
-function NumberField({ t, label, value, onChange, disabled }: { t: Theme; label: string; value: number | null; onChange: (v: number | null) => void; disabled?: boolean }) {
+function NumberField({ t, label, value, onChange, disabled }: { t: VibrantTheme; label: string; value: number | null; onChange: (v: number | null) => void; disabled?: boolean }) {
   const s = styles(t);
   const [text, setText] = useState(value === null ? "" : String(value));
   return (
@@ -476,7 +479,7 @@ function NumberField({ t, label, value, onChange, disabled }: { t: Theme; label:
 function PickerField({
   t, label, value, onChange, options, disabled,
 }: {
-  t: Theme; label: string; value: string; onChange: (v: string) => void; options: { value: string; label: string }[]; disabled?: boolean;
+  t: VibrantTheme; label: string; value: string; onChange: (v: string) => void; options: { value: string; label: string }[]; disabled?: boolean;
 }) {
   const s = styles(t);
   const [open, setOpen] = useState(false);
@@ -515,7 +518,7 @@ function PickerField({
 function PhotoSlot({
   t, label, photo, onPick, onRemove, disabled,
 }: {
-  t: Theme; label: string; photo: DraftPhoto | null; onPick: (source: "camera" | "library") => Promise<void>; onRemove: () => void; disabled?: boolean;
+  t: VibrantTheme; label: string; photo: DraftPhoto | null; onPick: (source: "camera" | "library") => Promise<void>; onRemove: () => void; disabled?: boolean;
 }) {
   const s = styles(t);
   const [open, setOpen] = useState(false);
@@ -574,77 +577,82 @@ function PhotoSlot({
   );
 }
 
-const styles = (t: Theme) =>
+const styles = (t: VibrantTheme) =>
   StyleSheet.create({
     screen: { flex: 1, backgroundColor: t.surface },
     centerFill: { flex: 1, alignItems: "center", justifyContent: "center" },
-    contentInner: { padding: 16, gap: 16, paddingBottom: 32 },
+    // "Installation report too looks cluster. make it spacious" -- was 16px
+    // section gap / 12-14px internal gaps throughout; both widened so each
+    // section and field reads as its own thing instead of running together.
+    contentInner: { padding: 16, gap: 20, paddingBottom: 32 },
 
-    section: { gap: 12, borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: t.line, padding: 14 },
-    sectionTitle: { fontSize: 13, fontWeight: "600", color: t.inkMuted, textTransform: "uppercase", letterSpacing: 0.3 },
+    section: { gap: 16, padding: 18 },
+    sectionTitle: { fontSize: 12, fontFamily: fonts.bold, color: t.inkMuted, textTransform: "uppercase", letterSpacing: 0.4 },
 
     field: { gap: 6 },
-    label: { fontSize: 13, fontWeight: "500", color: t.inkSecondary },
+    label: { fontSize: 12, fontFamily: fonts.medium, color: t.inkSecondary },
+    // Same "highlite input boxes" treatment as Sign Costing -- a filled,
+    // colored-border field reads as "type here", distinct from labels and
+    // static rows around it.
     input: {
-      minHeight: 44, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, borderColor: t.line,
-      backgroundColor: t.surfaceSunken, paddingHorizontal: 14, paddingVertical: 10, fontSize: 17, color: t.ink,
+      minHeight: 46, borderRadius: 12, borderWidth: 1.5, borderColor: t.primary + "55",
+      backgroundColor: t.primaryTint, paddingHorizontal: 14, paddingVertical: 10,
+      fontSize: 15, fontFamily: fonts.regular, color: t.ink,
     },
     fieldRow: { flexDirection: "row", gap: 12 },
     fieldHalf: { flex: 1 },
 
-    dropdown: { position: "absolute", top: 76, left: 0, right: 0, zIndex: 20, backgroundColor: t.surfaceOverlay, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, borderColor: t.line, maxHeight: 240, overflow: "hidden" },
-    dropdownRow: { padding: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: t.line },
-    dropdownTitle: { fontSize: 15, color: t.ink },
-    dropdownMeta: { fontSize: 12, color: t.inkMuted, marginTop: 2 },
+    dropdown: { position: "absolute", top: 80, left: 0, right: 0, zIndex: 20, backgroundColor: t.surfaceOverlay, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: t.line, maxHeight: 240, overflow: "hidden" },
+    dropdownRow: { padding: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: t.line },
+    dropdownTitle: { fontSize: 14, fontFamily: fonts.medium, color: t.ink },
+    dropdownMeta: { fontSize: 11, fontFamily: fonts.regular, color: t.inkMuted, marginTop: 2 },
     dropdownClose: { padding: 10, alignItems: "center" },
-    dropdownCloseText: { fontSize: 13, fontWeight: "600", color: t.primary },
+    dropdownCloseText: { fontSize: 12, fontFamily: fonts.bold, color: t.primary },
 
     pickerField: {
-      minHeight: 44, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, borderColor: t.line,
-      backgroundColor: t.surfaceSunken, paddingHorizontal: 14, paddingVertical: 10,
+      minHeight: 46, borderRadius: 12, borderWidth: 1.5, borderColor: t.primary + "55",
+      backgroundColor: t.primaryTint, paddingHorizontal: 14, paddingVertical: 10,
       flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8,
     },
-    pickerText: { flex: 1, fontSize: 16, color: t.ink },
-    pickerPlaceholder: { flex: 1, fontSize: 16, color: t.inkMuted },
-    pickerChevron: { fontSize: 16, color: t.inkMuted },
+    pickerText: { flex: 1, fontSize: 15, fontFamily: fonts.regular, color: t.ink },
+    pickerPlaceholder: { flex: 1, fontSize: 15, fontFamily: fonts.regular, color: t.inkMuted },
+    pickerChevron: { fontSize: 15, color: t.primary },
 
     modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)" },
     modalSheet: { backgroundColor: t.surfaceRaised, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, maxHeight: "70%", paddingBottom: 24 },
     modalSheetSmall: { position: "absolute", top: "35%", left: 24, right: 24, backgroundColor: t.surfaceRaised, borderRadius: radius.lg, overflow: "hidden" },
     modalHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: t.line },
-    modalTitle: { fontSize: 15, fontWeight: "600", color: t.ink },
-    modalClose: { fontSize: 15, fontWeight: "600", color: t.primary },
+    modalTitle: { fontSize: 14, fontFamily: fonts.bold, color: t.ink },
+    modalClose: { fontSize: 14, fontFamily: fonts.bold, color: t.primary },
     modalList: { paddingHorizontal: 8 },
     modalOption: { minHeight: 44, justifyContent: "center", paddingHorizontal: 16, paddingVertical: 12, borderRadius: radius.md },
     modalOptionActive: { backgroundColor: t.primaryTint },
-    modalOptionText: { fontSize: 15, color: t.ink },
-    modalEmpty: { padding: 24, textAlign: "center", color: t.inkMuted, fontSize: 14 },
+    modalOptionText: { fontSize: 14, fontFamily: fonts.regular, color: t.ink },
+    modalEmpty: { padding: 24, textAlign: "center", color: t.inkMuted, fontSize: 13 },
 
-    photoSectionLabel: { fontSize: 12, fontWeight: "600", color: t.inkMuted, textTransform: "uppercase", letterSpacing: 0.3, marginTop: 4 },
-    photoGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-    photoSlot: { width: "22%", gap: 4 },
-    photoTap: { aspectRatio: 1, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, borderColor: t.line, backgroundColor: t.surfaceSunken, alignItems: "center", justifyContent: "center", overflow: "hidden" },
+    photoSectionLabel: { fontSize: 11, fontFamily: fonts.bold, color: t.inkMuted, textTransform: "uppercase", letterSpacing: 0.4, marginTop: 4 },
+    photoGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+    photoSlot: { width: "22%", gap: 5 },
+    photoTap: { aspectRatio: 1, borderRadius: 14, borderWidth: 1.5, borderColor: t.line, backgroundColor: t.surfaceSunken, alignItems: "center", justifyContent: "center", overflow: "hidden" },
     photoImage: { width: "100%", height: "100%" },
-    photoPlaceholder: { fontSize: 24, color: t.inkMuted },
-    photoLabel: { fontSize: 11, color: t.inkSecondary, textAlign: "center" },
+    photoPlaceholder: { fontSize: 22, color: t.inkMuted },
+    photoLabel: { fontSize: 10, fontFamily: fonts.regular, color: t.inkSecondary, textAlign: "center" },
 
     siteQuickAdd: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-    quickAddChip: { minHeight: 36, paddingHorizontal: 12, borderRadius: radius.full, borderWidth: StyleSheet.hairlineWidth, borderColor: t.primary, backgroundColor: t.primaryTint, alignItems: "center", justifyContent: "center" },
-    quickAddChipText: { fontSize: 13, fontWeight: "500", color: t.primary },
+    quickAddChip: { minHeight: 36, paddingHorizontal: 14, borderRadius: radius.full, borderWidth: 1.5, borderColor: t.primary, backgroundColor: t.primaryTint, alignItems: "center", justifyContent: "center" },
+    quickAddChipText: { fontSize: 12, fontFamily: fonts.bold, color: t.primary },
 
-    siteCard: { gap: 12, borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: t.line, padding: 14 },
+    siteCard: { gap: 16, padding: 18 },
     siteCardHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-    siteCardTitle: { fontSize: 15, fontWeight: "600", color: t.ink },
-    removeText: { fontSize: 13, color: t.danger },
+    siteCardTitle: { fontSize: 14, fontFamily: fonts.bold, color: t.ink },
+    removeText: { fontSize: 12, fontFamily: fonts.medium, color: t.danger },
 
     errorBox: { borderRadius: radius.md, backgroundColor: t.dangerTint, padding: 12 },
-    errorText: { fontSize: 14, color: t.danger },
+    errorText: { fontSize: 13, fontFamily: fonts.regular, color: t.danger },
 
     footer: {
       borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.line, backgroundColor: t.surfaceRaised,
       paddingHorizontal: 16, paddingTop: 10, paddingBottom: Platform.OS === "ios" ? 10 : 14, gap: 8,
     },
-    progressText: { fontSize: 13, color: t.inkSecondary, textAlign: "center" },
-    submitBtn: { minHeight: 46, borderRadius: radius.md, backgroundColor: t.primary, alignItems: "center", justifyContent: "center" },
-    submitBtnText: { fontSize: 16, fontWeight: "600", color: t.onBrand },
+    progressText: { fontSize: 12, fontFamily: fonts.regular, color: t.inkSecondary, textAlign: "center" },
   });

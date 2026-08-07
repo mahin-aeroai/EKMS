@@ -15,8 +15,8 @@ import {
 } from "react-native";
 import { useHeaderHeight } from "expo-router/react-navigation";
 import { radius } from "@mmdi/shared/theme";
-import { vibrant, type VibrantTheme } from "../../theme/vibrant";
-import { SoftCard, GradientButton } from "../../theme/components";
+import { vibrant, fonts, type VibrantTheme } from "../../theme/vibrant";
+import { SoftCard, GradientCard, GradientButton } from "../../theme/components";
 import type {
   SignProfileRow, SignLedModuleRow, SignLedBarRow, SignLedDriverRow,
   SignSheetRow, SignPrintingMediaRow, SignAccessoryRow,
@@ -685,32 +685,48 @@ export default function EstimatorScreen() {
 
             <NumberField t={t} label="GST %" value={gstPct} onChange={setGstPct} />
 
-            <Text style={s.sectionTitle}>Cost Sheet</Text>
-            <Row t={t} label="Profile" detail={profResult ? `${(profResult.analysis.totalUsed / 304.8).toFixed(1)} RFT · ${profResult.analysis.totalBars} bar(s)` : ""} value={fmtRupee(profResult?.analysis.totalCost ?? 0)} />
-            <Row t={t} label="Backing Sheet" detail={sheetResult ? `${sheetResult.chargeable.toFixed(2)} sq.ft` : ""} value={fmtRupee(sheetResult?.chargedCost ?? 0)} />
-            <Row t={t} label="Accessories" detail={`${accessories.filter((a) => a.qty > 0).length} item(s)`} value={fmtRupee(accCost)} />
-            <Row
-              t={t}
-              label={`LED ${ledMode === "bar" ? "Bars" : "Modules"}`}
-              detail={ledMode === "bar" && barResult ? `${barResult.totalPieces} pieces · ${barResult.numBars} bar(s)` : ledMode === "module" && moduleResult ? `${moduleResult.total} modules` : ""}
-              value={fmtRupee(ledCost)}
-            />
-            <Row t={t} label="LED Drivers" detail={driverFinal ? `${driverFinal.qty} × ${driverFinal.watt}W` : ""} value={fmtRupee(driverFinal?.totalCost ?? 0)} />
-            <Row t={t} label="Raw Material Cost — Signage (per sign)" value={fmtRupee(pricing.raw)} strong />
-            <Row t={t} label={`Overhead (${numOr0(overheadPct)}%)`} value={fmtRupee(pricing.ovh)} />
-            <Row t={t} label="Labour" value={fmtRupee(numOr0(labour))} />
-            {qty > 1 && <Row t={t} label={`Quantity (× ${qty})`} value={`× ${qty}`} />}
-            <Row t={t} label="Signage Production Cost" value={fmtRupee(pricing.costAll)} strong />
-            <Row t={t} label={`Markup (${numOr0(markupPct)}%)`} value={fmtRupee(pricing.sellBD - pricing.costAll)} />
-            {pricing.discAmt > 0 && <Row t={t} label={`Discount (${numOr0(discountPct)}%)`} value={`−${fmtRupee(pricing.discAmt)}`} />}
-            <Row t={t} label="Signage Selling Price (ex-GST)" value={fmtRupee(pricing.signageSell)} strong />
-            <Row t={t} label="Printing & Finishing (cost reference)" detail={printResult ? `${printResult.printSqFt} sq.ft — not used in pricing` : ""} value={fmtRupee(pricing.printCostRef)} />
-            <Row t={t} label="Printing Selling Price (ex-GST)" value={fmtRupee(pricing.printSell)} strong />
-            <Row t={t} label="Installation Selling Price (ex-GST)" value={fmtRupee(pricing.installSell)} strong />
-            <Row t={t} label="Total Selling Price (ex-GST)" value={fmtRupee(pricing.sell)} strong big />
-            <Row t={t} label={`GST ${numOr0(gstPct)}%`} value={fmtRupee(pricing.gstAmt)} />
-            <Row t={t} label="Final Amount (incl. GST)" value={fmtRupee(pricing.final)} strong big />
-            <Row t={t} label="Gross Margin" value={`${pricing.margin}% (${fmtRupee(pricing.mgnAmt)})`} />
+            {/* "final estimate page i cant really understand what it
+                generated" -- was one flat list of 15 rows with no
+                grouping. Now three clearly labelled sections: the material
+                cost breakdown (supporting detail, subdued/small), what
+                gets charged (pricing), and the one number that actually
+                matters (a hero total, not just another row in the list). */}
+            <Text style={s.sectionTitle}>Cost breakdown</Text>
+            <SoftCard style={s.summaryCard}>
+              <Row t={t} small label="Profile" detail={profResult ? `${(profResult.analysis.totalUsed / 304.8).toFixed(1)} RFT · ${profResult.analysis.totalBars} bar(s)` : ""} value={fmtRupee(profResult?.analysis.totalCost ?? 0)} />
+              <Row t={t} small label="Backing Sheet" detail={sheetResult ? `${sheetResult.chargeable.toFixed(2)} sq.ft` : ""} value={fmtRupee(sheetResult?.chargedCost ?? 0)} />
+              <Row t={t} small label="Accessories" detail={`${accessories.filter((a) => a.qty > 0).length} item(s)`} value={fmtRupee(accCost)} />
+              <Row
+                t={t}
+                small
+                label={`LED ${ledMode === "bar" ? "Bars" : "Modules"}`}
+                detail={ledMode === "bar" && barResult ? `${barResult.totalPieces} pieces · ${barResult.numBars} bar(s)` : ledMode === "module" && moduleResult ? `${moduleResult.total} modules` : ""}
+                value={fmtRupee(ledCost)}
+              />
+              <Row t={t} small label="LED Drivers" detail={driverFinal ? `${driverFinal.qty} × ${driverFinal.watt}W` : ""} value={fmtRupee(driverFinal?.totalCost ?? 0)} />
+              <Row t={t} label="Raw Material Cost (per sign)" value={fmtRupee(pricing.raw)} strong />
+              <Row t={t} small label={`Overhead (${numOr0(overheadPct)}%)`} value={fmtRupee(pricing.ovh)} />
+              <Row t={t} small label="Labour" value={fmtRupee(numOr0(labour))} />
+              {qty > 1 && <Row t={t} small label={`Quantity (× ${qty})`} value={`× ${qty}`} />}
+              <Row t={t} label="Signage Production Cost" value={fmtRupee(pricing.costAll)} strong />
+            </SoftCard>
+
+            <Text style={s.sectionTitle}>What gets charged</Text>
+            <SoftCard style={s.summaryCard}>
+              <Row t={t} small label={`Markup (${numOr0(markupPct)}%)`} value={fmtRupee(pricing.sellBD - pricing.costAll)} />
+              {pricing.discAmt > 0 && <Row t={t} small label={`Discount (${numOr0(discountPct)}%)`} value={`−${fmtRupee(pricing.discAmt)}`} />}
+              <Row t={t} label="Signage" value={fmtRupee(pricing.signageSell)} strong />
+              <Row t={t} label="Printing" value={fmtRupee(pricing.printSell)} strong />
+              <Row t={t} label="Installation" value={fmtRupee(pricing.installSell)} strong />
+              <Row t={t} label="Subtotal (ex-GST)" value={fmtRupee(pricing.sell)} strong />
+              <Row t={t} small label={`GST (${numOr0(gstPct)}%)`} value={fmtRupee(pricing.gstAmt)} />
+            </SoftCard>
+
+            <GradientCard style={s.totalCard}>
+              <Text style={s.totalCardLabel}>Final Amount (incl. GST)</Text>
+              <Text style={s.totalCardValue}>{fmtRupee(pricing.final)}</Text>
+              <Text style={s.totalCardMargin}>Gross margin {pricing.margin}% ({fmtRupee(pricing.mgnAmt)})</Text>
+            </GradientCard>
 
             {savedRef && (
               <View style={s.successBox}><Text style={s.successText}>Cost sheet {savedRef} saved.</Text></View>
@@ -853,15 +869,17 @@ function Metric({ t, label, value, sub }: { t: VibrantTheme; label: string; valu
   );
 }
 
-function Row({ t, label, detail, value, strong, big }: { t: VibrantTheme; label: string; detail?: string; value: string; strong?: boolean; big?: boolean }) {
+function Row({
+  t, label, detail, value, strong, big, small,
+}: { t: VibrantTheme; label: string; detail?: string; value: string; strong?: boolean; big?: boolean; small?: boolean }) {
   const s = styles(t);
   return (
-    <View style={[s.row, strong && s.rowStrong]}>
+    <View style={[s.row, strong && s.rowStrong, small && s.rowSmall]}>
       <View style={s.rowLeft}>
-        <Text style={[s.rowLabel, strong && s.rowLabelStrong, big && s.rowBig]}>{label}</Text>
+        <Text style={[s.rowLabel, small && s.rowLabelSmall, strong && s.rowLabelStrong, big && s.rowBig]}>{label}</Text>
         {detail ? <Text style={s.rowDetail}>{detail}</Text> : null}
       </View>
-      <Text style={[s.rowValue, strong && s.rowLabelStrong, big && s.rowBig]}>{value}</Text>
+      <Text style={[s.rowValue, small && s.rowLabelSmall, strong && s.rowLabelStrong, big && s.rowBig]}>{value}</Text>
     </View>
   );
 }
@@ -979,114 +997,136 @@ const styles = (t: VibrantTheme) =>
     stepBarContent: { paddingHorizontal: 12, paddingVertical: 10, gap: 8 },
     stepChip: { minHeight: 32, paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.full, borderWidth: StyleSheet.hairlineWidth, borderColor: t.line, justifyContent: "center" },
     stepChipActive: { backgroundColor: t.primaryTint, borderColor: t.primary },
-    stepChipText: { fontSize: 13, fontWeight: "500", color: t.inkSecondary },
+    stepChipText: { fontSize: 12, fontFamily: fonts.medium, color: t.inkSecondary },
     stepChipTextActive: { color: t.primary },
 
     content: { flex: 1 },
     contentInner: { padding: 16, paddingBottom: 32, gap: 16 },
     stepGap: { gap: 16 },
 
-    sectionTitle: { fontSize: 17, fontWeight: "600", color: t.ink, marginTop: 4 },
-    sectionLabel: { fontSize: 13, fontWeight: "500", color: t.inkSecondary, textTransform: "uppercase", letterSpacing: 0.3 },
-    helperText: { fontSize: 13, color: t.inkSecondary },
-    totalLine: { fontSize: 15, fontWeight: "600", color: t.ink },
+    sectionTitle: { fontSize: 15, fontFamily: fonts.bold, color: t.ink, marginTop: 4 },
+    sectionLabel: { fontSize: 12, fontFamily: fonts.medium, color: t.inkSecondary, textTransform: "uppercase", letterSpacing: 0.3 },
+    helperText: { fontSize: 12, fontFamily: fonts.regular, color: t.inkSecondary },
+    totalLine: { fontSize: 14, fontFamily: fonts.bold, color: t.ink },
 
     field: { gap: 6 },
-    label: { fontSize: 13, fontWeight: "500", color: t.inkSecondary },
+    label: { fontSize: 12, fontFamily: fonts.medium, color: t.inkSecondary },
+    // Filled + colored border, not a hairline on the same sunken grey as
+    // everything else -- "highlite input boxes they are mixed up with
+    // other information" -- an input needs to visually pop as "the thing
+    // you type into" against static labels/values around it.
     input: {
-      minHeight: 44, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, borderColor: t.line,
-      backgroundColor: t.surfaceSunken, paddingHorizontal: 14, paddingVertical: 10, fontSize: 17, color: t.ink,
+      minHeight: 44, borderRadius: 12, borderWidth: 1.5, borderColor: t.primary + "55",
+      backgroundColor: t.primaryTint, paddingHorizontal: 14, paddingVertical: 10,
+      fontSize: 15, fontFamily: fonts.regular, color: t.ink,
     },
     fieldRow: { flexDirection: "row", gap: 12 },
     fieldHalf: { flex: 1 },
 
     optionCard: { minHeight: 44, padding: 12, gap: 4, borderWidth: 2, borderColor: "transparent" },
     optionCardActive: { borderColor: t.primary, backgroundColor: t.primaryTint },
-    optionTitle: { fontSize: 15, fontWeight: "600", color: t.ink },
-    optionDesc: { fontSize: 13, color: t.inkSecondary },
+    optionTitle: { fontSize: 14, fontFamily: fonts.medium, color: t.ink },
+    optionDesc: { fontSize: 12, fontFamily: fonts.regular, color: t.inkSecondary },
 
     pickerField: {
-      minHeight: 44, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, borderColor: t.line,
-      backgroundColor: t.surfaceSunken, paddingHorizontal: 14, paddingVertical: 10,
+      minHeight: 44, borderRadius: 12, borderWidth: 1.5, borderColor: t.primary + "55",
+      backgroundColor: t.primaryTint, paddingHorizontal: 14, paddingVertical: 10,
       flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8,
     },
-    pickerText: { flex: 1, fontSize: 16, color: t.ink },
-    pickerPlaceholder: { flex: 1, fontSize: 16, color: t.inkMuted },
-    pickerChevron: { fontSize: 16, color: t.inkMuted },
+    pickerText: { flex: 1, fontSize: 15, fontFamily: fonts.regular, color: t.ink },
+    pickerPlaceholder: { flex: 1, fontSize: 15, fontFamily: fonts.regular, color: t.inkMuted },
+    pickerChevron: { fontSize: 15, color: t.primary },
 
     modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)" },
     modalSheet: { backgroundColor: t.surfaceRaised, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, maxHeight: "70%", paddingBottom: 24 },
     modalSheetSmall: { position: "absolute", top: "40%", left: 24, right: 24, backgroundColor: t.surfaceRaised, borderRadius: radius.lg, overflow: "hidden" },
     modalHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: t.line },
-    modalTitle: { fontSize: 15, fontWeight: "600", color: t.ink },
-    modalClose: { fontSize: 15, fontWeight: "600", color: t.primary },
+    modalTitle: { fontSize: 14, fontFamily: fonts.bold, color: t.ink },
+    modalClose: { fontSize: 14, fontFamily: fonts.bold, color: t.primary },
     modalList: { paddingHorizontal: 8 },
     modalOption: { minHeight: 44, justifyContent: "center", paddingHorizontal: 12, paddingVertical: 10, borderRadius: radius.md },
     modalOptionActive: { backgroundColor: t.primaryTint },
-    modalOptionText: { fontSize: 15, color: t.ink },
-    modalEmpty: { padding: 24, textAlign: "center", color: t.inkMuted, fontSize: 14 },
+    modalOptionText: { fontSize: 14, fontFamily: fonts.regular, color: t.ink },
+    modalEmpty: { padding: 24, textAlign: "center", color: t.inkMuted, fontSize: 13 },
 
     switchRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", minHeight: 44, gap: 12 },
-    switchLabel: { fontSize: 15, color: t.ink, flex: 1 },
+    switchLabel: { fontSize: 14, fontFamily: fonts.regular, color: t.ink, flex: 1 },
 
     metricGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
     metricCard: { flexBasis: "47%", flexGrow: 1, padding: 10, gap: 2 },
-    metricLabel: { fontSize: 12, color: t.inkSecondary },
-    metricValue: { fontSize: 16, fontWeight: "600", color: t.ink },
-    metricSub: { fontSize: 11, color: t.inkMuted },
+    metricLabel: { fontSize: 11, fontFamily: fonts.medium, color: t.inkSecondary },
+    metricValue: { fontSize: 15, fontFamily: fonts.bold, color: t.ink },
+    metricSub: { fontSize: 10, fontFamily: fonts.regular, color: t.inkMuted },
 
     alertBox: { borderRadius: radius.md, backgroundColor: t.warningTint, padding: 12 },
-    alertText: { fontSize: 14, color: t.warning },
+    alertText: { fontSize: 13, fontFamily: fonts.regular, color: t.warning },
     successBox: { borderRadius: radius.md, backgroundColor: t.successTint, padding: 12 },
-    successText: { fontSize: 14, color: t.success, fontWeight: "600" },
+    successText: { fontSize: 13, fontFamily: fonts.bold, color: t.success },
 
     accRow: { padding: 12, gap: 10 },
     accRowHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" },
-    accName: { fontSize: 15, fontWeight: "500", color: t.ink, flex: 1 },
-    accUnit: { fontSize: 13, color: t.inkSecondary },
-    accLineTotal: { fontSize: 14, fontWeight: "600", color: t.ink, textAlign: "right" },
+    accName: { fontSize: 14, fontFamily: fonts.medium, color: t.ink, flex: 1 },
+    accUnit: { fontSize: 12, fontFamily: fonts.regular, color: t.inkSecondary },
+    accLineTotal: { fontSize: 13, fontFamily: fonts.bold, color: t.ink, textAlign: "right" },
 
-    row: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12, paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.line },
-    rowStrong: { backgroundColor: t.surfaceSunken, marginHorizontal: -16, paddingHorizontal: 16, borderRadius: radius.sm },
+    row: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12, paddingVertical: 7, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.line },
+    rowStrong: { backgroundColor: t.surfaceSunken, marginHorizontal: -12, paddingHorizontal: 12, borderRadius: radius.sm },
+    // Supporting-detail lines (individual material costs feeding into a
+    // strong subtotal right below them) shrink further and mute in color --
+    // the eye should land on the strong rows, not weigh every line equally.
+    rowSmall: { paddingVertical: 5 },
     rowLeft: { flex: 1, gap: 2 },
-    rowLabel: { fontSize: 14, color: t.inkSecondary },
-    rowLabelStrong: { fontSize: 14, fontWeight: "600", color: t.ink },
-    rowDetail: { fontSize: 12, color: t.inkMuted },
-    rowValue: { fontSize: 14, color: t.inkSecondary, textAlign: "right" },
-    rowBig: { fontSize: 17 },
+    rowLabel: { fontSize: 13, fontFamily: fonts.regular, color: t.inkSecondary },
+    rowLabelSmall: { fontSize: 12, color: t.inkMuted },
+    rowLabelStrong: { fontSize: 13, fontFamily: fonts.bold, color: t.ink },
+    rowDetail: { fontSize: 11, fontFamily: fonts.regular, color: t.inkMuted },
+    rowValue: { fontSize: 13, fontFamily: fonts.regular, color: t.inkSecondary, textAlign: "right" },
+    rowBig: { fontSize: 15 },
+
+    summaryCard: { padding: 12, gap: 0, overflow: "hidden" },
+    totalCard: { alignItems: "center", gap: 4, paddingVertical: 22 },
+    totalCardLabel: { fontSize: 12, fontFamily: fonts.medium, color: t.onGradient, opacity: 0.85 },
+    totalCardValue: { fontSize: 30, fontFamily: fonts.bold, color: t.onGradient },
+    totalCardMargin: { fontSize: 12, fontFamily: fonts.regular, color: t.onGradient, opacity: 0.85, marginTop: 2 },
 
     sizeHeader: { padding: 14, gap: 10 },
     sizeHeaderRow: { flexDirection: "row", alignItems: "flex-end", gap: 16, flexWrap: "wrap" },
     sizeField: { gap: 4 },
-    sizeLabel: { fontSize: 11, fontWeight: "500", color: t.inkMuted, textTransform: "uppercase", letterSpacing: 0.3 },
-    sizeInput: { minHeight: 36, minWidth: 64, borderRadius: radius.sm, borderWidth: StyleSheet.hairlineWidth, borderColor: t.lineStrong, backgroundColor: t.surface, paddingHorizontal: 10, fontSize: 15, color: t.ink },
-    sizeTimes: { fontSize: 15, color: t.inkMuted, paddingBottom: 8 },
-    unitPicker: { minHeight: 36, borderRadius: radius.sm, borderWidth: StyleSheet.hairlineWidth, borderColor: t.lineStrong, backgroundColor: t.surface, paddingHorizontal: 10, justifyContent: "center" },
-    unitPickerText: { fontSize: 15, color: t.ink },
+    sizeLabel: { fontSize: 10, fontFamily: fonts.medium, color: t.inkMuted, textTransform: "uppercase", letterSpacing: 0.3 },
+    sizeInput: {
+      minHeight: 38, minWidth: 64, borderRadius: 10, borderWidth: 1.5, borderColor: t.primary + "55",
+      backgroundColor: t.primaryTint, paddingHorizontal: 10, fontSize: 14, fontFamily: fonts.medium, color: t.ink,
+    },
+    sizeTimes: { fontSize: 14, color: t.inkMuted, paddingBottom: 8 },
+    unitPicker: {
+      minHeight: 38, borderRadius: 10, borderWidth: 1.5, borderColor: t.primary + "55",
+      backgroundColor: t.primaryTint, paddingHorizontal: 10, justifyContent: "center",
+    },
+    unitPickerText: { fontSize: 14, fontFamily: fonts.medium, color: t.ink },
     sizeStat: { gap: 2 },
-    sizeStatLabel: { fontSize: 11, fontWeight: "500", color: t.inkMuted, textTransform: "uppercase", letterSpacing: 0.3 },
-    sizeStatValue: { fontSize: 14, fontWeight: "600", color: t.ink },
+    sizeStatLabel: { fontSize: 10, fontFamily: fonts.medium, color: t.inkMuted, textTransform: "uppercase", letterSpacing: 0.3 },
+    sizeStatValue: { fontSize: 13, fontFamily: fonts.bold, color: t.ink },
 
     cuttingWrap: { gap: 10 },
     cuttingBin: { gap: 4 },
     cuttingBinHead: { flexDirection: "row", justifyContent: "space-between" },
-    cuttingBinLabel: { fontSize: 13, fontWeight: "600", color: t.ink },
-    cuttingBinSub: { fontSize: 12, color: t.inkSecondary },
+    cuttingBinLabel: { fontSize: 12, fontFamily: fonts.bold, color: t.ink },
+    cuttingBinSub: { fontSize: 11, fontFamily: fonts.regular, color: t.inkSecondary },
     cuttingBar: { flexDirection: "row", minHeight: 32, borderRadius: radius.sm, overflow: "hidden", borderWidth: StyleSheet.hairlineWidth, borderColor: t.line },
     cuttingSegment: { minHeight: 32, alignItems: "center", justifyContent: "center", borderRightWidth: 1, borderRightColor: "rgba(255,255,255,0.5)" },
-    cuttingSegmentText: { fontSize: 10, fontWeight: "600", color: t.onBrand, paddingHorizontal: 2 },
+    cuttingSegmentText: { fontSize: 9, fontFamily: fonts.bold, color: t.onBrand, paddingHorizontal: 2 },
     cuttingLeftover: { backgroundColor: t.surface, borderStyle: "dashed", borderWidth: 1, borderColor: t.lineStrong },
-    cuttingLegend: { fontSize: 11, color: t.inkMuted },
+    cuttingLegend: { fontSize: 10, fontFamily: fonts.regular, color: t.inkMuted },
 
     footer: {
       borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.line, backgroundColor: t.surfaceRaised,
       paddingHorizontal: 16, paddingTop: 10, paddingBottom: Platform.OS === "ios" ? 10 : 14, gap: 10,
     },
     footerTotal: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" },
-    footerTotalLabel: { fontSize: 13, color: t.inkSecondary },
-    footerTotalValue: { fontSize: 20, fontWeight: "700", color: t.ink },
+    footerTotalLabel: { fontSize: 12, fontFamily: fonts.regular, color: t.inkSecondary },
+    footerTotalValue: { fontSize: 19, fontFamily: fonts.bold, color: t.ink },
     footerButtons: { flexDirection: "row", gap: 10 },
     navBtnPrimaryWrap: { flex: 1 },
     navBtnSecondary: { minHeight: 46, paddingHorizontal: 18, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, borderColor: t.line, alignItems: "center", justifyContent: "center" },
-    navBtnSecondaryText: { fontSize: 16, fontWeight: "600", color: t.ink },
+    navBtnSecondaryText: { fontSize: 15, fontFamily: fonts.bold, color: t.ink },
   });

@@ -2,13 +2,15 @@ import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
+  Keyboard,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import { radius } from "@mmdi/shared/theme";
@@ -26,19 +28,42 @@ import { supabase } from "../../lib/supabase";
  * rather than trusting a bare `.select()` (see the web app's AI Copilot
  * route for the fuller history of that bug class).
  *
- * Two native-specific choices the web version didn't need:
- *  - HTML has no `<input type="date">` equivalent here without a new native
- *    dependency (@react-native-community/datetimepicker isn't installed
- *    yet) -- From/To are plain text fields (YYYY-MM-DD), same format
- *    Supabase expects, passed straight to .gte()/.lte() like the web
- *    version. A real native date picker is a reasonable follow-up, not
- *    done here to avoid a new native module + rebuild for a "quick win"
- *    round.
- *  - The sales-person picker is a bottom-sheet Modal + list (no native
- *    <select> equivalent), same pattern as EstimatorTab's PickerField.
- *  - CSV export shares the file via the native share sheet (Mail, Files,
- *    WhatsApp, etc.) instead of triggering a browser download.
+ * "dates convert indian format DDMMYYYY and give calendar there" -- From/To
+ * were plain YYYY-MM-DD text fields (no native <input type="date">
+ * equivalent existed without a new dependency). Now backed by
+ * @react-native-community/datetimepicker (SDK 57 pins 9.1.0, matching this
+ * project's react-native 0.86.0 exactly -- see bundledNativeModules.json)
+ * -- state is a real Date, displayed as DD/MM/YYYY, converted to ISO
+ * (toISODate) only at the query boundary since that's what Supabase's
+ * .gte()/.lte() expect. New native module, so this needs a fresh EAS build,
+ * not a JS-only update.
+ *
+ * "after run report keyboard is stuck on screen" -- was a side effect of
+ * the old text-input date fields (the software keyboard could stay up
+ * after Run report if a date field still had focus). Switching From/To to
+ * Pressable-triggered pickers removes the keyboard from that flow
+ * entirely; Keyboard.dismiss() in runReport() is a defensive backstop for
+ * any other field.
+ *
+ * The sales-person picker is a bottom-sheet Modal + list (no native
+ * <select> equivalent), same pattern as EstimatorTab's PickerField. CSV
+ * export shares the file via the native share sheet (Mail, Files,
+ * WhatsApp, etc.) instead of triggering a browser download.
  */
+
+function toISODate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function formatDMY(d: Date | null): string {
+  if (!d) return "";
+  const day = String(d.getDate()).padStart(2, "0");
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${day}/${m}/${d.getFullYear()}`;
+}
 
 interface CustomerBreakdownRow {
   customer_name: string;
@@ -76,8 +101,10 @@ export default function SalesByRepScreen() {
   const [salesPeople, setSalesPeople] = useState<string[] | null>(null);
   const [repPickerOpen, setRepPickerOpen] = useState(false);
   const [selectedRep, setSelectedRep] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [dateFrom, setDateFrom] = useState<Date | null>(null);
+  const [dateTo, setDateTo] = useState<Date | null>(null);
+  const [fromPickerOpen, setFromPickerOpen] = useState(false);
+  const [toPickerOpen, setToPickerOpen] = useState(false);
   const [rows, setRows] = useState<CustomerBreakdownRow[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -99,6 +126,10 @@ export default function SalesByRepScreen() {
 
   async function runReport() {
     if (!selectedRep) return;
+    // "after run report keyboard is stuck on screen" -- defensive backstop;
+    // the date fields themselves no longer summon the keyboard at all now
+    // that they're picker-driven (see the file header comment).
+    Keyboard.dismiss();
     setLoading(true);
     setRows(null);
     try {
@@ -109,8 +140,8 @@ export default function SalesByRepScreen() {
             .select("customer_name, taxable_value, invoice_date")
             .eq("sales_manager", selectedRep)
             .range(from, to);
-          if (dateFrom.trim()) q = q.gte("invoice_date", dateFrom.trim());
-          if (dateTo.trim()) q = q.lte("invoice_date", dateTo.trim());
+          if (dateFrom) q = q.gte("invoice_date", toISODate(dateFrom));
+          if (dateTo) q = q.lte("invoice_date", toISODate(dateTo));
           return q;
         }
       );
@@ -140,7 +171,7 @@ export default function SalesByRepScreen() {
       for (const r of rows) {
         lines.push([selectedRep, r.customer_name, r.transaction_count, r.total_taxable_value].map(csvEscape).join(","));
       }
-      const periodLabel = dateFrom || dateTo ? `-${dateFrom || "start"}-to-${dateTo || "end"}` : "";
+      const periodLabel = dateFrom || dateTo ? `-${dateFrom ? toISODate(dateFrom) : "start"}-to-${dateTo ? toISODate(dateTo) : "end"}` : "";
       const filename = `sales-by-rep-${selectedRep.replace(/\s+/g, "-")}${periodLabel}.csv`;
       // .write() creates the file itself if it doesn't exist yet -- same
       // pattern already proven in lib/installationReports/draftStore.ts,
@@ -173,27 +204,19 @@ export default function SalesByRepScreen() {
         <View style={s.dateRow}>
           <View style={s.dateField}>
             <Text style={s.label}>From (optional)</Text>
-            <TextInput
-              style={s.dateInput}
-              value={dateFrom}
-              onChangeText={setDateFrom}
-              placeholder="YYYY-MM-DD"
-              placeholderTextColor={t.inkMuted}
-              autoCorrect={false}
-              autoCapitalize="none"
-            />
+            <Pressable style={s.dateInput} onPress={() => setFromPickerOpen(true)}>
+              <Text style={dateFrom ? s.dateInputText : s.dateInputPlaceholder}>
+                {dateFrom ? formatDMY(dateFrom) : "DD/MM/YYYY"}
+              </Text>
+            </Pressable>
           </View>
           <View style={s.dateField}>
             <Text style={s.label}>To (optional)</Text>
-            <TextInput
-              style={s.dateInput}
-              value={dateTo}
-              onChangeText={setDateTo}
-              placeholder="YYYY-MM-DD"
-              placeholderTextColor={t.inkMuted}
-              autoCorrect={false}
-              autoCapitalize="none"
-            />
+            <Pressable style={s.dateInput} onPress={() => setToPickerOpen(true)}>
+              <Text style={dateTo ? s.dateInputText : s.dateInputPlaceholder}>
+                {dateTo ? formatDMY(dateTo) : "DD/MM/YYYY"}
+              </Text>
+            </Pressable>
           </View>
         </View>
 
@@ -279,6 +302,46 @@ export default function SalesByRepScreen() {
           />
         </View>
       </Modal>
+
+      <Modal visible={fromPickerOpen} transparent animationType="fade" onRequestClose={() => setFromPickerOpen(false)}>
+        <Pressable style={s.modalBackdrop} onPress={() => setFromPickerOpen(false)} />
+        <View style={s.datePickerSheet}>
+          <View style={s.modalHeader}>
+            <Text style={s.modalTitle}>From date</Text>
+            <Pressable onPress={() => setFromPickerOpen(false)}><Text style={s.modalClose}>Done</Text></Pressable>
+          </View>
+          <DateTimePicker
+            value={dateFrom ?? new Date()}
+            mode="date"
+            display={Platform.OS === "ios" ? "inline" : "default"}
+            maximumDate={dateTo ?? undefined}
+            onChange={(_event, selected) => {
+              if (Platform.OS === "android") setFromPickerOpen(false);
+              if (selected) setDateFrom(selected);
+            }}
+          />
+        </View>
+      </Modal>
+
+      <Modal visible={toPickerOpen} transparent animationType="fade" onRequestClose={() => setToPickerOpen(false)}>
+        <Pressable style={s.modalBackdrop} onPress={() => setToPickerOpen(false)} />
+        <View style={s.datePickerSheet}>
+          <View style={s.modalHeader}>
+            <Text style={s.modalTitle}>To date</Text>
+            <Pressable onPress={() => setToPickerOpen(false)}><Text style={s.modalClose}>Done</Text></Pressable>
+          </View>
+          <DateTimePicker
+            value={dateTo ?? new Date()}
+            mode="date"
+            display={Platform.OS === "ios" ? "inline" : "default"}
+            minimumDate={dateFrom ?? undefined}
+            onChange={(_event, selected) => {
+              if (Platform.OS === "android") setToPickerOpen(false);
+              if (selected) setDateTo(selected);
+            }}
+          />
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -302,10 +365,13 @@ const styles = (t: VibrantTheme) =>
     dateField: { flex: 1, gap: 4 },
     label: { fontSize: 12, fontWeight: "500", color: t.inkSecondary },
     dateInput: {
-      minHeight: 40, borderRadius: 14,
-      backgroundColor: t.surfaceRaised, paddingHorizontal: 12, fontSize: 15, color: t.ink,
+      minHeight: 44, borderRadius: 14, justifyContent: "center",
+      backgroundColor: t.surfaceRaised, paddingHorizontal: 12,
       shadowColor: "#3D2E6B", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
     },
+    dateInputText: { fontSize: 15, fontWeight: "500", color: t.ink },
+    dateInputPlaceholder: { fontSize: 15, color: t.inkMuted },
+    datePickerSheet: { backgroundColor: t.surfaceRaised, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, paddingBottom: 24 },
 
     statRow: { flexDirection: "row", gap: 8, padding: 16, paddingBottom: 8 },
     statCardHero: { flex: 1.2, justifyContent: "center", gap: 4 },

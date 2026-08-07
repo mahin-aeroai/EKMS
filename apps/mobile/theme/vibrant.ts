@@ -73,3 +73,17 @@ export const vibrant: VibrantTheme = {
   tabBarBg: "#15101F",
   tabBarInactive: "#6B6478",
 };
+
+/**
+ * Roboto family names, loaded via @expo-google-fonts/roboto in
+ * app/_layout.tsx -- "make th eofnts smaller roboto or suitable small
+ * font" for the denser screens (Sign Costing, its pricing summary, the
+ * installation report). Not applied to Home/Copilot/Surveys/Sales by Rep,
+ * which weren't called out as cluttered and read fine on the platform
+ * default.
+ */
+export const fonts = {
+  regular: "Roboto_400Regular",
+  medium: "Roboto_500Medium",
+  bold: "Roboto_700Bold",
+} as const;

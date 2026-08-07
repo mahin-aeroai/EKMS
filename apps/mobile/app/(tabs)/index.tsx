@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { supabase } from "../../lib/supabase";
@@ -63,7 +63,7 @@ function statusMeta(status: ReportStatus, t: VibrantTheme): { color: string; lab
 // as a bare string prop in _layout.tsx.
 const QUICK_ACTIONS = [
   { label: "Surveys", sub: "Search & open site surveys", icon: "doc.text.magnifyingglass", route: "/surveys" },
-  { label: "Estimate", sub: "Build a signage cost sheet", icon: "function", route: "/estimator" },
+  { label: "Sign Costing", sub: "Build a signage cost sheet", icon: "function", route: "/estimator" },
   { label: "Basil Installations", sub: "Reports & new capture", icon: "list.clipboard", route: "/reports" },
   { label: "Sales by Rep", sub: "Customer breakdown by rep", icon: "chart.line.uptrend.xyaxis", route: "/sales-by-rep" },
 ] as const;
@@ -140,10 +140,15 @@ export default function HomeScreen() {
 
   return (
     <ScrollView style={s.screen} contentContainerStyle={s.content}>
-      <Text style={s.greeting}>
-        {greeting()}, {firstName(session?.user?.email)}
-      </Text>
-      <Text style={s.subGreeting}>Here's what's happening today.</Text>
+      <View style={s.greetRow}>
+        <View style={{ flex: 1 }}>
+          <Text style={s.greeting}>
+            {greeting()}, {firstName(session?.user?.email)}
+          </Text>
+          <Text style={s.subGreeting}>Here's what's happening today.</Text>
+        </View>
+        <Image source={require("../../assets/images/logo-mark.png")} style={s.logo} resizeMode="contain" />
+      </View>
 
       <Pressable onPress={() => router.push("/copilot")}>
         <GradientCard style={s.copilotCard}>
@@ -227,8 +232,10 @@ const styles = (t: VibrantTheme) =>
     screen: { flex: 1, backgroundColor: t.surface },
     content: { padding: 16, paddingBottom: 32, gap: 14 },
 
+    greetRow: { flexDirection: "row", alignItems: "center", gap: 12 },
     greeting: { fontSize: 26, fontWeight: "700", color: t.ink },
     subGreeting: { fontSize: 15, color: t.inkSecondary, marginTop: -8 },
+    logo: { width: 40, height: 40, borderRadius: 10 },
 
     copilotCard: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16 },
     copilotIconWrap: {

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -8,9 +9,9 @@ import {
   Text,
   TextInput,
   View,
-  useColorScheme,
 } from "react-native";
-import { themes, radius, type Theme } from "@mmdi/shared/theme";
+import { vibrant, type VibrantTheme } from "../theme/vibrant";
+import { GradientButton } from "../theme/components";
 import { useSession } from "@/context/auth";
 
 /**
@@ -19,10 +20,13 @@ import { useSession } from "@/context/auth";
  * account enrolled in MFA can sign in here (password accepted) but the
  * server-side calls that require an assurance level of aal2 will still
  * reject it. Worth fixing before this ships to anyone with MFA enabled.
+ *
+ * Logo mark: recolored from the red reference logo to MMDI's existing
+ * brand blue (#2e5395, same as packages/shared/src/theme.ts's brand.steel)
+ * -- see apps/mobile/assets/images/logo-mark.png's header note for how.
  */
 export default function SignInScreen() {
-  const scheme = useColorScheme();
-  const t = themes[scheme === "dark" ? "dark" : "light"];
+  const t = vibrant;
   const s = styles(t);
   const { signIn } = useSession();
 
@@ -48,6 +52,7 @@ export default function SignInScreen() {
   return (
     <KeyboardAvoidingView style={s.screen} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <View style={s.card}>
+        <Image source={require("../assets/images/logo-mark.png")} style={s.logo} resizeMode="contain" />
         <Text style={s.heading}>MMDI ONE</Text>
         <Text style={s.subheading}>Sign in to continue</Text>
 
@@ -77,39 +82,32 @@ export default function SignInScreen() {
 
         {error ? <Text style={s.error}>{error}</Text> : null}
 
-        <Pressable onPress={submit} disabled={!canSubmit} style={[s.button, !canSubmit && s.buttonDisabled]}>
-          {busy ? <ActivityIndicator color={t.onBrand} /> : <Text style={s.buttonText}>Sign In</Text>}
-        </Pressable>
+        <GradientButton label="Sign In" onPress={submit} loading={busy} disabled={!canSubmit} style={s.button} />
       </View>
     </KeyboardAvoidingView>
   );
 }
 
-const styles = (t: Theme) =>
+const styles = (t: VibrantTheme) =>
   StyleSheet.create({
     screen: { flex: 1, backgroundColor: t.surface, justifyContent: "center", padding: 24 },
-    card: { gap: 12 },
-    heading: { fontSize: 28, fontWeight: "600", color: t.ink, textAlign: "center" },
+    card: { gap: 12, alignItems: "stretch" },
+    logo: { width: 64, height: 64, borderRadius: 16, alignSelf: "center", marginBottom: 4 },
+    heading: { fontSize: 28, fontWeight: "700", color: t.ink, textAlign: "center" },
     subheading: { fontSize: 15, color: t.inkSecondary, textAlign: "center", marginBottom: 16 },
+    // Filled + colored border rather than a hairline on a near-white
+    // background -- an input field should read as "the thing you type
+    // into", distinct from the plain heading/subheading text above it.
     input: {
-      height: 48,
-      borderRadius: radius.md,
-      borderWidth: StyleSheet.hairlineWidth,
+      height: 50,
+      borderRadius: 16,
+      borderWidth: 1.5,
       borderColor: t.line,
       backgroundColor: t.surfaceSunken,
-      paddingHorizontal: 14,
-      fontSize: 17,
+      paddingHorizontal: 16,
+      fontSize: 16,
       color: t.ink,
     },
     error: { color: t.danger, fontSize: 14, textAlign: "center" },
-    button: {
-      height: 48,
-      borderRadius: radius.md,
-      backgroundColor: t.primary,
-      alignItems: "center",
-      justifyContent: "center",
-      marginTop: 8,
-    },
-    buttonDisabled: { opacity: 0.5 },
-    buttonText: { color: t.onBrand, fontSize: 17, fontWeight: "600" },
+    button: { marginTop: 8 },
   });

@@ -79,7 +79,10 @@ export default function TabLayout() {
       <Tabs.Screen
         name="estimator"
         options={{
-          title: "Estimate",
+          // "Sgn Estimator named as Estimate user get confused so chnage it
+          // as Sign Costing" -- "Estimate" read as ambiguous (estimate of
+          // what?); "Sign Costing" says what the tab actually produces.
+          title: "Sign Costing",
           tabBarIcon: ({ color }) => <SymbolView name="function" tintColor={color} size={26} />,
         }}
       />

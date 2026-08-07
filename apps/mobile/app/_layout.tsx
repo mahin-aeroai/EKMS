@@ -4,6 +4,11 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import { useColorScheme } from 'react-native';
 import 'react-native-reanimated';
+import {
+  Roboto_400Regular,
+  Roboto_500Medium,
+  Roboto_700Bold,
+} from '@expo-google-fonts/roboto';
 
 import { SessionProvider, useSession } from '@/context/auth';
 
@@ -20,8 +25,16 @@ export const unstable_settings = {
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
+  // Roboto, per "make th eofnts smaller roboto or suitable small font" --
+  // used across Estimate/Sign Costing, the pricing summary, and the
+  // installation report, in place of the platform default (San Francisco
+  // on iOS), which was reading as visually noisy at the small sizes those
+  // dense screens need.
   const [loaded, error] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
+    Roboto_400Regular,
+    Roboto_500Medium,
+    Roboto_700Bold,
   });
 
   // Expo Router uses Error Boundaries to catch errors in the navigation tree.
