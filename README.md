@@ -5,14 +5,16 @@
 Repo: [github.com/mahin-aeroai/EKMS](https://github.com/mahin-aeroai/EKMS)
 
 An AI-native enterprise operating platform for MMDI, built on top of a 42-component
-design system: 35 Intelligent Workspace modules covering the full MDI-ONE navigation
+design system: 36 Intelligent Workspace modules covering the full MDI-ONE navigation
 tree (Executive, Customers, Operations, Manufacturing, Knowledge, People, Finance,
 Compliance, Administration), effectively all of which read/write real data from
 Supabase (either directly, or through the AI Copilot's API route / a workspace's own
 tab subcomponents). Highlights beyond the core CRUD workspaces: an AI Copilot with
 19 grounded tools including Gmail search and draft (recipient locked to a
 customer/contact picker, never to model input), a from-scratch soft-signage cost
-estimator (bin-packing, LED layout, GST-ready pricing), an Estimate Builder that
+estimator (bin-packing, LED layout, GST-ready pricing), a Cost Sheet module (BOM
+Master, Rate Card, and per-job cost calculation against real raw material/work
+centre pricing) for the finished-goods product line, an Estimate Builder that
 generates versioned, GST/HSN-ready customer quote PDFs from contract rate cards,
 past sales history, or fully custom line items, a searchable archive of 333
 real site-survey PDFs backed by Cloudflare R2, and an installation-report capture
@@ -93,14 +95,19 @@ supabase-route.ts` accepts either).
   every component live, grouped the same way as the Design System document
   (Inputs & Actions, Cards, Data & Structure, Navigation, Collaboration, Feedback &
   Overlays, AI-Native, Document & Media Viewers, Layout Primitives).
-- `src/app/workspaces/*` — 35 Intelligent Workspace modules (`project` is a redirect
+- `src/app/workspaces/*` — 36 Intelligent Workspace modules (`project` is a redirect
   stub pointing at `job-orders`, its real replacement). The flagship ones
   (`customer`, `machine`, `raw-material`, `job-orders`) use the full 6-tab Universal
   Workspace Pattern with a Server/Client component split; most others are lighter
   single-page modules; `sign-estimator` is its own small multi-tab app (Estimator /
-  Masters / Cost Sheet / Dashboard / History); `estimate-builder` generates
-  versioned, GST/HSN-ready customer quote PDFs client-side (`pdf-lib`) from contract
-  rate cards, past sales history, or custom line items, with every version listed in
+  Masters / Cost Sheet / Dashboard / History); `cost-sheet` is another multi-tab app
+  (Cost Sheet / BOM Master / Rate Card / Material Pricing) for costing finished-goods
+  product lines against real raw material and work centre rates, with a BOM Master
+  tab for mapping/editing/reordering each FG code's bill of materials and a
+  client-side-filtered `RawMaterialPicker` for mapping BOM lines and alternative
+  materials to real `raw_materials` codes; `estimate-builder` generates versioned,
+  GST/HSN-ready customer quote PDFs client-side (`pdf-lib`) from contract rate cards,
+  past sales history, or custom line items, with every version listed in
   `quotations`; `cut-file-tool` and `installation-report` run entirely client-side
   (canvas/PDF work with no server round-trip for the files themselves). See
   `PROJECT_STATUS.md` for the full build history of each.
@@ -124,15 +131,19 @@ supabase-route.ts` accepts either).
 
 ## Verified
 
-`npm run build` passes clean: **59 routes** total per `next build`'s own output — 35
-workspace modules (34 real + the `project` redirect stub), 7 API routes, and the
-design-system/foundation pages, with static prerendering everywhere except the
-workspaces that fetch live Supabase data server-side on every request
-(`customer/[code]`, `job-orders`, `machine`, `raw-material`) and the API routes
-themselves. `npx eslint src` currently has a small number of pre-existing errors
-unrelated to recent work (e.g. a `react-hooks/purity` hit on a `Date.now()` call in
-`workspaces/people/page.tsx`, tracked separately); nothing introduced in the most
-recent pass adds to that count.
+**59 routes** (35 workspace modules — 34 real + the `project` redirect stub — 7 API
+routes, and the design-system/foundation pages) was the last count actually confirmed
+against a real `next build` output, before the Cost Sheet module (`/workspaces/
+cost-sheet`) shipped — see `PROJECT_STATUS.md` item 72 onward. Every Cost Sheet/BOM
+Master change since has only been verified via `npx tsc --noEmit` and `npx eslint`
+(both clean bar the same pre-existing issues noted below) — the sandboxes doing that
+work hit a native `next build` "Bus error" on `@next/swc-linux-{gnu,musl}` every time
+(an ARM64/sandbox incompatibility, not a code issue), so the route count above is not
+yet re-confirmed post-Cost-Sheet and is very likely 60 now, not 59. `npx eslint src`
+currently has a small number of pre-existing errors unrelated to recent work (e.g. a
+`react-hooks/purity` hit on a `Date.now()` call in `workspaces/people/page.tsx`, and a
+`react-hooks/set-state-in-effect` hit in `account/page.tsx`, both tracked separately);
+nothing introduced in recent work adds to that count.
 
 ## Deployment
 

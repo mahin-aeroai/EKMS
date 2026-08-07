@@ -1,23 +1,33 @@
 # MMDI ONE — Project Status
 
-Last updated: 30 July 2026 (session: built the Cost Sheet module this file's
-previous handoff flagged, from scratch, in a *different* session/sandbox
-than this repo's usual assistant environment — this one started from a
-Cowork (not Claude Code) chat, was handed two source files (an internal FG
-Codes BOM Specs workbook and a Jan-Jun 2026 purchase register export), and
-delivered an Excel workbook version of the cost sheet FIRST before the user
-asked for "a module in EKMS MMDI One's Tools tab" — at which point this
-session cloned this repo, read this file, found the "Next up" section
-below, and asked the three scoping questions it demanded before writing
-any code. All three were answered "the recommended option": new
-standalone Tools workspace, wired to real data, BOM + Work Centre cost
-model. See item 72 in session history for the full build. Committed to a
-new branch `cost-sheet-module` (not pushed — this sandbox has no GitHub
-push credentials, only fetch; see that item for the handoff mechanics) —
-**next session should pull that branch, review it, and decide whether to
-merge, then run the two new SQL files against Supabase and confirm
-`npm run build` actually succeeds outside this session's sandbox (see
-"Next up" for why that matters here specifically).**
+Last updated: 7 August 2026 (session: another Cowork — not Claude Code —
+chat, continuing directly on the Cost Sheet module item 72 built. That
+module was merged and put into real use since (the user has been actively
+mapping BOM lines and running Rate Card/BOM Master through this session's
+whole arc), which is what surfaced everything below — every item this
+session fixed came from the user hitting a real rough edge while actually
+using the module, not from a cold read of "Next up." See items 73-78 for
+the full list: raw material picker data contamination + a real category
+consolidation migration, a dropdown that couldn't be closed, editable FG
+code names + a better clone flow + manual display ordering (needs
+`supabase-bom-templates-sort-order-migration.sql`), a checkbox multi-select
+for adding several alternative materials at once, a missing-work-centre
+gap (WC4 Lamination/WC5 Application had zero rows in `work_centre_rates`
+so never appeared as checkable options — needs
+`supabase-work-centre-4-5-bootstrap-migration.sql`, **confirmed run in
+production**), and a "material can't be its own alternative" duplicate-
+listing bug (needs
+`supabase-bom-template-line-alternatives-dedupe-migration.sql`). Every
+code change including item 78 (`bom-alternative-material-no-self-
+duplicate`) was confirmed merged into `main` via a live `git fetch origin
+main` check, same handoff mechanics as always in this sandbox
+(fetch-only, no push access — bundle + handoff instructions each round).
+**Item 78's `supabase-bom-template-line-alternatives-dedupe-migration.sql`
+and item 76's `supabase-bom-templates-sort-order-migration.sql` are the
+two SQL files not yet confirmed run** — confirm those next, then work
+through the refreshed "Next up" list below (BOM line mapping and the rate
+card are both real, ongoing, partly-done efforts now, not a cold-start
+task).
 
 This file exists so a new chat session (or a new contributor) can pick up this
 project without re-deriving context. Read this before making changes.
@@ -62,12 +72,22 @@ over what the code actually does again.
 
 **Deployed and verified**
 
-- `app.mmdi.in` — Next.js 16, 59 routes total per `next build`'s own output
-  (verified against a fresh build, not estimated — see item 52's
-  established convention; up from 56 now that Estimate Builder and
-  Quotations — see item 70 — are counted), 35 workspace modules under
-  `/workspaces/*` (34 real + `project`, confirmed a pure redirect stub to
-  job-orders), installable as a PWA on both iOS and Android
+- `app.mmdi.in` — 59 routes total was the last count actually confirmed
+  against a real `next build` output (see item 52's established
+  convention; up from 56 now that Estimate Builder and Quotations — see
+  item 70 — are counted), 35 workspace modules under `/workspaces/*` (34
+  real + `project`, confirmed a pure redirect stub to job-orders) —
+  **both numbers predate the Cost Sheet module (item 72) and haven't been
+  re-confirmed since**, because every sandbox that's touched this module
+  (including this session's) hits a native `next build` "Bus error" on
+  `@next/swc-linux-{gnu,musl}` (ARM64/sandbox incompatibility, not a code
+  issue — `npx tsc --noEmit` + `npx eslint` both stay clean instead).
+  Cost Sheet adds one workspace (`/workspaces/cost-sheet`) with no other
+  route changes noticed, so the real current figures are very likely 60
+  routes / 36 workspace modules — someone should run a real `next build`
+  outside a sandbox that hits this and update this line with a confirmed
+  number rather than trusting this estimate. Installable as a PWA on both
+  iOS and Android.
 - Supabase Postgres, RLS on every table, roles `admin | editor | viewer`,
   MFA enforced at `aal2` on all API routes
 - Cloudflare R2 for files, always via short-lived presigned URLs
@@ -153,6 +173,19 @@ workspaces. The estimator's `calc.ts` and ~45 row types are shared verbatim.
 - `src/lib/dashboard-queries.ts` — shared count/group-by helpers
   (`getCount`, `getCountWhere`, `groupCount`, `groupSum`, `statusDonutData`,
   `formatCrore`) used by all 6 aggregation dashboards.
+- `src/app/workspaces/cost-sheet/` (item 72 onward, most actively-edited
+  area this session — items 73-78) — `BomMasterTab.tsx` (map/edit/reorder
+  each FG code's bill of materials, `ensureRateCombos()` auto-seeds
+  missing work-centre rate rows), `RawMaterialPicker.tsx` (the shared
+  category-filtered/multi-select-capable raw material dropdown used by
+  both BOM Master and, via `preferredCategory`, alternative-material
+  picking), `CostSheetCalcTab.tsx` (the live per-job calculator),
+  `RateCardTab.tsx`, `calc.ts` (pure math, no Supabase import, kept that
+  way on purpose). `sort_order` on `bom_templates` (item 76) and the
+  bootstrap rows for WC4/WC5 on `work_centre_rates` (item 78) are both
+  recent enough that a fresh session should double-check they've actually
+  been run before assuming BOM Master's ordering/work-centre-checklist
+  behavior matches what's in this code.
 - `src/app/workspaces/estimate-builder/page.tsx` + `src/lib/estimateBuilder/
   pdf.ts` — the Estimate Builder workspace and its client-side (`pdf-lib`)
   quote PDF generator. See item 70 below for what this workspace actually
@@ -229,54 +262,53 @@ workspaces. The estimator's `calc.ts` and ~45 row types are shared verbatim.
 
 ## Next up (start here — this is where the session ended)
 
-**Land the Cost Sheet module (branch `cost-sheet-module`, commit
-`556bd1a`, not merged/pushed).** In priority order:
+The Cost Sheet module (item 72) is long since merged and in real daily use
+— everything below is this session's (items 73-78) real, in-progress
+follow-on work, not a cold restart of the original handoff. In priority
+order:
 
-1. **Get the branch onto GitHub.** It only exists in the sandbox that built
-   it — that assistant environment had no push credentials (fetch-only).
-   Either the user pulls the changes out some other way (the session's
-   sandbox is ephemeral) or a session with push access re-applies them —
-   check with the user which happened before assuming the branch is gone.
-2. **Run `supabase-cost-sheet-schema.sql`, then `supabase-cost-sheet-
-   seed.sql`, then `supabase-cost-sheet-unit-cost-backfill.sql`** against
-   the real Supabase project, in that order (each file's own header
-   explains why). All three were validated against a real local Postgres
-   via PGlite before being committed — see that commit's message for the
-   exact row counts to expect (33 / 139 / 57, 399 raw_materials rows
-   backfilled) — but nobody has run them against the actual Supabase
-   project yet.
-3. **Confirm `npm run build` actually passes.** The session that built
-   this could only verify `npm run typecheck` (clean) and `npm run lint`
-   (clean on every new/changed file — a handful of pre-existing errors in
-   files it didn't touch remain, see below). `next build` itself crashed
-   with a native "Bus error" the instant it loaded `@next/swc-linux-
-   arm64-gnu` (and the musl variant — both crash identically on a bare
-   `require()`, before any of this change's code runs) — an ARM64/sandbox
-   incompatibility in that particular session, since a prior session (see
-   item 71 below) verified a clean `next build` including Turbopack in
-   what should be a similar environment. Don't assume the Bus error means
-   anything is wrong with the Cost Sheet code itself; just get a real
-   build to confirm before merging.
-4. **Map the BOM lines.** By design, none of the 139 `bom_template_lines`
-   rows are pre-mapped to a `raw_materials.code` — the BOM's shorthand
-   material names (e.g. "RSD Flex 340GSM", "RDD Flex Megarich") didn't
-   text-match the purchase register closely enough to auto-map safely (see
-   the schema file's header, and `suggested_codes` on each line for
-   candidates that were found). Someone who knows MMDI's actual item
-   master needs to confirm each mapping via the new workspace's BOM Master
-   tab before the Cost Sheet tab's material costs mean anything.
-5. **Fill in the rest of the rate card.** Only 5 of 16 work centres
-   (Solvent Printing, Manual Cut, Seaming, QC, Packing) have rates
-   confirmed from the user's own sample cost sheet; UV/Latex/Dye Sub
-   Printing, Aluminium Cut, Dye Sub Transfer, Lamination, Application,
-   Digital Cut, Sewing, LED Section, and Assembling all need real rates
-   entered via the Rate Card tab (`work_centre_rates.confidence =
-   'missing'` marks exactly which ones).
-6. Possible follow-up, not required: link `inventory_skus` (785 real FG
-   SKUs from the Tally import) to `bom_templates` (33 coarser product-type
-   "recipes" from the BOM Specs file) via a `bom_template_id` FK, so a
-   specific real FG SKU can resolve to a template automatically instead of
-   the user picking a template by hand every time.
+1. **Run the two outstanding SQL files.** Item 78's code (a material can't
+   be its own alternative anymore) is confirmed merged, but its cleanup
+   migration, `supabase-bom-template-line-alternatives-dedupe-migration.sql`
+   (removes existing duplicate alternative rows), is **not yet confirmed
+   run** — item 78's other SQL file,
+   `supabase-work-centre-4-5-bootstrap-migration.sql`, already is.
+2. **Run `supabase-bom-templates-sort-order-migration.sql`** if it hasn't
+   been — item 76's manual FG-code reordering (up/down arrows in BOM
+   Master) silently no-ops without it (`sort_order` falls back to `null`,
+   which just sorts by code like before, so nothing visibly breaks if this
+   is missed, but reordering won't actually persist correctly until it's
+   run).
+3. **Keep mapping BOM lines.** This is genuinely in progress now (not
+   0/139 anymore) — the user has been actively working through BOM
+   Master's raw-material mapping across this whole session, helped along
+   by items 73-74 (the picker no longer shows Finished-Goods junk or gets
+   stuck open) and item 77 (can now tick several alternative materials at
+   once instead of one at a time). No exact remaining count is tracked
+   here; check BOM Master for lines still showing "unmapped" /
+   `suggested_codes` text.
+4. **Keep filling in the rate card.** Item 78 just added WC4 Lamination
+   and WC5 Application as checkable work centres for the first time (they
+   had zero rows in `work_centre_rates` before, so never appeared as
+   options at all) — those, plus whichever of the original 16 work
+   centres are still `confidence = 'missing'`, need real rates entered via
+   the Rate Card tab. Every work centre a template gets checked against
+   now auto-creates its own "missing" placeholder row (`ensureRateCombos`
+   in `BomMasterTab.tsx`) rather than silently costing ₹0, so the Rate
+   Card tab itself is the authoritative "what's left to price" list —
+   check it directly rather than trusting any specific count written here.
+5. Possible follow-up, not required: link `inventory_skus` (785 real FG
+   SKUs from the Tally import) to `bom_templates` (33+ product-type
+   "recipes," growing as the user clones new FG code variants via item
+   76's clone flow) via a `bom_template_id` FK, so a specific real FG SKU
+   can resolve to a template automatically instead of the user picking a
+   template by hand every time.
+6. **Re-confirm the route/workspace count** (see "Current state" above) —
+   nobody has run a real `next build` since the Cost Sheet module shipped;
+   every sandbox that's touched it since (including this session's) hits
+   the same ARM64 "Bus error" that item 72 first hit, so `npx tsc
+   --noEmit` + `npx eslint` are all that's actually been verified for
+   every change in items 72-78.
 
 ## Natural next steps (not started, pick one)
 
@@ -2133,3 +2165,219 @@ workspaces. The estimator's `calc.ts` and ~45 row types are shared verbatim.
       up next needs to find out from the user how (or whether) those
       changes made it out of that sandbox before re-doing any of this
       work from scratch.
+
+73. **RawMaterialPicker data-quality fixes** (BOM Master's raw-material
+    dropdown, both the main "Mapped raw material" picker and the "+
+    alternative material" one), across several rounds in one continuous
+    thread with the user. First report: "while selecting the material i
+    see all list of items... i dont see some of them in the list i should
+    search with their number then only they appear example when search
+    for backlit material with keyword backlit i see 12001 then jumped to
+    12006 whereas 12003 4, 5 are valid." Two real bugs, both in
+    `RawMaterialPicker.tsx`:
+    - `raw_materials` had picked up a batch of rows that are really
+      Finished Goods reference codes (e.g. "FG - 41004 — BACKLIT
+      SIGNAGES"), matching `import-finished-goods.sql`'s `inventory_skus`
+      seed exactly — contaminating every search. Fixed with a code-format
+      signature (`/\s-\s/`, space-dash-space — unique to the contaminated
+      batch, real codes like "FG-13300"/"GE-23096" never have it) plus,
+      once that signature proved incomplete (some junk rows like
+      "FG-41123" have no spaces), a category-based `EXCLUDED_CATEGORIES`
+      set covering 16 non-material categories confirmed via a live audit
+      query the user ran and pasted back as CSV (General Items, Fixed
+      Assets, General Services, Spare Parts for Machinary, SI - Margins,
+      Flag Costing (placeholder), 7 "FG - ... Applications" categories,
+      BPCL Signages, Backlit/Nonlit Soft Signs).
+    - The empty-query "browse" list was capped at 200 rows BEFORE sorting
+      by the line's `preferredCategory`, so relevant items (like
+      RM-12003/4/5) could get squeezed out of the cap entirely by
+      unrelated categories that happened to sort earlier — exactly the "I
+      have to search by number" symptom. Fixed by pulling
+      `preferredCategory` items out in full before applying the cap to
+      everything else.
+    - Follow-up report ("it is still not showing full backlit materilas
+      with 12002,3,4,5") led to a second live audit (58 distinct
+      `raw_materials.category` strings) that found the real root cause:
+      RM-12002 through RM-12005 sat under old Tally-style category
+      buckets ("RM - BACKLIT SIGNAGE MATERIALS" etc.) that were never
+      migrated to the newer taxonomy ("Backlit Flex") a subset of codes
+      already used — so they never grouped with RM-12001/12006 in the
+      picker even though they're the same product family. Per the user's
+      own answers to a clarifying question (hide non-material categories,
+      hide "General Items" entirely, merge old/new category duplicates
+      UI-only first): added `CATEGORY_ALIASES` (5 confirmed old↔new
+      category pairs) and `canonicalCategory()`, used throughout the
+      picker's filtering/grouping.
+    - The user then explicitly asked for the real database fix, not just
+      a UI merge ("give bom-raw-material-category-cleanup sql yi are not
+      gving it here") — `supabase-raw-material-category-cleanup-
+      migration.sql` (delivered standalone, not committed to git, same
+      pattern as every other supabase-*.sql file this session) actually
+      consolidates the same 5 pairs at the database level. **Confirmed
+      run in production** — the user uploaded a follow-up audit CSV
+      showing the exact expected post-migration category counts (e.g.
+      "Backlit Flex" now 468 rows, matching 22+436+2+8 from the
+      pre-migration breakdown), verified programmatically before telling
+      the user it matched.
+    Branches `bom-raw-material-picker-filter-fix` and
+    `bom-raw-material-category-cleanup`, both **confirmed merged into
+    `main`**.
+
+74. **RawMaterialPicker dropdown that could never be closed** — "once i
+    start selecting materials when i endup i cant close the selction
+    box!!" Root cause: picking a row removes that `<button>` from the DOM
+    (the list re-renders without it), and the browser's default behavior
+    on losing focus like that is to shift focus back onto the search
+    `<input>` immediately above it — whose own `onFocus` handler
+    immediately reopened the dropdown, so closing it by picking something
+    (or clicking away) looked like it never actually worked. Fixed with
+    `onMouseDown={(e) => e.preventDefault()}` on every option/close button
+    (stops the focus-shift from happening at all) plus a real independent
+    close path: a click-outside listener and an Escape-key handler, both
+    standard for a custom dropdown that isn't a native `<select>`, plus a
+    small explicit close (×) button in the dropdown's own header.
+    Verified via a clean `npx tsc --noEmit` + `npx eslint`. Branch
+    `bom-raw-material-picker-close-fix`, **confirmed merged into `main`**.
+
+75. **Sign Estimator Cost Sheet: per-sign display fix + real PDF
+    download.** Two small, separate user reports on the same tab
+    (`apps/web/src/app/workspaces/sign-estimator/CostSheetTab.tsx`):
+    - "check this profie is charged for 3 qty rest all compnents are
+      charged for 1 qty? how do we show it?" — a real display-consistency
+      bug (not a pricing bug) in how the Profile line's total was shown
+      relative to every other line; fixed so every cost line reads
+      per-sign consistently, matching how the rest of the sheet already
+      displayed. Verified against a re-rendered cost sheet before telling
+      the user it was fixed.
+    - "Instaed of print pdf give download pdf. and convert fonts to
+      nearest cambria font" — replaced the old `window.print()` button
+      with a real client-side PDF generator: new
+      `src/lib/signEstimator/pdf.ts` (`pdf-lib`, portrait A4,
+      `StandardFonts.TimesRoman`/`TimesRomanBold` as the closest available
+      Cambria substitute — matching the same font choice already used by
+      Import Duty's own `pdf.ts`), a 3-column label/detail/value row
+      renderer matching the on-screen `<Row>` layout exactly, and a
+      `downloadBlob()` helper triggering a real browser download named
+      `<ref>.pdf`. Caught and fixed two self-found rendering bugs before
+      handoff: a section-header background bar that extended 12pt above
+      its own section's starting cursor position (overlapping the line
+      above it whenever that line wrapped to two lines), and a stray leftover
+      highlight rectangle + extra spacing that pushed the footer note onto
+      an otherwise-blank second page — both confirmed fixed via a
+      re-rendered test PDF, not just reasoned about.
+    Verified via a clean `npx tsc --noEmit` + `npx eslint`. Branches
+    `sign-estimator-profile-per-sign-display-fix` and
+    `sign-estimator-download-pdf-cambria`, both **confirmed merged into
+    `main`**.
+
+76. **BOM Master: editable FG code names, a better clone flow, and manual
+    display ordering** — "give an option to edit names and also give
+    option to duplicate the FG codes and place them in order," after the
+    user noticed two very similarly-named FG codes ("UVDD-Flex" /
+    "UVDD-Flex-MultiLayer") sitting apart in the list purely because their
+    codes happened to sort that way alphabetically, with no way to place a
+    clone next to its source on purpose. Three changes to
+    `BomMasterTab.tsx`:
+    - **Inline editing**: a pencil icon next to each FG code opens an
+      editable Code + Description pair (Check to save, X to cancel).
+      Confirmed renaming `code` is safe before shipping it — `
+      bom_template_lines` references templates by `template_id` (a uuid
+      FK), never by `code`; `work_centre_rates` keys on `(work_centre,
+      print_mode, substrate)`, not code either; every place that displays
+      a template's `code` elsewhere (saved cost sheets, the Estimate Pool)
+      is a frozen historical snapshot that deliberately never rewrites
+      itself when the source template changes later, matching the
+      "don't rewrite history" convention already established for every
+      other saved-snapshot feature in this app.
+    - **Better clone**: the clone dialog now also lets you edit the
+      description up front (previously code-only), and the new copy is
+      spliced in directly after its source within the category — not
+      wherever its new code string happens to sort alphabetically.
+    - **Manual ordering**: new up/down arrows next to each FG code
+      reorder it within its category. Backed by a new `bom_templates.
+      sort_order integer` column
+      (`supabase-bom-templates-sort-order-migration.sql`, backfilled to
+      each row's current alphabetical position on migration so nothing
+      visibly reorders the moment it ships — **not yet confirmed run in
+      production**, see "Next up"). `renumberCategory()` renumbers a
+      whole category to clean sequential values (0, 10, 20...) any time
+      an item in it moves, gets created, or gets cloned, so gaps/ties
+      never really accumulate. `CostSheetCalcTab.tsx`'s own
+      `bom_templates` fetch was also updated to order by `sort_order`, so
+      the Cost Sheet tab's template picker reflects the same manual order
+      as BOM Master.
+    - Self-caught (not user-reported) an HTML-invalidity bug while
+      building the inline-editing UI: the existing clickable title area
+      was a native `<button>`, and a `<button>` cannot legally contain
+      another `<button>` or `<input>` as a descendant (browsers silently
+      restructure/break the DOM when it happens, which can cause React
+      hydration mismatches) — the new Edit/Save/Cancel buttons and text
+      inputs needed exactly that. Fixed by converting the outer element to
+      `<div role="button" tabIndex={0} onClick=... onKeyDown={...}>`,
+      keeping click-to-toggle and Enter/Space keyboard access, before ever
+      showing it to the user.
+    Verified via a clean `npx tsc --noEmit` + `npx eslint`. Branch
+    `bom-master-editable-names-and-ordering`, **confirmed merged into
+    `main`**.
+
+77. **Cost Sheet: tick multiple alternative materials at once** — "can i
+    have selction ticks so that i can do it at once," after the "+
+    alternative material" picker's click-to-pick-and-close behavior (fine
+    for the primary "Mapped raw material" picker, which only ever holds
+    one value) meant adding several alternatives required reopening and
+    re-searching the dropdown after every single pick. Added a `multiple`
+    mode to `RawMaterialPicker.tsx`: checkboxes on each row instead of an
+    immediate pick, a running "N selected" label plus an explicit "Add
+    (N)" button in the dropdown header, and a bulk `addAlternatives()` in
+    `BomMasterTab.tsx` (`upsert` with `ignoreDuplicates: true`, so
+    re-ticking an already-added alternative is a silent no-op, same
+    handling as the existing single-add path's `23505` case). The primary
+    picker is untouched — still single click-to-pick. Verified via a
+    clean `npx tsc --noEmit` + `npx eslint`. Branch
+    `bom-alternative-material-multiselect`, **confirmed merged into
+    `main`**.
+
+78. **WC4 Lamination / WC5 Application missing from the work centre
+    checklist, and a related "material can't be its own alternative" bug**
+    — two related small fixes from the same stretch of the session.
+    - "in the work centres: 4 and 5 are missing lamination and
+      application" — BOM Master's "Work centres for this FG code"
+      checklist isn't hardcoded; it lists whatever distinct `work_centre`
+      values already exist in `work_centre_rates`. A live audit (asked the
+      user to run it, since this sandbox has no direct DB access) confirmed
+      WC4 and WC5 had ZERO rows there at all — every other work centre
+      (WC2, WC6A/B, WC7, WC8, WC9, etc.) did — so they'd never appeared as
+      checkable options, even though they're real production steps. Per
+      the user's own choice (bootstrap one placeholder row each, rather
+      than guessing which substrates they apply to up front):
+      `supabase-work-centre-4-5-bootstrap-migration.sql` inserts one
+      `confidence = 'missing'` row per centre, just enough to make them
+      appear in the checklist — `BomMasterTab.tsx`'s existing
+      `ensureRateCombos()` already auto-creates the real substrate-specific
+      rate row the moment either gets checked on an actual FG code, same
+      as every other work centre, so nothing else needed to change.
+      **Confirmed run in production** — the user shared a screenshot of
+      the verification query returning both new rows.
+    - While investigating, found a real duplicate-listing bug the user
+      then separately reported: "the selction is duplicate observed
+      highted ink" — the Cost Sheet tab's Mapped-to dropdown showed one
+      material twice for some lines (once as the current default "...
+      (default)", once again plain), because that material was also
+      sitting in the line's own `bom_template_line_alternatives` — left
+      over from before it was promoted from alternative to default. A
+      material can't be its own alternative. Fixed at the source in
+      `BomMasterTab.tsx` — `mapLineToMaterial()` now drops the newly-set
+      default out of that line's alternatives if it was there;
+      `addAlternative`/`addAlternatives` now refuse to add a line's
+      current default as its own alternative in the first place — plus a
+      display-side backstop in `CostSheetCalcTab.tsx` that skips any
+      alternative matching the default regardless. Existing bad rows need
+      a one-time cleanup:
+      `supabase-bom-template-line-alternatives-dedupe-migration.sql`
+      (deletes any `bom_template_line_alternatives` row that already
+      matches its line's current `raw_material_code`) — **not yet
+      confirmed run in production**.
+    Verified via a clean `npx tsc --noEmit` + `npx eslint`. Branch
+    `bom-alternative-material-no-self-duplicate`, **confirmed merged into
+    `main`** — the dedupe migration itself is the one piece of this item
+    not yet confirmed run (see "Next up").
