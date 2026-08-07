@@ -81,6 +81,8 @@ function RootLayoutNav() {
         <Stack.Protected guard={!!session}>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="report/[id]" options={{ title: "Installation Report" }} />
+          {/* "make a screen for it" -- cost sheet detail after Generate */}
+          <Stack.Screen name="cost-sheet/[ref]" options={{ title: "Cost Sheet" }} />
         </Stack.Protected>
         <Stack.Protected guard={!session}>
           <Stack.Screen name="sign-in" options={{ headerShown: false }} />

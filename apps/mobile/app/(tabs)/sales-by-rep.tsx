@@ -14,7 +14,7 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import { radius } from "@mmdi/shared/theme";
-import { vibrant, type VibrantTheme } from "../../theme/vibrant";
+import { vibrant, fonts, optionAccent, type VibrantTheme } from "../../theme/vibrant";
 import { SoftCard, GradientCard, GradientButton } from "../../theme/components";
 import { supabase } from "../../lib/supabase";
 
@@ -65,10 +65,28 @@ function formatDMY(d: Date | null): string {
   return `${day}/${m}/${d.getFullYear()}`;
 }
 
+// "dates convert indian format DDMMYYYY" applies here too -- invoice_date
+// comes back from Supabase as a plain "YYYY-MM-DD" string, not a Date.
+function formatISOToDMY(iso: string | null): string {
+  if (!iso) return "—";
+  const [y, m, d] = iso.split("-");
+  return y && m && d ? `${d}/${m}/${y}` : iso;
+}
+
+interface CustomerTransaction {
+  invoice_date: string | null;
+  taxable_value: number;
+}
+
 interface CustomerBreakdownRow {
   customer_name: string;
   transaction_count: number;
   total_taxable_value: number;
+  // "after generating sales by customers should open detail transactions
+  // so that it is more relavent" -- kept per-customer instead of discarded
+  // once grouped, so tapping a row can show the individual invoices that
+  // make up its total rather than just the aggregate.
+  transactions: CustomerTransaction[];
 }
 
 async function fetchAllRows<T>(
@@ -108,6 +126,8 @@ export default function SalesByRepScreen() {
   const [rows, setRows] = useState<CustomerBreakdownRow[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  // "after generating sales by customers should open detail transactions"
+  const [detailCustomer, setDetailCustomer] = useState<CustomerBreakdownRow | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -145,16 +165,22 @@ export default function SalesByRepScreen() {
           return q;
         }
       );
-      const groups = new Map<string, { total: number; count: number }>();
+      const groups = new Map<string, { total: number; count: number; transactions: CustomerTransaction[] }>();
       for (const r of all) {
         const name = r.customer_name ?? "Unknown";
-        const g = groups.get(name) ?? { total: 0, count: 0 };
+        const g = groups.get(name) ?? { total: 0, count: 0, transactions: [] };
         g.total += r.taxable_value ?? 0;
         g.count += 1;
+        g.transactions.push({ invoice_date: r.invoice_date, taxable_value: r.taxable_value ?? 0 });
         groups.set(name, g);
       }
       const breakdown = [...groups.entries()]
-        .map(([customer_name, g]) => ({ customer_name, transaction_count: g.count, total_taxable_value: g.total }))
+        .map(([customer_name, g]) => ({
+          customer_name,
+          transaction_count: g.count,
+          total_taxable_value: g.total,
+          transactions: g.transactions.sort((a, b) => (b.invoice_date ?? "").localeCompare(a.invoice_date ?? "")),
+        }))
         .sort((a, b) => b.total_taxable_value - a.total_taxable_value);
       setRows(breakdown);
     } finally {
@@ -260,15 +286,22 @@ export default function SalesByRepScreen() {
                 </Pressable>
               }
               renderItem={({ item }) => (
-                <SoftCard style={s.row}>
-                  <View style={s.rowText}>
-                    <Text style={s.rowTitle} numberOfLines={1}>{item.customer_name}</Text>
-                    <Text style={s.rowMeta}>
-                      {item.transaction_count} transaction{item.transaction_count === 1 ? "" : "s"}
-                    </Text>
-                  </View>
-                  <Text style={s.rowValue}>₹{item.total_taxable_value.toLocaleString("en-IN")}</Text>
-                </SoftCard>
+                <Pressable onPress={() => setDetailCustomer(item)}>
+                  {({ pressed }) => (
+                    <SoftCard style={[s.row, pressed && { opacity: 0.7 }]}>
+                      <View style={s.rowText}>
+                        <Text style={s.rowTitle} numberOfLines={1}>{item.customer_name}</Text>
+                        <Text style={s.rowMeta}>
+                          {item.transaction_count} transaction{item.transaction_count === 1 ? "" : "s"}
+                        </Text>
+                      </View>
+                      <View style={s.rowRight}>
+                        <Text style={s.rowValue}>₹{item.total_taxable_value.toLocaleString("en-IN")}</Text>
+                        <Text style={s.rowChev}>›</Text>
+                      </View>
+                    </SoftCard>
+                  )}
+                </Pressable>
               )}
             />
           )}
@@ -286,9 +319,9 @@ export default function SalesByRepScreen() {
             data={salesPeople ?? []}
             keyExtractor={(name) => name}
             style={s.modalList}
-            renderItem={({ item: name }) => (
+            renderItem={({ item: name, index }) => (
               <Pressable
-                style={[s.modalOption, name === selectedRep && s.modalOptionActive]}
+                style={[s.modalOption, { borderLeftColor: optionAccent(t, index) }, name === selectedRep && s.modalOptionActive]}
                 onPress={() => {
                   setSelectedRep(name);
                   setRows(null);
@@ -314,6 +347,9 @@ export default function SalesByRepScreen() {
             value={dateFrom ?? new Date()}
             mode="date"
             display={Platform.OS === "ios" ? "inline" : "default"}
+            themeVariant="light"
+            accentColor={t.primary}
+            style={s.datePicker}
             maximumDate={dateTo ?? undefined}
             onChange={(_event, selected) => {
               if (Platform.OS === "android") setFromPickerOpen(false);
@@ -334,11 +370,42 @@ export default function SalesByRepScreen() {
             value={dateTo ?? new Date()}
             mode="date"
             display={Platform.OS === "ios" ? "inline" : "default"}
+            themeVariant="light"
+            accentColor={t.primary}
+            style={s.datePicker}
             minimumDate={dateFrom ?? undefined}
             onChange={(_event, selected) => {
               if (Platform.OS === "android") setToPickerOpen(false);
               if (selected) setDateTo(selected);
             }}
+          />
+        </View>
+      </Modal>
+
+      <Modal visible={!!detailCustomer} transparent animationType="slide" onRequestClose={() => setDetailCustomer(null)}>
+        <Pressable style={s.modalBackdrop} onPress={() => setDetailCustomer(null)} />
+        <View style={s.modalSheet}>
+          <View style={s.modalHeader}>
+            <Text style={s.modalTitle} numberOfLines={1}>{detailCustomer?.customer_name}</Text>
+            <Pressable onPress={() => setDetailCustomer(null)}><Text style={s.modalClose}>Done</Text></Pressable>
+          </View>
+          <View style={s.detailSummaryRow}>
+            <Text style={s.detailSummaryText}>
+              {detailCustomer?.transaction_count} transaction{detailCustomer?.transaction_count === 1 ? "" : "s"}
+            </Text>
+            <Text style={s.detailSummaryValue}>₹{detailCustomer?.total_taxable_value.toLocaleString("en-IN")}</Text>
+          </View>
+          <FlatList
+            data={detailCustomer?.transactions ?? []}
+            keyExtractor={(txn, i) => `${txn.invoice_date ?? "—"}-${i}`}
+            style={s.modalList}
+            renderItem={({ item: txn, index }) => (
+              <View style={[s.detailRow, { borderLeftColor: optionAccent(t, index) }]}>
+                <Text style={s.detailRowDate}>{formatISOToDMY(txn.invoice_date)}</Text>
+                <Text style={s.detailRowValue}>₹{txn.taxable_value.toLocaleString("en-IN")}</Text>
+              </View>
+            )}
+            ListEmptyComponent={<Text style={s.modalEmpty}>No transactions.</Text>}
           />
         </View>
       </Modal>
@@ -371,7 +438,15 @@ const styles = (t: VibrantTheme) =>
     },
     dateInputText: { fontSize: 15, fontWeight: "500", color: t.ink },
     dateInputPlaceholder: { fontSize: 15, color: t.inkMuted },
-    datePickerSheet: { backgroundColor: t.surfaceRaised, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, paddingBottom: 24 },
+    // "Sale sby rep date is not appearing" -- the iOS inline calendar was
+    // collapsing to a sliver (one visible day, default blue) because
+    // neither the sheet nor the picker itself had an explicit size, and an
+    // inline UIDatePicker needs one to lay out its full month grid. A fixed
+    // sheet height + stretched/tall picker plus themeVariant/accentColor
+    // (so it reads as part of the red theme, not default iOS blue) fixes
+    // both the layout collapse and the color mismatch in one pass.
+    datePickerSheet: { backgroundColor: t.surfaceRaised, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, paddingBottom: 24, minHeight: 400 },
+    datePicker: { alignSelf: "stretch", height: 340 },
 
     statRow: { flexDirection: "row", gap: 8, padding: 16, paddingBottom: 8 },
     statCardHero: { flex: 1.2, justifyContent: "center", gap: 4 },
@@ -393,6 +468,9 @@ const styles = (t: VibrantTheme) =>
     rowTitle: { fontSize: 15, color: t.ink },
     rowMeta: { fontSize: 13, color: t.inkSecondary, marginTop: 2 },
     rowValue: { fontSize: 15, fontWeight: "600", color: t.ink },
+    // "after generating sales by customers should open detail transactions"
+    rowRight: { flexDirection: "row", alignItems: "center", gap: 4 },
+    rowChev: { fontSize: 18, color: t.inkMuted },
 
     modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)" },
     modalSheet: { backgroundColor: t.surfaceRaised, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, maxHeight: "70%", paddingBottom: 24 },
@@ -400,8 +478,24 @@ const styles = (t: VibrantTheme) =>
     modalTitle: { fontSize: 15, fontWeight: "600", color: t.ink },
     modalClose: { fontSize: 15, fontWeight: "600", color: t.primary },
     modalList: { paddingHorizontal: 8 },
-    modalOption: { minHeight: 44, justifyContent: "center", paddingHorizontal: 12, paddingVertical: 10, borderRadius: radius.md },
+    // "drop down selction font should be smaller and more decorative with
+    // each line with slighly colored" -- thin colored left rule per row.
+    modalOption: { minHeight: 44, justifyContent: "center", paddingHorizontal: 12, paddingVertical: 10, borderRadius: radius.md, borderLeftWidth: 3, marginVertical: 1 },
     modalOptionActive: { backgroundColor: t.primaryTint },
-    modalOptionText: { fontSize: 15, color: t.ink },
+    modalOptionText: { fontSize: 13, fontFamily: fonts.serif, color: t.ink },
     modalEmpty: { padding: 24, textAlign: "center", color: t.inkMuted, fontSize: 14 },
+
+    // Customer transaction-detail sheet.
+    detailSummaryRow: {
+      flexDirection: "row", justifyContent: "space-between", alignItems: "center",
+      paddingHorizontal: 16, paddingVertical: 10, backgroundColor: t.surfaceSunken,
+    },
+    detailSummaryText: { fontSize: 12, fontFamily: fonts.regular, color: t.inkSecondary },
+    detailSummaryValue: { fontSize: 15, fontFamily: fonts.bold, color: t.ink },
+    detailRow: {
+      flexDirection: "row", justifyContent: "space-between", alignItems: "center",
+      minHeight: 40, paddingHorizontal: 12, paddingVertical: 8, borderLeftWidth: 3, marginVertical: 1,
+    },
+    detailRowDate: { fontSize: 13, fontFamily: fonts.regular, color: t.ink },
+    detailRowValue: { fontSize: 13, fontFamily: fonts.medium, color: t.inkSecondary },
   });

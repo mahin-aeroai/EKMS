@@ -103,3 +103,18 @@ export const fonts = {
   serif: "Lora_400Regular",
   serifBold: "Lora_600SemiBold",
 } as const;
+
+/**
+ * "drop down selction font should be smaller and more decorative with each
+ * line with slighly colored" -- a small cycling accent palette so every
+ * picker/dropdown list (sheet material, unit, sales rep, photo-source, ...)
+ * reads as a row of gently colored lines instead of flat black-on-white,
+ * without inventing new brand colors. Reuses existing semantic theme colors
+ * (primary/info/success/warning) rather than arbitrary hues so it still
+ * sits "within red theme" -- also doubles as the "add few more color inside
+ * the pages" pass across those same option lists.
+ */
+export function optionAccent(t: VibrantTheme, index: number): string {
+  const accents = [t.primary, t.info, t.success, t.warning];
+  return accents[index % accents.length];
+}

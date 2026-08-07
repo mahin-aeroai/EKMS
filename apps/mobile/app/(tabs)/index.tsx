@@ -61,11 +61,23 @@ function statusMeta(status: ReportStatus, t: VibrantTheme): { color: string; lab
 // specific SF Symbol literals, not a plain string, so a widened type fails
 // to typecheck even though every literal here is already used successfully
 // as a bare string prop in _layout.tsx.
+// "add few more color inside the pages so that it looks better" -- each
+// tool gets its own accent (still all from the existing red-theme palette,
+// nothing new invented) instead of every quick-action tile using the same
+// flat primaryTint icon circle, so the grid reads as four distinct tools
+// at a glance rather than four identical cards with different labels.
+const ACCENT_MAP: Record<string, (t: VibrantTheme) => { main: string; tint: string }> = {
+  primary: (t) => ({ main: t.primary, tint: t.primaryTint }),
+  info: (t) => ({ main: t.info, tint: t.infoTint }),
+  success: (t) => ({ main: t.success, tint: t.successTint }),
+  warning: (t) => ({ main: t.warning, tint: t.warningTint }),
+};
+
 const QUICK_ACTIONS = [
-  { label: "Surveys", sub: "Search & open site surveys", icon: "doc.text.magnifyingglass", route: "/surveys" },
-  { label: "Sign Costing", sub: "Build a signage cost sheet", icon: "function", route: "/estimator" },
-  { label: "Basil Installations", sub: "Reports & new capture", icon: "list.clipboard", route: "/reports" },
-  { label: "Sales by Rep", sub: "Customer breakdown by rep", icon: "chart.line.uptrend.xyaxis", route: "/sales-by-rep" },
+  { label: "Surveys", sub: "Search & open site surveys", icon: "doc.text.magnifyingglass", route: "/surveys", color: "info" },
+  { label: "Sign Costing", sub: "Build a signage cost sheet", icon: "function", route: "/estimator", color: "primary" },
+  { label: "Basil Installations", sub: "Reports & new capture", icon: "list.clipboard", route: "/reports", color: "warning" },
+  { label: "Sales by Rep", sub: "Customer breakdown by rep", icon: "chart.line.uptrend.xyaxis", route: "/sales-by-rep", color: "success" },
 ] as const;
 
 export default function HomeScreen() {
@@ -164,29 +176,32 @@ export default function HomeScreen() {
       </Pressable>
 
       <View style={s.statRow}>
-        <SoftCard style={s.statCard}>
-          <Text style={s.statValue}>{items === null ? "—" : inProgress}</Text>
+        <SoftCard style={[s.statCard, { borderLeftWidth: 3, borderLeftColor: t.warning }]}>
+          <Text style={[s.statValue, { color: t.warning }]}>{items === null ? "—" : inProgress}</Text>
           <Text style={s.statLabel}>In progress</Text>
         </SoftCard>
-        <SoftCard style={s.statCard}>
-          <Text style={s.statValue}>{items === null ? "—" : completedThisMonth}</Text>
+        <SoftCard style={[s.statCard, { borderLeftWidth: 3, borderLeftColor: t.success }]}>
+          <Text style={[s.statValue, { color: t.success }]}>{items === null ? "—" : completedThisMonth}</Text>
           <Text style={s.statLabel}>Completed this month</Text>
         </SoftCard>
       </View>
 
       <Text style={s.sectionTitle}>Quick actions</Text>
       <View style={s.grid}>
-        {QUICK_ACTIONS.map((a) => (
-          <Pressable key={a.route} style={s.gridItem} onPress={() => router.push(a.route as never)}>
-            <SoftCard style={s.gridCard}>
-              <View style={s.gridIconWrap}>
-                <SymbolView name={a.icon} tintColor={t.primary} size={20} />
-              </View>
-              <Text style={s.gridLabel}>{a.label}</Text>
-              <Text style={s.gridSub} numberOfLines={2}>{a.sub}</Text>
-            </SoftCard>
-          </Pressable>
-        ))}
+        {QUICK_ACTIONS.map((a) => {
+          const accent = ACCENT_MAP[a.color](t);
+          return (
+            <Pressable key={a.route} style={s.gridItem} onPress={() => router.push(a.route as never)}>
+              <SoftCard style={s.gridCard}>
+                <View style={[s.gridIconWrap, { backgroundColor: accent.tint }]}>
+                  <SymbolView name={a.icon} tintColor={accent.main} size={20} />
+                </View>
+                <Text style={s.gridLabel}>{a.label}</Text>
+                <Text style={s.gridSub} numberOfLines={2}>{a.sub}</Text>
+              </SoftCard>
+            </Pressable>
+          );
+        })}
       </View>
 
       <Text style={s.sectionTitle}>Recent activity</Text>
@@ -230,13 +245,13 @@ export default function HomeScreen() {
 const styles = (t: VibrantTheme) =>
   StyleSheet.create({
     screen: { flex: 1, backgroundColor: t.surface },
-    content: { padding: 16, paddingBottom: 32, gap: 14 },
+    content: { padding: 16, paddingBottom: 32, gap: 18 },
 
     greetRow: { flexDirection: "row", alignItems: "center", gap: 12 },
-    // "use Lora serif font with very small size" -- was fontSize 26 sans;
-    // now a small serif wordmark-style greeting instead of a big bold one.
-    greeting: { fontSize: 19, fontFamily: fonts.serifBold, color: t.ink },
-    subGreeting: { fontSize: 15, color: t.inkSecondary, marginTop: -8 },
+    // "font headr can be little smaller and gap can be increased slightly"
+    // -- shaved further and given more breathing room from what follows.
+    greeting: { fontSize: 16, fontFamily: fonts.serifBold, color: t.ink },
+    subGreeting: { fontSize: 13, color: t.inkSecondary, marginTop: -4 },
     logo: { width: 40, height: 40, borderRadius: 10 },
 
     copilotCard: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16 },

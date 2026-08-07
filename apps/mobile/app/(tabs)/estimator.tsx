@@ -13,9 +13,11 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useRouter } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { radius } from "@mmdi/shared/theme";
-import { vibrant, fonts, type VibrantTheme } from "../../theme/vibrant";
+import { vibrant, fonts, optionAccent, type VibrantTheme } from "../../theme/vibrant";
 import { SoftCard, GradientCard, GradientButton } from "../../theme/components";
 import type {
   SignProfileRow, SignLedModuleRow, SignLedBarRow, SignLedDriverRow,
@@ -90,6 +92,8 @@ export default function EstimatorScreen() {
   // A guessed constant here would be wrong on any device with a different
   // status bar / Dynamic Type header height than whatever it was eyeballed on.
   const headerHeight = useHeaderHeight();
+  const insets = useSafeAreaInsets();
+  const router = useRouter();
 
   const [step, setStep] = useState(1);
   const [masters, setMasters] = useState<Masters | null>(null);
@@ -150,7 +154,10 @@ export default function EstimatorScreen() {
   const [labour, setLabour] = useState<number | "">(0);
   const [install, setInstall] = useState<number | "">(0);
   const [overheadPct, setOverheadPct] = useState<number | "">(10);
-  const [markupPct, setMarkupPct] = useState<number | "">(30);
+  // "made labour charge by defalut 0 and markup to 50% etc. take current
+  // update from web and implement" -- matches EstimatorTab.tsx's own
+  // useState(50) default exactly (labour above was already 0 natively).
+  const [markupPct, setMarkupPct] = useState<number | "">(50);
   const [discountPct, setDiscountPct] = useState<number | "">(0);
   const [gstPct, setGstPct] = useState<number | "">(18);
   const [printSellOverride, setPrintSellOverride] = useState<number | "">("");
@@ -190,6 +197,12 @@ export default function EstimatorScreen() {
   const hMM = h === "" ? 0 : toMM(h, unit);
   const isLit = category !== "" && category !== "nonlit";
   const profile = masters?.profiles.find((p) => p.id === profileId) ?? null;
+  // "automatica infomation of technical specifications" -- mirrors
+  // EstimatorTab.tsx's profRatePerRFT/profRatePerRM (profile.cost is per
+  // whole stock bar, not per running length; Cost breakdown below wants the
+  // per-RFT/per-RM rate that actually produced that bar cost).
+  const profRatePerRFT = profile && profile.stock_len > 0 ? profile.cost / (profile.stock_len / 304.8) : 0;
+  const profRatePerRM = profile && profile.stock_len > 0 ? profile.cost / (profile.stock_len / 1000) : 0;
   const profilesForCategory = useMemo(() => {
     if (!masters || !category) return [];
     const catKey = CATEGORY_TO_PROFILE_CATEGORY[category];
@@ -342,6 +355,52 @@ export default function EstimatorScreen() {
     const now = new Date();
     const ref = `QUOTE-${now.getFullYear()}-${String(now.getTime()).slice(-5)}`;
     const { data: userData } = await supabase.auth.getUser();
+    // "after genrating the cost sheet it is not showing cost sheet. make a
+    // screen for it." -- calc now carries a full snapshot of everything
+    // Step 6 shows (material lines with their spec detail, overhead/labour/
+    // markup/discount, the three sell lines, GST, final total + margin), so
+    // /cost-sheet/[ref] can render the real thing straight from this saved
+    // row instead of just a bare confirmation toast.
+    const materials = [
+      {
+        label: "Profile",
+        detail: profile && profResult
+          ? `${profile.name}${profile.width && profile.depth ? ` ${profile.width}×${profile.depth}mm` : ""} · ₹${profRatePerRFT.toFixed(0)}/RFT · ${(profResult.analysis.totalUsed / 304.8).toFixed(1)} RFT, ${profResult.analysis.totalBars} bar(s)`
+          : "",
+        value: profResult?.analysis.totalCost ?? 0,
+      },
+      {
+        label: "Backing Sheet",
+        detail: sheet && sheetResult
+          ? `${sheet.name}${sheet.thickness ? ` (${sheet.thickness}mm)` : ""} · ₹${sheetResult.cpSqFt}/sq.ft × ${sheetResult.chargeable.toFixed(2)} sq.ft`
+          : "",
+        value: sheetResult?.chargedCost ?? 0,
+      },
+      {
+        label: "Accessories",
+        detail: accessories.filter((a) => a.qty > 0).length > 0
+          ? accessories.filter((a) => a.qty > 0).map((a) => `${a.name} (${a.qty} ${a.unit})`).join(", ")
+          : "",
+        value: accCost,
+      },
+      {
+        label: `LED ${ledMode === "bar" ? "Bars" : "Modules"}`,
+        detail:
+          ledMode === "bar" && barResult && ledBar
+            ? `${ledBar.name} · ${ledBar.watt}W/pc${ledBar.ip ? `, IP${ledBar.ip}` : ""} · ${barResult.totalPieces} pcs, ${barResult.numBars} bar(s)`
+            : ledMode === "module" && moduleResult && ledMod
+              ? `${ledMod.name} · ${ledMod.watt}W/module${ledMod.ip ? `, IP${ledMod.ip}` : ""} · ${moduleResult.cols}×${moduleResult.rows} grid, ${moduleResult.total} modules`
+              : "",
+        value: ledCost,
+      },
+      {
+        label: "LED Drivers",
+        detail: driverFinal && driverResult
+          ? `${driverResult.selected[0]?.drv.brand ?? "—"} · ${driverFinal.qty} × ${driverFinal.watt}W (${driverFinal.util}% load)`
+          : "",
+        value: driverFinal?.totalCost ?? 0,
+      },
+    ];
     const { error } = await supabase.from("sign_estimates").insert({
       ref,
       client: jobName || null,
@@ -358,6 +417,21 @@ export default function EstimatorScreen() {
       calc: {
         category, categoryLabel: CATEGORY_LABELS[category] ?? category, jobName: jobName || "—",
         dimW: w === "" ? 0 : w, dimH: h === "" ? 0 : h, dimUnit: unit, widthMM: wMM, heightMM: hMM, qty,
+        materials,
+        rawMaterialCost: pricing.raw,
+        overheadPct: numOr0(overheadPct), overheadValue: pricing.ovh,
+        labour: numOr0(labour),
+        productionCost: pricing.costAll,
+        markupPct: numOr0(markupPct), markupValue: pricing.sellBD - pricing.costAll,
+        discountPct: numOr0(discountPct), discountValue: pricing.discAmt,
+        signageSell: pricing.signageSell,
+        printSell: pricing.printSell,
+        installSell: pricing.installSell,
+        subtotal: pricing.sell,
+        gstPct: numOr0(gstPct), gstAmt: pricing.gstAmt,
+        finalAmount: pricing.final,
+        margin: pricing.margin,
+        marginAmt: pricing.mgnAmt,
       },
       created_by: userData?.user?.id ?? null,
     });
@@ -367,6 +441,7 @@ export default function EstimatorScreen() {
       return;
     }
     setSavedRef(ref);
+    router.push(`/cost-sheet/${ref}`);
   }
 
   if (loadError) {
@@ -693,17 +768,68 @@ export default function EstimatorScreen() {
                 matters (a hero total, not just another row in the list). */}
             <Text style={s.sectionTitle}>Cost breakdown</Text>
             <SoftCard style={s.summaryCard}>
-              <Row t={t} small label="Profile" detail={profResult ? `${(profResult.analysis.totalUsed / 304.8).toFixed(1)} RFT · ${profResult.analysis.totalBars} bar(s)` : ""} value={fmtRupee(profResult?.analysis.totalCost ?? 0)} />
-              <Row t={t} small label="Backing Sheet" detail={sheetResult ? `${sheetResult.chargeable.toFixed(2)} sq.ft` : ""} value={fmtRupee(sheetResult?.chargedCost ?? 0)} />
-              <Row t={t} small label="Accessories" detail={`${accessories.filter((a) => a.qty > 0).length} item(s)`} value={fmtRupee(accCost)} />
+              {/* "automatica infomation of technical specifications" -- each
+                  material line's detail now names the actual master-data
+                  item and its spec (section size, rate/RFT, sheet
+                  thickness+₹/sq.ft, LED watt/IP, driver brand/load), not
+                  just a bare quantity, mirroring EstimatorTab.tsx Section 1. */}
+              <Row
+                t={t}
+                small
+                label="Profile"
+                detail={
+                  profile && profResult
+                    ? `${profile.name}${profile.width && profile.depth ? ` ${profile.width}×${profile.depth}mm` : ""} · ₹${profRatePerRFT.toFixed(0)}/RFT · ${(profResult.analysis.totalUsed / 304.8).toFixed(1)} RFT, ${profResult.analysis.totalBars} bar(s)`
+                    : ""
+                }
+                value={fmtRupee(profResult?.analysis.totalCost ?? 0)}
+              />
+              <Row
+                t={t}
+                small
+                label="Backing Sheet"
+                detail={
+                  sheet && sheetResult
+                    ? `${sheet.name}${sheet.thickness ? ` (${sheet.thickness}mm)` : ""} · ₹${sheetResult.cpSqFt}/sq.ft × ${sheetResult.chargeable.toFixed(2)} sq.ft`
+                    : ""
+                }
+                value={fmtRupee(sheetResult?.chargedCost ?? 0)}
+              />
+              <Row
+                t={t}
+                small
+                label="Accessories"
+                detail={
+                  accessories.filter((a) => a.qty > 0).length > 0
+                    ? accessories.filter((a) => a.qty > 0).map((a) => `${a.name} (${a.qty} ${a.unit})`).join(", ")
+                    : ""
+                }
+                value={fmtRupee(accCost)}
+              />
               <Row
                 t={t}
                 small
                 label={`LED ${ledMode === "bar" ? "Bars" : "Modules"}`}
-                detail={ledMode === "bar" && barResult ? `${barResult.totalPieces} pieces · ${barResult.numBars} bar(s)` : ledMode === "module" && moduleResult ? `${moduleResult.total} modules` : ""}
+                detail={
+                  ledMode === "bar" && barResult && ledBar
+                    ? `${ledBar.name} · ${ledBar.watt}W/pc${ledBar.ip ? `, IP${ledBar.ip}` : ""} · ${barResult.totalPieces} pcs, ${barResult.numBars} bar(s)`
+                    : ledMode === "module" && moduleResult && ledMod
+                      ? `${ledMod.name} · ${ledMod.watt}W/module${ledMod.ip ? `, IP${ledMod.ip}` : ""} · ${moduleResult.cols}×${moduleResult.rows} grid, ${moduleResult.total} modules`
+                      : ""
+                }
                 value={fmtRupee(ledCost)}
               />
-              <Row t={t} small label="LED Drivers" detail={driverFinal ? `${driverFinal.qty} × ${driverFinal.watt}W` : ""} value={fmtRupee(driverFinal?.totalCost ?? 0)} />
+              <Row
+                t={t}
+                small
+                label="LED Drivers"
+                detail={
+                  driverFinal && driverResult
+                    ? `${driverResult.selected[0]?.drv.brand ?? "—"} · ${driverFinal.qty} × ${driverFinal.watt}W (${driverFinal.util}% load)`
+                    : ""
+                }
+                value={fmtRupee(driverFinal?.totalCost ?? 0)}
+              />
               <Row t={t} label="Raw Material Cost (per sign)" value={fmtRupee(pricing.raw)} strong />
               <Row t={t} small label={`Overhead (${numOr0(overheadPct)}%)`} value={fmtRupee(pricing.ovh)} />
               <Row t={t} small label="Labour" value={fmtRupee(numOr0(labour))} />
@@ -735,7 +861,7 @@ export default function EstimatorScreen() {
         )}
       </ScrollView>
 
-      <View style={s.footer}>
+      <View style={[s.footer, { paddingBottom: Math.max(insets.bottom, Platform.OS === "ios" ? 10 : 14) }]}>
         <View style={s.footerTotal}>
           <Text style={s.footerTotalLabel}>Est. Final Amount</Text>
           <Text style={s.footerTotalValue}>{fmtRupee(pricing.final)}</Text>
@@ -832,9 +958,9 @@ function PickerField({
             data={options}
             keyExtractor={(o) => o.value}
             style={s.modalList}
-            renderItem={({ item }) => (
+            renderItem={({ item, index }) => (
               <Pressable
-                style={[s.modalOption, item.value === value && s.modalOptionActive]}
+                style={[s.modalOption, { borderLeftColor: optionAccent(t, index) }, item.value === value && s.modalOptionActive]}
                 onPress={() => { onChange(item.value); setOpen(false); }}
               >
                 <Text style={s.modalOptionText}>{item.label}</Text>
@@ -923,8 +1049,8 @@ function SignSizeHeader({
       <Modal visible={unitOpen} transparent animationType="fade" onRequestClose={() => setUnitOpen(false)}>
         <Pressable style={s.modalBackdrop} onPress={() => setUnitOpen(false)} />
         <View style={s.modalSheetSmall}>
-          {units.map((u) => (
-            <Pressable key={u} style={[s.modalOption, u === unit && s.modalOptionActive]} onPress={() => { onUnit(u); setUnitOpen(false); }}>
+          {units.map((u, i) => (
+            <Pressable key={u} style={[s.modalOption, { borderLeftColor: optionAccent(t, i) }, u === unit && s.modalOptionActive]} onPress={() => { onUnit(u); setUnitOpen(false); }}>
               <Text style={s.modalOptionText}>{u}</Text>
             </Pressable>
           ))}
@@ -1001,10 +1127,15 @@ const styles = (t: VibrantTheme) =>
     stepChipTextActive: { color: t.primary },
 
     content: { flex: 1 },
-    contentInner: { padding: 16, paddingBottom: 32, gap: 16 },
-    stepGap: { gap: 16 },
+    // "Sign cost sheet still looks cluster so make it more neat gap
+    // maintained and fonts reduced for headers" -- more room between
+    // sections/rows, and paddingBottom generously clears the sticky
+    // footer (which also now adds its own safe-area inset) so the last
+    // card in each step never reads as cut off/overlapped by it.
+    contentInner: { padding: 16, paddingBottom: 56, gap: 20 },
+    stepGap: { gap: 20 },
 
-    sectionTitle: { fontSize: 13, fontFamily: fonts.serifBold, color: t.ink, marginTop: 4 },
+    sectionTitle: { fontSize: 12, fontFamily: fonts.serifBold, color: t.ink, marginTop: 6, marginBottom: 2 },
     sectionLabel: { fontSize: 12, fontFamily: fonts.medium, color: t.inkSecondary, textTransform: "uppercase", letterSpacing: 0.3 },
     helperText: { fontSize: 12, fontFamily: fonts.regular, color: t.inkSecondary },
     totalLine: { fontSize: 14, fontFamily: fonts.bold, color: t.ink },
@@ -1044,9 +1175,12 @@ const styles = (t: VibrantTheme) =>
     modalTitle: { fontSize: 14, fontFamily: fonts.bold, color: t.ink },
     modalClose: { fontSize: 14, fontFamily: fonts.bold, color: t.primary },
     modalList: { paddingHorizontal: 8 },
-    modalOption: { minHeight: 44, justifyContent: "center", paddingHorizontal: 12, paddingVertical: 10, borderRadius: radius.md },
+    // "drop down selction font should be smaller and more decorative with
+    // each line with slighly colored" -- a thin colored left rule per row
+    // (color cycles via optionAccent) instead of flat uniform text.
+    modalOption: { minHeight: 44, justifyContent: "center", paddingHorizontal: 12, paddingVertical: 10, borderRadius: radius.md, borderLeftWidth: 3, marginVertical: 1 },
     modalOptionActive: { backgroundColor: t.primaryTint },
-    modalOptionText: { fontSize: 14, fontFamily: fonts.regular, color: t.ink },
+    modalOptionText: { fontSize: 13, fontFamily: fonts.serif, color: t.ink },
     modalEmpty: { padding: 24, textAlign: "center", color: t.inkMuted, fontSize: 13 },
 
     switchRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", minHeight: 44, gap: 12 },
@@ -1069,12 +1203,12 @@ const styles = (t: VibrantTheme) =>
     accUnit: { fontSize: 12, fontFamily: fonts.regular, color: t.inkSecondary },
     accLineTotal: { fontSize: 13, fontFamily: fonts.bold, color: t.ink, textAlign: "right" },
 
-    row: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12, paddingVertical: 7, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.line },
+    row: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12, paddingVertical: 9, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.line },
     rowStrong: { backgroundColor: t.surfaceSunken, marginHorizontal: -12, paddingHorizontal: 12, borderRadius: radius.sm },
     // Supporting-detail lines (individual material costs feeding into a
     // strong subtotal right below them) shrink further and mute in color --
     // the eye should land on the strong rows, not weigh every line equally.
-    rowSmall: { paddingVertical: 5 },
+    rowSmall: { paddingVertical: 7 },
     rowLeft: { flex: 1, gap: 2 },
     rowLabel: { fontSize: 13, fontFamily: fonts.regular, color: t.inkSecondary },
     rowLabelSmall: { fontSize: 12, color: t.inkMuted },
@@ -1118,9 +1252,13 @@ const styles = (t: VibrantTheme) =>
     cuttingLeftover: { backgroundColor: t.surface, borderStyle: "dashed", borderWidth: 1, borderColor: t.lineStrong },
     cuttingLegend: { fontSize: 10, fontFamily: fonts.regular, color: t.inkMuted },
 
+    // paddingBottom is set inline (max of the safe-area inset and this
+    // fallback) -- see the sticky footer's style prop -- so the bar clears
+    // the home indicator instead of sitting flush under it, which on some
+    // devices was reading as if it were overlapping the content above.
     footer: {
       borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.line, backgroundColor: t.surfaceRaised,
-      paddingHorizontal: 16, paddingTop: 10, paddingBottom: Platform.OS === "ios" ? 10 : 14, gap: 10,
+      paddingHorizontal: 16, paddingTop: 10, gap: 10,
     },
     footerTotal: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" },
     footerTotalLabel: { fontSize: 12, fontFamily: fonts.regular, color: t.inkSecondary },

@@ -18,7 +18,7 @@ import {
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
 import { radius } from "@mmdi/shared/theme";
-import { vibrant, fonts, type VibrantTheme } from "../../theme/vibrant";
+import { vibrant, fonts, optionAccent, type VibrantTheme } from "../../theme/vibrant";
 import { SoftCard, GradientButton } from "../../theme/components";
 import { supabase } from "@/lib/supabase";
 import { loadDraft, saveDraft } from "@/lib/installationReports/draftStore";
@@ -82,6 +82,12 @@ export default function ReportScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [submitProgress, setSubmitProgress] = useState<SubmitProgress | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // "it is til asking me to selct installtion site instead of autimatically
+  // loading which we implemented o web so update with all updates" -- brief
+  // notice after picking a store, mirroring InstallationReportClient.tsx's
+  // toast() call at the same point (no toast system natively, so a small
+  // inline banner instead -- see siteAutoFillNotice's render spot below).
+  const [siteAutoFillNotice, setSiteAutoFillNotice] = useState<string | null>(null);
 
   // ── Load draft ──
   useEffect(() => {
@@ -180,6 +186,29 @@ export default function ReportScreen() {
             height_mm: null,
           }));
     setStoreSiteOptions(options);
+
+    // "instead of autimatically loading which we implemented o web so
+    // update with all updates" -- mirrors InstallationReportClient.tsx:
+    // when the report still has just its original blank Site 1 (nothing
+    // typed into it yet), auto-fill it from Store Master's Site 1 instead
+    // of making the user tap a "Site 1" quick-add chip first. A site the
+    // user has already started editing is left alone -- picking a store
+    // never overwrites real work in progress.
+    let filledSiteOne = false;
+    setDraft((d) => {
+      if (!d || d.sites.length !== 1 || !isSitePristine(d.sites[0])) return d;
+      filledSiteOne = true;
+      return { ...d, sites: [siteFromOption(options.find((o) => o.site_index === 1), 1)] };
+    });
+    setSiteAutoFillNotice(
+      filledSiteOne && options.length > 1
+        ? `Store details filled — this store has ${options.length} sites. Use the Site ${options.slice(1).map((o) => o.site_index).join(" / Site ")} buttons below to add the rest.`
+        : filledSiteOne
+          ? "Store details filled from Store Master."
+          : options.length > 0
+            ? "Store details filled — pick a Site number below to add its details."
+            : null
+    );
   }
 
   function siteFromOption(option: InstallationStoreSiteRow | undefined, siteIndex: number): DraftSite {
@@ -191,6 +220,20 @@ export default function ReportScreen() {
     site.widthMm = option.width_mm;
     site.heightMm = option.height_mm;
     return site;
+  }
+
+  // Mirrors InstallationReportClient.tsx's isSitePristine -- true only if
+  // nothing has been entered yet, so auto-fill never clobbers real work.
+  function isSitePristine(s: DraftSite): boolean {
+    return (
+      !s.fixtureType &&
+      !s.material &&
+      !s.signType &&
+      s.widthMm === null &&
+      s.heightMm === null &&
+      !s.remarks &&
+      Object.keys(s.photos).length === 0
+    );
   }
 
   function addSite() {
@@ -313,6 +356,12 @@ export default function ReportScreen() {
             </View>
           </View>
         </Section>
+
+        {siteAutoFillNotice && (
+          <Pressable style={s.autoFillNotice} onPress={() => setSiteAutoFillNotice(null)}>
+            <Text style={s.autoFillNoticeText}>{siteAutoFillNotice}</Text>
+          </Pressable>
+        )}
 
         <Section t={t} title="Program & schedule">
           <PickerField t={t} label="Season Program" value={draft.seasonProgram} onChange={(v) => setDraft((d) => (d ? { ...d, seasonProgram: v } : d))} options={programs.map((p) => ({ value: p.name, label: p.name }))} disabled={readOnly} />
@@ -502,8 +551,8 @@ function PickerField({
             data={options}
             keyExtractor={(o) => o.value}
             style={s.modalList}
-            renderItem={({ item }) => (
-              <Pressable style={[s.modalOption, item.value === value && s.modalOptionActive]} onPress={() => { onChange(item.value); setOpen(false); }}>
+            renderItem={({ item, index }) => (
+              <Pressable style={[s.modalOption, { borderLeftColor: optionAccent(t, index) }, item.value === value && s.modalOptionActive]} onPress={() => { onChange(item.value); setOpen(false); }}>
                 <Text style={s.modalOptionText}>{item.label}</Text>
               </Pressable>
             )}
@@ -560,14 +609,14 @@ function PhotoSlot({
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
         <Pressable style={s.modalBackdrop} onPress={() => setOpen(false)} />
         <View style={s.modalSheetSmall}>
-          <Pressable style={s.modalOption} onPress={() => pick("camera")}>
+          <Pressable style={[s.modalOption, { borderLeftColor: optionAccent(t, 0) }]} onPress={() => pick("camera")}>
             <Text style={s.modalOptionText}>Take Photo</Text>
           </Pressable>
-          <Pressable style={s.modalOption} onPress={() => pick("library")}>
+          <Pressable style={[s.modalOption, { borderLeftColor: optionAccent(t, 1) }]} onPress={() => pick("library")}>
             <Text style={s.modalOptionText}>Choose from Library</Text>
           </Pressable>
           {photo && (
-            <Pressable style={s.modalOption} onPress={() => { setOpen(false); onRemove(); }}>
+            <Pressable style={[s.modalOption, { borderLeftColor: t.danger }]} onPress={() => { setOpen(false); onRemove(); }}>
               <Text style={[s.modalOptionText, { color: t.danger }]}>Remove Photo</Text>
             </Pressable>
           )}
@@ -609,6 +658,12 @@ const styles = (t: VibrantTheme) =>
     dropdownClose: { padding: 10, alignItems: "center" },
     dropdownCloseText: { fontSize: 12, fontFamily: fonts.bold, color: t.primary },
 
+    // "instead of autimatically loading which we implemented o web" --
+    // transient confirmation after Store Master auto-fills Site 1, mirrors
+    // the web toast; tap to dismiss.
+    autoFillNotice: { backgroundColor: t.infoTint, borderRadius: 12, borderWidth: 1, borderColor: t.info + "33", padding: 12 },
+    autoFillNoticeText: { fontSize: 12, fontFamily: fonts.regular, color: t.ink, lineHeight: 17 },
+
     pickerField: {
       minHeight: 46, borderRadius: 12, borderWidth: 1.5, borderColor: t.primary + "55",
       backgroundColor: t.primaryTint, paddingHorizontal: 14, paddingVertical: 10,
@@ -625,9 +680,11 @@ const styles = (t: VibrantTheme) =>
     modalTitle: { fontSize: 14, fontFamily: fonts.bold, color: t.ink },
     modalClose: { fontSize: 14, fontFamily: fonts.bold, color: t.primary },
     modalList: { paddingHorizontal: 8 },
-    modalOption: { minHeight: 44, justifyContent: "center", paddingHorizontal: 16, paddingVertical: 12, borderRadius: radius.md },
+    // "drop down selction font should be smaller and more decorative with
+    // each line with slighly colored" -- thin colored left rule per row.
+    modalOption: { minHeight: 44, justifyContent: "center", paddingHorizontal: 16, paddingVertical: 12, borderRadius: radius.md, borderLeftWidth: 3, marginVertical: 1 },
     modalOptionActive: { backgroundColor: t.primaryTint },
-    modalOptionText: { fontSize: 14, fontFamily: fonts.regular, color: t.ink },
+    modalOptionText: { fontSize: 13, fontFamily: fonts.serif, color: t.ink },
     modalEmpty: { padding: 24, textAlign: "center", color: t.inkMuted, fontSize: 13 },
 
     photoSectionLabel: { fontSize: 11, fontFamily: fonts.bold, color: t.inkMuted, textTransform: "uppercase", letterSpacing: 0.4, marginTop: 4 },
