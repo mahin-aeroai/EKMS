@@ -1,8 +1,10 @@
 import { useCallback, useState } from "react";
-import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, View, useColorScheme } from "react-native";
+import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import * as Crypto from "expo-crypto";
-import { themes, radius, type Theme } from "@mmdi/shared/theme";
+import { radius } from "@mmdi/shared/theme";
+import { vibrant, type VibrantTheme } from "../../theme/vibrant";
+import { SoftCard, GradientButton } from "../../theme/components";
 import { supabase } from "@/lib/supabase";
 import { listDrafts, saveDraft } from "@/lib/installationReports/draftStore";
 import { allPhotos } from "@/lib/installationReports/submit";
@@ -48,15 +50,14 @@ interface ReportListItem {
 
 const PAGE = 50;
 
-function statusMeta(status: ReportStatus, t: Theme): { color: string; label: string } {
+function statusMeta(status: ReportStatus, t: VibrantTheme): { color: string; label: string } {
   if (status === "complete") return { color: t.success, label: "Complete" };
   if (status === "incomplete") return { color: t.danger, label: "Incomplete" };
   return { color: t.inkMuted, label: "Local draft" };
 }
 
 export default function ReportsScreen() {
-  const scheme = useColorScheme();
-  const t = themes[scheme === "dark" ? "dark" : "light"];
+  const t = vibrant;
   const s = styles(t);
   const router = useRouter();
 
@@ -208,7 +209,7 @@ export default function ReportsScreen() {
           data={items}
           keyExtractor={(d) => d.id}
           contentInsetAdjustmentBehavior="automatic"
-          ItemSeparatorComponent={() => <View style={s.sep} />}
+          contentContainerStyle={s.list}
           renderItem={({ item }) => {
             const meta = statusMeta(item.status, t);
             const progress =
@@ -222,33 +223,36 @@ export default function ReportsScreen() {
               <Pressable
                 onPress={() => item.resumable && router.push(`/report/${item.id}`)}
                 disabled={!item.resumable}
-                style={({ pressed }) => [s.row, pressed && item.resumable && { backgroundColor: t.surfaceSunken }]}
               >
-                <View style={{ flex: 1 }}>
-                  <Text style={s.title} numberOfLines={1}>{item.storeName}</Text>
-                  {progress && <Text style={s.progress}>{progress}</Text>}
-                  <View style={s.statusWrap}>
-                    <View style={[s.statusDot, { backgroundColor: meta.color }]} />
-                    <Text style={s.statusText}>{meta.label}</Text>
-                    {orphaned && <Text style={s.statusText}> · not resumable here</Text>}
-                  </View>
-                </View>
-                {item.resumable ? (
-                  <Text style={s.chev}>{item.status === "incomplete" ? "Resume ›" : "›"}</Text>
-                ) : orphaned ? (
-                  <Pressable
-                    onPress={() => confirmDiscard(item)}
-                    disabled={discardingId === item.id}
-                    style={s.discardBtn}
-                    hitSlop={8}
-                  >
-                    {discardingId === item.id ? (
-                      <ActivityIndicator color={t.danger} />
-                    ) : (
-                      <Text style={s.discardText}>Discard</Text>
-                    )}
-                  </Pressable>
-                ) : null}
+                {({ pressed }) => (
+                  <SoftCard style={[s.row, pressed && item.resumable && { opacity: 0.7 }]}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.title} numberOfLines={1}>{item.storeName}</Text>
+                      {progress && <Text style={s.progress}>{progress}</Text>}
+                      <View style={s.statusWrap}>
+                        <View style={[s.statusDot, { backgroundColor: meta.color }]} />
+                        <Text style={s.statusText}>{meta.label}</Text>
+                        {orphaned && <Text style={s.statusText}> · not resumable here</Text>}
+                      </View>
+                    </View>
+                    {item.resumable ? (
+                      <Text style={s.chev}>{item.status === "incomplete" ? "Resume ›" : "›"}</Text>
+                    ) : orphaned ? (
+                      <Pressable
+                        onPress={() => confirmDiscard(item)}
+                        disabled={discardingId === item.id}
+                        style={s.discardBtn}
+                        hitSlop={8}
+                      >
+                        {discardingId === item.id ? (
+                          <ActivityIndicator color={t.danger} />
+                        ) : (
+                          <Text style={s.discardText}>Discard</Text>
+                        )}
+                      </Pressable>
+                    ) : null}
+                  </SoftCard>
+                )}
               </Pressable>
             );
           }}
@@ -256,33 +260,29 @@ export default function ReportsScreen() {
       )}
 
       <View style={s.footer}>
-        <Pressable style={s.newBtn} onPress={newReport} disabled={creating}>
-          {creating ? <ActivityIndicator color={t.onBrand} /> : <Text style={s.newBtnText}>+ New Report</Text>}
-        </Pressable>
+        <GradientButton label="+ New Report" onPress={newReport} loading={creating} />
       </View>
     </View>
   );
 }
 
-const styles = (t: Theme) =>
+const styles = (t: VibrantTheme) =>
   StyleSheet.create({
     screen: { flex: 1, backgroundColor: t.surface },
-    row: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: 44, paddingVertical: 12, paddingHorizontal: 16 },
+    list: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 16, gap: 10 },
+    row: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: 44 },
     title: { fontSize: 17, color: t.ink },
     progress: { fontSize: 13, color: t.inkSecondary, marginTop: 2 },
     statusWrap: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 },
     statusDot: { width: 8, height: 8, borderRadius: 4 },
     statusText: { fontSize: 13, color: t.inkSecondary },
     chev: { fontSize: 15, fontWeight: "600", color: t.primary },
-    discardBtn: { minHeight: 32, paddingHorizontal: 12, justifyContent: "center", alignItems: "center", borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, borderColor: t.danger },
+    discardBtn: { minHeight: 32, paddingHorizontal: 12, justifyContent: "center", alignItems: "center", borderRadius: radius.md, borderWidth: 1.5, borderColor: t.danger },
     discardText: { fontSize: 13, fontWeight: "600", color: t.danger },
-    sep: { height: StyleSheet.hairlineWidth, backgroundColor: t.line, marginLeft: 16 },
     empty: { flex: 1, padding: 24, textAlign: "center", fontSize: 15, color: t.inkMuted },
     pad: { padding: 24 },
     footer: {
-      borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.line, backgroundColor: t.surfaceRaised,
+      backgroundColor: t.surface,
       padding: 16,
     },
-    newBtn: { minHeight: 46, borderRadius: radius.md, backgroundColor: t.primary, alignItems: "center", justifyContent: "center" },
-    newBtnText: { fontSize: 16, fontWeight: "600", color: t.onBrand },
   });

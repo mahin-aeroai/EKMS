@@ -8,11 +8,12 @@ import {
   Text,
   TextInput,
   View,
-  useColorScheme,
 } from "react-native";
 import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
-import { themes, radius, type Theme } from "@mmdi/shared/theme";
+import { radius } from "@mmdi/shared/theme";
+import { vibrant, type VibrantTheme } from "../../theme/vibrant";
+import { SoftCard, GradientCard, GradientButton } from "../../theme/components";
 import { supabase } from "../../lib/supabase";
 
 /**
@@ -69,8 +70,7 @@ function csvEscape(value: string | number): string {
 }
 
 export default function SalesByRepScreen() {
-  const scheme = useColorScheme();
-  const t = themes[scheme === "dark" ? "dark" : "light"];
+  const t = vibrant;
   const s = styles(t);
 
   const [salesPeople, setSalesPeople] = useState<string[] | null>(null);
@@ -197,29 +197,25 @@ export default function SalesByRepScreen() {
           </View>
         </View>
 
-        <Pressable
-          style={[s.runBtn, !selectedRep && s.runBtnDisabled]}
-          onPress={runReport}
-          disabled={!selectedRep || loading}
-        >
-          {loading ? <ActivityIndicator color={t.onBrand} /> : <Text style={s.runBtnText}>Run report</Text>}
-        </Pressable>
+        <GradientButton label="Run report" onPress={runReport} loading={loading} disabled={!selectedRep} />
       </View>
 
       {rows !== null && (
         <>
           <View style={s.statRow}>
-            <View style={s.statCard}>
-              <Text style={s.statLabel}>Total Sales</Text>
-              <Text style={s.statValue}>{formatCrore(totalSales)}</Text>
-            </View>
-            <View style={s.statCard}>
-              <Text style={s.statLabel}>Customers</Text>
-              <Text style={s.statValue}>{rows.length}</Text>
-            </View>
-            <View style={s.statCard}>
-              <Text style={s.statLabel}>Transactions</Text>
-              <Text style={s.statValue}>{totalTxns.toLocaleString("en-IN")}</Text>
+            <GradientCard style={s.statCardHero}>
+              <Text style={s.statLabelHero}>Total Sales</Text>
+              <Text style={s.statValueHero}>{formatCrore(totalSales)}</Text>
+            </GradientCard>
+            <View style={s.statCardCol}>
+              <SoftCard style={s.statCard}>
+                <Text style={s.statLabel}>Customers</Text>
+                <Text style={s.statValue}>{rows.length}</Text>
+              </SoftCard>
+              <SoftCard style={s.statCard}>
+                <Text style={s.statLabel}>Transactions</Text>
+                <Text style={s.statValue}>{totalTxns.toLocaleString("en-IN")}</Text>
+              </SoftCard>
             </View>
           </View>
 
@@ -230,7 +226,7 @@ export default function SalesByRepScreen() {
               data={rows}
               keyExtractor={(r) => r.customer_name}
               contentInsetAdjustmentBehavior="automatic"
-              ItemSeparatorComponent={() => <View style={s.sep} />}
+              contentContainerStyle={s.list}
               ListHeaderComponent={
                 <Pressable style={s.exportBtn} onPress={exportCsv} disabled={exporting}>
                   {exporting ? (
@@ -241,7 +237,7 @@ export default function SalesByRepScreen() {
                 </Pressable>
               }
               renderItem={({ item }) => (
-                <View style={s.row}>
+                <SoftCard style={s.row}>
                   <View style={s.rowText}>
                     <Text style={s.rowTitle} numberOfLines={1}>{item.customer_name}</Text>
                     <Text style={s.rowMeta}>
@@ -249,7 +245,7 @@ export default function SalesByRepScreen() {
                     </Text>
                   </View>
                   <Text style={s.rowValue}>₹{item.total_taxable_value.toLocaleString("en-IN")}</Text>
-                </View>
+                </SoftCard>
               )}
             />
           )}
@@ -287,15 +283,16 @@ export default function SalesByRepScreen() {
   );
 }
 
-const styles = (t: Theme) =>
+const styles = (t: VibrantTheme) =>
   StyleSheet.create({
     screen: { flex: 1, backgroundColor: t.surface },
-    filters: { padding: 16, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: t.line },
+    filters: { padding: 16, gap: 12 },
 
     pickerField: {
-      minHeight: 44, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, borderColor: t.line,
-      backgroundColor: t.surfaceSunken, paddingHorizontal: 14, paddingVertical: 10,
+      minHeight: 44, borderRadius: 22,
+      backgroundColor: t.surfaceRaised, paddingHorizontal: 16, paddingVertical: 10,
       flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8,
+      shadowColor: "#3D2E6B", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.08, shadowRadius: 12, elevation: 3,
     },
     pickerText: { flex: 1, fontSize: 16, color: t.ink },
     pickerPlaceholder: { flex: 1, fontSize: 16, color: t.inkMuted },
@@ -305,30 +302,31 @@ const styles = (t: Theme) =>
     dateField: { flex: 1, gap: 4 },
     label: { fontSize: 12, fontWeight: "500", color: t.inkSecondary },
     dateInput: {
-      minHeight: 40, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, borderColor: t.line,
-      backgroundColor: t.surfaceSunken, paddingHorizontal: 12, fontSize: 15, color: t.ink,
+      minHeight: 40, borderRadius: 14,
+      backgroundColor: t.surfaceRaised, paddingHorizontal: 12, fontSize: 15, color: t.ink,
+      shadowColor: "#3D2E6B", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
     },
 
-    runBtn: { minHeight: 46, borderRadius: radius.md, backgroundColor: t.primary, alignItems: "center", justifyContent: "center" },
-    runBtnDisabled: { opacity: 0.4 },
-    runBtnText: { fontSize: 16, fontWeight: "600", color: t.onBrand },
-
     statRow: { flexDirection: "row", gap: 8, padding: 16, paddingBottom: 8 },
-    statCard: { flex: 1, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, borderColor: t.line, padding: 10, gap: 2 },
+    statCardHero: { flex: 1.2, justifyContent: "center", gap: 4 },
+    statLabelHero: { fontSize: 12, color: t.onGradient, opacity: 0.85 },
+    statValueHero: { fontSize: 22, fontWeight: "700", color: t.onGradient },
+    statCardCol: { flex: 1, gap: 8 },
+    statCard: { padding: 10, gap: 2 },
     statLabel: { fontSize: 11, color: t.inkSecondary },
     statValue: { fontSize: 16, fontWeight: "600", color: t.ink },
 
-    exportBtn: { minHeight: 40, marginHorizontal: 16, marginBottom: 8, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, borderColor: t.primary, alignItems: "center", justifyContent: "center" },
+    exportBtn: { minHeight: 40, marginBottom: 4, borderRadius: radius.md, borderWidth: 1.5, borderColor: t.primary, alignItems: "center", justifyContent: "center" },
     exportBtnText: { fontSize: 14, fontWeight: "600", color: t.primary },
 
     empty: { padding: 24, textAlign: "center", fontSize: 15, color: t.inkMuted },
 
-    row: { flexDirection: "row", alignItems: "center", minHeight: 44, paddingVertical: 10, paddingHorizontal: 16, gap: 12 },
+    list: { paddingHorizontal: 16, paddingBottom: 16, gap: 8 },
+    row: { flexDirection: "row", alignItems: "center", minHeight: 44, gap: 12 },
     rowText: { flex: 1 },
     rowTitle: { fontSize: 15, color: t.ink },
     rowMeta: { fontSize: 13, color: t.inkSecondary, marginTop: 2 },
     rowValue: { fontSize: 15, fontWeight: "600", color: t.ink },
-    sep: { height: StyleSheet.hairlineWidth, backgroundColor: t.line, marginLeft: 16 },
 
     modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)" },
     modalSheet: { backgroundColor: t.surfaceRaised, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, maxHeight: "70%", paddingBottom: 24 },

@@ -1,7 +1,6 @@
 import { Tabs } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useColorScheme } from "react-native";
-import { themes } from "@mmdi/shared/theme";
+import { vibrant } from "../../theme/vibrant";
 
 /**
  * "remove documents, and rename reports as Basil Installtions and add ...
@@ -31,21 +30,26 @@ import { themes } from "@mmdi/shared/theme";
  * JS-drawn bar cannot reproduce either.
  */
 export default function TabLayout() {
-  const scheme = useColorScheme();
-  const t = themes[scheme === "dark" ? "dark" : "light"];
+  const t = vibrant;
 
   return (
     <Tabs
       screenOptions={{
+        // Dark tab bar deliberately, even though every screen above it is
+        // light -- matches the reference dashboard-kit exactly (its whole
+        // UI is light/card-forward except a solid dark bottom bar). Violet
+        // primary reads clearly against near-black; inactive icons use a
+        // dedicated muted tone (tabBarInactive) rather than the light-mode
+        // inkMuted, which is far too dark to read on this background.
         tabBarActiveTintColor: t.primary,
-        tabBarInactiveTintColor: t.inkMuted,
+        tabBarInactiveTintColor: t.tabBarInactive,
         // Large titles are a native-stack-only feature (UINavigationController);
         // Tabs' header is a plain JS-drawn @react-navigation/elements Header
         // with no equivalent -- see the NativeTabs note above for the real
         // way to get native tab-bar/header behaviour.
         headerStyle: { backgroundColor: t.surface },
         headerTintColor: t.ink,
-        tabBarStyle: { backgroundColor: t.surface, borderTopColor: t.line },
+        tabBarStyle: { backgroundColor: t.tabBarBg, borderTopColor: t.tabBarBg },
       }}
     >
       <Tabs.Screen

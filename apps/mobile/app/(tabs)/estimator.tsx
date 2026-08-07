@@ -12,10 +12,11 @@ import {
   Text,
   TextInput,
   View,
-  useColorScheme,
 } from "react-native";
 import { useHeaderHeight } from "expo-router/react-navigation";
-import { themes, radius, type Theme } from "@mmdi/shared/theme";
+import { radius } from "@mmdi/shared/theme";
+import { vibrant, type VibrantTheme } from "../../theme/vibrant";
+import { SoftCard, GradientButton } from "../../theme/components";
 import type {
   SignProfileRow, SignLedModuleRow, SignLedBarRow, SignLedDriverRow,
   SignSheetRow, SignPrintingMediaRow, SignAccessoryRow,
@@ -81,8 +82,7 @@ interface Masters {
 }
 
 export default function EstimatorScreen() {
-  const scheme = useColorScheme();
-  const t = themes[scheme === "dark" ? "dark" : "light"];
+  const t = vibrant;
   const s = styles(t);
   // The real, measured height of this tab's native header -- KeyboardAvoidingView's
   // own frame starts below it, so "padding" behavior needs this as
@@ -413,13 +413,11 @@ export default function EstimatorScreen() {
 
             <Text style={s.sectionLabel}>Sign Category</Text>
             {CATEGORY_OPTIONS.map((c) => (
-              <Pressable
-                key={c.value}
-                onPress={() => { setCategory(c.value); setProfileId(""); }}
-                style={[s.optionCard, category === c.value && s.optionCardActive]}
-              >
-                <Text style={s.optionTitle}>{c.label}</Text>
-                <Text style={s.optionDesc}>{c.desc}</Text>
+              <Pressable key={c.value} onPress={() => { setCategory(c.value); setProfileId(""); }}>
+                <SoftCard style={[s.optionCard, category === c.value && s.optionCardActive]}>
+                  <Text style={s.optionTitle}>{c.label}</Text>
+                  <Text style={s.optionDesc}>{c.desc}</Text>
+                </SoftCard>
               </Pressable>
             ))}
 
@@ -438,11 +436,13 @@ export default function EstimatorScreen() {
               <>
                 <Text style={s.sectionLabel}>LED Build Type</Text>
                 {(["module", "bar"] as const).map((m) => (
-                  <Pressable key={m} onPress={() => setLedMode(m)} style={[s.optionCard, ledMode === m && s.optionCardActive]}>
-                    <Text style={s.optionTitle}>{m === "module" ? "LED Modules" : "LED Bars (Vertical)"}</Text>
-                    <Text style={s.optionDesc}>
-                      {m === "module" ? "Grid of LED modules across the sign face." : "Vertical strips — industry-standard for outdoor drainage."}
-                    </Text>
+                  <Pressable key={m} onPress={() => setLedMode(m)}>
+                    <SoftCard style={[s.optionCard, ledMode === m && s.optionCardActive]}>
+                      <Text style={s.optionTitle}>{m === "module" ? "LED Modules" : "LED Bars (Vertical)"}</Text>
+                      <Text style={s.optionDesc}>
+                        {m === "module" ? "Grid of LED modules across the sign face." : "Vertical strips — industry-standard for outdoor drainage."}
+                      </Text>
+                    </SoftCard>
                   </Pressable>
                 ))}
               </>
@@ -505,7 +505,7 @@ export default function EstimatorScreen() {
             ) : (
               <>
                 {accessories.map((a) => (
-                  <View key={a.id} style={s.accRow}>
+                  <SoftCard key={a.id} style={s.accRow}>
                     <View style={s.accRowHead}>
                       <Text style={s.accName}>{a.name}{a.mandatory ? " •" : ""}</Text>
                       <Text style={s.accUnit}>{a.unit}</Text>
@@ -515,7 +515,7 @@ export default function EstimatorScreen() {
                       <View style={s.fieldHalf}><NumberField t={t} label="Unit Cost (₹)" value={a.unitCost} onChange={(v) => setAccessoryCost(a, v === "" ? 0 : v)} /></View>
                     </View>
                     <Text style={s.accLineTotal}>{fmtRupee(a.qty * a.unitCost)}</Text>
-                  </View>
+                  </SoftCard>
                 ))}
                 <Text style={s.totalLine}>Accessories total: {fmtRupee(accCost)}</Text>
               </>
@@ -719,13 +719,14 @@ export default function EstimatorScreen() {
             </Pressable>
           )}
           {step < 6 ? (
-            <Pressable style={s.navBtnPrimary} onPress={() => goStep(step + 1)}>
-              <Text style={s.navBtnPrimaryText}>Next</Text>
-            </Pressable>
+            <GradientButton label="Next" onPress={() => goStep(step + 1)} style={s.navBtnPrimaryWrap} />
           ) : (
-            <Pressable style={s.navBtnPrimary} onPress={generateCostSheet} disabled={saving}>
-              {saving ? <ActivityIndicator color={t.onBrand} /> : <Text style={s.navBtnPrimaryText}>Generate Cost Sheet</Text>}
-            </Pressable>
+            <GradientButton
+              label="Generate Cost Sheet"
+              onPress={generateCostSheet}
+              loading={saving}
+              style={s.navBtnPrimaryWrap}
+            />
           )}
         </View>
       </View>
@@ -735,7 +736,7 @@ export default function EstimatorScreen() {
 
 // ── Shared small field components ───────────────────────────────────────
 
-function Field({ t, label, children }: { t: Theme; label: string; children: React.ReactNode }) {
+function Field({ t, label, children }: { t: VibrantTheme; label: string; children: React.ReactNode }) {
   const s = styles(t);
   return (
     <View style={s.field}>
@@ -748,7 +749,7 @@ function Field({ t, label, children }: { t: Theme; label: string; children: Reac
 function NumberField({
   t, label, value, onChange, keyboardType = "decimal-pad",
 }: {
-  t: Theme; label: string; value: number | ""; onChange: (v: number | "") => void; keyboardType?: "decimal-pad" | "number-pad";
+  t: VibrantTheme; label: string; value: number | ""; onChange: (v: number | "") => void; keyboardType?: "decimal-pad" | "number-pad";
 }) {
   const s = styles(t);
   // Local text buffer, not re-derived from `value` on every keystroke -- a
@@ -778,7 +779,7 @@ function NumberField({
 function PickerField({
   t, label, value, onChange, options, placeholder,
 }: {
-  t: Theme; label: string; value: string; onChange: (v: string) => void;
+  t: VibrantTheme; label: string; value: string; onChange: (v: string) => void;
   options: { value: string; label: string }[]; placeholder?: string;
 }) {
   const s = styles(t);
@@ -819,7 +820,7 @@ function PickerField({
   );
 }
 
-function CheckField({ t, label, checked, onChange }: { t: Theme; label: string; checked: boolean; onChange: (v: boolean) => void }) {
+function CheckField({ t, label, checked, onChange }: { t: VibrantTheme; label: string; checked: boolean; onChange: (v: boolean) => void }) {
   const s = styles(t);
   return (
     <View style={s.switchRow}>
@@ -829,18 +830,18 @@ function CheckField({ t, label, checked, onChange }: { t: Theme; label: string; 
   );
 }
 
-function Metric({ t, label, value, sub }: { t: Theme; label: string; value: string; sub?: string }) {
+function Metric({ t, label, value, sub }: { t: VibrantTheme; label: string; value: string; sub?: string }) {
   const s = styles(t);
   return (
-    <View style={s.metricCard}>
+    <SoftCard style={s.metricCard}>
       <Text style={s.metricLabel}>{label}</Text>
       <Text style={s.metricValue}>{value}</Text>
       {sub ? <Text style={s.metricSub}>{sub}</Text> : null}
-    </View>
+    </SoftCard>
   );
 }
 
-function Row({ t, label, detail, value, strong, big }: { t: Theme; label: string; detail?: string; value: string; strong?: boolean; big?: boolean }) {
+function Row({ t, label, detail, value, strong, big }: { t: VibrantTheme; label: string; detail?: string; value: string; strong?: boolean; big?: boolean }) {
   const s = styles(t);
   return (
     <View style={[s.row, strong && s.rowStrong]}>
@@ -857,7 +858,7 @@ function Row({ t, label, detail, value, strong, big }: { t: Theme; label: string
 function SignSizeHeader({
   t, w, h, unit, onW, onH, onUnit, sqft, rft,
 }: {
-  t: Theme; w: number | ""; h: number | ""; unit: "mm" | "feet" | "inches";
+  t: VibrantTheme; w: number | ""; h: number | ""; unit: "mm" | "feet" | "inches";
   onW: (v: number | "") => void; onH: (v: number | "") => void; onUnit: (v: "mm" | "feet" | "inches") => void;
   sqft: number; rft: number;
 }) {
@@ -865,7 +866,7 @@ function SignSizeHeader({
   const [unitOpen, setUnitOpen] = useState(false);
   const units: ("mm" | "feet" | "inches")[] = ["mm", "feet", "inches"];
   return (
-    <View style={s.sizeHeader}>
+    <SoftCard style={s.sizeHeader}>
       <View style={s.sizeHeaderRow}>
         <View style={s.sizeField}>
           <Text style={s.sizeLabel}>Width</Text>
@@ -899,11 +900,11 @@ function SignSizeHeader({
           ))}
         </View>
       </Modal>
-    </View>
+    </SoftCard>
   );
 }
 
-function SmallNumberInput({ t, value, onChange }: { t: Theme; value: number | ""; onChange: (v: number | "") => void }) {
+function SmallNumberInput({ t, value, onChange }: { t: VibrantTheme; value: number | ""; onChange: (v: number | "") => void }) {
   const s = styles(t);
   const [text, setText] = useState(value === "" ? "" : String(value));
   return (
@@ -924,7 +925,7 @@ function SmallNumberInput({ t, value, onChange }: { t: Theme; value: number | ""
 }
 
 /** Simplified cutting-plan bar: one proportional-width row per stock bar. */
-function CuttingBins({ t, bins, stockLen }: { t: Theme; bins: CutBin[]; stockLen: number }) {
+function CuttingBins({ t, bins, stockLen }: { t: VibrantTheme; bins: CutBin[]; stockLen: number }) {
   const s = styles(t);
   if (bins.length === 0) return null;
   const colorFor = (label: string) => (/^width/i.test(label) ? t.info : /^height/i.test(label) ? t.success : t.inkMuted);
@@ -957,7 +958,7 @@ function CuttingBins({ t, bins, stockLen }: { t: Theme; bins: CutBin[]; stockLen
   );
 }
 
-const styles = (t: Theme) =>
+const styles = (t: VibrantTheme) =>
   StyleSheet.create({
     screen: { flex: 1, backgroundColor: t.surface },
     centerFill: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
@@ -987,7 +988,7 @@ const styles = (t: Theme) =>
     fieldRow: { flexDirection: "row", gap: 12 },
     fieldHalf: { flex: 1 },
 
-    optionCard: { minHeight: 44, borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: t.line, padding: 12, gap: 4 },
+    optionCard: { minHeight: 44, padding: 12, gap: 4, borderWidth: 2, borderColor: "transparent" },
     optionCardActive: { borderColor: t.primary, backgroundColor: t.primaryTint },
     optionTitle: { fontSize: 15, fontWeight: "600", color: t.ink },
     optionDesc: { fontSize: 13, color: t.inkSecondary },
@@ -1017,7 +1018,7 @@ const styles = (t: Theme) =>
     switchLabel: { fontSize: 15, color: t.ink, flex: 1 },
 
     metricGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-    metricCard: { flexBasis: "47%", flexGrow: 1, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, borderColor: t.line, padding: 10, gap: 2 },
+    metricCard: { flexBasis: "47%", flexGrow: 1, padding: 10, gap: 2 },
     metricLabel: { fontSize: 12, color: t.inkSecondary },
     metricValue: { fontSize: 16, fontWeight: "600", color: t.ink },
     metricSub: { fontSize: 11, color: t.inkMuted },
@@ -1027,7 +1028,7 @@ const styles = (t: Theme) =>
     successBox: { borderRadius: radius.md, backgroundColor: t.successTint, padding: 12 },
     successText: { fontSize: 14, color: t.success, fontWeight: "600" },
 
-    accRow: { borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, borderColor: t.line, padding: 12, gap: 10 },
+    accRow: { padding: 12, gap: 10 },
     accRowHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" },
     accName: { fontSize: 15, fontWeight: "500", color: t.ink, flex: 1 },
     accUnit: { fontSize: 13, color: t.inkSecondary },
@@ -1042,7 +1043,7 @@ const styles = (t: Theme) =>
     rowValue: { fontSize: 14, color: t.inkSecondary, textAlign: "right" },
     rowBig: { fontSize: 17 },
 
-    sizeHeader: { borderRadius: radius.lg, backgroundColor: t.surfaceSunken, padding: 12, gap: 10 },
+    sizeHeader: { padding: 14, gap: 10 },
     sizeHeaderRow: { flexDirection: "row", alignItems: "flex-end", gap: 16, flexWrap: "wrap" },
     sizeField: { gap: 4 },
     sizeLabel: { fontSize: 11, fontWeight: "500", color: t.inkMuted, textTransform: "uppercase", letterSpacing: 0.3 },
@@ -1073,8 +1074,7 @@ const styles = (t: Theme) =>
     footerTotalLabel: { fontSize: 13, color: t.inkSecondary },
     footerTotalValue: { fontSize: 20, fontWeight: "700", color: t.ink },
     footerButtons: { flexDirection: "row", gap: 10 },
-    navBtnPrimary: { flex: 1, minHeight: 46, borderRadius: radius.md, backgroundColor: t.primary, alignItems: "center", justifyContent: "center" },
-    navBtnPrimaryText: { fontSize: 16, fontWeight: "600", color: t.onBrand },
+    navBtnPrimaryWrap: { flex: 1 },
     navBtnSecondary: { minHeight: 46, paddingHorizontal: 18, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, borderColor: t.line, alignItems: "center", justifyContent: "center" },
     navBtnSecondaryText: { fontSize: 16, fontWeight: "600", color: t.ink },
   });

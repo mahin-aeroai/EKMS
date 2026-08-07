@@ -7,14 +7,14 @@ import {
   Text,
   TextInput,
   View,
-  useColorScheme,
 } from "react-native";
 import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import { supabase } from "../../lib/supabase";
 import { getSignedUrl } from "../../lib/copilot";
-import { themes, radius, type Theme } from "@mmdi/shared/theme";
 import type { ApplelfgSiteSurveyRow } from "@mmdi/shared/rows";
+import { vibrant, type VibrantTheme } from "../../theme/vibrant";
+import { SoftCard } from "../../theme/components";
 
 /**
  * Mirrors src/app/workspaces/site-surveys/page.tsx: query
@@ -29,8 +29,7 @@ import type { ApplelfgSiteSurveyRow } from "@mmdi/shared/rows";
 const PAGE = 40;
 
 export default function SurveysScreen() {
-  const scheme = useColorScheme();
-  const t = themes[scheme === "dark" ? "dark" : "light"];
+  const t = vibrant;
   const s = styles(t);
 
   const [query, setQuery] = useState("");
@@ -110,7 +109,7 @@ export default function SurveysScreen() {
           data={rows}
           keyExtractor={(r) => r.id}
           contentInsetAdjustmentBehavior="automatic"
-          ItemSeparatorComponent={() => <View style={s.sep} />}
+          contentContainerStyle={s.list}
           ListFooterComponent={
             totalCount !== null && totalCount > rows.length ? (
               <Text style={s.footer}>
@@ -119,23 +118,23 @@ export default function SurveysScreen() {
             ) : null
           }
           renderItem={({ item }) => (
-            <Pressable
-              onPress={() => open(item)}
-              disabled={openingId === item.id}
-              style={({ pressed }) => [s.row, pressed && { backgroundColor: t.surfaceSunken }]}
-            >
-              <View style={s.rowText}>
-                <Text style={s.title} numberOfLines={1}>
-                  {item.store_name ?? item.file_name}
-                </Text>
-                <Text style={s.meta} numberOfLines={1}>
-                  {[item.chain, item.apple_store_id].filter(Boolean).join(" · ") || "Not recorded"}
-                </Text>
-              </View>
-              {openingId === item.id ? (
-                <ActivityIndicator color={t.primary} />
-              ) : (
-                <Text style={s.chev}>›</Text>
+            <Pressable onPress={() => open(item)} disabled={openingId === item.id}>
+              {({ pressed }) => (
+                <SoftCard style={[s.row, pressed && { opacity: 0.7 }]}>
+                  <View style={s.rowText}>
+                    <Text style={s.title} numberOfLines={1}>
+                      {item.store_name ?? item.file_name}
+                    </Text>
+                    <Text style={s.meta} numberOfLines={1}>
+                      {[item.chain, item.apple_store_id].filter(Boolean).join(" · ") || "Not recorded"}
+                    </Text>
+                  </View>
+                  {openingId === item.id ? (
+                    <ActivityIndicator color={t.primary} />
+                  ) : (
+                    <Text style={s.chev}>›</Text>
+                  )}
+                </SoftCard>
               )}
             </Pressable>
           )}
@@ -145,34 +144,35 @@ export default function SurveysScreen() {
   );
 }
 
-const styles = (t: Theme) =>
+const styles = (t: VibrantTheme) =>
   StyleSheet.create({
     screen: { flex: 1, backgroundColor: t.surface },
     search: {
       margin: 16,
-      height: 40,
-      borderRadius: radius.md,
-      backgroundColor: t.surfaceSunken,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: t.line,
-      paddingHorizontal: 12,
+      height: 46,
+      borderRadius: 23,
+      backgroundColor: t.surfaceRaised,
+      paddingHorizontal: 16,
       fontSize: 17,
       color: t.ink,
+      shadowColor: "#3D2E6B",
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.08,
+      shadowRadius: 12,
+      elevation: 3,
     },
+    list: { paddingHorizontal: 16, paddingBottom: 16, gap: 10 },
     // No fixed row height: Dynamic Type must be able to grow these.
     row: {
       flexDirection: "row",
       alignItems: "center",
       minHeight: 44,
-      paddingVertical: 12,
-      paddingHorizontal: 16,
       gap: 12,
     },
     rowText: { flex: 1 },
     title: { fontSize: 17, color: t.ink },
     meta: { fontSize: 15, color: t.inkSecondary, marginTop: 2 },
     chev: { fontSize: 22, color: t.inkMuted },
-    sep: { height: StyleSheet.hairlineWidth, backgroundColor: t.line, marginLeft: 16 },
     empty: { padding: 24, textAlign: "center", fontSize: 15, color: t.inkMuted },
     footer: { padding: 16, textAlign: "center", fontSize: 13, color: t.inkMuted },
     pad: { padding: 24 },

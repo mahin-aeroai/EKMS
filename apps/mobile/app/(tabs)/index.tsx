@@ -9,13 +9,14 @@ import {
   Text,
   TextInput,
   View,
-  useColorScheme,
 } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import { askCopilot, getSignedUrl, type ToolCall } from "../../lib/copilot";
-import { themes, radius, type Theme } from "@mmdi/shared/theme";
 import { fmtRupee } from "@mmdi/shared/sign-estimator/calc";
+import { vibrant, type VibrantTheme } from "../../theme/vibrant";
+import { SoftCard } from "../../theme/components";
 
 /**
  * Copilot chat. Calls /api/ai-copilot, which returns
@@ -69,7 +70,7 @@ interface JobOrderCardRow {
 }
 
 interface CardCtx {
-  t: Theme;
+  t: VibrantTheme;
   opening: string | null;
   openSurvey: (row: SurveyRow) => void;
 }
@@ -92,17 +93,14 @@ function renderSurveyCard(item: unknown, _index: number, ctx: CardCtx): ReactNod
   const s = cardStyles(ctx.t);
   const isOpening = ctx.opening === row.relative_path;
   return (
-    <Pressable
-      key={row.relative_path}
-      onPress={() => ctx.openSurvey(row)}
-      disabled={isOpening}
-      style={({ pressed }) => [s.card, pressed && { backgroundColor: ctx.t.surfaceSunken }]}
-    >
-      <View style={{ flex: 1 }}>
-        <Text style={s.cardTitle} numberOfLines={1}>{row.store_name ?? row.file_name}</Text>
-        <Text style={s.cardMeta} numberOfLines={1}>{row.chain ?? "Not recorded"}</Text>
-      </View>
-      {isOpening ? <ActivityIndicator color={ctx.t.primary} /> : <Text style={s.chev}>›</Text>}
+    <Pressable key={row.relative_path} onPress={() => ctx.openSurvey(row)} disabled={isOpening}>
+      <SoftCard style={s.cardInner}>
+        <View style={{ flex: 1 }}>
+          <Text style={s.cardTitle} numberOfLines={1}>{row.store_name ?? row.file_name}</Text>
+          <Text style={s.cardMeta} numberOfLines={1}>{row.chain ?? "Not recorded"}</Text>
+        </View>
+        {isOpening ? <ActivityIndicator color={ctx.t.primary} /> : <Text style={s.chev}>›</Text>}
+      </SoftCard>
     </Pressable>
   );
 }
@@ -117,7 +115,7 @@ function renderLfgSiteCard(item: unknown, index: number, ctx: CardCtx): ReactNod
   const s = cardStyles(ctx.t);
   return (
     // Not pressable, no chevron -- there's no site detail screen to open.
-    <View key={`${row.store_name ?? "site"}-${index}`} style={s.card}>
+    <SoftCard key={`${row.store_name ?? "site"}-${index}`} style={s.cardInner}>
       <View style={{ flex: 1 }}>
         <Text style={s.cardTitle} numberOfLines={1}>{row.store_name ?? "Unknown site"}</Text>
         <Text style={s.cardMeta} numberOfLines={1}>{row.program ?? "Not recorded"}</Text>
@@ -127,7 +125,7 @@ function renderLfgSiteCard(item: unknown, index: number, ctx: CardCtx): ReactNod
           Installation: {row.total_installation_amount != null ? fmtRupee(row.total_installation_amount) : "Not recorded"}
         </Text>
       </View>
-    </View>
+    </SoftCard>
   );
 }
 
@@ -144,7 +142,7 @@ function extractJobOrderFromGet(result: unknown): JobOrderCardRow[] {
 // Mirrors STATUS_BADGE in src/components/workspaces/JobOrderWorkspaceClient.tsx
 // -- same two real status strings (job_orders.status is inferred from the
 // source's 'C'/'I' code, see supabase-job-orders-schema.sql), same colours.
-function jobOrderStatusColor(status: string, t: Theme): string {
+function jobOrderStatusColor(status: string, t: VibrantTheme): string {
   if (status === "Completed") return t.success;
   if (status === "In Progress") return t.warning;
   return t.inkMuted;
@@ -162,7 +160,7 @@ function renderJobOrderCard(item: unknown, index: number, ctx: CardCtx): ReactNo
   const s = cardStyles(ctx.t);
   return (
     // Not pressable, no chevron -- no job order detail screen yet.
-    <View key={row.code ?? String(index)} style={s.card}>
+    <SoftCard key={row.code ?? String(index)} style={s.cardInner}>
       <View style={{ flex: 1 }}>
         <Text style={s.cardTitle} numberOfLines={1}>{row.code}</Text>
         <Text style={s.cardMeta} numberOfLines={1}>{row.customer_name ?? "Not recorded"}</Text>
@@ -173,7 +171,7 @@ function renderJobOrderCard(item: unknown, index: number, ctx: CardCtx): ReactNo
         <View style={[s.statusDot, { backgroundColor: jobOrderStatusColor(row.status, ctx.t) }]} />
         <Text style={s.statusText}>{row.status}</Text>
       </View>
-    </View>
+    </SoftCard>
   );
 }
 
@@ -214,8 +212,7 @@ interface Turn {
 }
 
 export default function CopilotScreen() {
-  const scheme = useColorScheme();
-  const t = themes[scheme === "dark" ? "dark" : "light"];
+  const t = vibrant;
   const s = styles(t);
 
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -274,9 +271,20 @@ export default function CopilotScreen() {
         ListEmptyComponent={<Text style={s.empty}>Ask about jobs, surveys, rates, or documents.</Text>}
         renderItem={({ item }) => (
           <View>
-            <View style={item.role === "user" ? s.userBubble : s.botBubble}>
-              <Text style={item.role === "user" ? s.userText : s.botText}>{item.content}</Text>
-            </View>
+            {item.role === "user" ? (
+              <LinearGradient
+                colors={t.gradientPrimary}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={s.userBubble}
+              >
+                <Text style={s.userText}>{item.content}</Text>
+              </LinearGradient>
+            ) : (
+              <View style={s.botBubble}>
+                <Text style={s.botText}>{item.content}</Text>
+              </View>
+            )}
             {item.cardGroups?.map((group) => {
               const entry = CARD_REGISTRY[group.tool];
               if (!entry) return null;
@@ -303,48 +311,43 @@ export default function CopilotScreen() {
           multiline
           onSubmitEditing={send}
         />
-        <Pressable onPress={send} disabled={!draft.trim() || busy} style={[s.sendBtn, (!draft.trim() || busy) && { opacity: 0.4 }]}>
-          <Text style={s.sendIcon}>↑</Text>
+        <Pressable onPress={send} disabled={!draft.trim() || busy} style={[s.sendBtnWrap, (!draft.trim() || busy) && { opacity: 0.4 }]}>
+          <LinearGradient colors={t.gradientPrimary} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.sendBtn}>
+            <Text style={s.sendIcon}>↑</Text>
+          </LinearGradient>
         </Pressable>
       </View>
     </KeyboardAvoidingView>
   );
 }
 
-const styles = (t: Theme) =>
+const styles = (t: VibrantTheme) =>
   StyleSheet.create({
     screen: { flex: 1, backgroundColor: t.surface },
-    list: { padding: 16, gap: 8 },
+    list: { padding: 16, gap: 10 },
     empty: { textAlign: "center", padding: 32, fontSize: 15, color: t.inkMuted },
-    userBubble: { alignSelf: "flex-end", maxWidth: "80%", backgroundColor: t.primary, borderRadius: 18, paddingVertical: 9, paddingHorizontal: 14 },
-    botBubble: { alignSelf: "flex-start", maxWidth: "88%", backgroundColor: t.surfaceSunken, borderRadius: 18, paddingVertical: 9, paddingHorizontal: 14 },
-    userText: { fontSize: 17, color: t.onBrand },
+    userBubble: { alignSelf: "flex-end", maxWidth: "80%", borderRadius: 22, borderBottomRightRadius: 6, paddingVertical: 11, paddingHorizontal: 16 },
+    botBubble: { alignSelf: "flex-start", maxWidth: "88%", backgroundColor: t.surfaceRaised, borderRadius: 22, borderBottomLeftRadius: 6, paddingVertical: 11, paddingHorizontal: 16, shadowColor: "#3D2E6B", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.08, shadowRadius: 8, elevation: 2 },
+    userText: { fontSize: 17, color: t.onGradient },
     botText: { fontSize: 17, color: t.ink },
-    cardGroup: { alignSelf: "flex-start", width: "88%", gap: 6, marginTop: 6 },
+    cardGroup: { alignSelf: "flex-start", width: "88%", gap: 8, marginTop: 6 },
     moreLine: { fontSize: 13, color: t.inkMuted, paddingHorizontal: 4 },
     busy: { paddingBottom: 8 },
-    composer: { flexDirection: "row", alignItems: "flex-end", gap: 8, padding: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.line },
-    input: { flex: 1, minHeight: 40, maxHeight: 120, borderRadius: 20, borderWidth: StyleSheet.hairlineWidth, borderColor: t.line, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 10, fontSize: 17, color: t.ink },
-    sendBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: t.primary, alignItems: "center", justifyContent: "center" },
-    sendIcon: { fontSize: 20, color: t.onBrand },
+    composer: { flexDirection: "row", alignItems: "flex-end", gap: 10, padding: 12, backgroundColor: t.surfaceRaised, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.line },
+    input: { flex: 1, minHeight: 44, maxHeight: 120, borderRadius: 22, backgroundColor: t.surfaceSunken, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12, fontSize: 17, color: t.ink },
+    sendBtnWrap: { borderRadius: 22, shadowColor: "#3D2E6B", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 3 },
+    sendBtn: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
+    sendIcon: { fontSize: 20, fontWeight: "700", color: t.onGradient },
   });
 
 // Shared by every card renderer above (all module-level functions, called
 // with an explicit `t` rather than closing over component state) -- kept
 // separate from `styles` since it's used outside the component.
-const cardStyles = (t: Theme) =>
+const cardStyles = (t: VibrantTheme) =>
   StyleSheet.create({
-    card: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 10,
-      minHeight: 44,
-      padding: 12,
-      borderRadius: radius.lg,
-      backgroundColor: t.surfaceRaised,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: t.line,
-    },
+    // Actual card chrome (rounded corners, background, shadow) now comes
+    // from SoftCard -- this just lays out what's inside it.
+    cardInner: { flexDirection: "row", alignItems: "center", gap: 10, minHeight: 44, padding: 0 },
     cardTitle: { fontSize: 16, color: t.ink },
     cardMeta: { fontSize: 14, color: t.inkSecondary, marginTop: 2 },
     chev: { fontSize: 22, color: t.inkMuted },
