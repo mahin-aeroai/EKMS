@@ -57,7 +57,8 @@
           "microphonePermission": "MMDI ONE uses your microphone so you can ask Copilot questions by voice.",
           "speechRecognitionPermission": "MMDI ONE uses speech recognition to turn your voice into text for Copilot."
         }
-      ]
+      ],
+      "./plugins/withForceMicPermissions.js"
     ],
     "experiments": {
       "typedRoutes": true
