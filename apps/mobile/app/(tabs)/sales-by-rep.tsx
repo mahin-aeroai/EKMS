@@ -8,7 +8,6 @@ import {
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
@@ -51,6 +50,19 @@ import { supabase } from "../../lib/supabase";
  * <select> equivalent), same pattern as EstimatorTab's PickerField. CSV
  * export shares the file via the native share sheet (Mail, Files,
  * WhatsApp, etc.) instead of triggering a browser download.
+ *
+ * "put that after selection of sales person and then customer and if we
+ * leave all customer like wise" -- customer used to be a free-text box
+ * that only appeared after Run report, filtering the already-fetched rows
+ * client-side. Now it's a second picker, same bottom-sheet pattern as
+ * sales person, sitting directly between sales person and the date range
+ * (disabled with a "select a sales person first" placeholder until one is
+ * chosen). Its options come from a lightweight query scoped to the
+ * selected rep (refetched whenever selectedRep changes), and it defaults
+ * to "" meaning "All customers" -- selecting a specific one feeds a real
+ * .eq("customer_name", ...) into the report query alongside sales_manager
+ * and the date range, rather than post-filtering results that were
+ * already fetched unfiltered.
  */
 
 function toISODate(d: Date): string {
@@ -220,16 +232,22 @@ export default function SalesByRepScreen() {
   const [salesPeople, setSalesPeople] = useState<string[] | null>(null);
   const [repPickerOpen, setRepPickerOpen] = useState(false);
   const [selectedRep, setSelectedRep] = useState("");
+  // "can we put that after selection of sales person and then customer and
+  // if we leave all customer like wise" -- customer used to be a free-text
+  // box that only appeared after Run report, filtering the already-fetched
+  // rows client-side. Now it's a proper picker (same pattern as the sales
+  // person picker above it) that comes right after sales person and before
+  // the date range, so the flow reads: pick a rep, optionally narrow to
+  // one of their customers (or leave it on "All customers"), then a date
+  // range, then run. Selecting a customer feeds an actual .eq() filter
+  // into the query below rather than a client-side substring match.
+  const [customerNames, setCustomerNames] = useState<string[] | null>(null);
+  const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
+  const [selectedCustomer, setSelectedCustomer] = useState(""); // "" = All customers
   const [dateFrom, setDateFrom] = useState<Date | null>(null);
   const [dateTo, setDateTo] = useState<Date | null>(null);
   const [fromPickerOpen, setFromPickerOpen] = useState(false);
   const [toPickerOpen, setToPickerOpen] = useState(false);
-  // "add a filter apart from date range we direcly give customer filter" --
-  // filters the already-fetched, already-grouped rows for this rep/date
-  // range client-side (no extra round-trip needed), live as you type. Kept
-  // alongside sales person + date range as a third filter, all three
-  // combine.
-  const [customerFilter, setCustomerFilter] = useState("");
   const [rows, setRows] = useState<CustomerBreakdownRow[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -252,6 +270,38 @@ export default function SalesByRepScreen() {
     };
   }, []);
 
+  // Refetches whenever the sales person changes -- unscoped by date (the
+  // date range isn't picked yet at this point in the flow), so this lists
+  // every customer that rep has ever sold to. Resets the customer
+  // selection back to "All customers" too, since whichever specific
+  // customer was picked for the previous rep may not apply to this one.
+  useEffect(() => {
+    setSelectedCustomer("");
+    if (!selectedRep) {
+      setCustomerNames(null);
+      return;
+    }
+    let cancelled = false;
+    setCustomerNames(null);
+    (async () => {
+      const all = await fetchAllRowsParallel<{ customer_name: string | null }>(
+        () =>
+          supabase
+            .from("sales_transactions")
+            .select("customer_name", { count: "exact", head: true })
+            .eq("sales_manager", selectedRep),
+        (from, to) =>
+          supabase.from("sales_transactions").select("customer_name").eq("sales_manager", selectedRep).range(from, to)
+      );
+      if (cancelled) return;
+      const unique = Array.from(new Set(all.map((r) => r.customer_name).filter((v): v is string => !!v))).sort();
+      setCustomerNames(unique);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedRep]);
+
   async function runReport() {
     if (!selectedRep) return;
     // "after run report keyboard is stuck on screen" -- defensive backstop;
@@ -261,11 +311,14 @@ export default function SalesByRepScreen() {
     setLoading(true);
     setRows(null);
     try {
-      // Same date-range filters apply to both the count check and every
-      // page -- built once so the two can't drift apart.
-      function withFilters<Q extends { gte: (c: string, v: string) => Q; lte: (c: string, v: string) => Q }>(q: Q): Q {
+      // Same date-range + customer filters apply to both the count check
+      // and every page -- built once so they can't drift apart.
+      function withFilters<
+        Q extends { gte: (c: string, v: string) => Q; lte: (c: string, v: string) => Q; eq: (c: string, v: string) => Q }
+      >(q: Q): Q {
         if (dateFrom) q = q.gte("invoice_date", toISODate(dateFrom));
         if (dateTo) q = q.lte("invoice_date", toISODate(dateTo));
+        if (selectedCustomer) q = q.eq("customer_name", selectedCustomer);
         return q;
       }
       const all = await fetchAllRowsParallel<{
@@ -367,7 +420,8 @@ export default function SalesByRepScreen() {
         lines.push([selectedRep, r.customer_name, r.transaction_count, r.total_taxable_value].map(csvEscape).join(","));
       }
       const periodLabel = dateFrom || dateTo ? `-${dateFrom ? toISODate(dateFrom) : "start"}-to-${dateTo ? toISODate(dateTo) : "end"}` : "";
-      const filename = `sales-by-rep-${selectedRep.replace(/\s+/g, "-")}${periodLabel}.csv`;
+      const customerLabel = selectedCustomer ? `-${selectedCustomer.replace(/\s+/g, "-")}` : "";
+      const filename = `sales-by-rep-${selectedRep.replace(/\s+/g, "-")}${customerLabel}${periodLabel}.csv`;
       // .write() creates the file itself if it doesn't exist yet -- same
       // pattern already proven in lib/installationReports/draftStore.ts,
       // no separate .create() call needed (and calling .create() on a file
@@ -383,10 +437,12 @@ export default function SalesByRepScreen() {
     }
   }
 
-  const filteredRows =
-    rows && customerFilter.trim()
-      ? rows.filter((r) => r.customer_name.toLowerCase().includes(customerFilter.trim().toLowerCase()))
-      : rows;
+  // The customer picker now feeds an actual query filter (see withFilters
+  // in runReport above) rather than filtering client-side, so `rows` is
+  // already scoped correctly by the time it lands here -- no separate
+  // filteredRows derivation needed. Kept the name so the JSX below (and
+  // the stats/CSV export that read it) didn't need to change.
+  const filteredRows = rows;
   const totalSales = filteredRows?.reduce((sum, r) => sum + r.total_taxable_value, 0) ?? 0;
   const totalTxns = filteredRows?.reduce((sum, r) => sum + r.transaction_count, 0) ?? 0;
 
@@ -396,6 +452,18 @@ export default function SalesByRepScreen() {
         <Pressable style={s.pickerField} onPress={() => setRepPickerOpen(true)}>
           <Text style={selectedRep ? s.pickerText : s.pickerPlaceholder} numberOfLines={1}>
             {selectedRep || (salesPeople === null ? "Loading…" : "Select a sales person")}
+          </Text>
+          <Text style={s.pickerChevron}>⌄</Text>
+        </Pressable>
+
+        <Pressable
+          style={[s.pickerField, !selectedRep && s.pickerFieldDisabled]}
+          onPress={() => selectedRep && setCustomerPickerOpen(true)}
+        >
+          <Text style={selectedCustomer ? s.pickerText : s.pickerPlaceholder} numberOfLines={1}>
+            {!selectedRep
+              ? "Select a sales person first"
+              : selectedCustomer || (customerNames === null ? "Loading…" : "All customers")}
           </Text>
           <Text style={s.pickerChevron}>⌄</Text>
         </Pressable>
@@ -420,21 +488,6 @@ export default function SalesByRepScreen() {
         </View>
 
         <GradientButton label="Run report" onPress={runReport} loading={loading} disabled={!selectedRep} />
-
-        {rows !== null && (
-          <View style={s.customerFilterField}>
-            <Text style={s.label}>Customer (optional)</Text>
-            <TextInput
-              style={s.customerFilterInput}
-              value={customerFilter}
-              onChangeText={setCustomerFilter}
-              placeholder="Search by customer name"
-              placeholderTextColor={t.inkMuted}
-              autoCapitalize="words"
-              returnKeyType="search"
-            />
-          </View>
-        )}
       </View>
 
       {filteredRows !== null && (
@@ -461,8 +514,8 @@ export default function SalesByRepScreen() {
 
           {filteredRows.length === 0 ? (
             <Text style={s.empty}>
-              {customerFilter.trim()
-                ? `No customers matching "${customerFilter.trim()}" for ${selectedRep} in this period.`
+              {selectedCustomer
+                ? `No sales found for ${selectedCustomer} (${selectedRep}) in this period.`
                 : `No sales found for ${selectedRep} in this period.`}
             </Text>
           ) : (
@@ -527,6 +580,34 @@ export default function SalesByRepScreen() {
               </Pressable>
             )}
             ListEmptyComponent={<Text style={s.modalEmpty}>{salesPeople === null ? "Loading…" : "No sales people found."}</Text>}
+          />
+        </View>
+      </Modal>
+
+      <Modal visible={customerPickerOpen} transparent animationType="slide" onRequestClose={() => setCustomerPickerOpen(false)}>
+        <Pressable style={s.modalBackdrop} onPress={() => setCustomerPickerOpen(false)} />
+        <View style={s.modalSheet}>
+          <View style={s.modalHeader}>
+            <Text style={s.modalTitle}>Customer</Text>
+            <Pressable onPress={() => setCustomerPickerOpen(false)}><Text style={s.modalClose}>Done</Text></Pressable>
+          </View>
+          <FlatList
+            data={["", ...(customerNames ?? [])]}
+            keyExtractor={(name, i) => name || `all-${i}`}
+            style={s.modalList}
+            renderItem={({ item: name, index }) => (
+              <Pressable
+                style={[s.modalOption, { borderLeftColor: optionAccent(t, index) }, name === selectedCustomer && s.modalOptionActive]}
+                onPress={() => {
+                  setSelectedCustomer(name);
+                  setRows(null);
+                  setCustomerPickerOpen(false);
+                }}
+              >
+                <Text style={s.modalOptionText}>{name || "All customers"}</Text>
+              </Pressable>
+            )}
+            ListEmptyComponent={<Text style={s.modalEmpty}>{customerNames === null ? "Loading…" : "No customers found."}</Text>}
           />
         </View>
       </Modal>
@@ -676,20 +757,17 @@ const styles = (t: VibrantTheme) =>
     },
     pickerText: { flex: 1, fontSize: 16, color: t.ink },
     pickerPlaceholder: { flex: 1, fontSize: 16, color: t.inkMuted },
+    // Customer picker before a sales person is chosen -- same field, just
+    // dimmed and non-interactive rather than hidden, so the flow (sales
+    // person, then customer, then date) stays visible even before it's
+    // usable.
+    pickerFieldDisabled: { opacity: 0.5 },
     pickerChevron: { fontSize: 16, color: t.inkMuted },
 
     dateRow: { flexDirection: "row", gap: 12 },
     dateField: { flex: 1, gap: 4 },
     label: { fontSize: 12, fontWeight: "500", color: t.inkSecondary },
 
-    // "add a filter apart from date range we direcly give customer filter"
-    customerFilterField: { gap: 4 },
-    customerFilterInput: {
-      minHeight: 44, borderRadius: 14,
-      backgroundColor: t.surfaceRaised, paddingHorizontal: 12,
-      fontSize: 15, color: t.ink,
-      shadowColor: "#3D2E6B", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
-    },
     dateInput: {
       minHeight: 44, borderRadius: 14, justifyContent: "center",
       backgroundColor: t.surfaceRaised, paddingHorizontal: 12,
