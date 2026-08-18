@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import {
   ActivityIndicator,
   Animated,
+  Easing,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -85,6 +86,16 @@ import { SoftCard } from "../../theme/components";
  *    rebuild, not just a JS bundle -- see app.json's new
  *    "expo-speech-recognition" plugin entry (mic + speech-recognition
  *    Info.plist strings) and package.json/package-lock.json.
+ *  - "an animation that Tony Stark has when he talks to Jarvis" --
+ *    ListeningOverlay below: a full-screen takeover (pure
+ *    react-native Animated, no new dependency) that appears the moment
+ *    real dictation starts (whether from the mic button or a wake-word
+ *    handoff) and disappears the moment it ends. Three staggered rings
+ *    pulse outward from a gently breathing gradient orb -- same
+ *    gradientPrimary as the send button and user bubbles, so it reads as
+ *    "this app's AI," not a generic sci-fi skin -- with the live
+ *    transcript appearing under it as you talk, and a tap anywhere
+ *    cancels (same as tapping the mic button again).
  */
 
 const MAX_CARDS_PER_CALL = 4;
@@ -301,6 +312,79 @@ function TypingDots({ t }: { t: VibrantTheme }) {
         <Animated.View key={i} style={[s.typingDot, { opacity: v }]} />
       ))}
     </View>
+  );
+}
+
+// "an animation that Tony Stark has when he talks to Jarvis" -- a
+// full-screen takeover shown for the entire time real dictation is
+// active (not the quiet background wake-word state, only once a command
+// is actually being captured). Three rings, staggered a third of a cycle
+// apart, scale outward from the orb while fading out (a "sonar ping"
+// read), and the orb itself breathes gently the whole time so the screen
+// never looks static even between pings. Everything here is plain
+// react-native Animated -- no new dependency, no native module, so
+// unlike the rest of this round it needs no rebuild at all, just a
+// merge.
+function ListeningOverlay({ t, transcript, onCancel }: { t: VibrantTheme; transcript: string; onCancel: () => void }) {
+  const s = overlayStyles(t);
+  const appear = useRef(new Animated.Value(0)).current;
+  const orbPulse = useRef(new Animated.Value(1)).current;
+  const rings = useRef([0, 1, 2].map(() => new Animated.Value(0))).current;
+
+  useEffect(() => {
+    Animated.timing(appear, { toValue: 1, duration: 220, easing: Easing.out(Easing.ease), useNativeDriver: true }).start();
+
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(orbPulse, { toValue: 1.08, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(orbPulse, { toValue: 1, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ])
+    );
+    const ringLoops = rings.map((v, i) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(i * 700),
+          Animated.timing(v, { toValue: 1, duration: 2100, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+          Animated.timing(v, { toValue: 0, duration: 0, useNativeDriver: true }),
+          Animated.delay((2 - i) * 700),
+        ])
+      )
+    );
+    pulse.start();
+    ringLoops.forEach((l) => l.start());
+    return () => {
+      pulse.stop();
+      ringLoops.forEach((l) => l.stop());
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <Animated.View style={[s.overlay, { opacity: appear }]}>
+      <Pressable style={StyleSheet.absoluteFill} onPress={onCancel} />
+      <View style={s.orbWrap} pointerEvents="none">
+        {rings.map((v, i) => (
+          <Animated.View
+            key={i}
+            style={[
+              s.ring,
+              {
+                opacity: v.interpolate({ inputRange: [0, 1], outputRange: [0.5, 0] }),
+                transform: [{ scale: v.interpolate({ inputRange: [0, 1], outputRange: [1, 2.4] }) }],
+              },
+            ]}
+          />
+        ))}
+        <Animated.View style={{ transform: [{ scale: orbPulse }] }}>
+          <LinearGradient colors={t.gradientPrimary} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.orb}>
+            <SymbolView name="waveform" tintColor={t.onGradient} size={30} />
+          </LinearGradient>
+        </Animated.View>
+      </View>
+      <Text style={s.overlayLabel}>Listening…</Text>
+      <Text style={s.overlayTranscript} numberOfLines={4}>{transcript || " "}</Text>
+      <Text style={s.overlayHint}>Tap anywhere to stop</Text>
+    </Animated.View>
   );
 }
 
@@ -653,6 +737,8 @@ export default function CopilotScreen() {
           </LinearGradient>
         </Pressable>
       </View>
+
+      {listening && <ListeningOverlay t={t} transcript={draft} onCancel={toggleListening} />}
     </KeyboardAvoidingView>
   );
 }
@@ -745,4 +831,47 @@ const cardStyles = (t: VibrantTheme) =>
     statusWrap: { flexDirection: "row", alignItems: "center", gap: 6 },
     statusDot: { width: 8, height: 8, borderRadius: 4 },
     statusText: { fontSize: 13, color: t.inkSecondary },
+  });
+
+const ORB_SIZE = 96;
+const RING_SIZE = ORB_SIZE;
+
+// ListeningOverlay's own styles -- separate from `styles` for the same
+// reason cardStyles is (a distinct, self-contained visual language: a
+// near-black backdrop rather than the app's usual cream surface, since
+// the whole point is a dramatic full-screen takeover, not another card).
+const overlayStyles = (t: VibrantTheme) =>
+  StyleSheet.create({
+    overlay: {
+      position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
+      backgroundColor: "rgba(15,12,24,0.94)",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 18,
+      paddingHorizontal: 32,
+    },
+    orbWrap: { width: RING_SIZE * 2.4, height: RING_SIZE * 2.4, alignItems: "center", justifyContent: "center" },
+    ring: {
+      position: "absolute",
+      width: RING_SIZE,
+      height: RING_SIZE,
+      borderRadius: RING_SIZE / 2,
+      borderWidth: 1.5,
+      borderColor: t.gradientPrimary[0],
+    },
+    orb: {
+      width: ORB_SIZE,
+      height: ORB_SIZE,
+      borderRadius: ORB_SIZE / 2,
+      alignItems: "center",
+      justifyContent: "center",
+      shadowColor: t.gradientPrimary[1],
+      shadowOffset: { width: 0, height: 0 },
+      shadowOpacity: 0.6,
+      shadowRadius: 24,
+      elevation: 8,
+    },
+    overlayLabel: { fontSize: 15, fontFamily: fonts.medium, color: "rgba(255,255,255,0.6)", letterSpacing: 1 },
+    overlayTranscript: { fontSize: 22, fontFamily: fonts.regular, color: "#FFFFFF", textAlign: "center", lineHeight: 30 },
+    overlayHint: { position: "absolute", bottom: 48, fontSize: 12, color: "rgba(255,255,255,0.35)" },
   });
