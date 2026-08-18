@@ -11,7 +11,9 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.ekms.mobile",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSMicrophoneUsageDescription": "MMDI ONE uses your microphone so you can ask Copilot questions by voice.",
+        "NSSpeechRecognitionUsageDescription": "MMDI ONE uses speech recognition to turn your voice into text for Copilot."
       }
     },
     "android": {
