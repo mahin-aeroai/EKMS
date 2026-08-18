@@ -4,6 +4,8 @@
   "version": "1.0.0",
   "dependencies": {
     "@expo-google-fonts/roboto": "^0.4.3",
+    "@picovoice/porcupine-react-native": "^4.0.0",
+    "@picovoice/react-native-voice-processor": "^1.2.3",
     "@react-native-community/datetimepicker": "^9.1.0",
     "@supabase/supabase-js": "^2.110.8",
     "expo": "~57.0.8",
