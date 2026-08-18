@@ -28,35 +28,41 @@ import { supabase } from "../../lib/supabase";
  * an internal materials/production COST calculator.
  *
  * "when i add line item to the estimate i wanted have this 4 options" --
- * the Add Item modal now mirrors web's 4-source picker exactly (tables/
- * mapping confirmed by reading page.tsx directly):
+ * the Add Item modal mirrors web's 4-source picker (tables/mapping
+ * confirmed by reading page.tsx directly):
  *  - From contract catalog: hardcoded to two literal customers (name
- *    contains "ikea"/"apple", same substring check as web -- there's no
- *    generic contract-catalog mechanism on web either) -- ikea_rate_card /
- *    apple_rate_card tables, no customer_id filter (whole table applies).
+ *    contains "ikea"/"apple", same substring check as web).
  *  - From recent purchases: sales_transactions filtered by customer_id,
- *    collapsed client-side to one row per item_code (latest invoice_date
- *    wins), no DB date window -- same as web's loadSalesHistory.
- *  - Non-contract / unlisted product: the original v1 manual-entry form.
+ *    collapsed client-side to one row per item_code (latest wins).
+ *  - Non-contract / unlisted product: manual-entry form.
  *  - From estimate pool: estimate_pool_items where status='available' --
- *    populated by an explicit "Add to Pool" action in Sign Estimator/Cost
- *    Sheet on web (not built on mobile), so this tab surfaces whatever a
- *    web user has queued, not anything sourced natively yet. A
- *    sign_estimator pool item can add a second "Printing" line alongside
- *    the primary Signage line, matching web's pendingPoolExtraLines.
- *    Consuming a pool item marks it status='used' (never deleted).
+ *    populated by web's Sign Estimator/Cost Sheet "Add to Pool" action.
  *
- * Rate is left editable for every source on mobile (web locks it for
- * contract/pool picks) -- a deliberate simplification for on-the-go
- * adjustments; everything else (which fields get auto-filled from which
- * source) matches web's pickIkeaRateCardRow/pickAppleRateCardRow/
- * pickHistoryRow/pickPoolRow exactly.
+ * "Lets add design/creative detail" -- `designName` is now a real,
+ * editable field (was already a DB column and part of the save mapping,
+ * just never exposed in the UI) -- shown for every source, since a
+ * design/creative name is independent of where the product itself came
+ * from.
  *
- * sqftEntryMode ("dims" vs "bulk") is a mobile-side generalization of
- * web's dimensions-vs-bulk-sqft toggle: contract-catalog rows carry no
- * per-piece width/height, so those (and a pool Printing line, when only a
- * total sqft is known) use "bulk" -- the Quantity field IS the sqft
- * total directly, not a piece count multiplied by dimensions.
+ * "when i select from contract item ... the menu still appears and i am
+ * unable to identify it is already selected" -- once a pick is made on
+ * the Contract/Recent/Pool tabs, the search box + result list are hidden
+ * in favour of a single "Selected" card with a "Change" action, instead
+ * of leaving the full list open with no visual selected-state.
+ *
+ * "against deliver does not align in box properly" -- the shared
+ * `segment`/`segmentText` styles (used by payment terms, calc mode, sqft
+ * entry mode, and now dim units) switched from a fixed minHeight to
+ * auto-height + centered text, so a longer label like "Against Delivery"
+ * wraps to two lines cleanly instead of clipping/overflowing a fixed box.
+ *
+ * "when i choose by dimension i need to have centimeters/mm/feet too as
+ * option" -- `dimUnit` (in/cm/mm/ft) is now picked alongside Width/
+ * Height. Internally converted to inches for the sqft math (matches web's
+ * widthIn()/heightIn()) and to centimeters for width_cm/height_cm (the
+ * columns web's own getSizeUnit() reads back as centimeters by default --
+ * see pdf.ts) -- so an estimate built on mobile in any unit still reads
+ * correctly if someone later opens it on web.
  */
 
 interface CustomerOption {
@@ -70,6 +76,7 @@ interface CustomerOption {
 
 type CalcMode = "nos" | "sqft";
 type SqftEntryMode = "dims" | "bulk";
+type DimUnit = "in" | "cm" | "mm" | "ft";
 type DraftSource = "contract" | "history" | "custom" | "pool";
 type PaymentTermsType = "net_days" | "advance" | "against_delivery";
 
@@ -86,8 +93,9 @@ interface DraftLine {
   additionalDescription: string;
   calcMode: CalcMode;
   sqftEntryMode: SqftEntryMode;
-  widthIn: string;
-  heightIn: string;
+  dimUnit: DimUnit;
+  width: string;
+  height: string;
   quantity: string;
   unitRate: string;
   transportationRate: string;
@@ -169,6 +177,26 @@ function inferCalcMode(uom: string | null | undefined): CalcMode {
   return "sqft";
 }
 
+// See file header note -- mirrors web's widthIn()/heightIn() (inches, for
+// the actual sqft math) and getSizeUnit()'s cm default (for width_cm/
+// height_cm, the columns web reads back).
+function toInches(v: number, u: DimUnit): number {
+  switch (u) {
+    case "cm": return v / 2.54;
+    case "mm": return v / 25.4;
+    case "ft": return v * 12;
+    default: return v;
+  }
+}
+function toCm(v: number, u: DimUnit): number {
+  switch (u) {
+    case "in": return v * 2.54;
+    case "mm": return v / 10;
+    case "ft": return v * 30.48;
+    default: return v;
+  }
+}
+
 function computeLine(line: DraftLine) {
   const qty = parseNum(line.quantity);
   const rate = parseNum(line.unitRate);
@@ -183,9 +211,9 @@ function computeLine(line: DraftLine) {
       sqftTotal = qty;
       subtotal = sqftTotal * rate;
     } else {
-      const w = parseNum(line.widthIn);
-      const h = parseNum(line.heightIn);
-      sqftTotal = ((w * h) / 144) * qty;
+      const wIn = toInches(parseNum(line.width), line.dimUnit);
+      const hIn = toInches(parseNum(line.height), line.dimUnit);
+      sqftTotal = ((wIn * hIn) / 144) * qty;
       subtotal = sqftTotal * rate;
     }
   } else {
@@ -285,8 +313,9 @@ export default function EstimateBuilderScreen() {
       additionalDescription: "",
       calcMode: "sqft",
       sqftEntryMode: "dims",
-      widthIn: "",
-      heightIn: "",
+      dimUnit: "in",
+      width: "",
+      height: "",
       quantity: "1",
       unitRate: "",
       transportationRate: "",
@@ -496,6 +525,9 @@ export default function EstimateBuilderScreen() {
 
     if (row.source === "cost_sheet" && num("width") != null && num("height") != null) {
       const materials = Array.isArray(sum.materials) ? (sum.materials as unknown[]).filter((m) => typeof m === "string").join(", ") : null;
+      // Web maps Cost Sheet's own "INC"/other uom the same way -- see this
+      // file's header note.
+      const dimUnit: DimUnit = str("uom") === "INC" ? "in" : "ft";
       setDraftLine((d) => ({
         ...d,
         source: "pool",
@@ -506,8 +538,9 @@ export default function EstimateBuilderScreen() {
         description: [str("description"), materials].filter(Boolean).join(" — "),
         calcMode: "sqft",
         sqftEntryMode: "dims",
-        widthIn: String(num("width")),
-        heightIn: String(num("height")),
+        dimUnit,
+        width: String(num("width")),
+        height: String(num("height")),
         quantity: num("qty") != null ? String(num("qty")) : "1",
         unitRate: num("unitRatePerSqft") != null ? String(num("unitRatePerSqft")) : String(row.sell_amount),
       }));
@@ -528,8 +561,8 @@ export default function EstimateBuilderScreen() {
         description: str("categoryLabel") ?? str("category") ?? "",
         calcMode: "nos",
         sqftEntryMode: "dims",
-        widthIn: "",
-        heightIn: "",
+        width: "",
+        height: "",
         quantity: String(qty),
         unitRate: String(Math.round(signageSell / qty)),
         transportationRate: num("shipping") != null ? String(num("shipping")) : "",
@@ -568,6 +601,19 @@ export default function EstimateBuilderScreen() {
       sqftEntryMode: "dims",
       quantity: "1",
       unitRate: String(row.sell_amount ?? 0),
+    }));
+    setPendingExtraLine(null);
+  }
+
+  function clearPick() {
+    setDraftLine((d) => ({
+      ...d,
+      productNo: "",
+      productName: "",
+      description: "",
+      isContractItem: false,
+      rateCardSource: null,
+      poolItemId: null,
     }));
     setPendingExtraLine(null);
   }
@@ -614,6 +660,10 @@ export default function EstimateBuilderScreen() {
     .filter((p) => !searchLower || (p.itemDescription ?? p.itemCode ?? "").toLowerCase().includes(searchLower))
     .slice(0, PICKER_RESULT_CAP);
   const filteredPool = (poolRows ?? []).filter((p) => !searchLower || p.label.toLowerCase().includes(searchLower));
+
+  // Once a pick is made on a non-custom tab, hide the search/list in
+  // favour of a single unambiguous "Selected" card -- see file header note.
+  const hasPick = draftLine.source === activeTab && draftLine.productName !== "";
 
   const primaryCalc = computeLine(draftLine);
   const extraCalc = pendingExtraLine ? computeLine(pendingExtraLine) : null;
@@ -692,10 +742,10 @@ export default function EstimateBuilderScreen() {
         additional_description: l.additionalDescription.trim() || null,
         uom: l.calcMode === "sqft" ? "SQFT" : "NOS",
         calc_mode: l.calcMode,
-        width_cm: l.calcMode === "sqft" && l.sqftEntryMode === "dims" ? parseNum(l.widthIn) : null,
-        height_cm: l.calcMode === "sqft" && l.sqftEntryMode === "dims" ? parseNum(l.heightIn) : null,
-        width_in: l.calcMode === "sqft" && l.sqftEntryMode === "dims" ? parseNum(l.widthIn) : null,
-        height_in: l.calcMode === "sqft" && l.sqftEntryMode === "dims" ? parseNum(l.heightIn) : null,
+        width_cm: l.calcMode === "sqft" && l.sqftEntryMode === "dims" ? toCm(parseNum(l.width), l.dimUnit) : null,
+        height_cm: l.calcMode === "sqft" && l.sqftEntryMode === "dims" ? toCm(parseNum(l.height), l.dimUnit) : null,
+        width_in: l.calcMode === "sqft" && l.sqftEntryMode === "dims" ? toInches(parseNum(l.width), l.dimUnit) : null,
+        height_in: l.calcMode === "sqft" && l.sqftEntryMode === "dims" ? toInches(parseNum(l.height), l.dimUnit) : null,
         sqft_total: l.sqftTotal,
         unit_rate: parseNum(l.unitRate),
         quantity: parseNum(l.quantity),
@@ -807,12 +857,14 @@ export default function EstimateBuilderScreen() {
             {computedLines.map((l, i) => (
               <SoftCard key={l.key} style={[s.lineRow, { borderLeftWidth: 3, borderLeftColor: optionAccent(t, i) }]}>
                 <View style={s.lineRowText}>
-                  <Text style={s.lineRowTitle} numberOfLines={1}>{l.productName || l.description || "Untitled item"}</Text>
+                  <Text style={s.lineRowTitle} numberOfLines={1}>
+                    {[l.designName, l.productName || l.description].filter(Boolean).join(" — ") || "Untitled item"}
+                  </Text>
                   <Text style={s.lineRowMeta}>
                     {l.calcMode === "sqft"
                       ? l.sqftEntryMode === "bulk"
                         ? `${l.quantity || 0} sqft × ₹${l.unitRate || 0}`
-                        : `${l.widthIn || 0}×${l.heightIn || 0}in × ${l.quantity || 0} = ${l.sqftTotal?.toFixed(1) ?? 0} sqft × ₹${l.unitRate || 0}`
+                        : `${l.width || 0}×${l.height || 0}${l.dimUnit} × ${l.quantity || 0} = ${l.sqftTotal?.toFixed(1) ?? 0} sqft × ₹${l.unitRate || 0}`
                       : `Qty ${l.quantity || 0} × ₹${l.unitRate || 0}`}
                   </Text>
                   {l.source !== "custom" && (
@@ -972,6 +1024,8 @@ export default function EstimateBuilderScreen() {
                   <Text style={s.pickerHint}>Pick a customer first.</Text>
                 ) : !isIkea && !isApple ? (
                   <Text style={s.pickerHint}>No rate card is wired up for {selectedCustomer.name} yet — use the Custom tab.</Text>
+                ) : hasPick ? (
+                  <SelectedCard t={t} title={draftLine.productName} sub={draftLine.description} extra={pendingExtraLine?.productName} onChange={clearPick} />
                 ) : (
                   <>
                     <TextInput
@@ -1018,6 +1072,8 @@ export default function EstimateBuilderScreen() {
                   <ActivityIndicator color={t.primary} style={{ marginVertical: 8 }} />
                 ) : historyProducts.length === 0 ? (
                   <Text style={s.pickerHint}>No past sales on file for this customer yet — use the Custom tab.</Text>
+                ) : hasPick ? (
+                  <SelectedCard t={t} title={draftLine.productName} sub={draftLine.description} onChange={clearPick} />
                 ) : (
                   <>
                     <TextInput
@@ -1049,6 +1105,8 @@ export default function EstimateBuilderScreen() {
                   <ActivityIndicator color={t.primary} style={{ marginVertical: 8 }} />
                 ) : poolRows.length === 0 ? (
                   <Text style={s.pickerHint}>Nothing waiting in the pool right now.</Text>
+                ) : hasPick ? (
+                  <SelectedCard t={t} title={draftLine.productName} sub={draftLine.description} extra={pendingExtraLine?.productName} onChange={clearPick} />
                 ) : (
                   <>
                     <TextInput
@@ -1081,14 +1139,13 @@ export default function EstimateBuilderScreen() {
               </View>
             )}
 
-            {activeTab !== "custom" && draftLine.productName ? (
-              <SoftCard style={s.pickedCard}>
-                <Text style={s.pickedLabel}>Selected</Text>
-                <Text style={s.pickedTitle} numberOfLines={2}>{draftLine.productName}</Text>
-                {draftLine.description ? <Text style={s.pickedSub} numberOfLines={2}>{draftLine.description}</Text> : null}
-                {pendingExtraLine ? <Text style={s.pickedSub}>+ {pendingExtraLine.productName}</Text> : null}
-              </SoftCard>
-            ) : null}
+            <Field
+              label="Design / Creative name"
+              value={draftLine.designName}
+              onChangeText={(v) => setDraftLine((d) => ({ ...d, designName: v }))}
+              placeholder="Optional"
+              t={t}
+            />
 
             <View style={s.segmentRow}>
               {(["sqft", "nos"] as CalcMode[]).map((v) => (
@@ -1121,14 +1178,29 @@ export default function EstimateBuilderScreen() {
             )}
 
             {draftLine.calcMode === "sqft" && draftLine.sqftEntryMode === "dims" && (
-              <View style={s.dimRow}>
-                <View style={{ flex: 1 }}>
-                  <Field label="Width (in)" value={draftLine.widthIn} onChangeText={(v) => setDraftLine((d) => ({ ...d, widthIn: v }))} keyboardType="decimal-pad" t={t} />
+              <>
+                <View style={s.segmentRow}>
+                  {(["in", "cm", "mm", "ft"] as DimUnit[]).map((v) => (
+                    <Pressable
+                      key={v}
+                      style={[s.segment, draftLine.dimUnit === v && s.segmentActive]}
+                      onPress={() => setDraftLine((d) => ({ ...d, dimUnit: v }))}
+                    >
+                      <Text style={[s.segmentText, draftLine.dimUnit === v && s.segmentTextActive]}>
+                        {v === "in" ? "Inches" : v === "cm" ? "CM" : v === "mm" ? "MM" : "Feet"}
+                      </Text>
+                    </Pressable>
+                  ))}
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Field label="Height (in)" value={draftLine.heightIn} onChangeText={(v) => setDraftLine((d) => ({ ...d, heightIn: v }))} keyboardType="decimal-pad" t={t} />
+                <View style={s.dimRow}>
+                  <View style={{ flex: 1 }}>
+                    <Field label={`Width (${draftLine.dimUnit})`} value={draftLine.width} onChangeText={(v) => setDraftLine((d) => ({ ...d, width: v }))} keyboardType="decimal-pad" t={t} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Field label={`Height (${draftLine.dimUnit})`} value={draftLine.height} onChangeText={(v) => setDraftLine((d) => ({ ...d, height: v }))} keyboardType="decimal-pad" t={t} />
+                  </View>
                 </View>
-              </View>
+              </>
             )}
 
             <Field
@@ -1152,6 +1224,33 @@ export default function EstimateBuilderScreen() {
         </KeyboardAvoidingView>
       </Modal>
     </View>
+  );
+}
+
+function SelectedCard({
+  t, title, sub, extra, onChange,
+}: {
+  t: VibrantTheme;
+  title: string;
+  sub?: string;
+  extra?: string;
+  onChange: () => void;
+}) {
+  const s = styles(t);
+  return (
+    <SoftCard style={s.pickedCard}>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+        <View style={{ flex: 1 }}>
+          <Text style={s.pickedLabel}>Selected</Text>
+          <Text style={s.pickedTitle} numberOfLines={2}>{title}</Text>
+          {sub ? <Text style={s.pickedSub} numberOfLines={2}>{sub}</Text> : null}
+          {extra ? <Text style={s.pickedSub}>+ {extra}</Text> : null}
+        </View>
+        <Pressable onPress={onChange} hitSlop={8}>
+          <Text style={s.pickedChange}>Change</Text>
+        </Pressable>
+      </View>
+    </SoftCard>
   );
 }
 
@@ -1214,10 +1313,17 @@ const styles = (t: VibrantTheme) =>
     },
     fieldInputMultiline: { minHeight: 64, textAlignVertical: "top" },
 
+    // "against deliver does not align in box properly" -- auto-height +
+    // centered, wrapping text instead of a fixed minHeight that clipped
+    // the longer "Against Delivery" label. Shared by payment terms, calc
+    // mode, sqft entry mode, and dim unit toggles.
     segmentRow: { flexDirection: "row", gap: 6 },
-    segment: { flex: 1, minHeight: 36, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: t.surfaceSunken },
+    segment: {
+      flex: 1, borderRadius: 10, alignItems: "center", justifyContent: "center",
+      backgroundColor: t.surfaceSunken, paddingVertical: 8, paddingHorizontal: 4,
+    },
     segmentActive: { backgroundColor: t.primaryTint },
-    segmentText: { fontSize: 12, fontFamily: fonts.medium, color: t.inkSecondary },
+    segmentText: { fontSize: 11, fontFamily: fonts.medium, color: t.inkSecondary, textAlign: "center" },
     segmentTextActive: { color: t.primary },
 
     addLineBtn: { minHeight: 32, paddingHorizontal: 12, justifyContent: "center", borderRadius: radius.md, backgroundColor: t.primaryTint },
@@ -1287,6 +1393,7 @@ const styles = (t: VibrantTheme) =>
     pickedLabel: { fontSize: 10, fontFamily: fonts.bold, color: t.primary, textTransform: "uppercase", letterSpacing: 0.3 },
     pickedTitle: { fontSize: 13, fontFamily: fonts.bold, color: t.ink },
     pickedSub: { fontSize: 11, fontFamily: fonts.regular, color: t.inkSecondary },
+    pickedChange: { fontSize: 12, fontFamily: fonts.bold, color: t.primary },
 
     lineModalPreview: {
       flexDirection: "row", justifyContent: "space-between", alignItems: "center",

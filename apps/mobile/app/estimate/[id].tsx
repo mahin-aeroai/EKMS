@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import * as Print from "expo-print";
+import * as Sharing from "expo-sharing";
 import { vibrant, fonts, sectionLabelStyle, type VibrantTheme } from "../../theme/vibrant";
 import { SoftCard, GradientButton } from "../../theme/components";
 import { supabase } from "../../lib/supabase";
@@ -44,6 +46,7 @@ interface LineItemRow {
   id: string;
   sort_order: number;
   product_name: string | null;
+  design_name: string | null;
   description: string | null;
   uom: string | null;
   calc_mode: string | null;
@@ -76,6 +79,82 @@ function paymentTermsLabel(type: string | null, days: number | null): string | n
   return null;
 }
 
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// "when i save estimate it should be saved and create an attachment to
+// send as email. thats is optional" -- a real invoice-style PDF (via
+// expo-print's HTML-to-PDF), shared through the native share sheet (Mail
+// is one of the targets) via expo-sharing. Kept as a plain HTML string
+// here rather than reusing React Native styling -- expo-print renders
+// with WebKit, so this is regular CSS, not RN StyleSheet.
+function buildEstimateHtml(estimate: EstimateRow, lines: LineItemRow[], terms: string | null): string {
+  const rows = lines
+    .map((l) => {
+      const name = [l.design_name, l.product_name || l.description].filter(Boolean).map(String).map(escapeHtml).join(" — ") || "—";
+      const qtyRate = `${l.quantity} ${l.uom ?? ""} × ₹${l.unit_rate.toLocaleString("en-IN")}`;
+      return `<tr><td>${name}</td><td class="num">${escapeHtml(qtyRate)}</td><td class="num">₹${l.line_total.toLocaleString("en-IN")}</td></tr>`;
+    })
+    .join("");
+  const dateStr = formatISOToDMY(estimate.created_at);
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  body { font-family: -apple-system, Helvetica, Arial, sans-serif; color: #1a1a2e; padding: 28px; font-size: 12px; }
+  .letterhead { text-align: center; border-bottom: 1px solid #ddd; padding-bottom: 10px; margin-bottom: 18px; }
+  .letterhead h1 { font-size: 16px; margin: 0; }
+  .letterhead p { font-size: 10px; color: #777; margin: 2px 0; }
+  .meta { background: #f7f3f2; border-radius: 8px; padding: 14px; margin-bottom: 18px; }
+  .meta h2 { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: #a33; margin: 0 0 6px; }
+  .meta .name { font-size: 16px; font-weight: 700; margin: 0 0 2px; }
+  .meta-row { display: flex; justify-content: space-between; font-size: 11px; padding: 2px 0; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 18px; }
+  th { text-align: left; font-size: 9px; text-transform: uppercase; color: #888; border-bottom: 1px solid #ccc; padding: 5px 4px; }
+  td { font-size: 11px; padding: 7px 4px; border-bottom: 1px solid #eee; vertical-align: top; }
+  .num { text-align: right; }
+  .totals { width: 280px; margin-left: auto; }
+  .totals-row { display: flex; justify-content: space-between; font-size: 11px; padding: 3px 0; }
+  .totals-final { font-size: 14px; font-weight: 700; border-top: 1px solid #ccc; margin-top: 6px; padding-top: 8px; display: flex; justify-content: space-between; }
+</style>
+</head>
+<body>
+  <div class="letterhead">
+    <h1>${MMDI.legalName}</h1>
+    <p>${MMDI.address}</p>
+    <p>${MMDI.contact}</p>
+  </div>
+  <div class="meta">
+    <h2>Quote For</h2>
+    <p class="name">${escapeHtml(estimate.customers?.name ?? "—")}</p>
+    ${estimate.customer_address ? `<p>${escapeHtml(estimate.customer_address)}</p>` : ""}
+    ${estimate.customer_gstin ? `<p>GSTIN: ${escapeHtml(estimate.customer_gstin)}</p>` : ""}
+    <div class="meta-row"><span>Quote No</span><b>${escapeHtml(estimate.quote_number)}</b></div>
+    <div class="meta-row"><span>Date</span><b>${dateStr}</b></div>
+    <div class="meta-row"><span>Job / Campaign</span><b>${escapeHtml(estimate.job_number)}</b></div>
+    ${estimate.attention_person ? `<div class="meta-row"><span>Attention</span><b>${escapeHtml(estimate.attention_person)}</b></div>` : ""}
+    ${estimate.quote_subject ? `<div class="meta-row"><span>Subject</span><b>${escapeHtml(estimate.quote_subject)}</b></div>` : ""}
+    ${terms ? `<div class="meta-row"><span>Payment Terms</span><b>${escapeHtml(terms)}</b></div>` : ""}
+  </div>
+  <table>
+    <thead><tr><th>Item</th><th class="num">Qty × Rate</th><th class="num">Amount</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <div class="totals">
+    <div class="totals-row"><span>Subtotal</span><span>₹${estimate.subtotal.toLocaleString("en-IN")}</span></div>
+    ${estimate.transportation_total > 0 ? `<div class="totals-row"><span>Transportation</span><span>₹${estimate.transportation_total.toLocaleString("en-IN")}</span></div>` : ""}
+    ${estimate.installation_total > 0 ? `<div class="totals-row"><span>Installation</span><span>₹${estimate.installation_total.toLocaleString("en-IN")}</span></div>` : ""}
+    <div class="totals-row"><span>GST (${estimate.gst_percent}%)</span><span>₹${estimate.gst_amount.toLocaleString("en-IN")}</span></div>
+    <div class="totals-final"><span>Grand Total</span><span>₹${estimate.grand_total.toLocaleString("en-IN")}</span></div>
+  </div>
+  ${estimate.salesperson_name ? `<p style="text-align:right;font-style:italic;color:#777;">Prepared by ${escapeHtml(estimate.salesperson_name)}</p>` : ""}
+  ${estimate.notes ? `<p><b>Notes:</b> ${escapeHtml(estimate.notes)}</p>` : ""}
+</body>
+</html>`;
+}
+
 export default function EstimateViewScreen() {
   const t = vibrant;
   const s = styles(t);
@@ -84,6 +163,8 @@ export default function EstimateViewScreen() {
 
   const [estimate, setEstimate] = useState<EstimateRow | null | undefined>(undefined);
   const [lines, setLines] = useState<LineItemRow[]>([]);
+  const [sharing, setSharing] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -100,7 +181,7 @@ export default function EstimateViewScreen() {
         supabase
           .from("estimate_line_items")
           .select(
-            "id, sort_order, product_name, description, uom, calc_mode, width_in, height_in, sqft_total, unit_rate, quantity, transportation_rate, installation_rate, line_total"
+            "id, sort_order, product_name, design_name, description, uom, calc_mode, width_in, height_in, sqft_total, unit_rate, quantity, transportation_rate, installation_rate, line_total"
           )
           .eq("estimate_id", id)
           .order("sort_order"),
@@ -132,6 +213,30 @@ export default function EstimateViewScreen() {
   }
 
   const terms = paymentTermsLabel(estimate.payment_terms_type, estimate.payment_terms_days);
+
+  async function shareAsPdf() {
+    if (!estimate) return;
+    setShareError(null);
+    setSharing(true);
+    try {
+      const html = buildEstimateHtml(estimate, lines, terms);
+      const { uri } = await Print.printToFileAsync({ html, base64: false });
+      const canShare = await Sharing.isAvailableAsync();
+      if (!canShare) {
+        setShareError("Sharing isn't available on this device.");
+        return;
+      }
+      await Sharing.shareAsync(uri, {
+        mimeType: "application/pdf",
+        dialogTitle: `${estimate.quote_number} — ${estimate.customers?.name ?? "Estimate"}`,
+        UTI: "com.adobe.pdf",
+      });
+    } catch (e) {
+      setShareError(e instanceof Error ? e.message : "Could not generate the PDF.");
+    } finally {
+      setSharing(false);
+    }
+  }
 
   return (
     <View style={s.screen}>
@@ -172,7 +277,9 @@ export default function EstimateViewScreen() {
             lines.map((line, i) => (
               <View key={line.id} style={[s.itemRow, i === lines.length - 1 && s.itemRowLast]}>
                 <View style={s.colItem}>
-                  <Text style={s.itemName} numberOfLines={2}>{line.product_name || line.description || "—"}</Text>
+                  <Text style={s.itemName} numberOfLines={2}>
+                    {[line.design_name, line.product_name || line.description].filter(Boolean).join(" — ") || "—"}
+                  </Text>
                   {line.calc_mode === "sqft" && line.width_in != null && line.height_in != null ? (
                     <Text style={s.itemSub}>{line.width_in}in × {line.height_in}in · {line.sqft_total?.toFixed(1) ?? "—"} sqft</Text>
                   ) : null}
@@ -233,6 +340,14 @@ export default function EstimateViewScreen() {
           </>
         ) : null}
 
+        {shareError ? <Text style={s.shareError}>{shareError}</Text> : null}
+        <GradientButton
+          label="Share as PDF"
+          variant="secondary"
+          onPress={shareAsPdf}
+          loading={sharing}
+          style={s.shareBtn}
+        />
         <GradientButton label="Back" onPress={() => router.back()} style={s.doneBtn} />
       </ScrollView>
     </View>
@@ -302,5 +417,7 @@ const styles = (t: VibrantTheme) =>
     notesCard: { padding: 12 },
     notesText: { fontSize: 12, fontFamily: fonts.regular, color: t.inkSecondary, lineHeight: 17 },
 
+    shareError: { fontSize: 12, fontFamily: fonts.regular, color: t.danger, textAlign: "center" },
+    shareBtn: { marginTop: 4 },
     doneBtn: { marginTop: 4 },
   });
