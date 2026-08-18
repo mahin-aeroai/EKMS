@@ -16,7 +16,6 @@ import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import * as Speech from "expo-speech";
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from "expo-speech-recognition";
-import { PorcupineManager, BuiltInKeywords } from "@picovoice/porcupine-react-native";
 import { SymbolView } from "expo-symbols";
 import { useHeaderHeight } from "expo-router/react-navigation";
 import { askCopilot, getSignedUrl, type ToolCall } from "../../lib/copilot";
@@ -61,15 +60,19 @@ import { SoftCard } from "../../theme/components";
  *    that would be presumptive/disruptive in a shared or quiet space;
  *    the user opts in per message.
  *  - Hands-free wake word ("Hey Jarvis", follow-up request): a toggle chip
- *    starts Picovoice Porcupine listening in the background for just that
- *    one phrase; on detection it hands off to the same dictation flow as
- *    the manual mic button (Porcupine only spots the phrase, it doesn't
- *    transcribe -- expo-speech-recognition still does the actual
- *    listening for what you say after it). Entirely opt-in: the toggle
- *    only renders once an EXPO_PUBLIC_PICOVOICE_ACCESS_KEY is configured
- *    (free key from https://console.picovoice.ai/), and like any mic
- *    feature it's foreground-only -- iOS won't let it keep listening once
- *    the app is backgrounded or the screen locks.
+ *    starts expo-speech-recognition listening continuously in the
+ *    background, watching the live transcript for the phrase; on a match
+ *    it stops that background session and hands off to the exact same
+ *    dictation flow as the manual mic button. Originally built on
+ *    Picovoice Porcupine (a dedicated low-power wake-word engine), but
+ *    swapped out after signing up revealed Picovoice ended its unconditional
+ *    free tier this year -- what's left is a 7-day trial gated behind
+ *    manual approval, not viable for a business app like this one. This
+ *    version needs no account/key at all, so the toggle is unconditional.
+ *    Only one recognition session can hold the mic at a time, so starting
+ *    real dictation always stops background listening first, and iOS/
+ *    Android's own ~60s continuous-session limits are absorbed by simply
+ *    restarting background listening on every "end" event.
  *  - All three are new native modules (not pure JS), so this needs a full
  *    rebuild, not just a JS bundle -- see app.json's new
  *    "expo-speech-recognition" plugin entry (mic + speech-recognition
@@ -85,14 +88,11 @@ const SUGGESTIONS = [
   "Look up a rate card item",
 ];
 
-// Optional hands-free wake word ("Hey Jarvis", via Picovoice Porcupine) --
-// entirely opt-in: the toggle that starts it only renders once a free
-// AccessKey (https://console.picovoice.ai/) is set as
-// EXPO_PUBLIC_PICOVOICE_ACCESS_KEY, same EXPO_PUBLIC_* pattern as
-// lib/supabase.ts's env vars. Without a key, this feature is simply absent
-// rather than shipping a button that fails on tap.
-const PICOVOICE_ACCESS_KEY = process.env.EXPO_PUBLIC_PICOVOICE_ACCESS_KEY ?? "";
+// Hands-free wake word -- no account or native SDK beyond
+// expo-speech-recognition (already in use for manual dictation), so this
+// needs no setup and the toggle below is always available.
 const WAKE_WORD_LABEL = "Hey Jarvis";
+const WAKE_PHRASE = "hey jarvis";
 
 // ---- Row shapes, matching each tool's real `result` shape ----
 
@@ -318,14 +318,29 @@ export default function CopilotScreen() {
   const [micError, setMicError] = useState<string | null>(null);
   const [speakingIndex, setSpeakingIndex] = useState<number | null>(null);
   const [wakeEnabled, setWakeEnabled] = useState(false);
+  // True while the background, continuous "listening for the phrase"
+  // session is running -- always mutually exclusive with `listening`
+  // (full-command dictation), since only one recognition session can hold
+  // the mic at a time.
+  const [wakeListening, setWakeListening] = useState(false);
   const [wakeError, setWakeError] = useState<string | null>(null);
   const listRef = useRef<FlatList<Turn>>(null);
-  const porcupineRef = useRef<PorcupineManager | null>(null);
-  // Mirrors wakeEnabled for the STT "end"/"error" handlers below -- those
-  // are wired up once via useSpeechRecognitionEvent and need to know, at
-  // the moment dictation finishes, whether to hand the mic back to
-  // Porcupine, without depending on a possibly-stale closed-over value.
+  // Refs mirroring the booleans above for the useSpeechRecognitionEvent
+  // handlers below -- those are wired up once per render and need to read
+  // current values at the moment a native event fires, not whatever was
+  // closed over when they were first registered.
   const wakeEnabledRef = useRef(false);
+  const wakeListeningRef = useRef(false);
+  // What to do once the *current* recognition session's "end" event
+  // fires -- "dictation" when we're mid-handoff from wake listening to a
+  // real command, otherwise left "none" and the "end" handler falls back
+  // to resuming wake listening on its own if wakeEnabledRef is still true.
+  // Everything routes through this one ref rather than calling stop()
+  // immediately followed by start(), since stop() is asynchronous on the
+  // native side and starting a fresh session before the old one has
+  // actually closed is exactly the kind of race that can silently drop
+  // the takeover.
+  const nextActionRef = useRef<"none" | "dictation">("none");
 
   const beginDictation = useCallback(() => {
     setMicError(null);
@@ -334,106 +349,100 @@ export default function CopilotScreen() {
     ExpoSpeechRecognitionModule.start({ lang: "en-US", interimResults: true, continuous: false, addsPunctuation: true });
   }, []);
 
-  const stopWakeWordManager = useCallback(async () => {
-    if (!porcupineRef.current) return;
-    try {
-      await porcupineRef.current.stop();
-    } catch {
-      // already stopped -- fine
-    }
-  }, []);
-
-  // Only one engine can hold the microphone at a time, so both the manual
-  // mic button and Porcupine's own detection callback always stop this
-  // (harmless no-op if it isn't running) before starting full dictation.
-  const startWakeWordManager = useCallback(async () => {
-    if (!PICOVOICE_ACCESS_KEY) return;
-    try {
-      if (!porcupineRef.current) {
-        porcupineRef.current = await PorcupineManager.fromBuiltInKeywords(
-          PICOVOICE_ACCESS_KEY,
-          [BuiltInKeywords.JARVIS],
-          () => {
-            // Wake word heard -- Porcupine only spots the phrase itself, so
-            // hand off to expo-speech-recognition for the actual command.
-            stopWakeWordManager();
-            ExpoSpeechRecognitionModule.requestPermissionsAsync().then((perm) => {
-              if (perm.granted) {
-                beginDictation();
-              } else {
-                setMicError("Microphone/speech access is off -- enable it in Settings to ask by voice.");
-              }
-            });
-          },
-          (err) => setWakeError(err.message || `"${WAKE_WORD_LABEL}" listening stopped unexpectedly.`)
-        );
-      }
-      await porcupineRef.current.start();
-      setWakeError(null);
-    } catch (err) {
-      setWakeError((err as Error).message || `Couldn't start "${WAKE_WORD_LABEL}" listening.`);
+  // iOS/Android continuous recognition sessions don't run forever on their
+  // own (Apple's on-device/server recognizers time out a running session
+  // after roughly a minute) -- rather than fight that, the "end" handler
+  // below just calls this again whenever a background session closes and
+  // wakeEnabledRef is still true, so listening effectively continues with
+  // only a brief gap each restart.
+  const beginWakeListening = useCallback(async () => {
+    const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+    if (!perm.granted) {
+      setWakeError("Microphone/speech access is off -- enable it in Settings to ask by voice.");
       setWakeEnabled(false);
       wakeEnabledRef.current = false;
+      return;
     }
-  }, [beginDictation, stopWakeWordManager]);
+    setWakeError(null);
+    wakeListeningRef.current = true;
+    setWakeListening(true);
+    ExpoSpeechRecognitionModule.start({ lang: "en-US", interimResults: true, continuous: true, addsPunctuation: false });
+  }, []);
 
   const toggleWakeWord = useCallback(() => {
     const next = !wakeEnabled;
     setWakeEnabled(next);
     wakeEnabledRef.current = next;
     if (next) {
-      // If dictation is already running, the "end"/"error" handlers below
-      // pick this up once it finishes -- starting it here too would just
-      // fight the mic.
-      if (!listening) startWakeWordManager();
-    } else {
-      stopWakeWordManager();
+      // If real dictation is already running, the "end" handler below
+      // picks this up once it finishes (wakeEnabledRef is now true).
+      if (!listening && !wakeListeningRef.current) beginWakeListening();
+    } else if (wakeListeningRef.current) {
+      wakeListeningRef.current = false;
+      setWakeListening(false);
+      ExpoSpeechRecognitionModule.stop();
     }
-  }, [wakeEnabled, listening, startWakeWordManager, stopWakeWordManager]);
-
-  // Frees the native Porcupine instance if the screen unmounts while
-  // wake-word listening is on -- PorcupineManager keeps its microphone
-  // stream open until explicitly deleted.
-  useEffect(() => {
-    return () => {
-      porcupineRef.current?.delete();
-    };
-  }, []);
+  }, [wakeEnabled, listening, beginWakeListening]);
 
   // Voice input -- fills the draft as you talk, same review-then-Send flow
   // as the system keyboard's own dictation button (doesn't auto-send).
+  // While wake-listening is active this same event instead just watches
+  // for the phrase, since it's the same start()/result stream either way.
   useSpeechRecognitionEvent("result", (event) => {
-    const transcript = event.results[0]?.transcript;
+    const transcript = event.results[0]?.transcript ?? "";
+    if (wakeListeningRef.current) {
+      if (transcript.toLowerCase().includes(WAKE_PHRASE)) {
+        nextActionRef.current = "dictation";
+        wakeListeningRef.current = false;
+        setWakeListening(false);
+        ExpoSpeechRecognitionModule.stop();
+      }
+      return;
+    }
     if (transcript) setDraft(transcript);
   });
   useSpeechRecognitionEvent("end", () => {
     setListening(false);
-    // Hand the mic back to Porcupine so the next wake word is heard.
-    if (wakeEnabledRef.current) startWakeWordManager();
+    const next = nextActionRef.current;
+    nextActionRef.current = "none";
+    if (next === "dictation") {
+      beginDictation();
+    } else if (wakeEnabledRef.current) {
+      beginWakeListening();
+    }
   });
   useSpeechRecognitionEvent("error", (event) => {
     setListening(false);
+    wakeListeningRef.current = false;
+    setWakeListening(false);
     if (event.error !== "no-speech" && event.error !== "aborted") {
       setMicError(event.message || "Couldn't hear that -- try again.");
     }
-    if (wakeEnabledRef.current) startWakeWordManager();
+    const next = nextActionRef.current;
+    nextActionRef.current = "none";
+    if (next === "dictation") {
+      beginDictation();
+    } else if (wakeEnabledRef.current) {
+      beginWakeListening();
+    }
   });
 
-  const toggleListening = useCallback(async () => {
+  const toggleListening = useCallback(() => {
     setMicError(null);
     if (listening) {
+      ExpoSpeechRecognitionModule.stop(); // "end" handler resumes wake listening if enabled
+      return;
+    }
+    if (wakeListeningRef.current) {
+      // Hand the mic from background wake listening to full dictation.
+      nextActionRef.current = "dictation";
+      wakeListeningRef.current = false;
+      setWakeListening(false);
       ExpoSpeechRecognitionModule.stop();
       return;
     }
-    await stopWakeWordManager(); // don't fight wake-word listening for the mic
-    const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-    if (!perm.granted) {
-      setMicError("Microphone/speech access is off -- enable it in Settings to ask by voice.");
-      if (wakeEnabledRef.current) startWakeWordManager();
-      return;
-    }
     beginDictation();
-  }, [listening, stopWakeWordManager, beginDictation, startWakeWordManager]);
+  }, [listening, beginDictation]);
 
   // Voice output -- read a single reply aloud on demand (never auto-played
   // on arrival, see file header note). Tapping the same bubble's speaker
@@ -577,14 +586,12 @@ export default function CopilotScreen() {
 
       {micError ? <Text style={s.micErrorText}>{micError}</Text> : null}
       {wakeError ? <Text style={s.micErrorText}>{wakeError}</Text> : null}
-      {PICOVOICE_ACCESS_KEY ? (
-        <Pressable onPress={toggleWakeWord} style={[s.wakeToggle, wakeEnabled && s.wakeToggleActive]}>
-          <View style={[s.wakeDot, wakeEnabled && s.wakeDotActive]} />
-          <Text style={[s.wakeToggleText, wakeEnabled && s.wakeToggleTextActive]}>
-            {wakeEnabled ? `Listening for "${WAKE_WORD_LABEL}"` : `Enable "${WAKE_WORD_LABEL}"`}
-          </Text>
-        </Pressable>
-      ) : null}
+      <Pressable onPress={toggleWakeWord} style={[s.wakeToggle, wakeEnabled && s.wakeToggleActive]}>
+        <View style={[s.wakeDot, wakeListening && s.wakeDotActive]} />
+        <Text style={[s.wakeToggleText, wakeEnabled && s.wakeToggleTextActive]}>
+          {wakeEnabled ? `Listening for "${WAKE_WORD_LABEL}"` : `Enable "${WAKE_WORD_LABEL}"`}
+        </Text>
+      </Pressable>
 
       <View style={s.composer}>
         <Pressable
