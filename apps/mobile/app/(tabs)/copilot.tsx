@@ -770,15 +770,24 @@ const styles = (t: VibrantTheme) =>
     suggestionText: { fontSize: 13, fontFamily: fonts.medium, color: t.ink },
 
     userBubble: { alignSelf: "flex-end", maxWidth: "80%", borderRadius: 22, borderBottomRightRadius: 6, paddingVertical: 11, paddingHorizontal: 16 },
-    userText: { fontSize: 17, color: t.onGradient },
+    userText: { fontSize: 16, fontFamily: fonts.regular, color: t.onGradient, lineHeight: 22 },
 
     botRow: { flexDirection: "row", alignItems: "flex-end", gap: 8, maxWidth: "92%" },
     botAvatar: {
       width: 26, height: 26, borderRadius: 13, backgroundColor: t.primaryTint,
       alignItems: "center", justifyContent: "center", marginBottom: 2,
     },
-    botBubble: { alignSelf: "flex-start", backgroundColor: t.surfaceRaised, borderRadius: 22, borderBottomLeftRadius: 6, paddingVertical: 11, paddingHorizontal: 16, shadowColor: "#3D2E6B", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.08, shadowRadius: 8, elevation: 2 },
-    botText: { fontSize: 17, color: t.ink },
+    botBubble: { alignSelf: "flex-start", backgroundColor: t.surfaceRaised, borderRadius: 22, borderBottomLeftRadius: 6, paddingVertical: 12, paddingHorizontal: 16, shadowColor: "#3D2E6B", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.08, shadowRadius: 8, elevation: 2 },
+    // "the text looks little confusing to read.. can you make it beautiful
+    // reading, like pleasant" -- the reply bubble had no explicit
+    // fontFamily (falling back to the OS system font, out of step with
+    // the rest of the app's Roboto) and no lineHeight, so multi-line
+    // replies like a sales summary read as a dense, cramped block. Roboto
+    // Regular + 1.5x line-height (26 for 17pt, the same ratio bill.tsx
+    // already uses for its own body copy) plus a touch of letter-spacing
+    // is a standard, well-tested combination for comfortable paragraph
+    // reading -- noticeably calmer without needing a font swap.
+    botText: { fontSize: 17, fontFamily: fonts.regular, color: t.ink, lineHeight: 26, letterSpacing: 0.1 },
     speakBtn: { flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start", paddingHorizontal: 4, paddingVertical: 2 },
     speakBtnText: { fontSize: 12, fontFamily: fonts.medium, color: t.inkMuted },
 
