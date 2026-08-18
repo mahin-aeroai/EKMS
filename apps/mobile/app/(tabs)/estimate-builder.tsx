@@ -699,8 +699,11 @@ export default function EstimateBuilderScreen() {
         sqft_total: l.sqftTotal,
         unit_rate: parseNum(l.unitRate),
         quantity: parseNum(l.quantity),
-        transportation_rate: parseNum(l.transportationRate) || null,
-        installation_rate: parseNum(l.installationRate) || null,
+        // NOT NULL columns on estimate_line_items -- default to 0, not
+        // null, when the field is left blank (matches web's own draft
+        // default of 0 rather than an omitted/null value).
+        transportation_rate: parseNum(l.transportationRate),
+        installation_rate: parseNum(l.installationRate),
         line_subtotal: l.subtotal,
         line_total: l.total,
       }));
