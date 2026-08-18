@@ -38,6 +38,11 @@ interface EstimateRow {
   payment_terms_days: number | null;
   payment_terms_type: string | null;
   salesperson_name: string | null;
+  salesperson_designation: string | null;
+  salesperson_phone: string | null;
+  salesperson_email: string | null;
+  job_completion_time: string | null;
+  delivery_commitment: string | null;
   created_at: string;
   customers: { name: string } | null;
 }
@@ -45,11 +50,15 @@ interface EstimateRow {
 interface LineItemRow {
   id: string;
   sort_order: number;
+  product_no: string | null;
   product_name: string | null;
   design_name: string | null;
   description: string | null;
+  additional_description: string | null;
   uom: string | null;
   calc_mode: string | null;
+  width_cm: number | null;
+  height_cm: number | null;
   width_in: number | null;
   height_in: number | null;
   sqft_total: number | null;
@@ -83,74 +92,244 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+function ordinal(n: number): string {
+  const v = n % 100;
+  if (v >= 11 && v <= 13) return "th";
+  switch (n % 10) {
+    case 1: return "st";
+    case 2: return "nd";
+    case 3: return "rd";
+    default: return "th";
+  }
+}
+
+function formatLongDate(iso: string): string {
+  const d = iso ? new Date(iso) : new Date();
+  const day = d.getDate();
+  const month = d.toLocaleDateString("en-GB", { month: "long" });
+  return `${day}${ordinal(day)} ${month}, ${d.getFullYear()}`;
+}
+
+function rupee(n: number): string {
+  return n.toLocaleString("en-IN", { maximumFractionDigits: 2, minimumFractionDigits: 2 });
+}
+
+// Mirrors apps/web/src/lib/estimateBuilder/pdf.ts's getSizeUnit() exactly
+// -- a mobile-built line's uom is always "SQFT"/"NOS" (see estimate-
+// builder.tsx), which this always resolves to "cm" (the `u.includes("sq")`
+// branch), matching how width_cm/height_cm are actually stored on save.
+function getSizeUnit(uom: string | null | undefined): "cm" | "ft" | "in" {
+  const u = (uom ?? "").toLowerCase().trim();
+  if (!u || u.includes("sq")) return "cm";
+  if (/\bft\b|feet/.test(u)) return "ft";
+  if (/\bin\b|inch/.test(u)) return "in";
+  return "cm";
+}
+
+const HSN_CODE_PRINTED_PRODUCTS = "4911";
+
+// Exact wording from apps/web/src/lib/estimateBuilder/pdf.ts's BOILERPLATE
+// -- "Lets create the same pdf file which we designed in web for
+// estimate" -- kept byte-for-byte identical rather than paraphrased.
+const BOILERPLATE = {
+  priceNotes: [
+    "The quoted amount is only for supply in all respects as per details given above in accordance with the BOQ items.",
+    "Installation charges are included, for detailed specifications please check enclosure of BOQ sheet.",
+  ],
+  jobCompletionTrailer: "Any sort of delay shall be intimated accordingly the expected time for completion given may vary.",
+  closing:
+    "We trust our offer is in line with your requirements. Further if you may feel like, contact us for any sort of clarification or assistance required. It shall be our pleasure to fulfill your requirements in the best possible manner always.",
+  thanking: "Thanking and assuring you of our best services at all the times.",
+};
+const DEFAULT_JOB_COMPLETION_TIME = "The overall job is expected to be completed according to the given Schedule.";
+const DEFAULT_DELIVERY_COMMITMENT =
+  "Same day delivery within Hyderabad city, out station deliveries based on logistics with effect from the provided conditions are true.";
+const PDF_MMDI = {
+  legalName: "Macromedia Digital Imaging Private Limited",
+  address: "23B & 24, Phase 5, IDA – Cherlapally, Hyderabad – 500051",
+  phone: "+91 40 2726 7777 / 8888",
+  email: "info@mmdi.in",
+  web: "www.mmdi.in",
+  signOffLine: "For MACROMEDIA DIGITAL IMAGING PVT. LTD.",
+};
+
 // "when i save estimate it should be saved and create an attachment to
-// send as email. thats is optional" -- a real invoice-style PDF (via
-// expo-print's HTML-to-PDF), shared through the native share sheet (Mail
-// is one of the targets) via expo-sharing. Kept as a plain HTML string
-// here rather than reusing React Native styling -- expo-print renders
-// with WebKit, so this is regular CSS, not RN StyleSheet.
-function buildEstimateHtml(estimate: EstimateRow, lines: LineItemRow[], terms: string | null): string {
-  const rows = lines
+// send as email. thats is optional" then "Lets create the same pdf file
+// which we designed in web for estimate" -- this now mirrors
+// generateEstimatePdf() in apps/web/src/lib/estimateBuilder/pdf.ts
+// section-for-section (Date/To/Attn/SUB/Quote No block, intro paragraph,
+// full line-items table, taxable/GST/total summary line, Prices/Job
+// Completion/Delivery/Payment Schedule boilerplate, Notes, closing,
+// signing block) rather than the simplified single-column version this
+// screen started with. Built as an HTML string for expo-print (WebKit
+// rendering, regular CSS) instead of web's pdf-lib canvas approach --
+// same content and layout, different rendering engine.
+function buildEstimateHtml(estimate: EstimateRow, lines: LineItemRow[]): string {
+  let subtotal = 0;
+  let transportTotal = 0;
+  let installTotal = 0;
+  const rowsHtml = lines
     .map((l) => {
-      const name = [l.design_name, l.product_name || l.description].filter(Boolean).map(String).map(escapeHtml).join(" — ") || "—";
-      const qtyRate = `${l.quantity} ${l.uom ?? ""} × ₹${l.unit_rate.toLocaleString("en-IN")}`;
-      return `<tr><td>${name}</td><td class="num">${escapeHtml(qtyRate)}</td><td class="num">₹${l.line_total.toLocaleString("en-IN")}</td></tr>`;
+      const sizeUnit = getSizeUnit(l.uom);
+      const base = l.calc_mode === "sqft" ? (l.sqft_total ?? 0) * l.unit_rate : l.quantity * l.unit_rate;
+      const transport = l.transportation_rate ?? 0;
+      const install = l.installation_rate ?? 0;
+      subtotal += base;
+      transportTotal += transport;
+      installTotal += install;
+      const amount = base + transport + install;
+      const tax = (amount * estimate.gst_percent) / 100;
+
+      const nameLine = [l.design_name, l.product_name || l.description].filter(Boolean).join(" — ") || l.product_name || "—";
+      const descLine = [l.description, l.additional_description].filter(Boolean).join(" — ");
+      const productLines = [nameLine, descLine, `HSN: ${HSN_CODE_PRINTED_PRODUCTS}`].filter(Boolean).map(escapeHtml).join("<br/>");
+
+      const wh = l.width_cm != null && l.height_cm != null
+        ? `${l.width_cm.toFixed(2)}${sizeUnit} × ${l.height_cm.toFixed(2)}${sizeUnit}`
+        : "—";
+      // Same "don't repeat the unit a second time" rule as web: a sqft
+      // line's Qty column is just the bare piece count (the SQFT column
+      // already carries the priced area), and a "nos" line only appends
+      // its uom when that uom is a real counting unit, not a borrowed
+      // cm/ft/in size unit.
+      const qtyCell = l.calc_mode === "sqft" || ["cm", "ft", "in"].includes((l.uom ?? "").toLowerCase())
+        ? String(l.quantity)
+        : `${l.quantity} ${l.uom ?? ""}`.trim();
+      const sqftCell = l.calc_mode === "sqft" ? (l.sqft_total ?? 0).toFixed(2) : "—";
+
+      return `<tr>
+        <td>${escapeHtml(l.product_no || "—")}</td>
+        <td>${productLines}</td>
+        <td>${escapeHtml(wh)}</td>
+        <td class="num">${escapeHtml(qtyCell)}</td>
+        <td class="num">${sqftCell}</td>
+        <td class="num">${rupee(l.unit_rate)}</td>
+        <td class="num">${rupee(base)}</td>
+        <td class="num">${transport ? rupee(transport) : "—"}</td>
+        <td class="num">${install ? rupee(install) : "—"}</td>
+        <td class="num">${rupee(tax)}</td>
+        <td class="num">${rupee(amount + tax)}</td>
+      </tr>`;
     })
     .join("");
-  const dateStr = formatISOToDMY(estimate.created_at);
+
+  const taxableTotal = subtotal + transportTotal + installTotal;
+  const gstAmount = (taxableTotal * estimate.gst_percent) / 100;
+  const grandTotal = taxableTotal + gstAmount;
+
+  const paymentLine =
+    estimate.payment_terms_type === "advance"
+      ? "100% advance payment before commencement of work."
+      : estimate.payment_terms_type === "against_delivery"
+        ? "Payment against delivery."
+        : estimate.payment_terms_days
+          ? `${estimate.payment_terms_days} days from the date of supply.`
+          : "To be confirmed.";
+
+  const signatoryLines = [
+    estimate.salesperson_name,
+    estimate.salesperson_designation,
+    estimate.salesperson_phone ? `Mobile: ${estimate.salesperson_phone}` : null,
+    estimate.salesperson_email ? `Email: ${estimate.salesperson_email}` : null,
+  ].filter((l): l is string => !!l);
+
   return `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8" />
 <style>
-  body { font-family: -apple-system, Helvetica, Arial, sans-serif; color: #1a1a2e; padding: 28px; font-size: 12px; }
-  .letterhead { text-align: center; border-bottom: 1px solid #ddd; padding-bottom: 10px; margin-bottom: 18px; }
-  .letterhead h1 { font-size: 16px; margin: 0; }
-  .letterhead p { font-size: 10px; color: #777; margin: 2px 0; }
-  .meta { background: #f7f3f2; border-radius: 8px; padding: 14px; margin-bottom: 18px; }
-  .meta h2 { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: #a33; margin: 0 0 6px; }
-  .meta .name { font-size: 16px; font-weight: 700; margin: 0 0 2px; }
-  .meta-row { display: flex; justify-content: space-between; font-size: 11px; padding: 2px 0; }
-  table { width: 100%; border-collapse: collapse; margin-bottom: 18px; }
-  th { text-align: left; font-size: 9px; text-transform: uppercase; color: #888; border-bottom: 1px solid #ccc; padding: 5px 4px; }
-  td { font-size: 11px; padding: 7px 4px; border-bottom: 1px solid #eee; vertical-align: top; }
-  .num { text-align: right; }
-  .totals { width: 280px; margin-left: auto; }
-  .totals-row { display: flex; justify-content: space-between; font-size: 11px; padding: 3px 0; }
-  .totals-final { font-size: 14px; font-weight: 700; border-top: 1px solid #ccc; margin-top: 6px; padding-top: 8px; display: flex; justify-content: space-between; }
+  @page { size: A4; margin: 20mm; }
+  body { font-family: Georgia, "Times New Roman", serif; color: #14161c; font-size: 9pt; line-height: 1.45; }
+  p { margin: 0 0 9pt; }
+  b { font-weight: 700; }
+  table { width: 100%; border-collapse: collapse; margin: 10pt 0 12pt; }
+  th, td { border: 0.5pt solid #ccced1; padding: 4pt 3pt; font-size: 8pt; vertical-align: top; }
+  th { background: #f0f1f3; text-align: left; font-weight: 700; }
+  td.num, th.num { text-align: right; }
+  tr.totals td { font-weight: 700; }
+  .bullets { margin: 0 0 6pt; padding: 0; list-style: none; }
+  .bullets li { margin-bottom: 3pt; }
+  h3 { font-size: 9pt; margin: 10pt 0 4pt; }
+  .summary { margin: 4pt 0 14pt; }
+  .summary b { font-size: 9pt; }
+  .signoff { margin-top: 22pt; }
 </style>
 </head>
 <body>
-  <div class="letterhead">
-    <h1>${MMDI.legalName}</h1>
-    <p>${MMDI.address}</p>
-    <p>${MMDI.contact}</p>
-  </div>
-  <div class="meta">
-    <h2>Quote For</h2>
-    <p class="name">${escapeHtml(estimate.customers?.name ?? "—")}</p>
-    ${estimate.customer_address ? `<p>${escapeHtml(estimate.customer_address)}</p>` : ""}
-    ${estimate.customer_gstin ? `<p>GSTIN: ${escapeHtml(estimate.customer_gstin)}</p>` : ""}
-    <div class="meta-row"><span>Quote No</span><b>${escapeHtml(estimate.quote_number)}</b></div>
-    <div class="meta-row"><span>Date</span><b>${dateStr}</b></div>
-    <div class="meta-row"><span>Job / Campaign</span><b>${escapeHtml(estimate.job_number)}</b></div>
-    ${estimate.attention_person ? `<div class="meta-row"><span>Attention</span><b>${escapeHtml(estimate.attention_person)}</b></div>` : ""}
-    ${estimate.quote_subject ? `<div class="meta-row"><span>Subject</span><b>${escapeHtml(estimate.quote_subject)}</b></div>` : ""}
-    ${terms ? `<div class="meta-row"><span>Payment Terms</span><b>${escapeHtml(terms)}</b></div>` : ""}
-  </div>
+  <p>Date: ${formatLongDate(estimate.created_at)}</p>
+
+  <p>
+    To,<br/>
+    <b>${escapeHtml(estimate.customers?.name ?? "—")}</b><br/>
+    ${estimate.customer_address ? `${escapeHtml(estimate.customer_address)}<br/>` : ""}
+    ${estimate.customer_gstin ? `GST: ${escapeHtml(estimate.customer_gstin)}<br/>` : ""}
+  </p>
+
+  <p>
+    Dear Sir/Madam,<br/><br/>
+    ${estimate.attention_person ? `<b>Attn: ${escapeHtml(estimate.attention_person)},</b><br/>` : ""}
+    ${estimate.quote_subject ? `<b>SUB: ${escapeHtml(estimate.quote_subject)}</b><br/>` : ""}
+    <b>Quote No.: ${escapeHtml(estimate.quote_number)} (Version 1)</b><br/>
+    <b>Campaign/Job#/Program: ${escapeHtml(estimate.job_number)}</b>
+  </p>
+
+  <p>With reference to the above subject requirement, we hereby feel pleasure in submitting our proposal for the supply of the below items as per the given specifications. Please find below quote for your kind approval.</p>
+
   <table>
-    <thead><tr><th>Item</th><th class="num">Qty × Rate</th><th class="num">Amount</th></tr></thead>
-    <tbody>${rows}</tbody>
+    <thead>
+      <tr>
+        <th>Product No.</th>
+        <th>Design / Product</th>
+        <th>W × H</th>
+        <th class="num">Qty</th>
+        <th class="num">SQFT</th>
+        <th class="num">Rate</th>
+        <th class="num">Amount</th>
+        <th class="num">Shipping</th>
+        <th class="num">Instl.</th>
+        <th class="num">GST @${estimate.gst_percent}%</th>
+        <th class="num">Grand Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rowsHtml}
+      <tr class="totals">
+        <td></td><td></td><td></td><td></td><td></td>
+        <td class="num">Totals</td>
+        <td class="num">${rupee(subtotal)}</td>
+        <td class="num">${rupee(transportTotal)}</td>
+        <td class="num">${rupee(installTotal)}</td>
+        <td class="num">${rupee(gstAmount)}</td>
+        <td class="num">${rupee(grandTotal)}</td>
+      </tr>
+    </tbody>
   </table>
-  <div class="totals">
-    <div class="totals-row"><span>Subtotal</span><span>₹${estimate.subtotal.toLocaleString("en-IN")}</span></div>
-    ${estimate.transportation_total > 0 ? `<div class="totals-row"><span>Transportation</span><span>₹${estimate.transportation_total.toLocaleString("en-IN")}</span></div>` : ""}
-    ${estimate.installation_total > 0 ? `<div class="totals-row"><span>Installation</span><span>₹${estimate.installation_total.toLocaleString("en-IN")}</span></div>` : ""}
-    <div class="totals-row"><span>GST (${estimate.gst_percent}%)</span><span>₹${estimate.gst_amount.toLocaleString("en-IN")}</span></div>
-    <div class="totals-final"><span>Grand Total</span><span>₹${estimate.grand_total.toLocaleString("en-IN")}</span></div>
+
+  <p class="summary">Total Taxable Value (INR): ${rupee(taxableTotal)} &nbsp;&nbsp;&nbsp; GST @${estimate.gst_percent}% (INR): ${rupee(gstAmount)} &nbsp;&nbsp;&nbsp; <b>Total Value (INR): ${rupee(grandTotal)}</b></p>
+
+  <h3>Prices:</h3>
+  <ul class="bullets">
+    ${BOILERPLATE.priceNotes.map((n) => `<li>•&nbsp; ${escapeHtml(n)}</li>`).join("")}
+  </ul>
+
+  <h3>JOB Completion Time:</h3>
+  <p>${escapeHtml(estimate.job_completion_time || DEFAULT_JOB_COMPLETION_TIME)} ${escapeHtml(BOILERPLATE.jobCompletionTrailer)}</p>
+
+  <h3>Delivery time:</h3>
+  <p>${escapeHtml(estimate.delivery_commitment || DEFAULT_DELIVERY_COMMITMENT)}</p>
+
+  <h3>Payment Schedule:</h3>
+  <p>${escapeHtml(paymentLine)}</p>
+
+  ${estimate.notes ? `<h3>Notes:</h3><p>${escapeHtml(estimate.notes)}</p>` : ""}
+
+  <p>${escapeHtml(BOILERPLATE.closing)}</p>
+  <p>${escapeHtml(BOILERPLATE.thanking)}</p>
+
+  <div class="signoff">
+    <p><b>${escapeHtml(PDF_MMDI.signOffLine)}</b></p>
+    ${signatoryLines.map((l) => `<p style="margin:0 0 2pt;">${escapeHtml(l)}</p>`).join("")}
   </div>
-  ${estimate.salesperson_name ? `<p style="text-align:right;font-style:italic;color:#777;">Prepared by ${escapeHtml(estimate.salesperson_name)}</p>` : ""}
-  ${estimate.notes ? `<p><b>Notes:</b> ${escapeHtml(estimate.notes)}</p>` : ""}
 </body>
 </html>`;
 }
@@ -174,14 +353,14 @@ export default function EstimateViewScreen() {
         supabase
           .from("estimates")
           .select(
-            "id, quote_number, job_number, status, gst_percent, subtotal, transportation_total, installation_total, taxable_total, gst_amount, grand_total, notes, attention_person, quote_subject, customer_address, customer_gstin, payment_terms_days, payment_terms_type, salesperson_name, created_at, customers(name)"
+            "id, quote_number, job_number, status, gst_percent, subtotal, transportation_total, installation_total, taxable_total, gst_amount, grand_total, notes, attention_person, quote_subject, customer_address, customer_gstin, payment_terms_days, payment_terms_type, salesperson_name, salesperson_designation, salesperson_phone, salesperson_email, job_completion_time, delivery_commitment, created_at, customers(name)"
           )
           .eq("id", id)
           .maybeSingle(),
         supabase
           .from("estimate_line_items")
           .select(
-            "id, sort_order, product_name, design_name, description, uom, calc_mode, width_in, height_in, sqft_total, unit_rate, quantity, transportation_rate, installation_rate, line_total"
+            "id, sort_order, product_no, product_name, design_name, description, additional_description, uom, calc_mode, width_cm, height_cm, width_in, height_in, sqft_total, unit_rate, quantity, transportation_rate, installation_rate, line_total"
           )
           .eq("estimate_id", id)
           .order("sort_order"),
@@ -219,7 +398,7 @@ export default function EstimateViewScreen() {
     setShareError(null);
     setSharing(true);
     try {
-      const html = buildEstimateHtml(estimate, lines, terms);
+      const html = buildEstimateHtml(estimate, lines);
       const { uri } = await Print.printToFileAsync({ html, base64: false });
       const canShare = await Sharing.isAvailableAsync();
       if (!canShare) {
@@ -281,7 +460,7 @@ export default function EstimateViewScreen() {
                     {[line.design_name, line.product_name || line.description].filter(Boolean).join(" — ") || "—"}
                   </Text>
                   {line.calc_mode === "sqft" && line.width_in != null && line.height_in != null ? (
-                    <Text style={s.itemSub}>{line.width_in}in × {line.height_in}in · {line.sqft_total?.toFixed(1) ?? "—"} sqft</Text>
+                    <Text style={s.itemSub}>{line.width_in.toFixed(2)}in × {line.height_in.toFixed(2)}in · {line.sqft_total?.toFixed(2) ?? "—"} sqft</Text>
                   ) : null}
                   {(line.transportation_rate || line.installation_rate) ? (
                     <Text style={s.itemSub}>
@@ -292,7 +471,15 @@ export default function EstimateViewScreen() {
                   ) : null}
                 </View>
                 <Text style={[s.itemQty, s.colQty]}>
-                  {line.quantity} {line.uom || ""} × ₹{line.unit_rate.toLocaleString("en-IN")}
+                  {/* "check in Qty it is showing as 1SQFt which is wrong.
+                      it shuld be like 620 sqft" -- the piece count (2, 5)
+                      read as a sqft amount next to "SQFT"; a sqft-priced
+                      line shows its actual billed sqft here instead,
+                      matching web's own SQFT column. */}
+                  {line.calc_mode === "sqft"
+                    ? `${(line.sqft_total ?? 0).toFixed(2)} sqft`
+                    : `${line.quantity} ${line.uom || ""}`.trim()}
+                  {" × ₹"}{line.unit_rate.toLocaleString("en-IN")}
                 </Text>
                 <Text style={[s.itemValue, s.colAmt]}>₹{line.line_total.toLocaleString("en-IN")}</Text>
               </View>

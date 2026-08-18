@@ -197,6 +197,15 @@ function toCm(v: number, u: DimUnit): number {
   }
 }
 
+// "cut the to many digits in size keep only 2" -- unit conversions
+// (2400cm / 2.54 = 944.8818897637795...) produce long floats; round
+// everything derived from a conversion to 2 decimals before it's ever
+// stored, so it reads clean everywhere (mobile, web, PDF) rather than
+// rounding only for display in one place.
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 function computeLine(line: DraftLine) {
   const qty = parseNum(line.quantity);
   const rate = parseNum(line.unitRate);
@@ -213,7 +222,9 @@ function computeLine(line: DraftLine) {
     } else {
       const wIn = toInches(parseNum(line.width), line.dimUnit);
       const hIn = toInches(parseNum(line.height), line.dimUnit);
-      sqftTotal = ((wIn * hIn) / 144) * qty;
+      // Round the billable sqft to 2 decimals before pricing it, the way
+      // a real invoice would -- not just for display (see round2's note).
+      sqftTotal = round2((wIn * hIn / 144) * qty);
       subtotal = sqftTotal * rate;
     }
   } else {
@@ -742,10 +753,10 @@ export default function EstimateBuilderScreen() {
         additional_description: l.additionalDescription.trim() || null,
         uom: l.calcMode === "sqft" ? "SQFT" : "NOS",
         calc_mode: l.calcMode,
-        width_cm: l.calcMode === "sqft" && l.sqftEntryMode === "dims" ? toCm(parseNum(l.width), l.dimUnit) : null,
-        height_cm: l.calcMode === "sqft" && l.sqftEntryMode === "dims" ? toCm(parseNum(l.height), l.dimUnit) : null,
-        width_in: l.calcMode === "sqft" && l.sqftEntryMode === "dims" ? toInches(parseNum(l.width), l.dimUnit) : null,
-        height_in: l.calcMode === "sqft" && l.sqftEntryMode === "dims" ? toInches(parseNum(l.height), l.dimUnit) : null,
+        width_cm: l.calcMode === "sqft" && l.sqftEntryMode === "dims" ? round2(toCm(parseNum(l.width), l.dimUnit)) : null,
+        height_cm: l.calcMode === "sqft" && l.sqftEntryMode === "dims" ? round2(toCm(parseNum(l.height), l.dimUnit)) : null,
+        width_in: l.calcMode === "sqft" && l.sqftEntryMode === "dims" ? round2(toInches(parseNum(l.width), l.dimUnit)) : null,
+        height_in: l.calcMode === "sqft" && l.sqftEntryMode === "dims" ? round2(toInches(parseNum(l.height), l.dimUnit)) : null,
         sqft_total: l.sqftTotal,
         unit_rate: parseNum(l.unitRate),
         quantity: parseNum(l.quantity),
