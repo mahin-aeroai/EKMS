@@ -89,6 +89,8 @@ function RootLayoutNav() {
           {/* "let them open in diferent screena dn show them nicely like a
               bill" -- Sales by Rep's per-customer Bill detail */}
           <Stack.Screen name="bill" options={{ title: "Bill" }} />
+          {/* Estimate Builder's saved-quote "bill view" (app/estimate/[id].tsx) */}
+          <Stack.Screen name="estimate/[id]" options={{ title: "Estimate" }} />
         </Stack.Protected>
         <Stack.Protected guard={!session}>
           <Stack.Screen name="sign-in" options={{ headerShown: false }} />

@@ -8,6 +8,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
@@ -223,6 +224,12 @@ export default function SalesByRepScreen() {
   const [dateTo, setDateTo] = useState<Date | null>(null);
   const [fromPickerOpen, setFromPickerOpen] = useState(false);
   const [toPickerOpen, setToPickerOpen] = useState(false);
+  // "add a filter apart from date range we direcly give customer filter" --
+  // filters the already-fetched, already-grouped rows for this rep/date
+  // range client-side (no extra round-trip needed), live as you type. Kept
+  // alongside sales person + date range as a third filter, all three
+  // combine.
+  const [customerFilter, setCustomerFilter] = useState("");
   const [rows, setRows] = useState<CustomerBreakdownRow[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -351,12 +358,12 @@ export default function SalesByRepScreen() {
   }
 
   async function exportCsv() {
-    if (!rows || !selectedRep) return;
+    if (!filteredRows || !selectedRep) return;
     setExporting(true);
     try {
       const header = ["Sales Person", "Customer", "Transactions", "Total Taxable Value"];
       const lines = [header.join(",")];
-      for (const r of rows) {
+      for (const r of filteredRows) {
         lines.push([selectedRep, r.customer_name, r.transaction_count, r.total_taxable_value].map(csvEscape).join(","));
       }
       const periodLabel = dateFrom || dateTo ? `-${dateFrom ? toISODate(dateFrom) : "start"}-to-${dateTo ? toISODate(dateTo) : "end"}` : "";
@@ -376,8 +383,12 @@ export default function SalesByRepScreen() {
     }
   }
 
-  const totalSales = rows?.reduce((sum, r) => sum + r.total_taxable_value, 0) ?? 0;
-  const totalTxns = rows?.reduce((sum, r) => sum + r.transaction_count, 0) ?? 0;
+  const filteredRows =
+    rows && customerFilter.trim()
+      ? rows.filter((r) => r.customer_name.toLowerCase().includes(customerFilter.trim().toLowerCase()))
+      : rows;
+  const totalSales = filteredRows?.reduce((sum, r) => sum + r.total_taxable_value, 0) ?? 0;
+  const totalTxns = filteredRows?.reduce((sum, r) => sum + r.transaction_count, 0) ?? 0;
 
   return (
     <View style={s.screen}>
@@ -409,9 +420,24 @@ export default function SalesByRepScreen() {
         </View>
 
         <GradientButton label="Run report" onPress={runReport} loading={loading} disabled={!selectedRep} />
+
+        {rows !== null && (
+          <View style={s.customerFilterField}>
+            <Text style={s.label}>Customer (optional)</Text>
+            <TextInput
+              style={s.customerFilterInput}
+              value={customerFilter}
+              onChangeText={setCustomerFilter}
+              placeholder="Search by customer name"
+              placeholderTextColor={t.inkMuted}
+              autoCapitalize="words"
+              returnKeyType="search"
+            />
+          </View>
+        )}
       </View>
 
-      {rows !== null && (
+      {filteredRows !== null && (
         <>
           <View style={s.statRow}>
             {/* "for grand total lets on use gradient lets use flat color
@@ -424,7 +450,7 @@ export default function SalesByRepScreen() {
             <View style={s.statCardCol}>
               <SoftCard style={s.statCard}>
                 <Text style={s.statLabel}>Customers</Text>
-                <Text style={s.statValue}>{rows.length}</Text>
+                <Text style={s.statValue}>{filteredRows.length}</Text>
               </SoftCard>
               <SoftCard style={s.statCard}>
                 <Text style={s.statLabel}>Transactions</Text>
@@ -433,11 +459,15 @@ export default function SalesByRepScreen() {
             </View>
           </View>
 
-          {rows.length === 0 ? (
-            <Text style={s.empty}>No sales found for {selectedRep} in this period.</Text>
+          {filteredRows.length === 0 ? (
+            <Text style={s.empty}>
+              {customerFilter.trim()
+                ? `No customers matching "${customerFilter.trim()}" for ${selectedRep} in this period.`
+                : `No sales found for ${selectedRep} in this period.`}
+            </Text>
           ) : (
             <FlatList
-              data={rows}
+              data={filteredRows}
               keyExtractor={(r) => r.customer_name}
               contentInsetAdjustmentBehavior="automatic"
               contentContainerStyle={s.list}
@@ -446,7 +476,7 @@ export default function SalesByRepScreen() {
                   {exporting ? (
                     <ActivityIndicator color={t.primary} />
                   ) : (
-                    <Text style={s.exportBtnText}>Export {rows.length} rows to CSV</Text>
+                    <Text style={s.exportBtnText}>Export {filteredRows.length} rows to CSV</Text>
                   )}
                 </Pressable>
               }
@@ -651,6 +681,15 @@ const styles = (t: VibrantTheme) =>
     dateRow: { flexDirection: "row", gap: 12 },
     dateField: { flex: 1, gap: 4 },
     label: { fontSize: 12, fontWeight: "500", color: t.inkSecondary },
+
+    // "add a filter apart from date range we direcly give customer filter"
+    customerFilterField: { gap: 4 },
+    customerFilterInput: {
+      minHeight: 44, borderRadius: 14,
+      backgroundColor: t.surfaceRaised, paddingHorizontal: 12,
+      fontSize: 15, color: t.ink,
+      shadowColor: "#3D2E6B", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
+    },
     dateInput: {
       minHeight: 44, borderRadius: 14, justifyContent: "center",
       backgroundColor: t.surfaceRaised, paddingHorizontal: 12,

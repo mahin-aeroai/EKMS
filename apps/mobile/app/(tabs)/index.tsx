@@ -78,6 +78,11 @@ const QUICK_ACTIONS = [
   { label: "Sign Costing", sub: "Build a signage cost sheet", icon: "function", route: "/estimator", color: "primary" },
   { label: "Basil Installations", sub: "Reports & new capture", icon: "list.clipboard", route: "/reports", color: "warning" },
   { label: "Sales by Rep", sub: "Customer breakdown by rep", icon: "chart.line.uptrend.xyaxis", route: "/sales-by-rep", color: "success" },
+  // "lets add the tools/estimate module in the same way like this bill
+  // view kind of appearances" -- Estimate Builder (client quotations),
+  // NOT Sign Estimator/Sign Costing above. Hidden tab per _layout.tsx,
+  // reached only from here, matching the Copilot pattern.
+  { label: "Estimate Builder", sub: "Build & save client quotes", icon: "text.badge.plus", route: "/estimate-builder", color: "info" },
 ] as const;
 
 export default function HomeScreen() {

@@ -114,6 +114,18 @@ export default function TabLayout() {
           href: null,
         }}
       />
+      <Tabs.Screen
+        name="estimate-builder"
+        options={{
+          // Estimate Builder (tools/estimate-builder on web, NOT Sign
+          // Estimator/Sign Costing -- see this file's own comment above,
+          // this is exactly the port it anticipated). Same hidden-route
+          // treatment as Copilot: reached via router.push("/estimate-builder")
+          // from a Home quick-action tile, keeping visible tabs at 5.
+          title: "Estimate Builder",
+          href: null,
+        }}
+      />
     </Tabs>
   );
 }
