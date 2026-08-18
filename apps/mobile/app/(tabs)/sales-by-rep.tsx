@@ -84,59 +84,57 @@ interface CustomerTransaction {
   item_description: string | null;
   quantity: number | null;
   rate: number | null;
-  // "lets make it like typical invocie view with ... campaign" --
-  // sales_transactions has no campaign column, location is the closest
-  // real field available, used as its stand-in on the Bill screen.
   location: string | null;
-}
-
-// "lets make it like typical invocie view with header, delivery address,
-// inv number, date, campaign..." -- sales_transactions has no
-// invoice_number column (confirmed against every query of this table in
-// the repo, web included), so there's no real invoice number to show.
-// This derives a short, STABLE reference instead (same customer + same
-// date always produces the same ref), clearly a reference code rather
-// than something that looks like a real accounting invoice number.
-function billRef(customerId: string | null, customerName: string, date: string | null): string {
-  const seed = (customerId || customerName) + "|" + (date ?? "");
-  let hash = 0;
-  for (let i = 0; i < seed.length; i++) {
-    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
-  }
-  const code = hash.toString(36).toUpperCase().padStart(6, "0").slice(-6);
-  const datePart = date ? date.replace(/-/g, "").slice(2) : "000000";
-  return `BILL-${code}-${datePart}`;
+  // "lets make it like typical invocie view with header, delivery
+  // address, inv number, date, campaign ... GST part" -- these five were
+  // added to sales_transactions by
+  // supabase-sales-transactions-invoice-fidelity-migration.sql (backfilled
+  // from the real Sales_day_book export, not derived/guessed). A row has
+  // either sgst+cgst OR igst, never both -- standard Indian
+  // intra-state-vs-inter-state GST split, see the migration's own notes.
+  invoice_no: string | null;
+  campaign: string | null;
+  place_of_supply: string | null;
+  sgst: number | null;
+  cgst: number | null;
+  igst: number | null;
 }
 
 // "the detail we added in previous section is sufficient some of them
 // missing and if there are multi line items it is missing so let them
-// open in diferent screena dn show them nicely like a bill" --
-// sales_transactions has no invoice_number column (see PROJECT_STATUS.md's
-// own note on what was left out of the import), so a "bill" here is every
-// line sharing the same customer + invoice_date -- the closest available
-// stand-in for "one invoice". Grouping this way is also what was actually
-// wrong before: multiple product lines on the same date were listed as
-// separate flat rows with no indication they belonged together, which is
-// why some rows "were missing" their product line when in fact it just
-// hadn't been grouped with its siblings yet.
+// open in diferent screena dn show them nicely like a bill" -- a "bill"
+// is every line sharing the same real Invoice No (falls back to grouping
+// by invoice_date for the rare row where invoice_no wasn't backfilled,
+// e.g. a row added after the migration ran). This used to be approximated
+// by customer + date before invoice_no existed in the database.
 interface BillGroup {
+  invoiceNo: string | null;
   date: string | null;
+  campaign: string | null;
+  location: string | null;
+  placeOfSupply: string | null;
   total: number;
+  gstAmount: number;
   lines: CustomerTransaction[];
 }
 
 function groupIntoBills(transactions: CustomerTransaction[]): BillGroup[] {
-  const byDate = new Map<string, CustomerTransaction[]>();
+  const byKey = new Map<string, CustomerTransaction[]>();
   for (const txn of transactions) {
-    const key = txn.invoice_date ?? "—";
-    const list = byDate.get(key) ?? [];
+    const key = txn.invoice_no ?? `date:${txn.invoice_date ?? "—"}`;
+    const list = byKey.get(key) ?? [];
     list.push(txn);
-    byDate.set(key, list);
+    byKey.set(key, list);
   }
-  return Array.from(byDate.entries())
-    .map(([key, lines]) => ({
-      date: key === "—" ? null : key,
+  return Array.from(byKey.values())
+    .map((lines) => ({
+      invoiceNo: lines.find((l) => l.invoice_no)?.invoice_no ?? null,
+      date: lines[0]?.invoice_date ?? null,
+      campaign: lines.find((l) => l.campaign)?.campaign ?? null,
+      location: lines.find((l) => l.location)?.location ?? null,
+      placeOfSupply: lines.find((l) => l.place_of_supply)?.place_of_supply ?? null,
       total: lines.reduce((sum, l) => sum + l.taxable_value, 0),
+      gstAmount: lines.reduce((sum, l) => sum + (l.sgst ?? 0) + (l.cgst ?? 0) + (l.igst ?? 0), 0),
       lines,
     }))
     .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
@@ -272,6 +270,12 @@ export default function SalesByRepScreen() {
         quantity: number | null;
         rate: number | null;
         location: string | null;
+        invoice_no: string | null;
+        campaign: string | null;
+        place_of_supply: string | null;
+        sgst: number | null;
+        cgst: number | null;
+        igst: number | null;
       }>(
         () =>
           withFilters(
@@ -281,7 +285,9 @@ export default function SalesByRepScreen() {
           withFilters(
             supabase
               .from("sales_transactions")
-              .select("customer_id, customer_name, taxable_value, invoice_date, item_description, quantity, rate, location")
+              .select(
+                "customer_id, customer_name, taxable_value, invoice_date, item_description, quantity, rate, location, invoice_no, campaign, place_of_supply, sgst, cgst, igst"
+              )
               .eq("sales_manager", selectedRep)
               .range(from, to)
           )
@@ -299,6 +305,12 @@ export default function SalesByRepScreen() {
           quantity: r.quantity,
           rate: r.rate,
           location: r.location,
+          invoice_no: r.invoice_no,
+          campaign: r.campaign,
+          place_of_supply: r.place_of_supply,
+          sgst: r.sgst,
+          cgst: r.cgst,
+          igst: r.igst,
         });
         groups.set(name, g);
       }
@@ -583,9 +595,12 @@ export default function SalesByRepScreen() {
                       address: detailCustomer.address ?? "",
                       gstin: detailCustomer.gstin ?? "",
                       date: bill.date ?? "",
-                      location: bill.lines.find((l) => l.location)?.location ?? "",
-                      ref: billRef(detailCustomer.customer_id, detailCustomer.customer_name, bill.date),
+                      invoiceNo: bill.invoiceNo ?? "",
+                      campaign: bill.campaign ?? "",
+                      location: bill.location ?? "",
+                      placeOfSupply: bill.placeOfSupply ?? "",
                       total: String(bill.total),
+                      gstAmount: String(bill.gstAmount),
                       lines: JSON.stringify(bill.lines),
                     },
                   });
@@ -594,12 +609,12 @@ export default function SalesByRepScreen() {
                 {({ pressed }) => (
                   <View style={[s.detailRow, { borderLeftColor: optionAccent(t, index) }, pressed && { opacity: 0.7 }]}>
                     <View style={s.detailRowTop}>
-                      <Text style={s.detailRowDate}>{formatISOToDMY(bill.date)}</Text>
-                      <Text style={s.detailRowValue}>₹{bill.total.toLocaleString("en-IN")}</Text>
+                      <Text style={s.detailRowDate}>{bill.invoiceNo ?? formatISOToDMY(bill.date)}</Text>
+                      <Text style={s.detailRowValue}>₹{(bill.total + bill.gstAmount).toLocaleString("en-IN")}</Text>
                     </View>
                     <View style={s.detailRowTop}>
                       <Text style={s.detailRowProduct}>
-                        {bill.lines.length} item{bill.lines.length === 1 ? "" : "s"}
+                        {formatISOToDMY(bill.date)} · {bill.lines.length} item{bill.lines.length === 1 ? "" : "s"}
                         {bill.lines[0]?.item_description
                           ? `  ·  ${bill.lines[0].item_description}${bill.lines.length > 1 ? " + more" : ""}`
                           : ""}

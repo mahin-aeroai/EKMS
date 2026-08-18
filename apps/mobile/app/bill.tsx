@@ -8,32 +8,26 @@ import { SoftCard, GradientButton } from "../theme/components";
  * inv number, date, campaign, line items and qty and rate value, etc. GST
  * part and total. like typical restaurant bill. with small fonts and
  * nicely laced on screen i dont want to highlite the value instead i
- * highlite invoice details." -- rebuilt from the earlier plain
- * customer/total/items version into an actual invoice layout:
- *   - MMDI's own letterhead details (seller) up top, same fixed text as
- *     the web app's quotation PDF (apps/web/src/lib/estimateBuilder/pdf.ts)
- *   - "Bill To" block: customer + delivery address + GSTIN
- *   - a meta strip: Bill Ref / Date / Location -- this block (not the
- *     total) now carries the visual weight, a tinted card with slightly
- *     larger text than everything else on the screen
- *   - line items as a proper table (description / qty×rate / amount)
- *   - a plain, small, unhighlighted totals footer (Subtotal, GST, Total)
+ * highlite invoice details."
  *
- * Two honest gaps vs. a real invoice, called out rather than faked:
- *   - "inv number": sales_transactions has no invoice_number column (see
- *     PROJECT_STATUS.md's own note on what was left out of the import).
- *     `ref` below is a short, stable reference derived from customer+date
- *     (see billRef() in sales-by-rep.tsx) -- same bill always shows the
- *     same code, but it's a reference code, not a real accounting invoice
- *     number, and is labelled "Bill Ref" rather than "Invoice No" for that
- *     reason.
- *   - "campaign": no campaign column either. `location` (a real column) is
- *     the closest available field and is shown in its place, labelled
- *     "Location".
- *   - "GST part": sales_transactions has taxable_value only, no gst_percent
- *     or gst amount per line -- there's nothing to sum. The Subtotal/Total
- *     footer has a GST row reserved and labelled, with a small note that
- *     it isn't in the source data, rather than inventing a percentage.
+ * Followed by: "there are mistakes in the bill. chekc the ecel and correct
+ * it. i need all information on the bill." -- the first version of this
+ * screen used a synthetic "Bill Ref" and "GST not in source data" because
+ * sales_transactions genuinely didn't have Invoice No/Campaign/GST at the
+ * time. Checking the real Sales_day_book export (Bill.xlsx, then the full
+ * ~9,274-row quarter file) confirmed those fields DO exist in the real
+ * accounting data -- they just hadn't been imported.
+ * supabase-sales-transactions-invoice-fidelity-migration.sql adds them
+ * (invoice_no, campaign, place_of_supply, sgst/cgst/igst) and fixes a real
+ * bug found along the way: item_description was blank for ~48.8% of rows
+ * (raw-material lines like "3MM CLEAR ACRYLIC" on the Ikea India Pvt Ltd -
+ * Worli bill) because the source's "Item Description" column is blank for
+ * those -- the migration gap-fills from the source's "Item" column, which
+ * is always populated.
+ *
+ * All of the above is real, backfilled data passed in via route params
+ * from sales-by-rep.tsx (see groupIntoBills there) -- nothing on this
+ * screen is invented or estimated.
  */
 
 interface BillLine {
@@ -43,6 +37,12 @@ interface BillLine {
   quantity: number | null;
   rate: number | null;
   location: string | null;
+  invoice_no: string | null;
+  campaign: string | null;
+  place_of_supply: string | null;
+  sgst: number | null;
+  cgst: number | null;
+  igst: number | null;
 }
 
 function formatISOToDMY(iso: string | null): string {
@@ -61,14 +61,19 @@ export default function BillScreen() {
   const t = vibrant;
   const s = styles(t);
   const router = useRouter();
-  const { customerName, address, gstin, date, location, ref, total, lines } = useLocalSearchParams<{
+  const {
+    customerName, address, gstin, date, invoiceNo, campaign, location, placeOfSupply, total, gstAmount, lines,
+  } = useLocalSearchParams<{
     customerName?: string;
     address?: string;
     gstin?: string;
     date?: string;
+    invoiceNo?: string;
+    campaign?: string;
     location?: string;
-    ref?: string;
+    placeOfSupply?: string;
     total?: string;
+    gstAmount?: string;
     lines?: string;
   }>();
 
@@ -79,7 +84,16 @@ export default function BillScreen() {
     items = [];
   }
 
-  const totalValue = Number(total ?? 0);
+  const subtotal = Number(total ?? 0);
+  const gst = Number(gstAmount ?? 0);
+  const grandTotal = subtotal + gst;
+  // A bill is either intra-state (CGST+SGST) or inter-state (IGST), never
+  // both -- see the migration's own notes. Shown as separate labelled
+  // lines like a real Indian tax invoice, not a single blended "GST" row.
+  const sgstTotal = items.reduce((sum, l) => sum + (l.sgst ?? 0), 0);
+  const cgstTotal = items.reduce((sum, l) => sum + (l.cgst ?? 0), 0);
+  const igstTotal = items.reduce((sum, l) => sum + (l.igst ?? 0), 0);
+  const gstPct = subtotal > 0 ? Math.round((gst / subtotal) * 100) : 0;
 
   return (
     <View style={s.screen}>
@@ -91,8 +105,8 @@ export default function BillScreen() {
         </View>
 
         {/* "i dont want to highlite the value instead i highlite invoice
-            details" -- this block carries the visual weight now (tinted
-            card, the biggest text on the screen), not the total. */}
+            details" -- this block carries the visual weight (tinted card,
+            biggest text on the screen), not the total. */}
         <SoftCard style={s.metaCard}>
           <Text style={s.metaSectionLabel}>Bill To</Text>
           <Text style={s.customerName}>{customerName || "—"}</Text>
@@ -101,9 +115,11 @@ export default function BillScreen() {
 
           <View style={s.metaDivider} />
 
-          <MetaRow t={t} label="Bill Ref" value={ref || "—"} />
+          <MetaRow t={t} label="Invoice No" value={invoiceNo || "—"} />
           <MetaRow t={t} label="Date" value={formatISOToDMY(date ?? null)} />
+          {campaign ? <MetaRow t={t} label="Campaign" value={campaign} /> : null}
           {location ? <MetaRow t={t} label="Location" value={location} /> : null}
+          {placeOfSupply ? <MetaRow t={t} label="Place of Supply" value={placeOfSupply} /> : null}
         </SoftCard>
 
         <Text style={s.sectionTitle}>Items ({items.length})</Text>
@@ -129,22 +145,44 @@ export default function BillScreen() {
         </SoftCard>
 
         {/* "GST part and total. like typical restaurant bill" -- a plain,
-            small, unhighlighted totals footer instead of the old big flat
-            hero card. No GST figure is invented: sales_transactions has no
-            gst_percent/amount column, only taxable_value, so there's
-            nothing to sum -- see the file header comment. */}
+            small, unhighlighted totals footer. Real SGST/CGST/IGST amounts
+            from the database, not an invented flat rate -- see the file
+            header comment. */}
         <View style={s.totalsBlock}>
           <View style={s.totalsRow}>
             <Text style={s.totalsLabel}>Subtotal (Taxable Value)</Text>
-            <Text style={s.totalsValue}>₹{totalValue.toLocaleString("en-IN")}</Text>
+            <Text style={s.totalsValue}>₹{subtotal.toLocaleString("en-IN")}</Text>
           </View>
-          <View style={s.totalsRow}>
-            <Text style={s.totalsLabel}>GST</Text>
-            <Text style={s.totalsNote}>not in source data</Text>
-          </View>
+          {sgstTotal > 0 && (
+            <View style={s.totalsRow}>
+              <Text style={s.totalsLabel}>SGST</Text>
+              <Text style={s.totalsValue}>₹{sgstTotal.toLocaleString("en-IN")}</Text>
+            </View>
+          )}
+          {cgstTotal > 0 && (
+            <View style={s.totalsRow}>
+              <Text style={s.totalsLabel}>CGST</Text>
+              <Text style={s.totalsValue}>₹{cgstTotal.toLocaleString("en-IN")}</Text>
+            </View>
+          )}
+          {igstTotal > 0 && (
+            <View style={s.totalsRow}>
+              <Text style={s.totalsLabel}>IGST</Text>
+              <Text style={s.totalsValue}>₹{igstTotal.toLocaleString("en-IN")}</Text>
+            </View>
+          )}
+          {sgstTotal === 0 && cgstTotal === 0 && igstTotal === 0 && (
+            <View style={s.totalsRow}>
+              <Text style={s.totalsLabel}>GST</Text>
+              <Text style={s.totalsNote}>none recorded</Text>
+            </View>
+          )}
+          {gst > 0 && (
+            <Text style={s.totalsGstPctNote}>Effective rate ≈ {gstPct}%</Text>
+          )}
           <View style={[s.totalsRow, s.totalsRowFinal]}>
             <Text style={s.totalsLabelFinal}>Total</Text>
-            <Text style={s.totalsValueFinal}>₹{totalValue.toLocaleString("en-IN")}</Text>
+            <Text style={s.totalsValueFinal}>₹{grandTotal.toLocaleString("en-IN")}</Text>
           </View>
         </View>
 
@@ -159,7 +197,7 @@ function MetaRow({ t, label, value }: { t: VibrantTheme; label: string; value: s
   return (
     <View style={s.metaRow}>
       <Text style={s.metaLabel}>{label}</Text>
-      <Text style={s.metaValue} numberOfLines={1}>{value}</Text>
+      <Text style={s.metaValue} numberOfLines={2}>{value}</Text>
     </View>
   );
 }
@@ -210,6 +248,7 @@ const styles = (t: VibrantTheme) =>
     totalsLabel: { fontSize: 12, fontFamily: fonts.regular, color: t.inkSecondary },
     totalsValue: { fontSize: 12, fontFamily: fonts.medium, color: t.ink },
     totalsNote: { fontSize: 11, fontFamily: fonts.regular, color: t.inkMuted, fontStyle: "italic" },
+    totalsGstPctNote: { fontSize: 10, fontFamily: fonts.regular, color: t.inkMuted, textAlign: "right" },
     totalsLabelFinal: { fontSize: 13, fontFamily: fonts.bold, color: t.ink },
     totalsValueFinal: { fontSize: 14, fontFamily: fonts.bold, color: t.ink },
 
