@@ -13,6 +13,7 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
+import { useHeaderHeight } from "expo-router/react-navigation";
 import { askCopilot, getSignedUrl, type ToolCall } from "../../lib/copilot";
 import { fmtRupee } from "@mmdi/shared/sign-estimator/calc";
 import { vibrant, type VibrantTheme } from "../../theme/vibrant";
@@ -223,6 +224,13 @@ export default function CopilotScreen() {
   // even return.
   const [opening, setOpening] = useState<string | null>(null);
   const listRef = useRef<FlatList<Turn>>(null);
+  // Same fix as estimator.tsx/report/[id].tsx's own header-height note:
+  // without this, KeyboardAvoidingView's "padding" behavior on iOS
+  // doesn't account for this screen's native header, so it overshoots and
+  // pushes the composer bar (and its TextInput) off the top of the
+  // screen when the keyboard opens -- "copilot is not showing [an input]
+  // to type".
+  const headerHeight = useHeaderHeight();
 
   const send = useCallback(async () => {
     const text = draft.trim();
@@ -261,7 +269,11 @@ export default function CopilotScreen() {
   const cardCtx: CardCtx = { t, opening, openSurvey };
 
   return (
-    <KeyboardAvoidingView style={s.screen} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+    <KeyboardAvoidingView
+      style={s.screen}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      keyboardVerticalOffset={Platform.OS === "ios" ? headerHeight : 0}
+    >
       <FlatList
         ref={listRef}
         data={turns}
