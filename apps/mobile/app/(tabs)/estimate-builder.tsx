@@ -25,40 +25,38 @@ import { supabase } from "../../lib/supabase";
  * estimate-builder/page.tsx: a client-facing QUOTATION generator (pick a
  * customer, add priced line items, set GST/payment terms, save) --
  * different from Sign Costing (estimator.tsx / sign_estimates), which is
- * an internal materials/production COST calculator. The two are related
- * on web via a shared "estimate pool," but that's a separate future round.
+ * an internal materials/production COST calculator.
  *
- * v1 scope, deliberately cut down from the full web feature:
- *  - Line items are custom-typed only. The web version can also pull
- *    priced rows from a customer's IKEA/Apple contract rate card, their
- *    recent purchase history, or a queued Sign Costing/Cost Sheet job via
- *    the "estimate pool" -- all three are real, separately-scoped native
- *    builds of their own, not added here.
- *  - No PDF file is generated/downloaded on-device (the web version uses
- *    pdf-lib + fontkit client-side; porting that to React Native needs its
- *    own investigation). Instead, saving an estimate opens a dedicated
- *    "bill view" screen (app/estimate/[id].tsx) styled like a real
- *    invoice -- which is what was actually asked for ("in the same way
- *    like this bill view kind of appearances").
- *  - No editing/versioning (`root_estimate_id`/version bump) -- every save
- *    is a new estimate. The web version's version-on-edit behaviour can
- *    follow in a later round if estimates need correcting after the fact.
- *  - Salesperson is a single free-typed name (web picks from `employees`,
- *    ~500 rows, via a searchable dropdown) -- designation/phone/email
- *    aren't captured here.
+ * "when i add line item to the estimate i wanted have this 4 options" --
+ * the Add Item modal now mirrors web's 4-source picker exactly (tables/
+ * mapping confirmed by reading page.tsx directly):
+ *  - From contract catalog: hardcoded to two literal customers (name
+ *    contains "ikea"/"apple", same substring check as web -- there's no
+ *    generic contract-catalog mechanism on web either) -- ikea_rate_card /
+ *    apple_rate_card tables, no customer_id filter (whole table applies).
+ *  - From recent purchases: sales_transactions filtered by customer_id,
+ *    collapsed client-side to one row per item_code (latest invoice_date
+ *    wins), no DB date window -- same as web's loadSalesHistory.
+ *  - Non-contract / unlisted product: the original v1 manual-entry form.
+ *  - From estimate pool: estimate_pool_items where status='available' --
+ *    populated by an explicit "Add to Pool" action in Sign Estimator/Cost
+ *    Sheet on web (not built on mobile), so this tab surfaces whatever a
+ *    web user has queued, not anything sourced natively yet. A
+ *    sign_estimator pool item can add a second "Printing" line alongside
+ *    the primary Signage line, matching web's pendingPoolExtraLines.
+ *    Consuming a pool item marks it status='used' (never deleted).
  *
- * Data model matches the web version exactly (two real tables, not a JSON
- * blob like sign_estimates.calc): `estimates` (header/totals) +
- * `estimate_line_items` (one row per line, FK'd to estimate_id). Quote
- * numbers come from the same Postgres RPC, `generate_quote_number(p_customer_code)`.
+ * Rate is left editable for every source on mobile (web locks it for
+ * contract/pool picks) -- a deliberate simplification for on-the-go
+ * adjustments; everything else (which fields get auto-filled from which
+ * source) matches web's pickIkeaRateCardRow/pickAppleRateCardRow/
+ * pickHistoryRow/pickPoolRow exactly.
  *
- * GST is one flat % on (subtotal + transport + install) -- no CGST/SGST/
- * IGST split, matching the web version's own explicit, user-confirmed
- * design decision (see estimate-builder/page.tsx's header comment) --
- * this is a DIFFERENT and deliberately simpler convention than Sales by
- * Rep's Bill screen, which shows the real per-line SGST/CGST/IGST because
- * that data actually exists per-row in sales_transactions; estimates are
- * a forward-looking quote, not a completed, already-taxed sale.
+ * sqftEntryMode ("dims" vs "bulk") is a mobile-side generalization of
+ * web's dimensions-vs-bulk-sqft toggle: contract-catalog rows carry no
+ * per-piece width/height, so those (and a pool Printing line, when only a
+ * total sqft is known) use "bulk" -- the Quantity field IS the sqft
+ * total directly, not a piece count multiplied by dimensions.
  */
 
 interface CustomerOption {
@@ -71,13 +69,23 @@ interface CustomerOption {
 }
 
 type CalcMode = "nos" | "sqft";
+type SqftEntryMode = "dims" | "bulk";
+type DraftSource = "contract" | "history" | "custom" | "pool";
 type PaymentTermsType = "net_days" | "advance" | "against_delivery";
 
 interface DraftLine {
   key: string;
+  source: DraftSource;
+  isContractItem: boolean;
+  rateCardSource: string | null;
+  poolItemId: string | null;
+  productNo: string;
   productName: string;
+  designName: string;
   description: string;
+  additionalDescription: string;
   calcMode: CalcMode;
+  sqftEntryMode: SqftEntryMode;
   widthIn: string;
   heightIn: string;
   quantity: string;
@@ -95,9 +103,70 @@ interface RecentEstimate {
   customer_name: string;
 }
 
+interface IkeaRateCardRow {
+  sl_no: number | null;
+  scope: string | null;
+  material_category: string | null;
+  product: string;
+  description: string | null;
+  uom: string | null;
+  revised_rate: number;
+  remarks: string | null;
+}
+
+interface AppleRateCardRow {
+  sku_id: string;
+  sku_description: string | null;
+  category: string | null;
+  program: string | null;
+  substrate: string | null;
+  unit: string | null;
+  bill_rate: number;
+  rate_inr_each: number | null;
+  start_date: string | null;
+  end_date: string | null;
+  sqft: number | null;
+}
+
+interface HistorySaleRow {
+  item_code: string | null;
+  item_description: string | null;
+  product_category: string | null;
+  rate: number | null;
+  invoice_date: string | null;
+}
+
+interface HistoryProduct {
+  key: string;
+  itemCode: string | null;
+  itemDescription: string | null;
+  productCategory: string | null;
+  latestRate: number;
+  latestDate: string | null;
+  timesPurchased: number;
+}
+
+interface EstimatePoolItem {
+  id: string;
+  source: "sign_estimator" | "cost_sheet" | string;
+  source_ref_id: string | null;
+  label: string;
+  sell_amount: number;
+  cost_amount: number | null;
+  summary: Record<string, unknown> | null;
+  status: string;
+  used_in_estimate_id: string | null;
+  created_at: string;
+}
+
 function parseNum(s: string): number {
   const n = Number(s);
   return Number.isFinite(n) ? n : 0;
+}
+
+function inferCalcMode(uom: string | null | undefined): CalcMode {
+  if (uom && /nos|qty|each|pc|piece/i.test(uom)) return "nos";
+  return "sqft";
 }
 
 function computeLine(line: DraftLine) {
@@ -108,10 +177,17 @@ function computeLine(line: DraftLine) {
   let sqftTotal: number | null = null;
   let subtotal: number;
   if (line.calcMode === "sqft") {
-    const w = parseNum(line.widthIn);
-    const h = parseNum(line.heightIn);
-    sqftTotal = ((w * h) / 144) * qty;
-    subtotal = sqftTotal * rate;
+    if (line.sqftEntryMode === "bulk") {
+      // Quantity field IS the sqft total directly -- used for rate-card
+      // rows and pool items that carry no per-piece dimensions.
+      sqftTotal = qty;
+      subtotal = sqftTotal * rate;
+    } else {
+      const w = parseNum(line.widthIn);
+      const h = parseNum(line.heightIn);
+      sqftTotal = ((w * h) / 144) * qty;
+      subtotal = sqftTotal * rate;
+    }
   } else {
     subtotal = qty * rate;
   }
@@ -153,6 +229,8 @@ async function fetchAllRowsParallel<T>(
   return all;
 }
 
+const PICKER_RESULT_CAP = 30;
+
 export default function EstimateBuilderScreen() {
   const t = vibrant;
   const s = styles(t);
@@ -178,6 +256,15 @@ export default function EstimateBuilderScreen() {
   const [lineModalOpen, setLineModalOpen] = useState(false);
   const nextKey = useRef(0);
   const [draftLine, setDraftLine] = useState<DraftLine>(emptyLine());
+  const [pendingExtraLine, setPendingExtraLine] = useState<DraftLine | null>(null);
+  const [usedPoolItemIds, setUsedPoolItemIds] = useState<Set<string>>(new Set());
+
+  const [activeTab, setActiveTab] = useState<DraftSource>("custom");
+  const [pickerSearch, setPickerSearch] = useState("");
+  const [ikeaRows, setIkeaRows] = useState<IkeaRateCardRow[] | null>(null);
+  const [appleRows, setAppleRows] = useState<AppleRateCardRow[] | null>(null);
+  const [historyProducts, setHistoryProducts] = useState<HistoryProduct[] | null>(null);
+  const [poolRows, setPoolRows] = useState<EstimatePoolItem[] | null>(null);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -187,9 +274,17 @@ export default function EstimateBuilderScreen() {
   function emptyLine(): DraftLine {
     return {
       key: String(nextKey.current++),
+      source: "custom",
+      isContractItem: false,
+      rateCardSource: null,
+      poolItemId: null,
+      productNo: "",
       productName: "",
+      designName: "",
       description: "",
+      additionalDescription: "",
       calcMode: "sqft",
+      sqftEntryMode: "dims",
       widthIn: "",
       heightIn: "",
       quantity: "1",
@@ -226,6 +321,19 @@ export default function EstimateBuilderScreen() {
     };
   }, []);
 
+  async function loadPool() {
+    const { data } = await supabase
+      .from("estimate_pool_items")
+      .select("id, source, source_ref_id, label, sell_amount, cost_amount, summary, status, used_in_estimate_id, created_at")
+      .eq("status", "available")
+      .order("created_at", { ascending: false });
+    setPoolRows((data as EstimatePoolItem[] | null) ?? []);
+  }
+
+  useEffect(() => {
+    loadPool();
+  }, []);
+
   async function loadRecent() {
     const { data } = await supabase
       .from("estimates")
@@ -249,6 +357,75 @@ export default function EstimateBuilderScreen() {
     loadRecent();
   }, []);
 
+  // Contract-catalog / history datasets are customer-specific -- clear
+  // them whenever the customer changes so a stale list from a previous
+  // pick doesn't leak into the next one.
+  useEffect(() => {
+    setIkeaRows(null);
+    setAppleRows(null);
+    setHistoryProducts(null);
+  }, [selectedCustomer?.id]);
+
+  const isIkea = !!selectedCustomer?.name?.toLowerCase().includes("ikea");
+  const isApple = !!selectedCustomer?.name?.toLowerCase().includes("apple");
+
+  useEffect(() => {
+    if (!lineModalOpen || activeTab !== "contract" || !selectedCustomer) return;
+    if (isIkea && ikeaRows === null) {
+      supabase
+        .from("ikea_rate_card")
+        .select("sl_no, scope, material_category, product, description, uom, revised_rate, remarks")
+        .order("product")
+        .limit(2000)
+        .then(({ data }) => setIkeaRows((data as IkeaRateCardRow[] | null) ?? []));
+    }
+    if (isApple && appleRows === null) {
+      supabase
+        .from("apple_rate_card")
+        .select("sku_id, sku_description, category, program, substrate, unit, bill_rate, rate_inr_each, start_date, end_date, sqft")
+        .order("sku_id")
+        .limit(2000)
+        .then(({ data }) => setAppleRows((data as AppleRateCardRow[] | null) ?? []));
+    }
+  }, [lineModalOpen, activeTab, selectedCustomer, isIkea, isApple, ikeaRows, appleRows]);
+
+  useEffect(() => {
+    if (!lineModalOpen || activeTab !== "history" || !selectedCustomer || historyProducts !== null) return;
+    (async () => {
+      const rows = await fetchAllRows<HistorySaleRow>((from, to) =>
+        supabase
+          .from("sales_transactions")
+          .select("item_code, item_description, product_category, rate, invoice_date")
+          .eq("customer_id", selectedCustomer.id)
+          .range(from, to)
+      );
+      const sorted = rows
+        .slice()
+        .sort((a, b) => (b.invoice_date ?? "").localeCompare(a.invoice_date ?? ""));
+      const byKey = new Map<string, HistoryProduct>();
+      for (const r of sorted) {
+        const key = r.item_code ?? r.item_description ?? "";
+        if (!key) continue;
+        const existing = byKey.get(key);
+        if (existing) {
+          existing.timesPurchased += 1;
+        } else {
+          byKey.set(key, {
+            key,
+            itemCode: r.item_code,
+            itemDescription: r.item_description,
+            productCategory: r.product_category,
+            latestRate: r.rate ?? 0,
+            latestDate: r.invoice_date,
+            timesPurchased: 1,
+          });
+        }
+      }
+      const list = Array.from(byKey.values()).sort((a, b) => (b.latestDate ?? "").localeCompare(a.latestDate ?? ""));
+      setHistoryProducts(list);
+    })();
+  }, [lineModalOpen, activeTab, selectedCustomer, historyProducts]);
+
   function onSelectCustomer(c: CustomerOption) {
     setSelectedCustomer(c);
     setAddress(c.address ?? "");
@@ -260,12 +437,152 @@ export default function EstimateBuilderScreen() {
 
   function openAddLine() {
     setDraftLine(emptyLine());
+    setPendingExtraLine(null);
+    setActiveTab("custom");
+    setPickerSearch("");
     setLineModalOpen(true);
+  }
+
+  function pickIkeaRow(row: IkeaRateCardRow) {
+    setDraftLine((d) => ({
+      ...d,
+      source: "contract",
+      isContractItem: true,
+      rateCardSource: "ikea_rate_card",
+      productNo: String(row.sl_no ?? ""),
+      productName: row.product,
+      description: row.description ?? "",
+      calcMode: inferCalcMode(row.uom),
+      sqftEntryMode: "bulk",
+      unitRate: String(row.revised_rate),
+    }));
+    setPendingExtraLine(null);
+  }
+
+  function pickAppleRow(row: AppleRateCardRow) {
+    setDraftLine((d) => ({
+      ...d,
+      source: "contract",
+      isContractItem: true,
+      rateCardSource: "apple_rate_card",
+      productNo: row.sku_id,
+      productName: row.sku_description || row.sku_id,
+      description: [row.category, row.program, row.substrate].filter(Boolean).join(" / "),
+      calcMode: inferCalcMode(row.unit),
+      sqftEntryMode: "bulk",
+      unitRate: String(row.rate_inr_each ?? row.bill_rate),
+    }));
+    setPendingExtraLine(null);
+  }
+
+  function pickHistoryProduct(p: HistoryProduct) {
+    setDraftLine((d) => ({
+      ...d,
+      source: "history",
+      isContractItem: false,
+      rateCardSource: null,
+      productNo: p.itemCode ?? "",
+      productName: p.itemDescription || p.itemCode || "",
+      description: p.productCategory ?? "",
+      unitRate: String(p.latestRate),
+    }));
+    setPendingExtraLine(null);
+  }
+
+  function pickPoolRow(row: EstimatePoolItem) {
+    const sum = (row.summary ?? {}) as Record<string, unknown>;
+    const num = (k: string) => (typeof sum[k] === "number" ? (sum[k] as number) : null);
+    const str = (k: string) => (typeof sum[k] === "string" ? (sum[k] as string) : null);
+
+    if (row.source === "cost_sheet" && num("width") != null && num("height") != null) {
+      const materials = Array.isArray(sum.materials) ? (sum.materials as unknown[]).filter((m) => typeof m === "string").join(", ") : null;
+      setDraftLine((d) => ({
+        ...d,
+        source: "pool",
+        isContractItem: false,
+        rateCardSource: null,
+        poolItemId: row.id,
+        productName: row.label,
+        description: [str("description"), materials].filter(Boolean).join(" — "),
+        calcMode: "sqft",
+        sqftEntryMode: "dims",
+        widthIn: String(num("width")),
+        heightIn: String(num("height")),
+        quantity: num("qty") != null ? String(num("qty")) : "1",
+        unitRate: num("unitRatePerSqft") != null ? String(num("unitRatePerSqft")) : String(row.sell_amount),
+      }));
+      setPendingExtraLine(null);
+      return;
+    }
+
+    if (row.source === "sign_estimator") {
+      const qty = num("qty") || 1;
+      const signageSell = num("signageSell") ?? row.sell_amount;
+      setDraftLine((d) => ({
+        ...d,
+        source: "pool",
+        isContractItem: false,
+        rateCardSource: null,
+        poolItemId: row.id,
+        productName: row.label,
+        description: str("categoryLabel") ?? str("category") ?? "",
+        calcMode: "nos",
+        sqftEntryMode: "dims",
+        widthIn: "",
+        heightIn: "",
+        quantity: String(qty),
+        unitRate: String(Math.round(signageSell / qty)),
+        transportationRate: num("shipping") != null ? String(num("shipping")) : "",
+        installationRate: num("installSell") != null ? String(num("installSell")) : "",
+      }));
+      const printSell = num("printSell");
+      if (printSell) {
+        const printSqFt = num("printSqFt");
+        const printRate = num("printRatePerSqft");
+        setPendingExtraLine({
+          ...emptyLine(),
+          source: "pool",
+          poolItemId: row.id,
+          productName: `${row.label} — Printing`,
+          calcMode: "sqft",
+          sqftEntryMode: "bulk",
+          quantity: printSqFt != null ? String(printSqFt) : "1",
+          unitRate: printSqFt != null && printRate != null ? String(printRate) : String(printSell),
+        });
+      } else {
+        setPendingExtraLine(null);
+      }
+      return;
+    }
+
+    // Fallback for any pool row shape that doesn't match the two known
+    // sources -- matches web's own fallback branch.
+    setDraftLine((d) => ({
+      ...d,
+      source: "pool",
+      isContractItem: false,
+      rateCardSource: null,
+      poolItemId: row.id,
+      productName: row.label,
+      calcMode: "nos",
+      sqftEntryMode: "dims",
+      quantity: "1",
+      unitRate: String(row.sell_amount ?? 0),
+    }));
+    setPendingExtraLine(null);
   }
 
   function confirmAddLine() {
     Keyboard.dismiss();
-    setLines((prev) => [...prev, draftLine]);
+    setLines((prev) => {
+      const next = [...prev, draftLine];
+      if (pendingExtraLine) next.push(pendingExtraLine);
+      return next;
+    });
+    if (draftLine.poolItemId) {
+      setUsedPoolItemIds((prev) => new Set(prev).add(draftLine.poolItemId as string));
+    }
+    setPendingExtraLine(null);
     setLineModalOpen(false);
   }
 
@@ -285,6 +602,22 @@ export default function EstimateBuilderScreen() {
   const filteredCustomers = (customers ?? []).filter(
     (c) => !customerSearch.trim() || c.name.toLowerCase().includes(customerSearch.trim().toLowerCase())
   );
+
+  const searchLower = pickerSearch.trim().toLowerCase();
+  const filteredIkea = (ikeaRows ?? [])
+    .filter((r) => !searchLower || r.product.toLowerCase().includes(searchLower))
+    .slice(0, PICKER_RESULT_CAP);
+  const filteredApple = (appleRows ?? [])
+    .filter((r) => !searchLower || (r.sku_description ?? r.sku_id).toLowerCase().includes(searchLower))
+    .slice(0, PICKER_RESULT_CAP);
+  const filteredHistory = (historyProducts ?? [])
+    .filter((p) => !searchLower || (p.itemDescription ?? p.itemCode ?? "").toLowerCase().includes(searchLower))
+    .slice(0, PICKER_RESULT_CAP);
+  const filteredPool = (poolRows ?? []).filter((p) => !searchLower || p.label.toLowerCase().includes(searchLower));
+
+  const primaryCalc = computeLine(draftLine);
+  const extraCalc = pendingExtraLine ? computeLine(pendingExtraLine) : null;
+  const previewTotal = primaryCalc.total + (extraCalc?.total ?? 0);
 
   async function saveEstimate() {
     setError(null);
@@ -350,19 +683,19 @@ export default function EstimateBuilderScreen() {
       const lineRows = computedLines.map((l, i) => ({
         estimate_id: estRow.id,
         sort_order: i,
-        is_contract_item: false,
-        rate_card_source: null,
-        product_no: null,
+        is_contract_item: l.isContractItem,
+        rate_card_source: l.rateCardSource,
+        product_no: l.productNo.trim() || null,
         product_name: l.productName.trim() || null,
-        design_name: null,
+        design_name: l.designName.trim() || null,
         description: l.description.trim() || null,
-        additional_description: null,
+        additional_description: l.additionalDescription.trim() || null,
         uom: l.calcMode === "sqft" ? "SQFT" : "NOS",
         calc_mode: l.calcMode,
-        width_cm: l.calcMode === "sqft" ? parseNum(l.widthIn) : null,
-        height_cm: l.calcMode === "sqft" ? parseNum(l.heightIn) : null,
-        width_in: l.calcMode === "sqft" ? parseNum(l.widthIn) : null,
-        height_in: l.calcMode === "sqft" ? parseNum(l.heightIn) : null,
+        width_cm: l.calcMode === "sqft" && l.sqftEntryMode === "dims" ? parseNum(l.widthIn) : null,
+        height_cm: l.calcMode === "sqft" && l.sqftEntryMode === "dims" ? parseNum(l.heightIn) : null,
+        width_in: l.calcMode === "sqft" && l.sqftEntryMode === "dims" ? parseNum(l.widthIn) : null,
+        height_in: l.calcMode === "sqft" && l.sqftEntryMode === "dims" ? parseNum(l.heightIn) : null,
         sqft_total: l.sqftTotal,
         unit_rate: parseNum(l.unitRate),
         quantity: parseNum(l.quantity),
@@ -373,6 +706,21 @@ export default function EstimateBuilderScreen() {
       }));
       const { error: liErr } = await supabase.from("estimate_line_items").insert(lineRows);
       if (liErr) throw new Error(liErr.message);
+
+      if (usedPoolItemIds.size > 0) {
+        // Best-effort, isolated from the main flow -- matches web: a
+        // failure here shouldn't undo an otherwise-successful save.
+        try {
+          await supabase
+            .from("estimate_pool_items")
+            .update({ status: "used", used_in_estimate_id: estRow.id })
+            .in("id", Array.from(usedPoolItemIds));
+        } catch {
+          // ignore
+        }
+        setUsedPoolItemIds(new Set());
+        loadPool();
+      }
 
       router.push(`/estimate/${estRow.id}`);
 
@@ -459,9 +807,16 @@ export default function EstimateBuilderScreen() {
                   <Text style={s.lineRowTitle} numberOfLines={1}>{l.productName || l.description || "Untitled item"}</Text>
                   <Text style={s.lineRowMeta}>
                     {l.calcMode === "sqft"
-                      ? `${l.widthIn || 0}×${l.heightIn || 0}in × ${l.quantity || 0} = ${l.sqftTotal?.toFixed(1) ?? 0} sqft × ₹${l.unitRate || 0}`
+                      ? l.sqftEntryMode === "bulk"
+                        ? `${l.quantity || 0} sqft × ₹${l.unitRate || 0}`
+                        : `${l.widthIn || 0}×${l.heightIn || 0}in × ${l.quantity || 0} = ${l.sqftTotal?.toFixed(1) ?? 0} sqft × ₹${l.unitRate || 0}`
                       : `Qty ${l.quantity || 0} × ₹${l.unitRate || 0}`}
                   </Text>
+                  {l.source !== "custom" && (
+                    <Text style={s.lineRowSource}>
+                      {l.source === "contract" ? "Contract catalog" : l.source === "history" ? "Recent purchase" : "Estimate pool"}
+                    </Text>
+                  )}
                 </View>
                 <View style={s.lineRowRight}>
                   <Text style={s.lineRowValue}>₹{l.total.toLocaleString("en-IN")}</Text>
@@ -502,11 +857,6 @@ export default function EstimateBuilderScreen() {
           </View>
         </View>
 
-        {/* "for grand total lets on use gradient lets use flat color like:
-            #8C98B0" -- same flat treatment used everywhere else in the app;
-            the understated bill-view totals style is reserved for the
-            read-only estimate/[id].tsx screen, per the user's request that
-            that screen specifically should read like an invoice. */}
         <View style={s.grandTotalCard}>
           <Text style={s.grandTotalLabel}>Grand Total</Text>
           <Text style={s.grandTotalValue}>₹{grandTotal.toLocaleString("en-IN")}</Text>
@@ -591,9 +941,151 @@ export default function EstimateBuilderScreen() {
             <Text style={s.modalTitle}>Add line item</Text>
             <Pressable onPress={() => setLineModalOpen(false)}><Text style={s.modalClose}>Cancel</Text></Pressable>
           </View>
+
+          <View style={s.sourceTabRow}>
+            {([
+              ["contract", "Contract"],
+              ["history", "Recent"],
+              ["custom", "Custom"],
+              ["pool", `Pool${poolRows && poolRows.length > 0 ? ` (${poolRows.length})` : ""}`],
+            ] as [DraftSource, string][]).map(([tab, label]) => (
+              <Pressable
+                key={tab}
+                style={[s.sourceTab, activeTab === tab && s.sourceTabActive]}
+                onPress={() => {
+                  setActiveTab(tab);
+                  setPickerSearch("");
+                }}
+              >
+                <Text style={[s.sourceTabText, activeTab === tab && s.sourceTabTextActive]} numberOfLines={1}>{label}</Text>
+              </Pressable>
+            ))}
+          </View>
+
           <ScrollView contentContainerStyle={s.lineModalContent} keyboardShouldPersistTaps="handled">
-            <Field label="Product name" value={draftLine.productName} onChangeText={(v) => setDraftLine((d) => ({ ...d, productName: v }))} t={t} />
-            <Field label="Description" value={draftLine.description} onChangeText={(v) => setDraftLine((d) => ({ ...d, description: v }))} multiline t={t} />
+            {activeTab === "contract" && (
+              <View style={{ gap: 8 }}>
+                {!selectedCustomer ? (
+                  <Text style={s.pickerHint}>Pick a customer first.</Text>
+                ) : !isIkea && !isApple ? (
+                  <Text style={s.pickerHint}>No rate card is wired up for {selectedCustomer.name} yet — use the Custom tab.</Text>
+                ) : (
+                  <>
+                    <TextInput
+                      style={s.pickerSearchInput}
+                      value={pickerSearch}
+                      onChangeText={setPickerSearch}
+                      placeholder={isIkea ? "Search IKEA products" : "Search Apple SKUs"}
+                      placeholderTextColor={t.inkMuted}
+                    />
+                    {isIkea && ikeaRows === null && <ActivityIndicator color={t.primary} style={{ marginVertical: 8 }} />}
+                    {isIkea && ikeaRows !== null && (
+                      <View style={{ gap: 6 }}>
+                        {filteredIkea.map((row) => (
+                          <Pressable key={row.sl_no ?? row.product} style={s.pickerRow} onPress={() => pickIkeaRow(row)}>
+                            <Text style={s.pickerRowTitle} numberOfLines={1}>{row.product}</Text>
+                            <Text style={s.pickerRowSub} numberOfLines={1}>₹{row.revised_rate.toLocaleString("en-IN")} / {row.uom || "unit"}{row.scope ? ` · ${row.scope}` : ""}</Text>
+                          </Pressable>
+                        ))}
+                        {filteredIkea.length === 0 && <Text style={s.pickerHint}>No matches.</Text>}
+                      </View>
+                    )}
+                    {isApple && appleRows === null && <ActivityIndicator color={t.primary} style={{ marginVertical: 8 }} />}
+                    {isApple && appleRows !== null && (
+                      <View style={{ gap: 6 }}>
+                        {filteredApple.map((row) => (
+                          <Pressable key={row.sku_id} style={s.pickerRow} onPress={() => pickAppleRow(row)}>
+                            <Text style={s.pickerRowTitle} numberOfLines={1}>{row.sku_description || row.sku_id}</Text>
+                            <Text style={s.pickerRowSub} numberOfLines={1}>₹{(row.rate_inr_each ?? row.bill_rate).toLocaleString("en-IN")} / {row.unit || "unit"}</Text>
+                          </Pressable>
+                        ))}
+                        {filteredApple.length === 0 && <Text style={s.pickerHint}>No matches.</Text>}
+                      </View>
+                    )}
+                  </>
+                )}
+              </View>
+            )}
+
+            {activeTab === "history" && (
+              <View style={{ gap: 8 }}>
+                {!selectedCustomer ? (
+                  <Text style={s.pickerHint}>Pick a customer first.</Text>
+                ) : historyProducts === null ? (
+                  <ActivityIndicator color={t.primary} style={{ marginVertical: 8 }} />
+                ) : historyProducts.length === 0 ? (
+                  <Text style={s.pickerHint}>No past sales on file for this customer yet — use the Custom tab.</Text>
+                ) : (
+                  <>
+                    <TextInput
+                      style={s.pickerSearchInput}
+                      value={pickerSearch}
+                      onChangeText={setPickerSearch}
+                      placeholder="Search past items"
+                      placeholderTextColor={t.inkMuted}
+                    />
+                    <View style={{ gap: 6 }}>
+                      {filteredHistory.map((p) => (
+                        <Pressable key={p.key} style={s.pickerRow} onPress={() => pickHistoryProduct(p)}>
+                          <Text style={s.pickerRowTitle} numberOfLines={1}>{p.itemDescription || p.itemCode}</Text>
+                          <Text style={s.pickerRowSub} numberOfLines={1}>
+                            ₹{p.latestRate.toLocaleString("en-IN")} · last bought {p.latestDate ?? "—"} · {p.timesPurchased}×
+                          </Text>
+                        </Pressable>
+                      ))}
+                      {filteredHistory.length === 0 && <Text style={s.pickerHint}>No matches.</Text>}
+                    </View>
+                  </>
+                )}
+              </View>
+            )}
+
+            {activeTab === "pool" && (
+              <View style={{ gap: 8 }}>
+                {poolRows === null ? (
+                  <ActivityIndicator color={t.primary} style={{ marginVertical: 8 }} />
+                ) : poolRows.length === 0 ? (
+                  <Text style={s.pickerHint}>Nothing waiting in the pool right now.</Text>
+                ) : (
+                  <>
+                    <TextInput
+                      style={s.pickerSearchInput}
+                      value={pickerSearch}
+                      onChangeText={setPickerSearch}
+                      placeholder="Search the pool"
+                      placeholderTextColor={t.inkMuted}
+                    />
+                    <View style={{ gap: 6 }}>
+                      {filteredPool.map((row) => (
+                        <Pressable key={row.id} style={s.pickerRow} onPress={() => pickPoolRow(row)}>
+                          <Text style={s.pickerRowTitle} numberOfLines={1}>{row.label}</Text>
+                          <Text style={s.pickerRowSub} numberOfLines={1}>
+                            {row.source === "sign_estimator" ? "Sign Estimator" : "Cost Sheet"} · ₹{row.sell_amount.toLocaleString("en-IN")}
+                          </Text>
+                        </Pressable>
+                      ))}
+                      {filteredPool.length === 0 && <Text style={s.pickerHint}>No matches.</Text>}
+                    </View>
+                  </>
+                )}
+              </View>
+            )}
+
+            {activeTab === "custom" && (
+              <View style={{ gap: 10 }}>
+                <Field label="Product name" value={draftLine.productName} onChangeText={(v) => setDraftLine((d) => ({ ...d, productName: v }))} t={t} />
+                <Field label="Description" value={draftLine.description} onChangeText={(v) => setDraftLine((d) => ({ ...d, description: v }))} multiline t={t} />
+              </View>
+            )}
+
+            {activeTab !== "custom" && draftLine.productName ? (
+              <SoftCard style={s.pickedCard}>
+                <Text style={s.pickedLabel}>Selected</Text>
+                <Text style={s.pickedTitle} numberOfLines={2}>{draftLine.productName}</Text>
+                {draftLine.description ? <Text style={s.pickedSub} numberOfLines={2}>{draftLine.description}</Text> : null}
+                {pendingExtraLine ? <Text style={s.pickedSub}>+ {pendingExtraLine.productName}</Text> : null}
+              </SoftCard>
+            ) : null}
 
             <View style={s.segmentRow}>
               {(["sqft", "nos"] as CalcMode[]).map((v) => (
@@ -610,6 +1102,22 @@ export default function EstimateBuilderScreen() {
             </View>
 
             {draftLine.calcMode === "sqft" && (
+              <View style={s.segmentRow}>
+                {(["dims", "bulk"] as SqftEntryMode[]).map((v) => (
+                  <Pressable
+                    key={v}
+                    style={[s.segment, draftLine.sqftEntryMode === v && s.segmentActive]}
+                    onPress={() => setDraftLine((d) => ({ ...d, sqftEntryMode: v }))}
+                  >
+                    <Text style={[s.segmentText, draftLine.sqftEntryMode === v && s.segmentTextActive]}>
+                      {v === "dims" ? "By dimensions" : "Total sqft"}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
+
+            {draftLine.calcMode === "sqft" && draftLine.sqftEntryMode === "dims" && (
               <View style={s.dimRow}>
                 <View style={{ flex: 1 }}>
                   <Field label="Width (in)" value={draftLine.widthIn} onChangeText={(v) => setDraftLine((d) => ({ ...d, widthIn: v }))} keyboardType="decimal-pad" t={t} />
@@ -620,14 +1128,20 @@ export default function EstimateBuilderScreen() {
               </View>
             )}
 
-            <Field label="Quantity" value={draftLine.quantity} onChangeText={(v) => setDraftLine((d) => ({ ...d, quantity: v }))} keyboardType="decimal-pad" t={t} />
-            <Field label="Rate (per sqft or per nos)" value={draftLine.unitRate} onChangeText={(v) => setDraftLine((d) => ({ ...d, unitRate: v }))} keyboardType="decimal-pad" t={t} />
+            <Field
+              label={draftLine.calcMode === "sqft" && draftLine.sqftEntryMode === "bulk" ? "Total sqft" : "Quantity"}
+              value={draftLine.quantity}
+              onChangeText={(v) => setDraftLine((d) => ({ ...d, quantity: v }))}
+              keyboardType="decimal-pad"
+              t={t}
+            />
+            <Field label="Rate" value={draftLine.unitRate} onChangeText={(v) => setDraftLine((d) => ({ ...d, unitRate: v }))} keyboardType="decimal-pad" t={t} />
             <Field label="Transportation (flat)" value={draftLine.transportationRate} onChangeText={(v) => setDraftLine((d) => ({ ...d, transportationRate: v }))} keyboardType="decimal-pad" placeholder="Optional" t={t} />
             <Field label="Installation (flat)" value={draftLine.installationRate} onChangeText={(v) => setDraftLine((d) => ({ ...d, installationRate: v }))} keyboardType="decimal-pad" placeholder="Optional" t={t} />
 
             <View style={s.lineModalPreview}>
-              <Text style={s.lineModalPreviewLabel}>Line total</Text>
-              <Text style={s.lineModalPreviewValue}>₹{computeLine(draftLine).total.toLocaleString("en-IN")}</Text>
+              <Text style={s.lineModalPreviewLabel}>{pendingExtraLine ? "Line total (2 lines)" : "Line total"}</Text>
+              <Text style={s.lineModalPreviewValue}>₹{previewTotal.toLocaleString("en-IN")}</Text>
             </View>
 
             <GradientButton label="Add to quote" onPress={confirmAddLine} style={{ marginTop: 4 }} />
@@ -713,6 +1227,7 @@ const styles = (t: VibrantTheme) =>
     lineRowText: { flex: 1, gap: 2 },
     lineRowTitle: { fontSize: 14, fontFamily: fonts.medium, color: t.ink },
     lineRowMeta: { fontSize: 11, fontFamily: fonts.regular, color: t.inkMuted },
+    lineRowSource: { fontSize: 10, fontFamily: fonts.medium, color: t.primary },
     lineRowRight: { alignItems: "flex-end", gap: 4 },
     lineRowValue: { fontSize: 14, fontFamily: fonts.bold, color: t.ink },
     lineRowRemove: { fontSize: 11, fontFamily: fonts.medium, color: t.danger },
@@ -748,9 +1263,28 @@ const styles = (t: VibrantTheme) =>
       backgroundColor: t.surfaceSunken, paddingHorizontal: 12, fontSize: 14, color: t.ink,
     },
 
-    lineModalSheet: { backgroundColor: t.surfaceRaised, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, maxHeight: "88%" },
+    lineModalSheet: { backgroundColor: t.surfaceRaised, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, maxHeight: "90%" },
+    sourceTabRow: { flexDirection: "row", gap: 4, paddingHorizontal: 16, paddingTop: 10 },
+    sourceTab: { flex: 1, minHeight: 34, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: t.surfaceSunken, paddingHorizontal: 4 },
+    sourceTabActive: { backgroundColor: t.primaryTint },
+    sourceTabText: { fontSize: 11, fontFamily: fonts.medium, color: t.inkSecondary },
+    sourceTabTextActive: { color: t.primary },
     lineModalContent: { padding: 16, gap: 10, paddingBottom: 32 },
     dimRow: { flexDirection: "row", gap: 10 },
+
+    pickerHint: { fontSize: 12, fontFamily: fonts.regular, color: t.inkMuted, paddingVertical: 8 },
+    pickerSearchInput: {
+      minHeight: 40, borderRadius: 10, backgroundColor: t.surfaceSunken, paddingHorizontal: 12, fontSize: 14, color: t.ink,
+    },
+    pickerRow: { minHeight: 44, borderRadius: 10, backgroundColor: t.surfaceSunken, paddingHorizontal: 12, paddingVertical: 8, gap: 2 },
+    pickerRowTitle: { fontSize: 13, fontFamily: fonts.medium, color: t.ink },
+    pickerRowSub: { fontSize: 11, fontFamily: fonts.regular, color: t.inkMuted },
+
+    pickedCard: { padding: 10, gap: 2, backgroundColor: t.primaryTint },
+    pickedLabel: { fontSize: 10, fontFamily: fonts.bold, color: t.primary, textTransform: "uppercase", letterSpacing: 0.3 },
+    pickedTitle: { fontSize: 13, fontFamily: fonts.bold, color: t.ink },
+    pickedSub: { fontSize: 11, fontFamily: fonts.regular, color: t.inkSecondary },
+
     lineModalPreview: {
       flexDirection: "row", justifyContent: "space-between", alignItems: "center",
       paddingVertical: 8, paddingHorizontal: 10, backgroundColor: t.surfaceSunken, borderRadius: 10, marginTop: 4,
