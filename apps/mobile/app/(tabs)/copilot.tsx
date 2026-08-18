@@ -60,9 +60,9 @@ import { SoftCard } from "../../theme/components";
  *    that would be presumptive/disruptive in a shared or quiet space;
  *    the user opts in per message.
  *  - Hands-free wake word ("Hey Jarvis", follow-up request): a toggle chip
- *    starts expo-speech-recognition listening continuously in the
- *    background, watching the live transcript for the phrase; on a match
- *    it stops that background session and hands off to the exact same
+ *    starts expo-speech-recognition listening in short bursts in the
+ *    background, watching each transcript for the phrase; on a match it
+ *    stops that background session and hands off to the exact same
  *    dictation flow as the manual mic button. Originally built on
  *    Picovoice Porcupine (a dedicated low-power wake-word engine), but
  *    swapped out after signing up revealed Picovoice ended its unconditional
@@ -70,9 +70,17 @@ import { SoftCard } from "../../theme/components";
  *    manual approval, not viable for a business app like this one. This
  *    version needs no account/key at all, so the toggle is unconditional.
  *    Only one recognition session can hold the mic at a time, so starting
- *    real dictation always stops background listening first, and iOS/
- *    Android's own ~60s continuous-session limits are absorbed by simply
- *    restarting background listening on every "end" event.
+ *    real dictation always stops background listening first. Deliberately
+ *    NOT using the module's own continuous: true option -- the toggle
+ *    crashed the app on first real-device test, and continuous mode is
+ *    exactly the kind of less-common code path a version mismatch would
+ *    leave broken (expo-speech-recognition's latest release is still
+ *    tagged for Expo SDK 56, this app is on 57). Instead each burst is
+ *    short (continuous: false) and immediately restarted from the "end"
+ *    handler whenever wakeEnabledRef is still true, which reads as
+ *    effectively continuous listening without relying on that option, and
+ *    every native call is wrapped so a future failure surfaces as an
+ *    inline error instead of taking the app down again.
  *  - All three are new native modules (not pure JS), so this needs a full
  *    rebuild, not just a JS bundle -- see app.json's new
  *    "expo-speech-recognition" plugin entry (mic + speech-recognition
@@ -342,31 +350,59 @@ export default function CopilotScreen() {
   // the takeover.
   const nextActionRef = useRef<"none" | "dictation">("none");
 
-  const beginDictation = useCallback(() => {
-    setMicError(null);
-    setDraft("");
-    setListening(true);
-    ExpoSpeechRecognitionModule.start({ lang: "en-US", interimResults: true, continuous: false, addsPunctuation: true });
+  // Every direct call into the native module below is wrapped -- an
+  // unhandled rejection or thrown error from a native binding inside an
+  // event handler can take the whole app down in a release build (no red
+  // box safety net like in dev mode), so any failure here should surface
+  // as an inline error message instead of a crash.
+  const safeStop = useCallback(() => {
+    try {
+      ExpoSpeechRecognitionModule.stop();
+    } catch {
+      // ignore -- nothing was listening
+    }
   }, []);
 
-  // iOS/Android continuous recognition sessions don't run forever on their
-  // own (Apple's on-device/server recognizers time out a running session
-  // after roughly a minute) -- rather than fight that, the "end" handler
-  // below just calls this again whenever a background session closes and
-  // wakeEnabledRef is still true, so listening effectively continues with
-  // only a brief gap each restart.
+  const beginDictation = useCallback(() => {
+    try {
+      setMicError(null);
+      setDraft("");
+      setListening(true);
+      ExpoSpeechRecognitionModule.start({ lang: "en-US", interimResults: true, continuous: false, addsPunctuation: true });
+    } catch (err) {
+      setListening(false);
+      setMicError((err as Error).message || "Couldn't start listening.");
+    }
+  }, []);
+
+  // Deliberately continuous: false, restarted from the "end" handler below
+  // every time a session closes -- not continuous: true. That option is
+  // technically available on this module, but expo-speech-recognition's
+  // latest published release is still tagged for Expo SDK 56 (this app is
+  // on 57), and continuous mode is exactly the kind of less-common code
+  // path that a version mismatch like that tends to leave broken. Each
+  // short burst plus near-instant restart reads as effectively continuous
+  // listening without relying on it.
   const beginWakeListening = useCallback(async () => {
-    const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-    if (!perm.granted) {
-      setWakeError("Microphone/speech access is off -- enable it in Settings to ask by voice.");
+    try {
+      const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+      if (!perm.granted) {
+        setWakeError("Microphone/speech access is off -- enable it in Settings to ask by voice.");
+        setWakeEnabled(false);
+        wakeEnabledRef.current = false;
+        return;
+      }
+      setWakeError(null);
+      wakeListeningRef.current = true;
+      setWakeListening(true);
+      ExpoSpeechRecognitionModule.start({ lang: "en-US", interimResults: true, continuous: false, addsPunctuation: false });
+    } catch (err) {
+      wakeListeningRef.current = false;
+      setWakeListening(false);
       setWakeEnabled(false);
       wakeEnabledRef.current = false;
-      return;
+      setWakeError((err as Error).message || "Couldn't start \"Hey Jarvis\" listening.");
     }
-    setWakeError(null);
-    wakeListeningRef.current = true;
-    setWakeListening(true);
-    ExpoSpeechRecognitionModule.start({ lang: "en-US", interimResults: true, continuous: true, addsPunctuation: false });
   }, []);
 
   const toggleWakeWord = useCallback(() => {
@@ -380,9 +416,9 @@ export default function CopilotScreen() {
     } else if (wakeListeningRef.current) {
       wakeListeningRef.current = false;
       setWakeListening(false);
-      ExpoSpeechRecognitionModule.stop();
+      safeStop();
     }
-  }, [wakeEnabled, listening, beginWakeListening]);
+  }, [wakeEnabled, listening, beginWakeListening, safeStop]);
 
   // Voice input -- fills the draft as you talk, same review-then-Send flow
   // as the system keyboard's own dictation button (doesn't auto-send).
@@ -395,7 +431,7 @@ export default function CopilotScreen() {
         nextActionRef.current = "dictation";
         wakeListeningRef.current = false;
         setWakeListening(false);
-        ExpoSpeechRecognitionModule.stop();
+        safeStop();
       }
       return;
     }
@@ -430,7 +466,7 @@ export default function CopilotScreen() {
   const toggleListening = useCallback(() => {
     setMicError(null);
     if (listening) {
-      ExpoSpeechRecognitionModule.stop(); // "end" handler resumes wake listening if enabled
+      safeStop(); // "end" handler resumes wake listening if enabled
       return;
     }
     if (wakeListeningRef.current) {
@@ -438,11 +474,11 @@ export default function CopilotScreen() {
       nextActionRef.current = "dictation";
       wakeListeningRef.current = false;
       setWakeListening(false);
-      ExpoSpeechRecognitionModule.stop();
+      safeStop();
       return;
     }
     beginDictation();
-  }, [listening, beginDictation]);
+  }, [listening, beginDictation, safeStop]);
 
   // Voice output -- read a single reply aloud on demand (never auto-played
   // on arrival, see file header note). Tapping the same bubble's speaker
