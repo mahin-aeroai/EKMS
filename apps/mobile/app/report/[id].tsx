@@ -648,7 +648,7 @@ const styles = (t: VibrantTheme) =>
     // colored-border field reads as "type here", distinct from labels and
     // static rows around it.
     input: {
-      minHeight: 46, borderRadius: 12, borderWidth: 1.5, borderColor: t.primary + "55",
+      minHeight: 46, borderRadius: 12, borderWidth: 1.5, borderColor: t.inkMuted + "40",
       backgroundColor: t.primaryTint, paddingHorizontal: 14, paddingVertical: 10,
       fontSize: 15, fontFamily: fonts.regular, color: t.ink,
     },
@@ -669,7 +669,7 @@ const styles = (t: VibrantTheme) =>
     autoFillNoticeText: { fontSize: 12, fontFamily: fonts.regular, color: t.ink, lineHeight: 17 },
 
     pickerField: {
-      minHeight: 46, borderRadius: 12, borderWidth: 1.5, borderColor: t.primary + "55",
+      minHeight: 46, borderRadius: 12, borderWidth: 1.5, borderColor: t.inkMuted + "40",
       backgroundColor: t.primaryTint, paddingHorizontal: 14, paddingVertical: 10,
       flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8,
     },
@@ -688,7 +688,7 @@ const styles = (t: VibrantTheme) =>
     // each line with slighly colored" -- thin colored left rule per row.
     modalOption: { minHeight: 44, justifyContent: "center", paddingHorizontal: 16, paddingVertical: 12, borderRadius: radius.md, borderLeftWidth: 3, marginVertical: 1 },
     modalOptionActive: { backgroundColor: t.primaryTint },
-    modalOptionText: { fontSize: 13, fontFamily: fonts.regular, color: t.ink },
+    modalOptionText: { fontSize: 12, fontFamily: fonts.regular, color: t.ink },
     modalEmpty: { padding: 24, textAlign: "center", color: t.inkMuted, fontSize: 13 },
 
     photoSectionLabel: { fontSize: 11, fontFamily: fonts.bold, color: t.inkMuted, textTransform: "uppercase", letterSpacing: 0.4, marginTop: 4 },
@@ -700,7 +700,7 @@ const styles = (t: VibrantTheme) =>
     photoLabel: { fontSize: 10, fontFamily: fonts.regular, color: t.inkSecondary, textAlign: "center" },
 
     siteQuickAdd: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-    quickAddChip: { minHeight: 36, paddingHorizontal: 14, borderRadius: radius.full, borderWidth: 1.5, borderColor: t.primary, backgroundColor: t.primaryTint, alignItems: "center", justifyContent: "center" },
+    quickAddChip: { minHeight: 36, paddingHorizontal: 14, borderRadius: radius.lg, borderWidth: 1.5, borderColor: t.primary, backgroundColor: t.primaryTint, alignItems: "center", justifyContent: "center" },
     quickAddChipText: { fontSize: 12, fontFamily: fonts.bold, color: t.primary },
 
     siteCard: { gap: 16, padding: 18 },

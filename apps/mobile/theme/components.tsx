@@ -79,11 +79,15 @@ export function SoftCard({ style, children }: { style?: StyleProp<ViewStyle>; ch
   return <View style={[s.softCard, style]}>{children}</View>;
 }
 
+// "rounded rectalugars and less rounded" -- was near-pill (26/24/20,
+// borderRadius roughly half the element's height), now a moderate rounded
+// rectangle throughout. Shared primitives, so this is every button/card
+// app-wide, not just Sign Costing.
 const s = StyleSheet.create({
-  btnWrap: { borderRadius: 26, ...shadow },
-  btn: { minHeight: 52, borderRadius: 26, alignItems: "center", justifyContent: "center", paddingHorizontal: 20 },
+  btnWrap: { borderRadius: 14, ...shadow },
+  btn: { minHeight: 52, borderRadius: 14, alignItems: "center", justifyContent: "center", paddingHorizontal: 20 },
   btnDisabled: { opacity: 0.45 },
   btnText: { fontSize: 16, fontWeight: "700", color: vibrant.onGradient },
-  card: { borderRadius: 24, padding: 18, ...shadow },
-  softCard: { borderRadius: 20, backgroundColor: vibrant.surfaceRaised, padding: 14, ...shadow },
+  card: { borderRadius: 16, padding: 18, ...shadow },
+  softCard: { borderRadius: 14, backgroundColor: vibrant.surfaceRaised, padding: 14, ...shadow },
 });

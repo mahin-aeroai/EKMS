@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { vibrant, fonts, sectionLabelStyle, type VibrantTheme } from "../../theme/vibrant";
-import { SoftCard, GradientCard, GradientButton } from "../../theme/components";
+import { SoftCard, GradientButton } from "../../theme/components";
 import { fmtRupee } from "@mmdi/shared/sign-estimator/calc";
 import { supabase } from "../../lib/supabase";
 
@@ -116,12 +116,14 @@ export default function CostSheetScreen() {
   return (
     <View style={s.screen}>
       <ScrollView contentContainerStyle={s.content}>
-        <GradientCard style={s.heroCard}>
+        {/* "for grand total lets on use gradient lets use flat color like:
+            #8C98B0" -- was GradientCard (dusty-blue-to-navy). */}
+        <View style={s.heroCard}>
           <Text style={s.heroRef}>{row.ref}</Text>
           <Text style={s.heroClient} numberOfLines={1}>{c.jobName || row.client || "—"}</Text>
           <Text style={s.heroValue}>{fmtRupee(row.final_amount)}</Text>
           <Text style={s.heroMargin}>Gross margin {row.margin}% ({fmtRupee(c.marginAmt ?? 0)})</Text>
-        </GradientCard>
+        </View>
 
         <SoftCard style={s.metaCard}>
           <MetaRow t={t} label="Category" value={c.categoryLabel || row.category || "—"} />
@@ -201,7 +203,11 @@ const styles = (t: VibrantTheme) =>
     backLink: { paddingVertical: 8, paddingHorizontal: 16 },
     backLinkText: { fontSize: 14, fontFamily: fonts.bold, color: t.primary },
 
-    heroCard: { alignItems: "center", gap: 4, paddingVertical: 22 },
+    heroCard: {
+      alignItems: "center", gap: 4, paddingVertical: 22, paddingHorizontal: 18,
+      backgroundColor: t.inkMuted, borderRadius: 16,
+      shadowColor: "#3D2E6B", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.1, shadowRadius: 16, elevation: 4,
+    },
     heroRef: { fontSize: 12, fontFamily: fonts.medium, color: t.onGradient, opacity: 0.85 },
     heroClient: { fontSize: 14, fontFamily: fonts.bold, color: t.onGradient, marginTop: 2 },
     heroValue: { fontSize: 30, fontFamily: fonts.bold, color: t.onGradient, marginTop: 6 },

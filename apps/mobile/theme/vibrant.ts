@@ -8,7 +8,10 @@
  * lifted directly:
  *   #FFF9F9 (softest blush)  -> surface
  *   #F0E7E1 (cream)          -> surfaceSunken
- *   #EED8D1 (blush pink)     -> primaryTint / aiTint
+ *   #EED8D1 (blush pink)     -> primaryTint / aiTint (later lightened to
+ *                                #F6EFED -- "reduce color opacity little
+ *                                lower", the flat swatch read too solid
+ *                                as an input-field fill)
  *   #CEC5C1 (taupe)          -> lineStrong
  *   #8C98B0 (dusty blue)     -> inkMuted, gradientPrimary's light stop
  *   #1F2947 (navy)           -> primary / ink / ai, gradientPrimary's dark stop
@@ -63,7 +66,11 @@ export const vibrant: VibrantTheme = {
   onBrand: "#FFFFFF",
   primary: "#1F2947",
   primaryHover: "#161D32",
-  primaryTint: "#EED8D1",
+  // "Reduce color opacity little lower" -- was the blush swatch itself
+  // (#EED8D1) flat, which read fairly saturated as an input-field fill
+  // across a whole screen of them. Lightened/desaturated so it reads as a
+  // soft wash rather than a solid pink block.
+  primaryTint: "#F6EFED",
   success: "#0FAE7A",
   successTint: "#E3F9F1",
   warning: "#DC8A0E",
@@ -73,7 +80,7 @@ export const vibrant: VibrantTheme = {
   info: "#4C6EF5",
   infoTint: "#E9EEFE",
   ai: "#1F2947",
-  aiTint: "#EED8D1",
+  aiTint: "#F6EFED",
 
   // Dusty blue to navy -- "a gradient from lighter to dark", same
   // light-to-dark-same-family structure as the old red gradient.
@@ -135,11 +142,15 @@ export function sectionLabelStyle(t: VibrantTheme) {
  * picker/dropdown list (sheet material, unit, sales rep, photo-source, ...)
  * reads as a row of gently colored lines instead of flat black-on-white,
  * without inventing new brand colors. Reuses existing semantic theme colors
- * (primary/info/success/warning) rather than arbitrary hues so it still
- * sits "within red theme" -- also doubles as the "add few more color inside
- * the pages" pass across those same option lists.
+ * rather than arbitrary hues so it still sits within the app's own palette.
+ *
+ * "Some of the dark blues are still eyesore so make less contrast and try
+ * to use #8C98B0" -- the cycle led with `primary` (navy, #1F2947), which
+ * on a left-border accent bar read as a hard black-ish line repeated down
+ * every dropdown/transaction list. Leads with `inkMuted` (the palette's
+ * own dusty blue, #8C98B0) instead -- same idea, softer first impression.
  */
 export function optionAccent(t: VibrantTheme, index: number): string {
-  const accents = [t.primary, t.info, t.success, t.warning];
+  const accents = [t.inkMuted, t.info, t.success, t.warning];
   return accents[index % accents.length];
 }

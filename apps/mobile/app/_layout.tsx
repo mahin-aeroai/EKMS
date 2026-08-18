@@ -86,6 +86,9 @@ function RootLayoutNav() {
           <Stack.Screen name="report/[id]" options={{ title: "Installation Report" }} />
           {/* "make a screen for it" -- cost sheet detail after Generate */}
           <Stack.Screen name="cost-sheet/[ref]" options={{ title: "Cost Sheet" }} />
+          {/* "let them open in diferent screena dn show them nicely like a
+              bill" -- Sales by Rep's per-customer Bill detail */}
+          <Stack.Screen name="bill" options={{ title: "Bill" }} />
         </Stack.Protected>
         <Stack.Protected guard={!session}>
           <Stack.Screen name="sign-in" options={{ headerShown: false }} />

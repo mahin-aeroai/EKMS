@@ -18,7 +18,7 @@ import { useHeaderHeight } from "expo-router/react-navigation";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { radius } from "@mmdi/shared/theme";
 import { vibrant, fonts, optionAccent, sectionLabelStyle, type VibrantTheme } from "../../theme/vibrant";
-import { SoftCard, GradientCard, GradientButton } from "../../theme/components";
+import { SoftCard, GradientButton } from "../../theme/components";
 import type {
   SignProfileRow, SignLedModuleRow, SignLedBarRow, SignLedDriverRow,
   SignSheetRow, SignPrintingMediaRow, SignAccessoryRow,
@@ -848,11 +848,13 @@ export default function EstimatorScreen() {
               <Row t={t} small label={`GST (${numOr0(gstPct)}%)`} value={fmtRupee(pricing.gstAmt)} />
             </SoftCard>
 
-            <GradientCard style={s.totalCard}>
+            {/* "for grand total lets on use gradient lets use flat color
+                like: #8C98B0" -- was GradientCard (dusty-blue-to-navy). */}
+            <View style={s.totalCard}>
               <Text style={s.totalCardLabel}>Final Amount (incl. GST)</Text>
               <Text style={s.totalCardValue}>{fmtRupee(pricing.final)}</Text>
               <Text style={s.totalCardMargin}>Gross margin {pricing.margin}% ({fmtRupee(pricing.mgnAmt)})</Text>
-            </GradientCard>
+            </View>
 
             {savedRef && (
               <View style={s.successBox}><Text style={s.successText}>Cost sheet {savedRef} saved.</Text></View>
@@ -1121,7 +1123,8 @@ const styles = (t: VibrantTheme) =>
 
     stepBar: { flexGrow: 0, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: t.line },
     stepBarContent: { paddingHorizontal: 12, paddingVertical: 10, gap: 8 },
-    stepChip: { minHeight: 32, paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.full, borderWidth: StyleSheet.hairlineWidth, borderColor: t.line, justifyContent: "center" },
+    // "rounded rectalugars and less rounded" -- was a full pill.
+    stepChip: { minHeight: 32, paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: t.line, justifyContent: "center" },
     stepChipActive: { backgroundColor: t.primaryTint, borderColor: t.primary },
     stepChipText: { fontSize: 12, fontFamily: fonts.medium, color: t.inkSecondary },
     stepChipTextActive: { color: t.primary },
@@ -1148,10 +1151,12 @@ const styles = (t: VibrantTheme) =>
     // everything else -- "highlite input boxes they are mixed up with
     // other information" -- an input needs to visually pop as "the thing
     // you type into" against static labels/values around it.
+    // "those highlighted font size can be much smaller" + "Fonts has to be
+    // smaller" -- was 15.
     input: {
-      minHeight: 44, borderRadius: 12, borderWidth: 1.5, borderColor: t.primary + "55",
+      minHeight: 44, borderRadius: 12, borderWidth: 1.5, borderColor: t.inkMuted + "40",
       backgroundColor: t.primaryTint, paddingHorizontal: 14, paddingVertical: 10,
-      fontSize: 15, fontFamily: fonts.regular, color: t.ink,
+      fontSize: 13, fontFamily: fonts.regular, color: t.ink,
     },
     fieldRow: { flexDirection: "row", gap: 12 },
     fieldHalf: { flex: 1 },
@@ -1162,12 +1167,12 @@ const styles = (t: VibrantTheme) =>
     optionDesc: { fontSize: 12, fontFamily: fonts.regular, color: t.inkSecondary },
 
     pickerField: {
-      minHeight: 44, borderRadius: 12, borderWidth: 1.5, borderColor: t.primary + "55",
+      minHeight: 44, borderRadius: 12, borderWidth: 1.5, borderColor: t.inkMuted + "40",
       backgroundColor: t.primaryTint, paddingHorizontal: 14, paddingVertical: 10,
       flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8,
     },
-    pickerText: { flex: 1, fontSize: 15, fontFamily: fonts.regular, color: t.ink },
-    pickerPlaceholder: { flex: 1, fontSize: 15, fontFamily: fonts.regular, color: t.inkMuted },
+    pickerText: { flex: 1, fontSize: 13, fontFamily: fonts.regular, color: t.ink },
+    pickerPlaceholder: { flex: 1, fontSize: 13, fontFamily: fonts.regular, color: t.inkMuted },
     pickerChevron: { fontSize: 15, color: t.primary },
 
     modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)" },
@@ -1182,7 +1187,7 @@ const styles = (t: VibrantTheme) =>
     // (color cycles via optionAccent) instead of flat uniform text.
     modalOption: { minHeight: 44, justifyContent: "center", paddingHorizontal: 12, paddingVertical: 10, borderRadius: radius.md, borderLeftWidth: 3, marginVertical: 1 },
     modalOptionActive: { backgroundColor: t.primaryTint },
-    modalOptionText: { fontSize: 13, fontFamily: fonts.regular, color: t.ink },
+    modalOptionText: { fontSize: 12, fontFamily: fonts.regular, color: t.ink },
     modalEmpty: { padding: 24, textAlign: "center", color: t.inkMuted, fontSize: 13 },
 
     switchRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", minHeight: 44, gap: 12 },
@@ -1220,7 +1225,14 @@ const styles = (t: VibrantTheme) =>
     rowBig: { fontSize: 15 },
 
     summaryCard: { padding: 12, gap: 0, overflow: "hidden" },
-    totalCard: { alignItems: "center", gap: 4, paddingVertical: 22 },
+    // Flat #8C98B0 (t.inkMuted, same hex) instead of GradientCard -- see
+    // the JSX comment above. Padding/radius/shadow that GradientCard used
+    // to provide are now spelled out here directly.
+    totalCard: {
+      alignItems: "center", gap: 4, paddingVertical: 22, paddingHorizontal: 18,
+      backgroundColor: t.inkMuted, borderRadius: 16,
+      shadowColor: "#3D2E6B", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.1, shadowRadius: 16, elevation: 4,
+    },
     totalCardLabel: { fontSize: 12, fontFamily: fonts.medium, color: t.onGradient, opacity: 0.85 },
     totalCardValue: { fontSize: 30, fontFamily: fonts.bold, color: t.onGradient },
     totalCardMargin: { fontSize: 12, fontFamily: fonts.regular, color: t.onGradient, opacity: 0.85, marginTop: 2 },
@@ -1230,15 +1242,15 @@ const styles = (t: VibrantTheme) =>
     sizeField: { gap: 4 },
     sizeLabel: { fontSize: 10, fontFamily: fonts.medium, color: t.inkMuted, textTransform: "uppercase", letterSpacing: 0.3 },
     sizeInput: {
-      minHeight: 38, minWidth: 64, borderRadius: 10, borderWidth: 1.5, borderColor: t.primary + "55",
-      backgroundColor: t.primaryTint, paddingHorizontal: 10, fontSize: 14, fontFamily: fonts.medium, color: t.ink,
+      minHeight: 38, minWidth: 64, borderRadius: 10, borderWidth: 1.5, borderColor: t.inkMuted + "40",
+      backgroundColor: t.primaryTint, paddingHorizontal: 10, fontSize: 13, fontFamily: fonts.medium, color: t.ink,
     },
-    sizeTimes: { fontSize: 14, color: t.inkMuted, paddingBottom: 8 },
+    sizeTimes: { fontSize: 13, color: t.inkMuted, paddingBottom: 8 },
     unitPicker: {
-      minHeight: 38, borderRadius: 10, borderWidth: 1.5, borderColor: t.primary + "55",
+      minHeight: 38, borderRadius: 10, borderWidth: 1.5, borderColor: t.inkMuted + "40",
       backgroundColor: t.primaryTint, paddingHorizontal: 10, justifyContent: "center",
     },
-    unitPickerText: { fontSize: 14, fontFamily: fonts.medium, color: t.ink },
+    unitPickerText: { fontSize: 13, fontFamily: fonts.medium, color: t.ink },
     sizeStat: { gap: 2 },
     sizeStatLabel: { fontSize: 10, fontFamily: fonts.medium, color: t.inkMuted, textTransform: "uppercase", letterSpacing: 0.3 },
     sizeStatValue: { fontSize: 13, fontFamily: fonts.bold, color: t.ink },

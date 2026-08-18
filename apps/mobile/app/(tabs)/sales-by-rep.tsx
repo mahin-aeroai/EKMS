@@ -11,11 +11,12 @@ import {
   View,
 } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
+import { useRouter } from "expo-router";
 import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import { radius } from "@mmdi/shared/theme";
 import { vibrant, fonts, optionAccent, type VibrantTheme } from "../../theme/vibrant";
-import { SoftCard, GradientCard, GradientButton } from "../../theme/components";
+import { SoftCard, GradientButton } from "../../theme/components";
 import { supabase } from "../../lib/supabase";
 
 /**
@@ -85,6 +86,40 @@ interface CustomerTransaction {
   rate: number | null;
 }
 
+// "the detail we added in previous section is sufficient some of them
+// missing and if there are multi line items it is missing so let them
+// open in diferent screena dn show them nicely like a bill" --
+// sales_transactions has no invoice_number column (see PROJECT_STATUS.md's
+// own note on what was left out of the import), so a "bill" here is every
+// line sharing the same customer + invoice_date -- the closest available
+// stand-in for "one invoice". Grouping this way is also what was actually
+// wrong before: multiple product lines on the same date were listed as
+// separate flat rows with no indication they belonged together, which is
+// why some rows "were missing" their product line when in fact it just
+// hadn't been grouped with its siblings yet.
+interface BillGroup {
+  date: string | null;
+  total: number;
+  lines: CustomerTransaction[];
+}
+
+function groupIntoBills(transactions: CustomerTransaction[]): BillGroup[] {
+  const byDate = new Map<string, CustomerTransaction[]>();
+  for (const txn of transactions) {
+    const key = txn.invoice_date ?? "—";
+    const list = byDate.get(key) ?? [];
+    list.push(txn);
+    byDate.set(key, list);
+  }
+  return Array.from(byDate.entries())
+    .map(([key, lines]) => ({
+      date: key === "—" ? null : key,
+      total: lines.reduce((sum, l) => sum + l.taxable_value, 0),
+      lines,
+    }))
+    .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
+}
+
 interface CustomerBreakdownRow {
   customer_id: string | null;
   customer_name: string;
@@ -97,11 +132,11 @@ interface CustomerBreakdownRow {
   address: string | null;
   transaction_count: number;
   total_taxable_value: number;
-  // "after generating sales by customers should open detail transactions
-  // so that it is more relavent" -- kept per-customer instead of discarded
-  // once grouped, so tapping a row can show the individual invoices that
-  // make up its total rather than just the aggregate.
+  // Raw per-line data (used for CSV export's line-item fidelity and to
+  // derive `bills` below) -- the detail sheet itself now renders `bills`,
+  // not this directly.
   transactions: CustomerTransaction[];
+  bills: BillGroup[];
 }
 
 async function fetchAllRows<T>(
@@ -118,6 +153,32 @@ async function fetchAllRows<T>(
   return all;
 }
 
+// "While loading slaes person selction it istaking lot of time" --
+// fetchAllRows above pages sequentially, each page awaiting the one
+// before it, so N pages means N round-trips back-to-back before the
+// screen has anything to show. Getting the row count first (a fast,
+// row-free `head: true` request) lets every page fire in parallel
+// instead -- same data transferred, but wall-clock time is roughly one
+// round-trip instead of N. Falls back to the sequential fetchAllRows if
+// the count request itself fails for any reason.
+async function fetchAllRowsParallel<T>(
+  getCount: () => PromiseLike<{ count: number | null; error: unknown }>,
+  buildPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>
+): Promise<T[]> {
+  const pageSize = 1000;
+  const { count, error: countError } = await getCount();
+  if (countError || !count) return fetchAllRows(buildPage);
+  const pageCount = Math.max(1, Math.ceil(count / pageSize));
+  const pages = await Promise.all(
+    Array.from({ length: pageCount }, (_, i) => buildPage(i * pageSize, i * pageSize + pageSize - 1))
+  );
+  const all: T[] = [];
+  for (const { data } of pages) {
+    if (data) all.push(...data);
+  }
+  return all;
+}
+
 function formatCrore(rupees: number): string {
   return `₹${(rupees / 10000000).toFixed(2)} Cr`;
 }
@@ -130,6 +191,7 @@ function csvEscape(value: string | number): string {
 export default function SalesByRepScreen() {
   const t = vibrant;
   const s = styles(t);
+  const router = useRouter();
 
   const [salesPeople, setSalesPeople] = useState<string[] | null>(null);
   const [repPickerOpen, setRepPickerOpen] = useState(false);
@@ -147,8 +209,9 @@ export default function SalesByRepScreen() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const all = await fetchAllRows<{ sales_manager: string | null }>((from, to) =>
-        supabase.from("sales_transactions").select("sales_manager").range(from, to)
+      const all = await fetchAllRowsParallel<{ sales_manager: string | null }>(
+        () => supabase.from("sales_transactions").select("sales_manager", { count: "exact", head: true }),
+        (from, to) => supabase.from("sales_transactions").select("sales_manager").range(from, to)
       );
       if (cancelled) return;
       const unique = Array.from(new Set(all.map((r) => r.sales_manager).filter((v): v is string => !!v))).sort();
@@ -168,7 +231,14 @@ export default function SalesByRepScreen() {
     setLoading(true);
     setRows(null);
     try {
-      const all = await fetchAllRows<{
+      // Same date-range filters apply to both the count check and every
+      // page -- built once so the two can't drift apart.
+      function withFilters<Q extends { gte: (c: string, v: string) => Q; lte: (c: string, v: string) => Q }>(q: Q): Q {
+        if (dateFrom) q = q.gte("invoice_date", toISODate(dateFrom));
+        if (dateTo) q = q.lte("invoice_date", toISODate(dateTo));
+        return q;
+      }
+      const all = await fetchAllRowsParallel<{
         customer_id: string | null;
         customer_name: string | null;
         taxable_value: number;
@@ -176,16 +246,20 @@ export default function SalesByRepScreen() {
         item_description: string | null;
         quantity: number | null;
         rate: number | null;
-      }>((from, to) => {
-        let q = supabase
-          .from("sales_transactions")
-          .select("customer_id, customer_name, taxable_value, invoice_date, item_description, quantity, rate")
-          .eq("sales_manager", selectedRep)
-          .range(from, to);
-        if (dateFrom) q = q.gte("invoice_date", toISODate(dateFrom));
-        if (dateTo) q = q.lte("invoice_date", toISODate(dateTo));
-        return q;
-      });
+      }>(
+        () =>
+          withFilters(
+            supabase.from("sales_transactions").select("*", { count: "exact", head: true }).eq("sales_manager", selectedRep)
+          ),
+        (from, to) =>
+          withFilters(
+            supabase
+              .from("sales_transactions")
+              .select("customer_id, customer_name, taxable_value, invoice_date, item_description, quantity, rate")
+              .eq("sales_manager", selectedRep)
+              .range(from, to)
+          )
+      );
       const groups = new Map<string, { customerId: string | null; total: number; count: number; transactions: CustomerTransaction[] }>();
       for (const r of all) {
         const name = r.customer_name ?? "Unknown";
@@ -224,6 +298,7 @@ export default function SalesByRepScreen() {
           transaction_count: g.count,
           total_taxable_value: g.total,
           transactions: g.transactions.sort((a, b) => (b.invoice_date ?? "").localeCompare(a.invoice_date ?? "")),
+          bills: groupIntoBills(g.transactions),
         }))
         .sort((a, b) => b.total_taxable_value - a.total_taxable_value);
       setRows(breakdown);
@@ -296,10 +371,13 @@ export default function SalesByRepScreen() {
       {rows !== null && (
         <>
           <View style={s.statRow}>
-            <GradientCard style={s.statCardHero}>
+            {/* "for grand total lets on use gradient lets use flat color
+                like: #8C98B0" -- same flat treatment as Sign Costing's
+                and Cost Sheet's grand-total cards. */}
+            <View style={[s.statCardHero, s.statCardHeroFlat]}>
               <Text style={s.statLabelHero}>Total Sales</Text>
               <Text style={s.statValueHero}>{formatCrore(totalSales)}</Text>
-            </GradientCard>
+            </View>
             <View style={s.statCardCol}>
               <SoftCard style={s.statCard}>
                 <Text style={s.statLabel}>Customers</Text>
@@ -450,32 +528,55 @@ export default function SalesByRepScreen() {
             </Text>
             <Text style={s.detailSummaryValue}>₹{detailCustomer?.total_taxable_value.toLocaleString("en-IN")}</Text>
           </View>
+          {/* "the detail we added in previous section is sufficient some of
+              them missing and if there are multi line items it is missing
+              so let them open in diferent screena dn show them nicely like
+              a bill" -- one row per Bill (same customer + invoice_date)
+              instead of one row per raw product line, so multi-line bills
+              show as a single row with their full line count rather than
+              several same-date rows that looked like missing/duplicate
+              data. Tapping a bill opens it on its own screen, styled like
+              an actual invoice. */}
           <FlatList
-            data={detailCustomer?.transactions ?? []}
-            keyExtractor={(txn, i) => `${txn.invoice_date ?? "—"}-${i}`}
+            data={detailCustomer?.bills ?? []}
+            keyExtractor={(bill, i) => `${bill.date ?? "—"}-${i}`}
             style={s.modalList}
-            renderItem={({ item: txn, index }) => (
-              <View style={[s.detailRow, { borderLeftColor: optionAccent(t, index) }]}>
-                <View style={s.detailRowTop}>
-                  <Text style={s.detailRowDate}>{formatISOToDMY(txn.invoice_date)}</Text>
-                  <Text style={s.detailRowValue}>₹{txn.taxable_value.toLocaleString("en-IN")}</Text>
-                </View>
-                {/* "add here more details about each invocie with, product,
-                    qty rate and invocie value. in small font. underneath
-                    each Bill" -- taxable_value (above) already covers
-                    "invoice value"; product/qty/rate go here, small and
-                    muted so the date/amount above stays the primary read. */}
-                {txn.item_description ? (
-                  <Text style={s.detailRowProduct} numberOfLines={2}>
-                    {txn.item_description}
-                    {txn.quantity != null && txn.rate != null
-                      ? `  ·  Qty ${txn.quantity} × ₹${txn.rate.toLocaleString("en-IN")}`
-                      : ""}
-                  </Text>
-                ) : null}
-              </View>
+            renderItem={({ item: bill, index }) => (
+              <Pressable
+                onPress={() => {
+                  if (!detailCustomer) return;
+                  router.push({
+                    pathname: "/bill",
+                    params: {
+                      customerName: detailCustomer.customer_name,
+                      address: detailCustomer.address ?? "",
+                      date: bill.date ?? "",
+                      total: String(bill.total),
+                      lines: JSON.stringify(bill.lines),
+                    },
+                  });
+                }}
+              >
+                {({ pressed }) => (
+                  <View style={[s.detailRow, { borderLeftColor: optionAccent(t, index) }, pressed && { opacity: 0.7 }]}>
+                    <View style={s.detailRowTop}>
+                      <Text style={s.detailRowDate}>{formatISOToDMY(bill.date)}</Text>
+                      <Text style={s.detailRowValue}>₹{bill.total.toLocaleString("en-IN")}</Text>
+                    </View>
+                    <View style={s.detailRowTop}>
+                      <Text style={s.detailRowProduct}>
+                        {bill.lines.length} item{bill.lines.length === 1 ? "" : "s"}
+                        {bill.lines[0]?.item_description
+                          ? `  ·  ${bill.lines[0].item_description}${bill.lines.length > 1 ? " + more" : ""}`
+                          : ""}
+                      </Text>
+                      <Text style={s.detailRowChev}>›</Text>
+                    </View>
+                  </View>
+                )}
+              </Pressable>
             )}
-            ListEmptyComponent={<Text style={s.modalEmpty}>No transactions.</Text>}
+            ListEmptyComponent={<Text style={s.modalEmpty}>No bills.</Text>}
           />
         </View>
       </Modal>
@@ -520,6 +621,10 @@ const styles = (t: VibrantTheme) =>
 
     statRow: { flexDirection: "row", gap: 8, padding: 16, paddingBottom: 8 },
     statCardHero: { flex: 1.2, justifyContent: "center", gap: 4 },
+    statCardHeroFlat: {
+      backgroundColor: t.inkMuted, borderRadius: 16, padding: 14,
+      shadowColor: "#3D2E6B", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.1, shadowRadius: 16, elevation: 4,
+    },
     statLabelHero: { fontSize: 12, color: t.onGradient, opacity: 0.85 },
     statValueHero: { fontSize: 22, fontWeight: "700", color: t.onGradient },
     statCardCol: { flex: 1, gap: 8 },
@@ -581,6 +686,7 @@ const styles = (t: VibrantTheme) =>
     detailRowTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
     detailRowDate: { fontSize: 13, fontFamily: fonts.regular, color: t.ink },
     detailRowValue: { fontSize: 13, fontFamily: fonts.medium, color: t.inkSecondary },
-    // "in small font. underneath each Bill" -- product + qty × rate.
-    detailRowProduct: { fontSize: 11, fontFamily: fonts.regular, color: t.inkMuted },
+    // "in small font. underneath each Bill" -- item count + first product.
+    detailRowProduct: { fontSize: 11, fontFamily: fonts.regular, color: t.inkMuted, flexShrink: 1 },
+    detailRowChev: { fontSize: 14, color: t.inkMuted },
   });
