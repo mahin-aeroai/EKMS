@@ -508,6 +508,7 @@ export default function CopilotScreen() {
         ref={listRef}
         data={turns}
         keyExtractor={(_, i) => String(i)}
+        style={s.flatList}
         contentContainerStyle={s.list}
         contentInsetAdjustmentBehavior="automatic"
         ListEmptyComponent={
@@ -623,6 +624,13 @@ export default function CopilotScreen() {
 const styles = (t: VibrantTheme) =>
   StyleSheet.create({
     screen: { flex: 1, backgroundColor: t.surface },
+    // FlatList needs its own flex:1 (separate from contentContainerStyle
+    // below) to actually shrink when KeyboardAvoidingView adds bottom
+    // padding for the keyboard -- without it, the extra rows below the
+    // list (typing indicator, error text, the wake-word toggle) have
+    // nowhere to give up space, so the composer -- and the TextInput
+    // inside it -- gets pushed down behind the keyboard instead.
+    flatList: { flex: 1 },
     list: { padding: 16, gap: 10, flexGrow: 1 },
 
     emptyWrap: { flex: 1, alignItems: "center", justifyContent: "center", paddingTop: 60, paddingHorizontal: 24, gap: 6 },
