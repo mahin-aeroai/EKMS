@@ -1,27 +1,37 @@
 /**
- * "no i dont want blue ..MMDI is build on red theme i cant present with
- * blue. use Hex#e0293d like attached with a gradient from lighter to
- * dark." -- supersedes this file's original violet/pink palette (from the
- * "I am really excited abut this kind of UI" round). Per the user's own
- * call: the RED replaces violet as the whole app's gradient theme (every
- * screen this file's `vibrant` export touches), not just the logo -- still
- * deliberately its own file, not an edit to packages/shared/src/theme.ts,
- * which stays blue for the web app.
+ * "Actually switch to this pink/navy palette" -- a real rebrand away from
+ * the red theme (#E0293D, see git history), sourced from a brand-board
+ * reference the user shared (blush pink / cream / taupe / dusty blue /
+ * navy, "very neat and clean look"). That board only gives six swatches
+ * for a full marketing brand, not a UI system -- surface/text/tint/hover/
+ * gradient/tab-bar all had to be derived from those six rather than
+ * lifted directly:
+ *   #FFF9F9 (softest blush)  -> surface
+ *   #F0E7E1 (cream)          -> surfaceSunken
+ *   #EED8D1 (blush pink)     -> primaryTint / aiTint
+ *   #CEC5C1 (taupe)          -> lineStrong
+ *   #8C98B0 (dusty blue)     -> inkMuted, gradientPrimary's light stop
+ *   #1F2947 (navy)           -> primary / ink / ai, gradientPrimary's dark stop
+ * primaryHover, inkSecondary, line, tabBarBg and tabBarInactive are HSL
+ * lightness variants of navy/dusty-blue (same approach as the old red
+ * palette's derivation) so they read as part of one family rather than
+ * invented colors.
  *
- * Palette derived from the user's exact hex (#E0293D) by varying HSL
- * lightness only, keeping the same hue/saturation across every stop, so
- * "primary" (flat accent), the gradient's light/dark ends, and the tint
- * all read as one consistent red rather than unrelated reds:
- *   H 353°, S 75%  ->  lighter #EA707E, base #E0293D, hover #C41C2F,
- *   darker #A91828, tint #FBE4E7.
+ * success/warning/danger/info are deliberately UNCHANGED -- they're
+ * semantic status colors (not brand colors), weren't part of the
+ * reference board, and changing them wasn't asked for.
+ *
+ * The app icon/logo-mark image itself is still the original uploaded red
+ * "M" artwork -- that's a raster asset, not a themeable value, and
+ * swapping it wasn't part of this round. Flagging in case the mismatch
+ * (red icon, navy in-app theme) stands out once this is on-device.
  *
  * `Theme` (from @mmdi/shared/theme) has no gradient fields -- a flat
  * "primary" string can't express a two-stop gradient. VibrantTheme extends
  * it with gradientPrimary/gradientSecondary (consumed by <LinearGradient>
  * via GradientCard/GradientButton, see ./components.tsx) plus tabBarBg, a
- * dark tab bar even though the rest of the UI is light -- unchanged from
- * the original violet round, just retinted toward the red family instead
- * of pure black so it still feels part of the same palette.
+ * dark tab bar even though the rest of the UI is light -- unchanged
+ * structurally from every earlier round, just retinted toward navy.
  *
  * Deliberately ONE fixed theme, not a light/dark pair like the shared
  * Theme system -- see the original round's reasoning, unchanged by this
@@ -41,47 +51,41 @@ export interface VibrantTheme extends Theme {
 }
 
 export const vibrant: VibrantTheme = {
-  surface: "#FCF7F7",
+  surface: "#FFF9F9",
   surfaceRaised: "#FFFFFF",
-  surfaceSunken: "#FBEEEF",
+  surfaceSunken: "#F0E7E1",
   surfaceOverlay: "#FFFFFF",
-  line: "#F3DEE0",
-  lineStrong: "#E7C7CA",
-  ink: "#221417",
-  inkSecondary: "#75585C",
-  inkMuted: "#A68689",
+  line: "#EBE8E6",
+  lineStrong: "#CEC5C1",
+  ink: "#1F2947",
+  inkSecondary: "#415181",
+  inkMuted: "#8C98B0",
   onBrand: "#FFFFFF",
-  // "primary" stays a flat color (every existing StyleSheet color prop
-  // expects a string, not a gradient) -- set to the user's exact hex so
-  // plain-color usages (borders, icons, small accents) match it precisely.
-  primary: "#E0293D",
-  primaryHover: "#C41C2F",
-  primaryTint: "#FBE4E7",
+  primary: "#1F2947",
+  primaryHover: "#161D32",
+  primaryTint: "#EED8D1",
   success: "#0FAE7A",
   successTint: "#E3F9F1",
   warning: "#DC8A0E",
   warningTint: "#FCF1DC",
-  // Deliberately NOT the same red as `primary` -- with the brand itself
-  // now crimson, reusing it for danger would make error text/discard
-  // buttons indistinguishable from ordinary branded UI. A darker, more
-  // muted maroon keeps the "something's wrong" read without competing
-  // with the brand accent.
   danger: "#7A1220",
   dangerTint: "#F5DEDF",
   info: "#4C6EF5",
   infoTint: "#E9EEFE",
-  ai: "#E0293D",
-  aiTint: "#FBE4E7",
+  ai: "#1F2947",
+  aiTint: "#EED8D1",
 
-  // Light to dark, same hue -- "a gradient from lighter to dark".
-  gradientPrimary: ["#EA707E", "#A91828"],
+  // Dusty blue to navy -- "a gradient from lighter to dark", same
+  // light-to-dark-same-family structure as the old red gradient.
+  gradientPrimary: ["#8C98B0", "#1F2947"],
   // Used sparingly (GradientButton/GradientCard variant="secondary") --
-  // a warm coral-to-red companion so it still reads as the same brand
-  // when it does show up, not a second unrelated color.
-  gradientSecondary: ["#FF8A65", "#E0293D"],
+  // a monochrome navy variant rather than trying to stretch the palette's
+  // lightest swatch (blush pink) across a full gradient, which would put
+  // onGradient's white text on a too-light background at that end.
+  gradientSecondary: ["#2F3D6B", "#1F2947"],
   onGradient: "#FFFFFF",
-  tabBarBg: "#1C1214",
-  tabBarInactive: "#8A6E71",
+  tabBarBg: "#101424",
+  tabBarInactive: "#838CA0",
 };
 
 /**
