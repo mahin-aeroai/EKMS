@@ -76,10 +76,25 @@ function formatISOToDMY(iso: string | null): string {
 interface CustomerTransaction {
   invoice_date: string | null;
   taxable_value: number;
+  // "i want add here more details about each invocie with, product, qty
+  // rate" -- each sales_transactions row already IS one product line (not
+  // a multi-line invoice), so these three plus taxable_value fully
+  // describe it: no further grouping needed, just more fields kept.
+  item_description: string | null;
+  quantity: number | null;
+  rate: number | null;
 }
 
 interface CustomerBreakdownRow {
+  customer_id: string | null;
   customer_name: string;
+  // "customer name make it more visible with address so that we can
+  // identify easily" -- sales_transactions has no address column itself
+  // (per PROJECT_STATUS.md's own note on what was deliberately left out
+  // of the import); filled in after the fact from `customers.address` via
+  // customer_id, see the batch lookup in runReport() below. null until
+  // that lookup resolves, or if this customer_id has no customers match.
+  address: string | null;
   transaction_count: number;
   total_taxable_value: number;
   // "after generating sales by customers should open detail transactions
@@ -153,30 +168,59 @@ export default function SalesByRepScreen() {
     setLoading(true);
     setRows(null);
     try {
-      const all = await fetchAllRows<{ customer_name: string | null; taxable_value: number; invoice_date: string | null }>(
-        (from, to) => {
-          let q = supabase
-            .from("sales_transactions")
-            .select("customer_name, taxable_value, invoice_date")
-            .eq("sales_manager", selectedRep)
-            .range(from, to);
-          if (dateFrom) q = q.gte("invoice_date", toISODate(dateFrom));
-          if (dateTo) q = q.lte("invoice_date", toISODate(dateTo));
-          return q;
-        }
-      );
-      const groups = new Map<string, { total: number; count: number; transactions: CustomerTransaction[] }>();
+      const all = await fetchAllRows<{
+        customer_id: string | null;
+        customer_name: string | null;
+        taxable_value: number;
+        invoice_date: string | null;
+        item_description: string | null;
+        quantity: number | null;
+        rate: number | null;
+      }>((from, to) => {
+        let q = supabase
+          .from("sales_transactions")
+          .select("customer_id, customer_name, taxable_value, invoice_date, item_description, quantity, rate")
+          .eq("sales_manager", selectedRep)
+          .range(from, to);
+        if (dateFrom) q = q.gte("invoice_date", toISODate(dateFrom));
+        if (dateTo) q = q.lte("invoice_date", toISODate(dateTo));
+        return q;
+      });
+      const groups = new Map<string, { customerId: string | null; total: number; count: number; transactions: CustomerTransaction[] }>();
       for (const r of all) {
         const name = r.customer_name ?? "Unknown";
-        const g = groups.get(name) ?? { total: 0, count: 0, transactions: [] };
+        const g = groups.get(name) ?? { customerId: r.customer_id, total: 0, count: 0, transactions: [] };
         g.total += r.taxable_value ?? 0;
         g.count += 1;
-        g.transactions.push({ invoice_date: r.invoice_date, taxable_value: r.taxable_value ?? 0 });
+        g.transactions.push({
+          invoice_date: r.invoice_date,
+          taxable_value: r.taxable_value ?? 0,
+          item_description: r.item_description,
+          quantity: r.quantity,
+          rate: r.rate,
+        });
         groups.set(name, g);
       }
+
+      // "customer name make it more visible with address" -- a second,
+      // small batch query rather than joining in the main paginated fetch
+      // above (that fetch can be thousands of rows across many repeated
+      // customers; a join would repeat the same address string on every
+      // one of them for no benefit). One row per distinct customer here.
+      const customerIds = Array.from(new Set([...groups.values()].map((g) => g.customerId).filter((v): v is string => !!v)));
+      const addressById = new Map<string, string | null>();
+      if (customerIds.length > 0) {
+        const { data: customerRows } = await supabase.from("customers").select("id, address").in("id", customerIds);
+        for (const c of (customerRows as { id: string; address: string | null }[] | null) ?? []) {
+          addressById.set(c.id, c.address);
+        }
+      }
+
       const breakdown = [...groups.entries()]
         .map(([customer_name, g]) => ({
+          customer_id: g.customerId,
           customer_name,
+          address: g.customerId ? addressById.get(g.customerId) ?? null : null,
           transaction_count: g.count,
           total_taxable_value: g.total,
           transactions: g.transactions.sort((a, b) => (b.invoice_date ?? "").localeCompare(a.invoice_date ?? "")),
@@ -385,8 +429,19 @@ export default function SalesByRepScreen() {
       <Modal visible={!!detailCustomer} transparent animationType="slide" onRequestClose={() => setDetailCustomer(null)}>
         <Pressable style={s.modalBackdrop} onPress={() => setDetailCustomer(null)} />
         <View style={s.modalSheet}>
-          <View style={s.modalHeader}>
-            <Text style={s.modalTitle} numberOfLines={1}>{detailCustomer?.customer_name}</Text>
+          {/* "customer name make it more visible with address so that we
+              can identify easily" -- was a single truncated line sharing
+              the row with the Done button; now its own block, full name
+              (wraps to 2 lines rather than clipping with "…"), plus the
+              customer's registered address underneath so a same-named
+              branch/location is unambiguous. */}
+          <View style={s.detailHeader}>
+            <View style={s.detailHeaderText}>
+              <Text style={s.detailCustomerName}>{detailCustomer?.customer_name}</Text>
+              {detailCustomer?.address ? (
+                <Text style={s.detailCustomerAddress} numberOfLines={2}>{detailCustomer.address}</Text>
+              ) : null}
+            </View>
             <Pressable onPress={() => setDetailCustomer(null)}><Text style={s.modalClose}>Done</Text></Pressable>
           </View>
           <View style={s.detailSummaryRow}>
@@ -401,8 +456,23 @@ export default function SalesByRepScreen() {
             style={s.modalList}
             renderItem={({ item: txn, index }) => (
               <View style={[s.detailRow, { borderLeftColor: optionAccent(t, index) }]}>
-                <Text style={s.detailRowDate}>{formatISOToDMY(txn.invoice_date)}</Text>
-                <Text style={s.detailRowValue}>₹{txn.taxable_value.toLocaleString("en-IN")}</Text>
+                <View style={s.detailRowTop}>
+                  <Text style={s.detailRowDate}>{formatISOToDMY(txn.invoice_date)}</Text>
+                  <Text style={s.detailRowValue}>₹{txn.taxable_value.toLocaleString("en-IN")}</Text>
+                </View>
+                {/* "add here more details about each invocie with, product,
+                    qty rate and invocie value. in small font. underneath
+                    each Bill" -- taxable_value (above) already covers
+                    "invoice value"; product/qty/rate go here, small and
+                    muted so the date/amount above stays the primary read. */}
+                {txn.item_description ? (
+                  <Text style={s.detailRowProduct} numberOfLines={2}>
+                    {txn.item_description}
+                    {txn.quantity != null && txn.rate != null
+                      ? `  ·  Qty ${txn.quantity} × ₹${txn.rate.toLocaleString("en-IN")}`
+                      : ""}
+                  </Text>
+                ) : null}
               </View>
             )}
             ListEmptyComponent={<Text style={s.modalEmpty}>No transactions.</Text>}
@@ -486,16 +556,31 @@ const styles = (t: VibrantTheme) =>
     modalEmpty: { padding: 24, textAlign: "center", color: t.inkMuted, fontSize: 14 },
 
     // Customer transaction-detail sheet.
+    // "customer name make it more visible with address" -- replaces the
+    // old single-line modalHeader/modalTitle combo for this sheet only
+    // (other sheets in this file still use modalHeader/modalTitle).
+    detailHeader: {
+      flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12,
+      padding: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: t.line,
+    },
+    detailHeaderText: { flex: 1, gap: 3 },
+    detailCustomerName: { fontSize: 17, fontFamily: fonts.bold, color: t.ink },
+    detailCustomerAddress: { fontSize: 12, fontFamily: fonts.regular, color: t.inkSecondary, lineHeight: 16 },
     detailSummaryRow: {
       flexDirection: "row", justifyContent: "space-between", alignItems: "center",
       paddingHorizontal: 16, paddingVertical: 10, backgroundColor: t.surfaceSunken,
     },
     detailSummaryText: { fontSize: 12, fontFamily: fonts.regular, color: t.inkSecondary },
     detailSummaryValue: { fontSize: 15, fontFamily: fonts.bold, color: t.ink },
+    // Was a single row (date + amount); now a small column so the
+    // product/qty/rate line can sit underneath each "bill" without
+    // fighting the date/amount for horizontal space.
     detailRow: {
-      flexDirection: "row", justifyContent: "space-between", alignItems: "center",
-      minHeight: 40, paddingHorizontal: 12, paddingVertical: 8, borderLeftWidth: 3, marginVertical: 1,
+      gap: 2, paddingHorizontal: 12, paddingVertical: 8, borderLeftWidth: 3, marginVertical: 1,
     },
+    detailRowTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
     detailRowDate: { fontSize: 13, fontFamily: fonts.regular, color: t.ink },
     detailRowValue: { fontSize: 13, fontFamily: fonts.medium, color: t.inkSecondary },
+    // "in small font. underneath each Bill" -- product + qty × rate.
+    detailRowProduct: { fontSize: 11, fontFamily: fonts.regular, color: t.inkMuted },
   });
