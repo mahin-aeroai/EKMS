@@ -1,5 +1,12 @@
 const { withInfoPlist } = require("@expo/config-plugins");
 
+// Loud, temporary canary: proves whether Expo's config loader is actually
+// require()-ing this file at all. If this line never shows up in
+// `npx expo prebuild` output, the plugin entry in app.json isn't being
+// resolved/loaded in the first place -- a totally different problem than
+// "the mod ran but got overridden". Remove once the real issue is found.
+console.log("\n>>> withForceMicPermissions.js: file loaded by Expo config <<<\n");
+
 /**
  * Forces NSMicrophoneUsageDescription and NSSpeechRecognitionUsageDescription
  * into the built Info.plist, no matter what any other plugin does to those
@@ -24,11 +31,14 @@ const { withInfoPlist } = require("@expo/config-plugins");
  * array, nothing that runs after it can undo this. See app.json.
  */
 module.exports = function withForceMicPermissions(config) {
+  console.log(">>> withForceMicPermissions.js: plugin function called <<<");
   return withInfoPlist(config, (config) => {
+    console.log(">>> withForceMicPermissions.js: Info.plist mod is running <<<");
     config.modResults.NSMicrophoneUsageDescription =
       "MMDI ONE uses your microphone so you can ask Copilot questions by voice.";
     config.modResults.NSSpeechRecognitionUsageDescription =
       "MMDI ONE uses speech recognition to turn your voice into text for Copilot.";
+    console.log(">>> withForceMicPermissions.js: keys set on modResults <<<");
     return config;
   });
 };
