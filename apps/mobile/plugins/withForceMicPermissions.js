@@ -1,4 +1,4 @@
-const { withDangerousMod } = require("@expo/config-plugins");
+const { withFinalizedMod } = require("@expo/config-plugins");
 const fs = require("fs");
 const path = require("path");
 
@@ -25,13 +25,19 @@ const path = require("path");
  *      with expo-image-picker's "microphonePermission": false) was still
  *      clobbering just that one key after this mod ran.
  *
- * Rather than keep relying on mod-ordering semantics between plugins,
- * this uses withDangerousMod, which runs in its own final pass *after*
- * all the regular mods.ios.infoPlist chain has already been written to
- * disk. It reads the real Info.plist file the build will actually use,
- * patches the keys in with a plain string replace/insert, and writes it
- * straight back. Nothing that runs earlier in the pipeline can undo this,
- * because nothing else runs after it.
+ * Third attempt: this first tried withDangerousMod, on the assumption
+ * that "dangerous" mods run last. They don't -- confirmed directly by
+ * reading @expo/config-plugins' own mod-compiler source: dangerous mods
+ * are sorted to run *first* (priority -2/-1), specifically so they can
+ * prep things before the typed mods (ios.infoPlist, etc.) run and do
+ * their own read-modify-write of Info.plist afterward, undoing the
+ * dangerous mod's patch. The correct API for "run after literally
+ * everything else" is withFinalizedMod (priority 1, sorted last) --
+ * confirmed in the same source file. This reads the real Info.plist file
+ * the build will actually use, patches the keys in with a plain string
+ * replace/insert, and writes it straight back, after every other mod
+ * (including whatever was stripping the microphone key before) has
+ * already run.
  */
 function setPlistString(xml, key, value) {
   const existing = new RegExp(`(<key>${key}</key>\\s*<string>)[^<]*(</string>)`);
@@ -45,7 +51,7 @@ function setPlistString(xml, key, value) {
 }
 
 module.exports = function withForceMicPermissions(config) {
-  return withDangerousMod(config, [
+  return withFinalizedMod(config, [
     "ios",
     async (config) => {
       const infoPlistPath = path.join(
@@ -68,7 +74,7 @@ module.exports = function withForceMicPermissions(config) {
       fs.writeFileSync(infoPlistPath, contents);
 
       console.log(
-        ">>> withForceMicPermissions.js: patched Info.plist directly on disk (dangerous mod, final pass) <<<"
+        ">>> withForceMicPermissions.js: patched Info.plist directly on disk (finalized mod, true final pass) <<<"
       );
 
       return config;
