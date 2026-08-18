@@ -1,6 +1,7 @@
-import { useCallback, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
+  Animated,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -13,10 +14,13 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
+import * as Speech from "expo-speech";
+import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from "expo-speech-recognition";
+import { SymbolView } from "expo-symbols";
 import { useHeaderHeight } from "expo-router/react-navigation";
 import { askCopilot, getSignedUrl, type ToolCall } from "../../lib/copilot";
 import { fmtRupee } from "@mmdi/shared/sign-estimator/calc";
-import { vibrant, type VibrantTheme } from "../../theme/vibrant";
+import { vibrant, fonts, type VibrantTheme } from "../../theme/vibrant";
 import { SoftCard } from "../../theme/components";
 
 /**
@@ -38,9 +42,37 @@ import { SoftCard } from "../../theme/components";
  * find_site_survey card silently never rendered because its result never
  * actually selected `relative_path` despite every comment/description saying
  * it did (fixed server-side alongside this).
+ *
+ * "make the copilot beautiful and can we add speech to it?" -- two changes
+ * this round, both scoped via a clarifying question (voice input AND
+ * output, per the answer):
+ *  - Visual pass: a real empty state (icon + suggestion chips instead of a
+ *    single line of grey text), a small avatar on bot replies, an animated
+ *    three-dot "typing" bubble instead of a bare spinner, and a redesigned
+ *    pill-shaped composer with the mic button built in.
+ *  - Voice input: expo-speech-recognition's mic button fills the draft
+ *    field with a live transcript as you talk (same "review, then tap
+ *    Send" flow as the system keyboard's own dictation button, just more
+ *    discoverable/prominent here) -- doesn't auto-send, so a garbled
+ *    transcription can still be edited or discarded.
+ *  - Voice output: expo-speech reads a reply aloud on demand via a small
+ *    speaker icon on each bot bubble -- NOT auto-played on arrival, since
+ *    that would be presumptive/disruptive in a shared or quiet space;
+ *    the user opts in per message.
+ *  - Both are new native modules (not pure JS), so this needs a full
+ *    rebuild, not just a JS bundle -- see app.json's new
+ *    "expo-speech-recognition" plugin entry (mic + speech-recognition
+ *    Info.plist strings) and package.json/package-lock.json.
  */
 
 const MAX_CARDS_PER_CALL = 4;
+
+const SUGGESTIONS = [
+  "Find a site survey",
+  "What's my job order status?",
+  "Show this month's sales",
+  "Look up a rate card item",
+];
 
 // ---- Row shapes, matching each tool's real `result` shape ----
 
@@ -212,18 +244,41 @@ interface Turn {
   cardGroups?: CardGroup[];
 }
 
+// Three dots that pulse in sequence -- shown instead of a bare spinner
+// while waiting for a reply, styled like a normal bot bubble so it reads
+// as "Copilot is typing" rather than a generic loading state.
+function TypingDots({ t }: { t: VibrantTheme }) {
+  const s = styles(t);
+  const anims = useRef([new Animated.Value(0.3), new Animated.Value(0.3), new Animated.Value(0.3)]).current;
+
+  useEffect(() => {
+    const loops = anims.map((v, i) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(i * 150),
+          Animated.timing(v, { toValue: 1, duration: 350, useNativeDriver: true }),
+          Animated.timing(v, { toValue: 0.3, duration: 350, useNativeDriver: true }),
+          Animated.delay((2 - i) * 150),
+        ])
+      )
+    );
+    loops.forEach((l) => l.start());
+    return () => loops.forEach((l) => l.stop());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <View style={[s.botBubble, s.typingBubble]}>
+      {anims.map((v, i) => (
+        <Animated.View key={i} style={[s.typingDot, { opacity: v }]} />
+      ))}
+    </View>
+  );
+}
+
 export default function CopilotScreen() {
   const t = vibrant;
   const s = styles(t);
-
-  const [turns, setTurns] = useState<Turn[]>([]);
-  const [draft, setDraft] = useState("");
-  const [busy, setBusy] = useState(false);
-  // Keyed by relative_path (the one field every survey row actually has and
-  // is guaranteed unique) -- NOT an `id`, which this table's select doesn't
-  // even return.
-  const [opening, setOpening] = useState<string | null>(null);
-  const listRef = useRef<FlatList<Turn>>(null);
   // Same fix as estimator.tsx/report/[id].tsx's own header-height note:
   // without this, KeyboardAvoidingView's "padding" behavior on iOS
   // doesn't account for this screen's native header, so it overshoots and
@@ -232,8 +287,68 @@ export default function CopilotScreen() {
   // to type".
   const headerHeight = useHeaderHeight();
 
-  const send = useCallback(async () => {
-    const text = draft.trim();
+  const [turns, setTurns] = useState<Turn[]>([]);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  // Keyed by relative_path (the one field every survey row actually has and
+  // is guaranteed unique) -- NOT an `id`, which this table's select doesn't
+  // even return.
+  const [opening, setOpening] = useState<string | null>(null);
+  const [listening, setListening] = useState(false);
+  const [micError, setMicError] = useState<string | null>(null);
+  const [speakingIndex, setSpeakingIndex] = useState<number | null>(null);
+  const listRef = useRef<FlatList<Turn>>(null);
+
+  // Voice input -- fills the draft as you talk, same review-then-Send flow
+  // as the system keyboard's own dictation button (doesn't auto-send).
+  useSpeechRecognitionEvent("result", (event) => {
+    const transcript = event.results[0]?.transcript;
+    if (transcript) setDraft(transcript);
+  });
+  useSpeechRecognitionEvent("end", () => setListening(false));
+  useSpeechRecognitionEvent("error", (event) => {
+    setListening(false);
+    if (event.error !== "no-speech" && event.error !== "aborted") {
+      setMicError(event.message || "Couldn't hear that -- try again.");
+    }
+  });
+
+  const toggleListening = useCallback(async () => {
+    setMicError(null);
+    if (listening) {
+      ExpoSpeechRecognitionModule.stop();
+      return;
+    }
+    const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+    if (!perm.granted) {
+      setMicError("Microphone/speech access is off -- enable it in Settings to ask by voice.");
+      return;
+    }
+    setDraft("");
+    setListening(true);
+    ExpoSpeechRecognitionModule.start({ lang: "en-US", interimResults: true, continuous: false, addsPunctuation: true });
+  }, [listening]);
+
+  // Voice output -- read a single reply aloud on demand (never auto-played
+  // on arrival, see file header note). Tapping the same bubble's speaker
+  // again stops it; tapping a different one switches to that reply.
+  const toggleSpeak = useCallback((index: number, text: string) => {
+    if (speakingIndex === index) {
+      Speech.stop();
+      setSpeakingIndex(null);
+      return;
+    }
+    Speech.stop();
+    setSpeakingIndex(index);
+    Speech.speak(text, {
+      onDone: () => setSpeakingIndex(null),
+      onStopped: () => setSpeakingIndex(null),
+      onError: () => setSpeakingIndex(null),
+    });
+  }, [speakingIndex]);
+
+  const send = useCallback(async (overrideText?: string) => {
+    const text = (overrideText ?? draft).trim();
     if (!text || busy) return;
 
     const history: Turn[] = [...turns, { role: "user", content: text }];
@@ -280,8 +395,23 @@ export default function CopilotScreen() {
         keyExtractor={(_, i) => String(i)}
         contentContainerStyle={s.list}
         contentInsetAdjustmentBehavior="automatic"
-        ListEmptyComponent={<Text style={s.empty}>Ask about jobs, surveys, rates, or documents.</Text>}
-        renderItem={({ item }) => (
+        ListEmptyComponent={
+          <View style={s.emptyWrap}>
+            <View style={s.emptyIconWrap}>
+              <SymbolView name="sparkles" tintColor={t.primary} size={28} />
+            </View>
+            <Text style={s.emptyTitle}>Ask Copilot</Text>
+            <Text style={s.empty}>Jobs, surveys, rates, documents — type or tap the mic.</Text>
+            <View style={s.suggestionWrap}>
+              {SUGGESTIONS.map((sug) => (
+                <Pressable key={sug} style={s.suggestionChip} onPress={() => setDraft(sug)}>
+                  <Text style={s.suggestionText}>{sug}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        }
+        renderItem={({ item, index }) => (
           <View>
             {item.role === "user" ? (
               <LinearGradient
@@ -293,8 +423,27 @@ export default function CopilotScreen() {
                 <Text style={s.userText}>{item.content}</Text>
               </LinearGradient>
             ) : (
-              <View style={s.botBubble}>
-                <Text style={s.botText}>{item.content}</Text>
+              <View style={s.botRow}>
+                <View style={s.botAvatar}>
+                  <SymbolView name="sparkles" tintColor={t.primary} size={14} />
+                </View>
+                <View style={{ flex: 1, gap: 4 }}>
+                  <View style={s.botBubble}>
+                    <Text style={s.botText}>{item.content}</Text>
+                  </View>
+                  <Pressable
+                    style={s.speakBtn}
+                    onPress={() => toggleSpeak(index, item.content)}
+                    hitSlop={8}
+                  >
+                    <SymbolView
+                      name={speakingIndex === index ? "stop.circle.fill" : "speaker.wave.2"}
+                      tintColor={t.inkMuted}
+                      size={15}
+                    />
+                    <Text style={s.speakBtnText}>{speakingIndex === index ? "Stop" : "Listen"}</Text>
+                  </Pressable>
+                </View>
               </View>
             )}
             {item.cardGroups?.map((group) => {
@@ -311,19 +460,35 @@ export default function CopilotScreen() {
         )}
       />
 
-      {busy && <ActivityIndicator style={s.busy} color={t.primary} />}
+      {busy && (
+        <View style={s.typingRow}>
+          <View style={s.botAvatar}>
+            <SymbolView name="sparkles" tintColor={t.primary} size={14} />
+          </View>
+          <TypingDots t={t} />
+        </View>
+      )}
+
+      {micError ? <Text style={s.micErrorText}>{micError}</Text> : null}
 
       <View style={s.composer}>
+        <Pressable
+          onPress={toggleListening}
+          style={[s.micBtn, listening && s.micBtnActive]}
+          hitSlop={6}
+        >
+          <SymbolView name={listening ? "waveform" : "mic.fill"} tintColor={listening ? t.onGradient : t.inkSecondary} size={18} />
+        </Pressable>
         <TextInput
           style={s.input}
           value={draft}
           onChangeText={setDraft}
-          placeholder="Ask anything"
-          placeholderTextColor={t.inkMuted}
+          placeholder={listening ? "Listening…" : "Ask anything"}
+          placeholderTextColor={listening ? t.primary : t.inkMuted}
           multiline
-          onSubmitEditing={send}
+          onSubmitEditing={() => send()}
         />
-        <Pressable onPress={send} disabled={!draft.trim() || busy} style={[s.sendBtnWrap, (!draft.trim() || busy) && { opacity: 0.4 }]}>
+        <Pressable onPress={() => send()} disabled={!draft.trim() || busy} style={[s.sendBtnWrap, (!draft.trim() || busy) && { opacity: 0.4 }]}>
           <LinearGradient colors={t.gradientPrimary} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.sendBtn}>
             <Text style={s.sendIcon}>↑</Text>
           </LinearGradient>
@@ -336,16 +501,53 @@ export default function CopilotScreen() {
 const styles = (t: VibrantTheme) =>
   StyleSheet.create({
     screen: { flex: 1, backgroundColor: t.surface },
-    list: { padding: 16, gap: 10 },
-    empty: { textAlign: "center", padding: 32, fontSize: 15, color: t.inkMuted },
+    list: { padding: 16, gap: 10, flexGrow: 1 },
+
+    emptyWrap: { flex: 1, alignItems: "center", justifyContent: "center", paddingTop: 60, paddingHorizontal: 24, gap: 6 },
+    emptyIconWrap: {
+      width: 56, height: 56, borderRadius: 28, backgroundColor: t.primaryTint,
+      alignItems: "center", justifyContent: "center", marginBottom: 6,
+    },
+    emptyTitle: { fontSize: 19, fontFamily: fonts.bold, color: t.ink },
+    empty: { textAlign: "center", fontSize: 14, color: t.inkMuted, marginBottom: 14 },
+    suggestionWrap: { flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 8 },
+    suggestionChip: {
+      paddingVertical: 8, paddingHorizontal: 14, borderRadius: 18, backgroundColor: t.surfaceRaised,
+      shadowColor: "#3D2E6B", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.07, shadowRadius: 6, elevation: 2,
+    },
+    suggestionText: { fontSize: 13, fontFamily: fonts.medium, color: t.ink },
+
     userBubble: { alignSelf: "flex-end", maxWidth: "80%", borderRadius: 22, borderBottomRightRadius: 6, paddingVertical: 11, paddingHorizontal: 16 },
-    botBubble: { alignSelf: "flex-start", maxWidth: "88%", backgroundColor: t.surfaceRaised, borderRadius: 22, borderBottomLeftRadius: 6, paddingVertical: 11, paddingHorizontal: 16, shadowColor: "#3D2E6B", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.08, shadowRadius: 8, elevation: 2 },
     userText: { fontSize: 17, color: t.onGradient },
+
+    botRow: { flexDirection: "row", alignItems: "flex-end", gap: 8, maxWidth: "92%" },
+    botAvatar: {
+      width: 26, height: 26, borderRadius: 13, backgroundColor: t.primaryTint,
+      alignItems: "center", justifyContent: "center", marginBottom: 2,
+    },
+    botBubble: { alignSelf: "flex-start", backgroundColor: t.surfaceRaised, borderRadius: 22, borderBottomLeftRadius: 6, paddingVertical: 11, paddingHorizontal: 16, shadowColor: "#3D2E6B", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.08, shadowRadius: 8, elevation: 2 },
     botText: { fontSize: 17, color: t.ink },
-    cardGroup: { alignSelf: "flex-start", width: "88%", gap: 8, marginTop: 6 },
+    speakBtn: { flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start", paddingHorizontal: 4, paddingVertical: 2 },
+    speakBtnText: { fontSize: 12, fontFamily: fonts.medium, color: t.inkMuted },
+
+    cardGroup: { alignSelf: "flex-start", width: "88%", gap: 8, marginTop: 6, marginLeft: 34 },
     moreLine: { fontSize: 13, color: t.inkMuted, paddingHorizontal: 4 },
-    busy: { paddingBottom: 8 },
-    composer: { flexDirection: "row", alignItems: "flex-end", gap: 10, padding: 12, backgroundColor: t.surfaceRaised, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.line },
+
+    typingRow: { flexDirection: "row", alignItems: "flex-end", gap: 8, paddingHorizontal: 16, paddingBottom: 8 },
+    typingBubble: { flexDirection: "row", gap: 5, alignItems: "center", paddingVertical: 14 },
+    typingDot: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: t.inkMuted },
+
+    micErrorText: { fontSize: 12, color: t.danger, textAlign: "center", paddingHorizontal: 16, paddingBottom: 4 },
+
+    composer: {
+      flexDirection: "row", alignItems: "flex-end", gap: 8, padding: 10,
+      backgroundColor: t.surfaceRaised, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.line,
+    },
+    micBtn: {
+      width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center",
+      backgroundColor: t.surfaceSunken, marginBottom: 2,
+    },
+    micBtnActive: { backgroundColor: t.primary },
     input: { flex: 1, minHeight: 44, maxHeight: 120, borderRadius: 22, backgroundColor: t.surfaceSunken, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12, fontSize: 17, color: t.ink },
     sendBtnWrap: { borderRadius: 22, shadowColor: "#3D2E6B", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 3 },
     sendBtn: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },

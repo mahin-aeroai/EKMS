@@ -48,6 +48,13 @@
           "photosPermission": "MMDI ONE lets you attach photos from your library to your installation report.",
           "microphonePermission": false
         }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "MMDI ONE uses your microphone so you can ask Copilot questions by voice.",
+          "speechRecognitionPermission": "MMDI ONE uses speech recognition to turn your voice into text for Copilot."
+        }
       ]
     ],
     "experiments": {
