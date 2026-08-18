@@ -53,16 +53,16 @@ export default function TabLayout() {
         // inkMuted, which is far too dark to read on this background.
         tabBarActiveTintColor: t.primary,
         tabBarInactiveTintColor: t.tabBarInactive,
-        // "use Lora serif font with very small size" -- applies to every
-        // tab's label via screenOptions rather than per-Tabs.Screen.
-        tabBarLabelStyle: { fontFamily: fonts.serif, fontSize: 10 },
+        // "still the fonts erantic" -- serif dropped app-wide (see
+        // theme/vibrant.ts), clean Roboto everywhere including tab labels.
+        tabBarLabelStyle: { fontFamily: fonts.medium, fontSize: 10 },
         // Large titles are a native-stack-only feature (UINavigationController);
         // Tabs' header is a plain JS-drawn @react-navigation/elements Header
         // with no equivalent -- see the NativeTabs note above for the real
         // way to get native tab-bar/header behaviour.
         headerStyle: { backgroundColor: t.surface },
         headerTintColor: t.ink,
-        headerTitleStyle: { fontFamily: fonts.serifBold, fontSize: 16 },
+        headerTitleStyle: { fontFamily: fonts.bold, fontSize: 16 },
         tabBarStyle: { backgroundColor: t.tabBarBg, borderTopColor: t.tabBarBg },
       }}
     >

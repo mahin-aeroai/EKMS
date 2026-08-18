@@ -5,7 +5,7 @@ import { SymbolView } from "expo-symbols";
 import { supabase } from "../../lib/supabase";
 import { useSession } from "../../context/auth";
 import { listDrafts } from "../../lib/installationReports/draftStore";
-import { vibrant, fonts, type VibrantTheme } from "../../theme/vibrant";
+import { vibrant, fonts, sectionLabelStyle, type VibrantTheme } from "../../theme/vibrant";
 import { GradientCard, SoftCard } from "../../theme/components";
 
 /**
@@ -250,7 +250,8 @@ const styles = (t: VibrantTheme) =>
     greetRow: { flexDirection: "row", alignItems: "center", gap: 12 },
     // "font headr can be little smaller and gap can be increased slightly"
     // -- shaved further and given more breathing room from what follows.
-    greeting: { fontSize: 16, fontFamily: fonts.serifBold, color: t.ink },
+    // "still the fonts erantic" -- serif dropped, clean bold sans instead.
+    greeting: { fontSize: 17, fontFamily: fonts.bold, color: t.ink },
     subGreeting: { fontSize: 13, color: t.inkSecondary, marginTop: -4 },
     logo: { width: 40, height: 40, borderRadius: 10 },
 
@@ -268,7 +269,9 @@ const styles = (t: VibrantTheme) =>
     statValue: { fontSize: 24, fontWeight: "700", color: t.ink },
     statLabel: { fontSize: 12, color: t.inkSecondary },
 
-    sectionTitle: { fontSize: 13, fontFamily: fonts.serifBold, color: t.ink, marginTop: 4 },
+    // Matches the reference apps' small uppercase-tracked "FOR YOU" style
+    // section labels -- see theme/vibrant.ts's sectionLabelStyle().
+    sectionTitle: { ...sectionLabelStyle(t), marginTop: 4 },
 
     grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
     gridItem: { flexBasis: "47%", flexGrow: 1 },

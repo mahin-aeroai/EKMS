@@ -172,7 +172,7 @@ export default function SurveysScreen() {
 const styles = (t: VibrantTheme) =>
   StyleSheet.create({
     screen: { flex: 1, backgroundColor: t.surface },
-    heading: { fontSize: 19, fontFamily: fonts.serifBold, color: t.ink, marginHorizontal: 16, marginTop: 8 },
+    heading: { fontSize: 18, fontFamily: fonts.bold, color: t.ink, marginHorizontal: 16, marginTop: 8 },
     searchWrap: {
       flexDirection: "row",
       alignItems: "center",
@@ -196,7 +196,7 @@ const styles = (t: VibrantTheme) =>
       width: 64, height: 64, borderRadius: 32, backgroundColor: t.primaryTint,
       alignItems: "center", justifyContent: "center", marginBottom: 4,
     },
-    promptTitle: { fontSize: 15, fontFamily: fonts.serifBold, color: t.ink },
+    promptTitle: { fontSize: 15, fontFamily: fonts.bold, color: t.ink },
     promptText: { fontSize: 14, color: t.inkSecondary, textAlign: "center", maxWidth: 260 },
 
     resultCount: { fontSize: 13, fontWeight: "600", color: t.inkSecondary, marginBottom: 2 },

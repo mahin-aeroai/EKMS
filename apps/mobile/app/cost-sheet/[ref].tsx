@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { vibrant, fonts, type VibrantTheme } from "../../theme/vibrant";
+import { vibrant, fonts, sectionLabelStyle, type VibrantTheme } from "../../theme/vibrant";
 import { SoftCard, GradientCard, GradientButton } from "../../theme/components";
 import { fmtRupee } from "@mmdi/shared/sign-estimator/calc";
 import { supabase } from "../../lib/supabase";
@@ -203,7 +203,7 @@ const styles = (t: VibrantTheme) =>
 
     heroCard: { alignItems: "center", gap: 4, paddingVertical: 22 },
     heroRef: { fontSize: 12, fontFamily: fonts.medium, color: t.onGradient, opacity: 0.85 },
-    heroClient: { fontSize: 14, fontFamily: fonts.serifBold, color: t.onGradient, marginTop: 2 },
+    heroClient: { fontSize: 14, fontFamily: fonts.bold, color: t.onGradient, marginTop: 2 },
     heroValue: { fontSize: 30, fontFamily: fonts.bold, color: t.onGradient, marginTop: 6 },
     heroMargin: { fontSize: 12, fontFamily: fonts.regular, color: t.onGradient, opacity: 0.85 },
 
@@ -212,7 +212,7 @@ const styles = (t: VibrantTheme) =>
     metaLabel: { fontSize: 12, fontFamily: fonts.regular, color: t.inkSecondary },
     metaValue: { fontSize: 12, fontFamily: fonts.medium, color: t.ink, flexShrink: 1, textAlign: "right" },
 
-    sectionTitle: { fontSize: 12, fontFamily: fonts.serifBold, color: t.ink, marginTop: 2 },
+    sectionTitle: { ...sectionLabelStyle(t), marginTop: 2 },
     summaryCard: { padding: 12, gap: 0, overflow: "hidden" },
 
     row: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12, paddingVertical: 9, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.line },

@@ -87,22 +87,43 @@ export const vibrant: VibrantTheme = {
 /**
  * Roboto family names, loaded via @expo-google-fonts/roboto in
  * app/_layout.tsx -- "make th eofnts smaller roboto or suitable small
- * font" for the denser screens (Sign Costing, its pricing summary, the
- * installation report). Not applied to Home/Copilot/Surveys/Sales by Rep,
- * which weren't called out as cluttered and read fine on the platform
- * default.
+ * font", now used for every fontFamily in the app, headings included.
+ *
+ * "still the fonts erantic" + reference screenshots (CRED, a shopping
+ * app's product-detail sheet) -- those apps read as clean and consistent
+ * because they use ONE small sans throughout, not because they use a
+ * fancier font. This file previously also exported serif/serifBold
+ * (Lora, "use Lora serif font with very small size") applied to nav
+ * titles, card titles, and section labels all at once -- which is what
+ * was reading as inconsistent next to the references, not any one size
+ * or weight in isolation. Serif is gone now (see _layout.tsx -- Lora is
+ * no longer loaded at all); every screen that used serif/serifBold now
+ * uses `bold` for titles/emphasis and the SECTION_LABEL pattern below for
+ * section headers, matching the references' small uppercase-tracked
+ * "FOR YOU" / "YOUR REWARDS & BENEFITS" style labels.
  */
 export const fonts = {
   regular: "Roboto_400Regular",
   medium: "Roboto_500Medium",
   bold: "Roboto_700Bold",
-  // "use Lora serif font with very small size" -- headings/titles only
-  // (screen titles, section headers, tab names, the sign-in wordmark).
-  // Never used for dense body/numeric/label text, which stays Roboto for
-  // legibility at small sizes.
-  serif: "Lora_400Regular",
-  serifBold: "Lora_600SemiBold",
 } as const;
+
+/**
+ * The small uppercase-tracked muted label style used above every section
+ * in the CRED reference screenshots ("FOR YOU", "YOUR REWARDS &
+ * BENEFITS") -- report/[id].tsx's sectionTitle already matched this by
+ * chance; every other screen's section title now uses this same shape
+ * instead of each screen inventing its own heading style.
+ */
+export function sectionLabelStyle(t: VibrantTheme) {
+  return {
+    fontSize: 11,
+    fontFamily: fonts.bold,
+    color: t.inkMuted,
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.5,
+  };
+}
 
 /**
  * "drop down selction font should be smaller and more decorative with each

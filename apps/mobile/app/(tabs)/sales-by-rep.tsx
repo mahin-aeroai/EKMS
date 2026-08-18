@@ -482,7 +482,7 @@ const styles = (t: VibrantTheme) =>
     // each line with slighly colored" -- thin colored left rule per row.
     modalOption: { minHeight: 44, justifyContent: "center", paddingHorizontal: 12, paddingVertical: 10, borderRadius: radius.md, borderLeftWidth: 3, marginVertical: 1 },
     modalOptionActive: { backgroundColor: t.primaryTint },
-    modalOptionText: { fontSize: 13, fontFamily: fonts.serif, color: t.ink },
+    modalOptionText: { fontSize: 13, fontFamily: fonts.regular, color: t.ink },
     modalEmpty: { padding: 24, textAlign: "center", color: t.inkMuted, fontSize: 14 },
 
     // Customer transaction-detail sheet.

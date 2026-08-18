@@ -636,7 +636,11 @@ const styles = (t: VibrantTheme) =>
     contentInner: { padding: 16, gap: 20, paddingBottom: 32 },
 
     section: { gap: 16, padding: 18 },
-    sectionTitle: { fontSize: 11, fontFamily: fonts.serifBold, color: t.inkMuted, textTransform: "uppercase", letterSpacing: 0.4 },
+    // "still the fonts erantic" -- this was already the target pattern
+    // (small uppercase-tracked muted label, see theme/vibrant.ts's
+    // sectionLabelStyle, now used the same way everywhere) except for the
+    // serif font family, swapped to bold Roboto like every other screen.
+    sectionTitle: { fontSize: 11, fontFamily: fonts.bold, color: t.inkMuted, textTransform: "uppercase", letterSpacing: 0.4 },
 
     field: { gap: 6 },
     label: { fontSize: 12, fontFamily: fonts.medium, color: t.inkSecondary },
@@ -684,7 +688,7 @@ const styles = (t: VibrantTheme) =>
     // each line with slighly colored" -- thin colored left rule per row.
     modalOption: { minHeight: 44, justifyContent: "center", paddingHorizontal: 16, paddingVertical: 12, borderRadius: radius.md, borderLeftWidth: 3, marginVertical: 1 },
     modalOptionActive: { backgroundColor: t.primaryTint },
-    modalOptionText: { fontSize: 13, fontFamily: fonts.serif, color: t.ink },
+    modalOptionText: { fontSize: 13, fontFamily: fonts.regular, color: t.ink },
     modalEmpty: { padding: 24, textAlign: "center", color: t.inkMuted, fontSize: 13 },
 
     photoSectionLabel: { fontSize: 11, fontFamily: fonts.bold, color: t.inkMuted, textTransform: "uppercase", letterSpacing: 0.4, marginTop: 4 },

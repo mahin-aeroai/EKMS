@@ -9,7 +9,6 @@ import {
   Roboto_500Medium,
   Roboto_700Bold,
 } from '@expo-google-fonts/roboto';
-import { Lora_400Regular, Lora_600SemiBold } from '@expo-google-fonts/lora';
 
 import { SessionProvider, useSession } from '@/context/auth';
 
@@ -27,19 +26,23 @@ SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   // Roboto, per "make th eofnts smaller roboto or suitable small font" --
-  // used across Sign Costing, the pricing summary, and the installation
-  // report, in place of the platform default (San Francisco on iOS),
-  // which was reading as visually noisy at the small sizes those dense
-  // screens need. Lora, per "use Lora serif font with very small size" --
-  // used for headings/titles only (Home greeting, section titles, tab
-  // names, the sign-in wordmark), never for dense body/numeric text.
+  // used app-wide, in place of the platform default (San Francisco on
+  // iOS), which was reading as visually noisy at the small sizes the
+  // denser screens need.
+  //
+  // "still the fonts erantic" + reference screenshots (CRED-style: one
+  // clean small sans throughout, no serif) -- Lora was dropped entirely
+  // per that round. It had been layered onto nav titles, card titles, and
+  // section labels all at once, which read as inconsistent/heavier next
+  // to the references rather than as a deliberate accent. See
+  // theme/vibrant.ts's `fonts` export -- serif/serifBold no longer exist,
+  // every fontFamily in the app is now one of the three Roboto weights
+  // below.
   const [loaded, error] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
     Roboto_400Regular,
     Roboto_500Medium,
     Roboto_700Bold,
-    Lora_400Regular,
-    Lora_600SemiBold,
   });
 
   // Expo Router uses Error Boundaries to catch errors in the navigation tree.

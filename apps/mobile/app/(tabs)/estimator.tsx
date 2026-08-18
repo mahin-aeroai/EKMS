@@ -17,7 +17,7 @@ import { useRouter } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { radius } from "@mmdi/shared/theme";
-import { vibrant, fonts, optionAccent, type VibrantTheme } from "../../theme/vibrant";
+import { vibrant, fonts, optionAccent, sectionLabelStyle, type VibrantTheme } from "../../theme/vibrant";
 import { SoftCard, GradientCard, GradientButton } from "../../theme/components";
 import type {
   SignProfileRow, SignLedModuleRow, SignLedBarRow, SignLedDriverRow,
@@ -1135,7 +1135,9 @@ const styles = (t: VibrantTheme) =>
     contentInner: { padding: 16, paddingBottom: 56, gap: 20 },
     stepGap: { gap: 20 },
 
-    sectionTitle: { fontSize: 12, fontFamily: fonts.serifBold, color: t.ink, marginTop: 6, marginBottom: 2 },
+    // "still the fonts erantic" -- matches the reference apps' small
+    // uppercase-tracked "FOR YOU" style section labels.
+    sectionTitle: { ...sectionLabelStyle(t), marginTop: 6, marginBottom: 2 },
     sectionLabel: { fontSize: 12, fontFamily: fonts.medium, color: t.inkSecondary, textTransform: "uppercase", letterSpacing: 0.3 },
     helperText: { fontSize: 12, fontFamily: fonts.regular, color: t.inkSecondary },
     totalLine: { fontSize: 14, fontFamily: fonts.bold, color: t.ink },
@@ -1180,7 +1182,7 @@ const styles = (t: VibrantTheme) =>
     // (color cycles via optionAccent) instead of flat uniform text.
     modalOption: { minHeight: 44, justifyContent: "center", paddingHorizontal: 12, paddingVertical: 10, borderRadius: radius.md, borderLeftWidth: 3, marginVertical: 1 },
     modalOptionActive: { backgroundColor: t.primaryTint },
-    modalOptionText: { fontSize: 13, fontFamily: fonts.serif, color: t.ink },
+    modalOptionText: { fontSize: 13, fontFamily: fonts.regular, color: t.ink },
     modalEmpty: { padding: 24, textAlign: "center", color: t.inkMuted, fontSize: 13 },
 
     switchRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", minHeight: 44, gap: 12 },
