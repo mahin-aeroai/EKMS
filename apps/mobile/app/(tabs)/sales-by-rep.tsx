@@ -84,6 +84,28 @@ interface CustomerTransaction {
   item_description: string | null;
   quantity: number | null;
   rate: number | null;
+  // "lets make it like typical invocie view with ... campaign" --
+  // sales_transactions has no campaign column, location is the closest
+  // real field available, used as its stand-in on the Bill screen.
+  location: string | null;
+}
+
+// "lets make it like typical invocie view with header, delivery address,
+// inv number, date, campaign..." -- sales_transactions has no
+// invoice_number column (confirmed against every query of this table in
+// the repo, web included), so there's no real invoice number to show.
+// This derives a short, STABLE reference instead (same customer + same
+// date always produces the same ref), clearly a reference code rather
+// than something that looks like a real accounting invoice number.
+function billRef(customerId: string | null, customerName: string, date: string | null): string {
+  const seed = (customerId || customerName) + "|" + (date ?? "");
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+  const code = hash.toString(36).toUpperCase().padStart(6, "0").slice(-6);
+  const datePart = date ? date.replace(/-/g, "").slice(2) : "000000";
+  return `BILL-${code}-${datePart}`;
 }
 
 // "the detail we added in previous section is sufficient some of them
@@ -130,6 +152,9 @@ interface CustomerBreakdownRow {
   // customer_id, see the batch lookup in runReport() below. null until
   // that lookup resolves, or if this customer_id has no customers match.
   address: string | null;
+  // "GST part" on the Bill screen -- customers.gstin, same batch lookup as
+  // address (see runReport() below). null if this customer has none on file.
+  gstin: string | null;
   transaction_count: number;
   total_taxable_value: number;
   // Raw per-line data (used for CSV export's line-item fidelity and to
@@ -246,6 +271,7 @@ export default function SalesByRepScreen() {
         item_description: string | null;
         quantity: number | null;
         rate: number | null;
+        location: string | null;
       }>(
         () =>
           withFilters(
@@ -255,7 +281,7 @@ export default function SalesByRepScreen() {
           withFilters(
             supabase
               .from("sales_transactions")
-              .select("customer_id, customer_name, taxable_value, invoice_date, item_description, quantity, rate")
+              .select("customer_id, customer_name, taxable_value, invoice_date, item_description, quantity, rate, location")
               .eq("sales_manager", selectedRep)
               .range(from, to)
           )
@@ -272,21 +298,25 @@ export default function SalesByRepScreen() {
           item_description: r.item_description,
           quantity: r.quantity,
           rate: r.rate,
+          location: r.location,
         });
         groups.set(name, g);
       }
 
-      // "customer name make it more visible with address" -- a second,
-      // small batch query rather than joining in the main paginated fetch
-      // above (that fetch can be thousands of rows across many repeated
-      // customers; a join would repeat the same address string on every
-      // one of them for no benefit). One row per distinct customer here.
+      // "customer name make it more visible with address" + "GST part" --
+      // a second, small batch query rather than joining in the main
+      // paginated fetch above (that fetch can be thousands of rows across
+      // many repeated customers; a join would repeat the same
+      // address/gstin string on every one of them for no benefit). One row
+      // per distinct customer here.
       const customerIds = Array.from(new Set([...groups.values()].map((g) => g.customerId).filter((v): v is string => !!v)));
       const addressById = new Map<string, string | null>();
+      const gstinById = new Map<string, string | null>();
       if (customerIds.length > 0) {
-        const { data: customerRows } = await supabase.from("customers").select("id, address").in("id", customerIds);
-        for (const c of (customerRows as { id: string; address: string | null }[] | null) ?? []) {
+        const { data: customerRows } = await supabase.from("customers").select("id, address, gstin").in("id", customerIds);
+        for (const c of (customerRows as { id: string; address: string | null; gstin: string | null }[] | null) ?? []) {
           addressById.set(c.id, c.address);
+          gstinById.set(c.id, c.gstin);
         }
       }
 
@@ -295,6 +325,7 @@ export default function SalesByRepScreen() {
           customer_id: g.customerId,
           customer_name,
           address: g.customerId ? addressById.get(g.customerId) ?? null : null,
+          gstin: g.customerId ? gstinById.get(g.customerId) ?? null : null,
           transaction_count: g.count,
           total_taxable_value: g.total,
           transactions: g.transactions.sort((a, b) => (b.invoice_date ?? "").localeCompare(a.invoice_date ?? "")),
@@ -550,7 +581,10 @@ export default function SalesByRepScreen() {
                     params: {
                       customerName: detailCustomer.customer_name,
                       address: detailCustomer.address ?? "",
+                      gstin: detailCustomer.gstin ?? "",
                       date: bill.date ?? "",
+                      location: bill.lines.find((l) => l.location)?.location ?? "",
+                      ref: billRef(detailCustomer.customer_id, detailCustomer.customer_name, bill.date),
                       total: String(bill.total),
                       lines: JSON.stringify(bill.lines),
                     },
