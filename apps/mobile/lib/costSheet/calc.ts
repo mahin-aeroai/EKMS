@@ -191,31 +191,39 @@ export function computeCostSheet(
 //     Material Mark-up + Work Centre Costs + GP on Work Centre Costs +
 //     Ink Cost ... the raw material component is excluded from the GP
 //     calculation ... by default it should be charged more GP% like
-//     instead 50% we make it 100%." Material and ink are both recovered
-//     at cost (no GP on either) -- GP% applies ONLY to work centre cost,
-//     added on top of it. Default 100% -> price = material + ink +
-//     2x work centre cost, which typically lands the overall total
-//     somewhere around 1.5x depending on how much of the job's cost is
-//     raw material vs. processing (the "1.5X" the methodology mentions
-//     is that rough real-world outcome, not a fixed multiplier baked
-//     into the formula itself).
+//     instead 50% we make it 100%." The methodology's own words listed
+//     Ink Cost as its own line, which read as "recovered at cost, no
+//     GP" -- but "we should take ink cost component also in value
+//     addition GP" corrects that: ink is a processing input (bought in
+//     for that specific job, not stocked/marked-up raw material the way
+//     the backing sheet or vinyl is), so it belongs in the GP-bearing
+//     "value added" bucket alongside work centre cost, not the
+//     recovered-at-cost raw material bucket. Only raw material (the
+//     literal substrate/backing/etc. -- computeCostSheet's
+//     materialCostRecent/Avg MINUS inkCostRecent/Avg) is excluded from
+//     GP now. Default 100% -> price = material + 2x (ink + work centre
+//     cost), landing the overall total somewhere around 1.5x total cost
+//     depending on how much of the job is raw material vs. ink +
+//     processing (the "1.5X" the methodology mentions is that rough
+//     real-world outcome, not a fixed multiplier baked into the formula
+//     itself).
 export type GpMethod = "total_cost" | "services_only";
 
 /** Traditional method's default -- GP on the full cost base. */
 export const TRADITIONAL_DEFAULT_GP_PCT = 50;
-/** Value Addition method's default -- GP only on work centre cost, so it
- * needs to run higher to recover a comparable margin overall. */
+/** Value Addition method's default -- GP only on ink + work centre cost,
+ * so it needs to run higher to recover a comparable margin overall. */
 export const VALUE_ADDITION_DEFAULT_GP_PCT = 100;
 
 /**
  * Suggested selling amount (₹, NOT per-sqft -- divide by sqft yourself)
  * under the given method's cost-plus markup formula. `materialAtCost`
- * should exclude ink (see inkCostRecent/Avg on CostSheetResult);
- * `inkCost` and `workCentreCost` are passed separately since Value
- * Addition treats them differently (ink recovered at cost, GP only on
- * work centre cost) -- Traditional applies the same GP% to all three
- * either way, so the split doesn't change its result, just lets one
- * function serve both methods with one clear contract.
+ * should exclude ink (see inkCostRecent/Avg on CostSheetResult) --
+ * Traditional applies the same GP% to material, ink, and work centre
+ * cost alike, so the split doesn't change its result, just lets one
+ * function serve both methods with one clear contract. Value Addition
+ * applies GP% to ink + work centre cost only; raw material is recovered
+ * at cost.
  */
 export function suggestSellingPrice(
   materialAtCost: number,
@@ -228,5 +236,5 @@ export function suggestSellingPrice(
     const totalCost = materialAtCost + inkCost + workCentreCost;
     return totalCost * (1 + targetGpPct);
   }
-  return materialAtCost + inkCost + workCentreCost * (1 + targetGpPct);
+  return materialAtCost + (inkCost + workCentreCost) * (1 + targetGpPct);
 }
