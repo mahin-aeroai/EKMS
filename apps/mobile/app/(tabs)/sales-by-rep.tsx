@@ -970,14 +970,21 @@ const styles = (t: VibrantTheme) =>
     datePickerSheet: { backgroundColor: t.surfaceRaised, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, paddingBottom: 24, minHeight: 400 },
     datePicker: { alignSelf: "stretch", height: 340 },
 
+    // "total sales block looks pretty dominent" -- was flex:1.2 (wider
+    // than its two siblings) with more padding and a bigger value than
+    // either, on top of already being the only solid-filled card in the
+    // row; all three together made it read as commanding the screen
+    // rather than sitting alongside Customers/Transactions. Same width
+    // now (flex:1), tighter padding, smaller value -- still the visually
+    // distinct "hero" figure, just not an oversized one.
     statRow: { flexDirection: "row", gap: 8, padding: 16, paddingBottom: 8 },
-    statCardHero: { flex: 1.2, justifyContent: "center", gap: 4 },
+    statCardHero: { flex: 1, justifyContent: "center", gap: 4 },
     statCardHeroFlat: {
-      backgroundColor: t.inkMuted, borderRadius: 16, padding: 14,
+      backgroundColor: t.inkMuted, borderRadius: 16, padding: 11,
       shadowColor: "#3D2E6B", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.1, shadowRadius: 16, elevation: 4,
     },
-    statLabelHero: { fontSize: 12, color: t.onGradient, opacity: 0.85 },
-    statValueHero: { fontSize: 22, fontWeight: "700", color: t.onGradient },
+    statLabelHero: { fontSize: 11, color: t.onGradient, opacity: 0.85 },
+    statValueHero: { fontSize: 18, fontWeight: "700", color: t.onGradient },
     statCardCol: { flex: 1, gap: 8 },
     statCard: { padding: 10, gap: 2 },
     statLabel: { fontSize: 11, color: t.inkSecondary },

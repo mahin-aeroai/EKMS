@@ -109,12 +109,29 @@ export default function TabLayout() {
       <Tabs.Screen
         name="cost-sheets"
         options={{
-          // "add cost sheet from tools to the menu too" -- new list screen
-          // (cost-sheets.tsx), the missing "browse what I've already
-          // generated" counterpart to Sign Costing's "Generate Cost Sheet"
-          // button, which previously had no way back to a past sheet.
+          // "in my previous chat i asked to add new module cost sheet but
+          // not sign costsheets. the cost sheet from tool from web app and
+          // which we build costing like attached screen" -- this tab was
+          // first built as a list of past Sign Costing runs (wrong --
+          // that's now sign-costing-history.tsx, still reachable from a
+          // link at the bottom of this screen). cost-sheets.tsx is now a
+          // real port of the web app's Tools > Cost Sheet BOM+Work-Centre
+          // calculator: pick an FG Code/Template, enter job details, see a
+          // live cost breakdown computed from bom_templates/
+          // bom_template_lines/raw_materials/work_centre_rates.
           title: "Cost Sheets",
           tabBarIcon: ({ color }) => <SymbolView name="doc.text" tintColor={color} size={26} />,
+        }}
+      />
+      <Tabs.Screen
+        name="sign-costing-history"
+        options={{
+          title: "Sign Costing History",
+          // Not a primary tab -- reached via a link on the Cost Sheets
+          // calculator screen (see cost-sheets.tsx) or router.push
+          // directly. Same href:null treatment as Surveys/Basil
+          // Installations below.
+          href: null,
         }}
       />
       <Tabs.Screen

@@ -889,7 +889,13 @@ export default function EstimatorScreen() {
             <GradientButton label="Next" onPress={() => goStep(step + 1)} style={s.navBtnPrimaryWrap} />
           ) : (
             <GradientButton
-              label="Generate Cost Sheet"
+              // "egenrate cost shhet is soo big and can reduce font or make
+              // them 2 line or cut short the word" -- GradientButton is
+              // shared app-wide with mostly short labels ("Next", "Run
+              // report"), so shrinking its font size globally would be the
+              // wrong fix; shortening just this one label is the safe,
+              // targeted change.
+              label="Generate Sheet"
               onPress={generateCostSheet}
               loading={saving}
               style={s.navBtnPrimaryWrap}
