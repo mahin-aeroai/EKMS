@@ -667,10 +667,21 @@ export default function CostSheetToolScreen() {
                         screen rather than a separate black box. */}
                     <View style={s.calcBox}>
                       <Text style={s.calcTitle}>How this price was calculated (Recent)</Text>
+                      {/* "Ink cost shows as zero can we remove the line but
+                          in GP calculation it should be added in both GP
+                          versions" -- display-only change: most BOMs have
+                          no "Ink" category line, so this row was almost
+                          always a ₹0 line of pure noise. It's still
+                          folded into every total below exactly as before
+                          (Total Cost, Ink + Work Centre, the GP amount) --
+                          only the standalone row disappears, and only
+                          when there's truly nothing to show. */}
                       {gpMethod === "total_cost" ? (
                         <>
                           <Row t={t} small label="Raw Material (incl. wastage & markup)" value={fmtRupee(result.materialCostRecent - result.inkCostRecent)} />
-                          <Row t={t} small label="Ink Cost" value={fmtRupee(result.inkCostRecent)} />
+                          {result.inkCostRecent > 0 && (
+                            <Row t={t} small label="Ink Cost" value={fmtRupee(result.inkCostRecent)} />
+                          )}
                           <Row t={t} small label="Work Centre Cost" value={fmtRupee(result.totalProcessCost)} />
                           <Row t={t} small strong label="= Total Cost" value={fmtRupee(result.totalCostRecent)} />
                           <Row t={t} small label={`+ GP (${targetGpPct}% of Total Cost)`} value={fmtRupee(result.totalCostRecent * ((targetGpPct as number) / 100))} />
@@ -679,7 +690,9 @@ export default function CostSheetToolScreen() {
                       ) : (
                         <>
                           <Row t={t} small label="Raw Material (recovered at cost, no GP)" value={fmtRupee(result.materialCostRecent - result.inkCostRecent)} />
-                          <Row t={t} small label="Ink Cost" value={fmtRupee(result.inkCostRecent)} />
+                          {result.inkCostRecent > 0 && (
+                            <Row t={t} small label="Ink Cost" value={fmtRupee(result.inkCostRecent)} />
+                          )}
                           <Row t={t} small label="Work Centre Cost" value={fmtRupee(result.totalProcessCost)} />
                           <Row t={t} small strong label="= Ink + Work Centre (GP base)" value={fmtRupee(result.inkCostRecent + result.totalProcessCost)} />
                           <Row t={t} small label={`+ GP (${targetGpPct}% of Ink + Work Centre)`} value={fmtRupee((result.inkCostRecent + result.totalProcessCost) * ((targetGpPct as number) / 100))} />
