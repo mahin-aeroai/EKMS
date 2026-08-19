@@ -15,6 +15,7 @@ import { useRouter } from "expo-router";
 import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import { LinearGradient } from "expo-linear-gradient";
+import Svg, { Circle, G } from "react-native-svg";
 import { radius } from "@mmdi/shared/theme";
 import { vibrant, fonts, sectionLabelStyle, optionAccent, type VibrantTheme } from "../../theme/vibrant";
 import { SoftCard, GradientButton } from "../../theme/components";
@@ -264,10 +265,14 @@ function formatCrore(rupees: number): string {
  * enter them) or a cost/COGS field ever gets added, margin and
  * achievement charts are the natural next addition here.
  *
- * No charting library -- react-native-svg isn't a dependency and adding
- * one means another native rebuild. Every bar below is a plain View
- * (optionally with a LinearGradient fill, already a dependency), sized
- * with plain percentage heights/widths.
+ * "incorporate pie charts or bar charts and next generation charts" --
+ * react-native-svg is now a dependency (added this round -- needs
+ * `npx expo install react-native-svg` run once before the next rebuild,
+ * same as any other new native module) so the sales-mix section below
+ * can be a real ring/donut chart instead of another bar list. The trend
+ * and top-products/top-locations bars stay plain Views (optionally with
+ * a LinearGradient fill) -- no need to rebuild something that already
+ * reads clearly as a ranked bar list.
  */
 
 interface MonthValue {
@@ -343,6 +348,96 @@ function TrendChart({ t, data }: { t: VibrantTheme; data: MonthValue[] }) {
           <Text style={s.trendMonth}>{formatMonthLabel(d.month)}</Text>
         </View>
       ))}
+    </View>
+  );
+}
+
+// "incorporate pie charts or bar charts and next generation charts" --
+// a proportion-of-whole view (top 4 + "Others", so the ring always sums
+// to 100%) alongside the existing ranked bar breakdowns, not instead of
+// them: bars answer "which is biggest," a donut answers "how much of my
+// total does this represent." Built from the same buildBreakdown-style
+// aggregation, just capped at 4 explicit slices plus a rollup so the
+// ring stays readable instead of a pie fights-for-your-attention plate.
+const PIE_SLICE_LIMIT = 4;
+
+function buildPieBreakdown(rows: CustomerBreakdownRow[], pick: (t: CustomerTransaction) => string | null): LabelValue[] {
+  const full = buildBreakdownFull(rows, pick);
+  if (full.length <= PIE_SLICE_LIMIT + 1) return full;
+  const head = full.slice(0, PIE_SLICE_LIMIT);
+  const othersTotal = full.slice(PIE_SLICE_LIMIT).reduce((sum, d) => sum + d.value, 0);
+  return [...head, { label: "Others", value: othersTotal }];
+}
+
+function buildBreakdownFull(rows: CustomerBreakdownRow[], pick: (t: CustomerTransaction) => string | null): LabelValue[] {
+  const map = new Map<string, number>();
+  for (const row of rows) {
+    for (const txn of row.transactions) {
+      const raw = pick(txn);
+      const label = raw && raw.trim() ? raw.trim() : "Not recorded";
+      map.set(label, (map.get(label) ?? 0) + txn.taxable_value);
+    }
+  }
+  return Array.from(map.entries())
+    .map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value);
+}
+
+const DONUT_SIZE = 168;
+const DONUT_STROKE = 24;
+const DONUT_RADIUS = (DONUT_SIZE - DONUT_STROKE) / 2;
+const DONUT_CIRCUMFERENCE = 2 * Math.PI * DONUT_RADIUS;
+
+function DonutChart({ t, data }: { t: VibrantTheme; data: LabelValue[] }) {
+  const s = chartStyles(t);
+  if (data.length === 0) return <Text style={s.chartEmpty}>No data in this period.</Text>;
+  const total = data.reduce((sum, d) => sum + d.value, 0) || 1;
+  let cumulative = 0;
+  const segments = data.map((d, i) => {
+    const fraction = d.value / total;
+    const dashLength = Math.max(fraction * DONUT_CIRCUMFERENCE - 1.5, 0); // small gap between slices
+    const dashOffset = -cumulative * DONUT_CIRCUMFERENCE;
+    cumulative += fraction;
+    const color = d.label === "Others" ? t.lineStrong : optionAccent(t, i);
+    return { ...d, color, dashLength, dashOffset, pct: fraction * 100 };
+  });
+  return (
+    <View style={s.donutRow}>
+      <Svg width={DONUT_SIZE} height={DONUT_SIZE} viewBox={`0 0 ${DONUT_SIZE} ${DONUT_SIZE}`}>
+        <G rotation={-90} origin={`${DONUT_SIZE / 2}, ${DONUT_SIZE / 2}`}>
+          <Circle
+            cx={DONUT_SIZE / 2}
+            cy={DONUT_SIZE / 2}
+            r={DONUT_RADIUS}
+            stroke={t.surfaceSunken}
+            strokeWidth={DONUT_STROKE}
+            fill="none"
+          />
+          {segments.map((seg) => (
+            <Circle
+              key={seg.label}
+              cx={DONUT_SIZE / 2}
+              cy={DONUT_SIZE / 2}
+              r={DONUT_RADIUS}
+              stroke={seg.color}
+              strokeWidth={DONUT_STROKE}
+              strokeDasharray={`${seg.dashLength} ${DONUT_CIRCUMFERENCE}`}
+              strokeDashoffset={seg.dashOffset}
+              strokeLinecap="round"
+              fill="none"
+            />
+          ))}
+        </G>
+      </Svg>
+      <View style={s.donutLegend}>
+        {segments.map((seg) => (
+          <View key={seg.label} style={s.legendRow}>
+            <View style={[s.legendSwatch, { backgroundColor: seg.color }]} />
+            <Text style={s.legendLabel} numberOfLines={1}>{seg.label}</Text>
+            <Text style={s.legendPct}>{seg.pct.toFixed(0)}%</Text>
+          </View>
+        ))}
+      </View>
     </View>
   );
 }
@@ -602,149 +697,153 @@ export default function SalesByRepScreen() {
   const monthlyTrend = filteredRows ? buildMonthlyTrend(filteredRows) : [];
   const topItems = filteredRows ? buildBreakdown(filteredRows, (txn) => txn.item_description) : [];
   const topLocations = filteredRows ? buildBreakdown(filteredRows, (txn) => txn.location) : [];
+  const topItemsPie = filteredRows ? buildPieBreakdown(filteredRows, (txn) => txn.item_description) : [];
 
+  // "unfreeze the top panel" -- the rep/customer pickers, date range, Run
+  // report button, and the Total Sales/Customers/Transactions cards used
+  // to sit as fixed siblings ABOVE the FlatList, permanently eating the
+  // top of the screen no matter how far down you scrolled. They're now
+  // the FlatList's own ListHeaderComponent (same "everything scrolls
+  // through the one flex:1 FlatList" pattern already used for the charts
+  // below them), so the whole screen -- filters, stat cards, charts, and
+  // the customer list -- scrolls together and nothing stays pinned. The
+  // FlatList itself is now ALWAYS rendered (data: filteredRows ?? []) so
+  // the filters have somewhere to live even before Run report is pressed.
   return (
     <View style={s.screen}>
-      <View style={s.filters}>
-        <Pressable style={s.pickerField} onPress={() => setRepPickerOpen(true)}>
-          <Text style={selectedRep ? s.pickerText : s.pickerPlaceholder} numberOfLines={1}>
-            {selectedRep || (salesPeople === null ? "Loading…" : "Select a sales person")}
-          </Text>
-          <Text style={s.pickerChevron}>⌄</Text>
-        </Pressable>
+      <FlatList
+        data={filteredRows ?? []}
+        keyExtractor={(r) => r.customer_name}
+        contentInsetAdjustmentBehavior="automatic"
+        style={s.flatList}
+        contentContainerStyle={s.list}
+        ListHeaderComponent={
+          <>
+            <View style={s.filters}>
+              <Pressable style={s.pickerField} onPress={() => setRepPickerOpen(true)}>
+                <Text style={selectedRep ? s.pickerText : s.pickerPlaceholder} numberOfLines={1}>
+                  {selectedRep || (salesPeople === null ? "Loading…" : "Select a sales person")}
+                </Text>
+                <Text style={s.pickerChevron}>⌄</Text>
+              </Pressable>
 
-        <Pressable
-          style={[s.pickerField, !selectedRep && s.pickerFieldDisabled]}
-          onPress={() => selectedRep && setCustomerPickerOpen(true)}
-        >
-          <Text style={selectedCustomer ? s.pickerText : s.pickerPlaceholder} numberOfLines={1}>
-            {!selectedRep
-              ? "Select a sales person first"
-              : selectedCustomer || (customerNames === null ? "Loading…" : "All customers")}
-          </Text>
-          <Text style={s.pickerChevron}>⌄</Text>
-        </Pressable>
+              <Pressable
+                style={[s.pickerField, !selectedRep && s.pickerFieldDisabled]}
+                onPress={() => selectedRep && setCustomerPickerOpen(true)}
+              >
+                <Text style={selectedCustomer ? s.pickerText : s.pickerPlaceholder} numberOfLines={1}>
+                  {!selectedRep
+                    ? "Select a sales person first"
+                    : selectedCustomer || (customerNames === null ? "Loading…" : "All customers")}
+                </Text>
+                <Text style={s.pickerChevron}>⌄</Text>
+              </Pressable>
 
-        <View style={s.dateRow}>
-          <View style={s.dateField}>
-            <Text style={s.label}>From (optional)</Text>
-            <Pressable style={s.dateInput} onPress={() => setFromPickerOpen(true)}>
-              <Text style={dateFrom ? s.dateInputText : s.dateInputPlaceholder}>
-                {dateFrom ? formatDMY(dateFrom) : "DD/MM/YYYY"}
-              </Text>
-            </Pressable>
-          </View>
-          <View style={s.dateField}>
-            <Text style={s.label}>To (optional)</Text>
-            <Pressable style={s.dateInput} onPress={() => setToPickerOpen(true)}>
-              <Text style={dateTo ? s.dateInputText : s.dateInputPlaceholder}>
-                {dateTo ? formatDMY(dateTo) : "DD/MM/YYYY"}
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-
-        <GradientButton label="Run report" onPress={runReport} loading={loading} disabled={!selectedRep} />
-      </View>
-
-      {filteredRows !== null && (
-        <>
-          <View style={s.statRow}>
-            {/* "for grand total lets on use gradient lets use flat color
-                like: #8C98B0" -- same flat treatment as Sign Costing's
-                and Cost Sheet's grand-total cards. */}
-            <View style={[s.statCardHero, s.statCardHeroFlat]}>
-              <Text style={s.statLabelHero}>Total Sales</Text>
-              <Text style={s.statValueHero}>{formatCrore(totalSales)}</Text>
-            </View>
-            <View style={s.statCardCol}>
-              <SoftCard style={s.statCard}>
-                <Text style={s.statLabel}>Customers</Text>
-                <Text style={s.statValue}>{filteredRows.length}</Text>
-              </SoftCard>
-              <SoftCard style={s.statCard}>
-                <Text style={s.statLabel}>Transactions</Text>
-                <Text style={s.statValue}>{totalTxns.toLocaleString("en-IN")}</Text>
-              </SoftCard>
-            </View>
-          </View>
-
-          {filteredRows.length === 0 ? (
-            <Text style={s.empty}>
-              {selectedCustomer
-                ? `No sales found for ${selectedCustomer} (${selectedRep}) in this period.`
-                : `No sales found for ${selectedRep} in this period.`}
-            </Text>
-          ) : (
-            <FlatList
-              data={filteredRows}
-              keyExtractor={(r) => r.customer_name}
-              contentInsetAdjustmentBehavior="automatic"
-              // "in the page scroll is very small at bottom can't see and
-              // difficult to scroll" -- same root cause already fixed once
-              // in copilot.tsx this session: a FlatList with only
-              // contentContainerStyle and no style={flex:1} of its own
-              // doesn't reliably claim the space its siblings (the filter
-              // fields + stat row above) leave behind, so its actual
-              // scrollable viewport ends up shorter than the real
-              // available screen space.
-              style={s.flatList}
-              contentContainerStyle={s.list}
-              ListHeaderComponent={
-                <>
-                  {/* Charts live inside the FlatList's own header (not as
-                      fixed siblings above it) so they scroll together with
-                      the customer list through the one flex:1 FlatList --
-                      stacking more fixed content above the list is exactly
-                      what caused the "scroll is very small" bug this same
-                      round fixed. */}
-                  <Text style={[s.chartSectionTitle, { marginTop: 0 }]}>Monthly trend</Text>
-                  <SoftCard style={s.chartCard}>
-                    <TrendChart t={t} data={monthlyTrend} />
-                  </SoftCard>
-
-                  <Text style={s.chartSectionTitle}>Top products</Text>
-                  <SoftCard style={s.chartCard}>
-                    <BreakdownBars t={t} data={topItems} />
-                  </SoftCard>
-
-                  <Text style={s.chartSectionTitle}>Top locations</Text>
-                  <SoftCard style={s.chartCard}>
-                    <BreakdownBars t={t} data={topLocations} />
-                  </SoftCard>
-
-                  <Text style={s.chartSectionTitle}>Customers</Text>
-                  <Pressable style={s.exportBtn} onPress={exportCsv} disabled={exporting}>
-                    {exporting ? (
-                      <ActivityIndicator color={t.primary} />
-                    ) : (
-                      <Text style={s.exportBtnText}>Export {filteredRows.length} rows to CSV</Text>
-                    )}
+              <View style={s.dateRow}>
+                <View style={s.dateField}>
+                  <Text style={s.label}>From (optional)</Text>
+                  <Pressable style={s.dateInput} onPress={() => setFromPickerOpen(true)}>
+                    <Text style={dateFrom ? s.dateInputText : s.dateInputPlaceholder}>
+                      {dateFrom ? formatDMY(dateFrom) : "DD/MM/YYYY"}
+                    </Text>
                   </Pressable>
-                </>
-              }
-              renderItem={({ item }) => (
-                <Pressable onPress={() => setDetailCustomer(item)}>
-                  {({ pressed }) => (
-                    <SoftCard style={[s.row, pressed && { opacity: 0.7 }]}>
-                      <View style={s.rowText}>
-                        <Text style={s.rowTitle} numberOfLines={1}>{item.customer_name}</Text>
-                        <Text style={s.rowMeta}>
-                          {item.transaction_count} transaction{item.transaction_count === 1 ? "" : "s"}
-                        </Text>
-                      </View>
-                      <View style={s.rowRight}>
-                        <Text style={s.rowValue}>₹{item.total_taxable_value.toLocaleString("en-IN")}</Text>
-                        <Text style={s.rowChev}>›</Text>
-                      </View>
+                </View>
+                <View style={s.dateField}>
+                  <Text style={s.label}>To (optional)</Text>
+                  <Pressable style={s.dateInput} onPress={() => setToPickerOpen(true)}>
+                    <Text style={dateTo ? s.dateInputText : s.dateInputPlaceholder}>
+                      {dateTo ? formatDMY(dateTo) : "DD/MM/YYYY"}
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              <GradientButton label="Run report" onPress={runReport} loading={loading} disabled={!selectedRep} />
+            </View>
+
+            {filteredRows !== null && (
+              <>
+                <View style={s.statRow}>
+                  {/* "for grand total lets on use gradient lets use flat color
+                      like: #8C98B0" -- same flat treatment as Sign Costing's
+                      and Cost Sheet's grand-total cards. */}
+                  <View style={[s.statCardHero, s.statCardHeroFlat]}>
+                    <Text style={s.statLabelHero}>Total Sales</Text>
+                    <Text style={s.statValueHero}>{formatCrore(totalSales)}</Text>
+                  </View>
+                  <View style={s.statCardCol}>
+                    <SoftCard style={s.statCard}>
+                      <Text style={s.statLabel}>Customers</Text>
+                      <Text style={s.statValue}>{filteredRows.length}</Text>
                     </SoftCard>
-                  )}
-                </Pressable>
-              )}
-            />
-          )}
-        </>
-      )}
+                    <SoftCard style={s.statCard}>
+                      <Text style={s.statLabel}>Transactions</Text>
+                      <Text style={s.statValue}>{totalTxns.toLocaleString("en-IN")}</Text>
+                    </SoftCard>
+                  </View>
+                </View>
+
+                {filteredRows.length === 0 ? (
+                  <Text style={s.empty}>
+                    {selectedCustomer
+                      ? `No sales found for ${selectedCustomer} (${selectedRep}) in this period.`
+                      : `No sales found for ${selectedRep} in this period.`}
+                  </Text>
+                ) : (
+                  <>
+                    <Text style={[s.chartSectionTitle, { marginTop: 0 }]}>Monthly trend</Text>
+                    <SoftCard style={s.chartCard}>
+                      <TrendChart t={t} data={monthlyTrend} />
+                    </SoftCard>
+
+                    <Text style={s.chartSectionTitle}>Sales mix by product</Text>
+                    <SoftCard style={s.chartCard}>
+                      <DonutChart t={t} data={topItemsPie} />
+                    </SoftCard>
+
+                    <Text style={s.chartSectionTitle}>Top products</Text>
+                    <SoftCard style={s.chartCard}>
+                      <BreakdownBars t={t} data={topItems} />
+                    </SoftCard>
+
+                    <Text style={s.chartSectionTitle}>Top locations</Text>
+                    <SoftCard style={s.chartCard}>
+                      <BreakdownBars t={t} data={topLocations} />
+                    </SoftCard>
+
+                    <Text style={s.chartSectionTitle}>Customers</Text>
+                    <Pressable style={s.exportBtn} onPress={exportCsv} disabled={exporting}>
+                      {exporting ? (
+                        <ActivityIndicator color={t.primary} />
+                      ) : (
+                        <Text style={s.exportBtnText}>Export {filteredRows.length} rows to CSV</Text>
+                      )}
+                    </Pressable>
+                  </>
+                )}
+              </>
+            )}
+          </>
+        }
+        renderItem={({ item }) => (
+          <Pressable onPress={() => setDetailCustomer(item)}>
+            {({ pressed }) => (
+              <SoftCard style={[s.row, pressed && { opacity: 0.7 }]}>
+                <View style={s.rowText}>
+                  <Text style={s.rowTitle} numberOfLines={1}>{item.customer_name}</Text>
+                  <Text style={s.rowMeta}>
+                    {item.transaction_count} transaction{item.transaction_count === 1 ? "" : "s"}
+                  </Text>
+                </View>
+                <View style={s.rowRight}>
+                  <Text style={s.rowValue}>₹{item.total_taxable_value.toLocaleString("en-IN")}</Text>
+                  <Text style={s.rowChev}>›</Text>
+                </View>
+              </SoftCard>
+            )}
+          </Pressable>
+        )}
+      />
 
       <Modal visible={repPickerOpen} transparent animationType="slide" onRequestClose={() => setRepPickerOpen(false)}>
         <Pressable style={s.modalBackdrop} onPress={() => setRepPickerOpen(false)} />
@@ -1106,4 +1205,13 @@ const chartStyles = (t: VibrantTheme) =>
     breakdownTrack: { flex: 1, height: 10, borderRadius: 5, backgroundColor: t.surfaceSunken, overflow: "hidden" },
     breakdownFill: { height: "100%", borderRadius: 5 },
     breakdownValue: { width: 78, fontSize: 12, fontFamily: fonts.medium, color: t.inkSecondary, textAlign: "right" },
+
+    // DonutChart -- ring on the left, legend (swatch + label + %) on the
+    // right, wraps to stacked on very narrow screens via flexWrap.
+    donutRow: { flexDirection: "row", alignItems: "center", gap: 16, flexWrap: "wrap" },
+    donutLegend: { flex: 1, minWidth: 120, gap: 8 },
+    legendRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+    legendSwatch: { width: 10, height: 10, borderRadius: 3 },
+    legendLabel: { flex: 1, fontSize: 12, fontFamily: fonts.regular, color: t.ink },
+    legendPct: { fontSize: 12, fontFamily: fonts.bold, color: t.inkSecondary },
   });

@@ -31,6 +31,8 @@ import {
   computeSqft,
   computeWorkCentreCost,
   suggestSellingPrice,
+  TRADITIONAL_DEFAULT_GP_PCT,
+  VALUE_ADDITION_DEFAULT_GP_PCT,
   type CostSheetInputs,
   type GpMethod,
   type Uom,
@@ -72,16 +74,13 @@ interface TemplateOption {
   label: string;
 }
 
-// "I need gorss margin percentage for adjustment" -- back to an editable
-// Target GP%, reversing the previous round's fixed multipliers per this
-// round's own instruction. The underlying formula (suggestSellingPrice,
-// price = cost / (1 - GP%) -- the standard gross-profit-MARGIN
-// definition, not a simple markup) was always mathematically correct at
-// every percentage -- verified directly against the user's own example:
-// at 50% it gives cost / 0.5 = cost x2, i.e. "GP 50% means ₹100 becomes
-// ₹200," exactly as described. Defaults to 50 so a fresh calculation
-// opens on that same verified point for either method.
-const DEFAULT_TARGET_GP_PCT = 50;
+// "I need gorss margin percentage for adjustment" -- an editable Target
+// GP%, per-method default (see calc.ts's TRADITIONAL_DEFAULT_GP_PCT /
+// VALUE_ADDITION_DEFAULT_GP_PCT and the "cost-based methodology, not on
+// the selling price" comment on suggestSellingPrice for the full
+// reasoning) -- switching Method resets Target GP% to that method's own
+// default (50% Traditional, 100% Value Addition), while still leaving it
+// freely editable afterward.
 
 async function fetchAllRawMaterials(): Promise<RawMaterialRow[]> {
   // raw_materials is ~1,558 rows -- past PostgREST's default 1000-row cap
@@ -150,7 +149,7 @@ export default function CostSheetToolScreen() {
   const [poolMessage, setPoolMessage] = useState<{ kind: "success" | "danger"; text: string } | null>(null);
 
   const [gpMethod, setGpMethod] = useState<GpMethod>("total_cost");
-  const [targetGpPct, setTargetGpPct] = useState<number | "">(DEFAULT_TARGET_GP_PCT);
+  const [targetGpPct, setTargetGpPct] = useState<number | "">(TRADITIONAL_DEFAULT_GP_PCT);
 
   useEffect(() => {
     (async () => {
@@ -271,11 +270,8 @@ export default function CostSheetToolScreen() {
     const g = targetGpPct / 100;
     const materialAtCostRecent = result.materialCostRecent - result.inkCostRecent;
     const materialAtCostAvg = result.materialCostAvg - result.inkCostAvg;
-    const servicesRecent = result.inkCostRecent + result.totalProcessCost;
-    const servicesAvg = result.inkCostAvg + result.totalProcessCost;
-    const totalRecent = suggestSellingPrice(materialAtCostRecent, servicesRecent, g, gpMethod);
-    const totalAvg = suggestSellingPrice(materialAtCostAvg, servicesAvg, g, gpMethod);
-    if (totalRecent === null || totalAvg === null) return null;
+    const totalRecent = suggestSellingPrice(materialAtCostRecent, result.inkCostRecent, result.totalProcessCost, g, gpMethod);
+    const totalAvg = suggestSellingPrice(materialAtCostAvg, result.inkCostAvg, result.totalProcessCost, g, gpMethod);
     return {
       perSqftRecent: totalRecent / result.sqft,
       perSqftAvg: totalAvg / result.sqft,
@@ -540,22 +536,58 @@ export default function CostSheetToolScreen() {
               <SoftCard style={s.card}>
                 <Row t={t} label="Total Cost (Recent)" value={fmtRupee(result.totalCostRecent)} strong />
                 <Row t={t} label="Total Cost (Average)" value={fmtRupee(result.totalCostAvg)} strong />
-                <Row
-                  t={t}
-                  label="Gross Profit (Recent)"
-                  detail={fmtPct(result.gpRecentPct)}
-                  value={fmtRupee(result.gpRecent)}
-                  strong
-                  big
-                />
-                <Row
-                  t={t}
-                  label="Gross Profit (Average)"
-                  detail={fmtPct(result.gpAvgPct)}
-                  value={fmtRupee(result.gpAvg)}
-                  strong
-                  big
-                />
+                {/* "there is something wrong i couldnt get the calculation
+                    with GP" -- root cause: Gross Profit here is
+                    sellingAmount - totalCost, and sellingAmount is
+                    sqft x Selling Price / SqFt (the Job Details field
+                    above). Leaving that field blank (its default) makes
+                    sellingAmount 0, so this correctly-but-confusingly
+                    showed the full cost as a negative number with a "—"
+                    for the percentage (division by zero) -- nothing was
+                    actually broken, but there was no way to tell that
+                    from the screen, and no link back to the Suggested
+                    Selling Price section below that already computes a
+                    real price. Now: while no price has been entered, this
+                    shows a plain explanation plus a one-tap button that
+                    fills Selling Price / SqFt straight from the Suggested
+                    Selling Price section's own Target GP% -- Gross Profit
+                    updates immediately to reflect it. */}
+                {sellPrice === "" ? (
+                  <View style={s.gpEmptyState}>
+                    <Text style={s.placeholder}>
+                      Enter a Selling Price / SqFt above to see Gross Profit here.
+                    </Text>
+                    {priceSuggestion && (
+                      <Pressable
+                        style={s.useSuggestedBtn}
+                        onPress={() => setSellPrice(Math.round(priceSuggestion.perSqftRecent))}
+                      >
+                        <Text style={s.useSuggestedBtnText}>
+                          Use Suggested Price — {fmtRupee(priceSuggestion.perSqftRecent)}/sqft ({targetGpPct}% GP)
+                        </Text>
+                      </Pressable>
+                    )}
+                  </View>
+                ) : (
+                  <>
+                    <Row
+                      t={t}
+                      label="Gross Profit (Recent)"
+                      detail={fmtPct(result.gpRecentPct)}
+                      value={fmtRupee(result.gpRecent)}
+                      strong
+                      big
+                    />
+                    <Row
+                      t={t}
+                      label="Gross Profit (Average)"
+                      detail={fmtPct(result.gpAvgPct)}
+                      value={fmtRupee(result.gpAvg)}
+                      strong
+                      big
+                    />
+                  </>
+                )}
                 <GradientButton
                   label={addingToPool ? "Adding…" : "Add to Estimate Pool"}
                   onPress={addToPool}
@@ -580,7 +612,10 @@ export default function CostSheetToolScreen() {
                   <View style={s.uomToggle}>
                     <Pressable
                       style={[s.gpMethodOption, gpMethod === "total_cost" && s.uomOptionActive]}
-                      onPress={() => setGpMethod("total_cost")}
+                      onPress={() => {
+                        setGpMethod("total_cost");
+                        setTargetGpPct(TRADITIONAL_DEFAULT_GP_PCT);
+                      }}
                     >
                       <Text style={[s.uomOptionText, gpMethod === "total_cost" && s.uomOptionTextActive]} numberOfLines={2}>
                         Traditional — GP on total cost
@@ -588,29 +623,51 @@ export default function CostSheetToolScreen() {
                     </Pressable>
                     <Pressable
                       style={[s.gpMethodOption, gpMethod === "services_only" && s.uomOptionActive]}
-                      onPress={() => setGpMethod("services_only")}
+                      onPress={() => {
+                        setGpMethod("services_only");
+                        setTargetGpPct(VALUE_ADDITION_DEFAULT_GP_PCT);
+                      }}
                     >
                       <Text style={[s.uomOptionText, gpMethod === "services_only" && s.uomOptionTextActive]} numberOfLines={2}>
-                        Value Addition — GP on services only
+                        Value Addition — GP on work centre cost
                       </Text>
                     </Pressable>
                   </View>
                 </Field>
+                {/* Cost-plus markup, not gross-profit-margin -- GP% is a
+                    percentage of a COST base, added on top of it, per the
+                    methodology written out for this round (see
+                    suggestSellingPrice's own comment in calc.ts for the
+                    full derivation and the history of the earlier,
+                    incorrect margin-based version this replaces). */}
                 <Text style={s.gpMethodHint}>
                   {gpMethod === "total_cost"
-                    ? "Margin applied to everything: raw materials, wastage, ink, machine cost, labour, finishing, packing, overheads. 50% doubles total cost (₹100 → ₹200)."
-                    : "Raw materials and wastage recovered at cost. Margin applied only to ink, machine time, labour, finishing, packing, and overheads."}
+                    ? "GP% applied to everything: raw material (incl. wastage & markup), ink, and all work centre costs. Default 50% adds half the total cost on top (₹100 cost → ₹150)."
+                    : "Raw material and ink recovered at cost -- no GP on either. GP% applied only to work centre cost, added on top of it. Default 100% doubles just that portion, which typically brings the overall total to somewhere around 1.5x depending on how much of the job is material vs. processing."}
                 </Text>
                 <NumberField t={t} label="Target GP %" value={targetGpPct} onChange={setTargetGpPct} />
                 {priceSuggestion ? (
-                  <View style={s.metricGrid}>
-                    <Metric t={t} label="Price / SqFt (Recent)" value={fmtRupee(priceSuggestion.perSqftRecent)} />
-                    <Metric t={t} label="Price / SqFt (Average)" value={fmtRupee(priceSuggestion.perSqftAvg)} />
-                    <Metric t={t} label="Total (Recent)" value={fmtRupee(priceSuggestion.totalRecent)} />
-                    <Metric t={t} label="Total (Average)" value={fmtRupee(priceSuggestion.totalAvg)} />
-                  </View>
+                  <>
+                    <View style={s.metricGrid}>
+                      <Metric t={t} label="Price / SqFt (Recent)" value={fmtRupee(priceSuggestion.perSqftRecent)} />
+                      <Metric t={t} label="Price / SqFt (Average)" value={fmtRupee(priceSuggestion.perSqftAvg)} />
+                      <Metric t={t} label="Total (Recent)" value={fmtRupee(priceSuggestion.totalRecent)} />
+                      <Metric t={t} label="Total (Average)" value={fmtRupee(priceSuggestion.totalAvg)} />
+                    </View>
+                    {/* Feeds this section's price back up into Selling
+                        Price / SqFt so the Cost Summary's Gross Profit
+                        rows reflect it too -- see that section's own
+                        comment for the full "couldn't get the GP
+                        calculation" reasoning. */}
+                    <Pressable
+                      style={s.useSuggestedBtn}
+                      onPress={() => setSellPrice(Math.round(priceSuggestion.perSqftRecent))}
+                    >
+                      <Text style={s.useSuggestedBtnText}>Apply to Selling Price / SqFt</Text>
+                    </Pressable>
+                  </>
                 ) : (
-                  <Text style={s.placeholder}>Enter a target GP% under 100 to see a suggested price.</Text>
+                  <Text style={s.placeholder}>Enter a target GP% to see a suggested price.</Text>
                 )}
               </SoftCard>
             </>
@@ -931,6 +988,13 @@ const styles = (t: VibrantTheme) =>
     poolBtn: { marginTop: 4 },
     poolSuccessText: { fontSize: 12, fontFamily: fonts.regular, color: t.success, textAlign: "center" },
     poolErrorText: { fontSize: 12, fontFamily: fonts.regular, color: t.danger, textAlign: "center" },
+
+    gpEmptyState: { gap: 8, paddingVertical: 4 },
+    useSuggestedBtn: {
+      minHeight: 40, borderRadius: radius.md, borderWidth: 1.5, borderColor: t.primary,
+      alignItems: "center", justifyContent: "center", paddingHorizontal: 12, backgroundColor: t.primaryTint,
+    },
+    useSuggestedBtnText: { fontSize: 12, fontFamily: fonts.bold, color: t.primary, textAlign: "center" },
 
     historyLink: { alignItems: "center", paddingVertical: 16 },
     historyLinkText: { fontSize: 13, fontFamily: fonts.medium, color: t.primary },
