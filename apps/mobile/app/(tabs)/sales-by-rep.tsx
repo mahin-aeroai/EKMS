@@ -842,7 +842,17 @@ export default function SalesByRepScreen() {
 
       <Modal visible={!!detailCustomer} transparent animationType="slide" onRequestClose={() => setDetailCustomer(null)}>
         <Pressable style={s.modalBackdrop} onPress={() => setDetailCustomer(null)} />
-        <View style={s.modalSheet}>
+        {/* "very congested to scroll let remove freeze and display all" --
+            this sheet was reusing modalSheet (maxHeight: 70%, no flex on
+            its own) with a bills FlatList that also had no style={flex:1}
+            of its own -- the exact same "FlatList doesn't reliably claim
+            the space its siblings leave behind" bug already fixed once in
+            this file's customer list and in copilot.tsx. For a customer
+            with 100+ bills that combination read as barely scrollable.
+            detailSheet below is taller (90%, not 70%) and detailList adds
+            the missing flex:1 so the list actually fills and scrolls the
+            whole sheet instead of a cramped sliver of it. */}
+        <View style={s.detailSheet}>
           {/* "customer name make it more visible with address so that we
               can identify easily" -- was a single truncated line sharing
               the row with the Done button; now its own block, full name
@@ -876,7 +886,8 @@ export default function SalesByRepScreen() {
           <FlatList
             data={detailCustomer?.bills ?? []}
             keyExtractor={(bill, i) => `${bill.date ?? "—"}-${i}`}
-            style={s.modalList}
+            style={s.detailList}
+            contentContainerStyle={s.detailListContent}
             renderItem={({ item: bill, index }) => (
               <Pressable
                 onPress={() => {
@@ -1012,6 +1023,13 @@ const styles = (t: VibrantTheme) =>
     modalTitle: { fontSize: 15, fontWeight: "600", color: t.ink },
     modalClose: { fontSize: 15, fontWeight: "600", color: t.primary },
     modalList: { paddingHorizontal: 8 },
+    // "very congested to scroll let remove freeze and display all" -- a
+    // taller sheet (90%, not the 70% every picker modal uses -- a bill
+    // list can run to hundreds of rows, a picker never does) plus an
+    // explicit flex:1 on its own FlatList (see the JSX comment above).
+    detailSheet: { backgroundColor: t.surfaceRaised, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, height: "90%" },
+    detailList: { flex: 1, paddingHorizontal: 8 },
+    detailListContent: { paddingBottom: 24 },
     // "drop down selction font should be smaller and more decorative with
     // each line with slighly colored" -- thin colored left rule per row.
     modalOption: { minHeight: 44, justifyContent: "center", paddingHorizontal: 12, paddingVertical: 10, borderRadius: radius.md, borderLeftWidth: 3, marginVertical: 1 },

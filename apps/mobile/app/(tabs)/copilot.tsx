@@ -428,6 +428,21 @@ export default function CopilotScreen() {
   // draft's live-transcript behaviour but only while wake-listening, and
   // is shown right under the toggle -- see s.wakeTranscriptText below.
   const [wakeTranscript, setWakeTranscript] = useState("");
+  // "still jarvis unresponsive" + the caption above never leaving
+  // "Listening for Jarvis…" (confirmed: no "result" event is firing at
+  // all while wake-listening, not just a phrase-matching miss) -- the
+  // previous diagnostic could only show a HEARD transcript, so silence
+  // there is ambiguous between "no session is actually running" and "a
+  // session is running but genuinely hearing nothing." Counting real
+  // native "start" events (see useSpeechRecognitionEvent("start", ...)
+  // below) and showing that count in the caption answers that: a number
+  // that's stuck at 0 means start() itself is never succeeding; a number
+  // climbing fast means sessions ARE starting and ending in a tight loop
+  // (each one too short to catch a spoken word); a number that climbs
+  // slowly/normally but still never shows a "Heard" transcript means
+  // sessions run for a normal duration but the recognizer itself never
+  // produces a result.
+  const [wakeSessionCount, setWakeSessionCount] = useState(0);
   const listRef = useRef<FlatList<Turn>>(null);
   // Refs mirroring the booleans above for the useSpeechRecognitionEvent
   // handlers below -- those are wired up once per render and need to read
@@ -512,7 +527,19 @@ export default function CopilotScreen() {
       setWakeTranscript("");
       wakeListeningRef.current = true;
       setWakeListening(true);
-      ExpoSpeechRecognitionModule.start({ lang: "en-US", interimResults: true, continuous: false, addsPunctuation: false });
+      ExpoSpeechRecognitionModule.start({
+        lang: "en-US",
+        interimResults: true,
+        continuous: false,
+        addsPunctuation: false,
+        // Biases Apple's on-device recognizer's language model toward
+        // these exact strings (SFSpeechRecognitionRequest.contextualStrings)
+        // -- "Jarvis" alone has no strong prior in a general-purpose
+        // recognizer, so a quiet or fast utterance of an uncommon name is
+        // exactly the kind of thing this option exists to help with. Not
+        // previously tried.
+        contextualStrings: ["Jarvis", "Hey Jarvis"],
+      });
     } catch (err) {
       wakeListeningRef.current = false;
       setWakeListening(false);
@@ -527,6 +554,7 @@ export default function CopilotScreen() {
     setWakeEnabled(next);
     wakeEnabledRef.current = next;
     if (next) {
+      setWakeSessionCount(0);
       // If real dictation is already running, the "end" handler below
       // picks this up once it finishes (wakeEnabledRef is now true).
       if (!listening && !wakeListeningRef.current) beginWakeListening();
@@ -537,6 +565,13 @@ export default function CopilotScreen() {
       safeStop();
     }
   }, [wakeEnabled, listening, beginWakeListening, safeStop]);
+
+  // See wakeSessionCount's declaration above -- only counts sessions
+  // started while wake-listening (not manual dictation), so it's purely
+  // this diagnostic's signal.
+  useSpeechRecognitionEvent("start", () => {
+    if (wakeListeningRef.current) setWakeSessionCount((n) => n + 1);
+  });
 
   // Voice input -- fills the draft as you talk, same review-then-Send flow
   // as the system keyboard's own dictation button (doesn't auto-send).
@@ -791,7 +826,7 @@ export default function CopilotScreen() {
           instant real dictation takes over. */}
       {wakeListening && (
         <Text style={s.wakeTranscriptText} numberOfLines={1}>
-          {wakeTranscript ? `Heard: "${wakeTranscript}"` : "Listening for “Jarvis”…"}
+          {wakeTranscript ? `Heard: "${wakeTranscript}"` : `Listening for "Jarvis"… (session #${wakeSessionCount})`}
         </Text>
       )}
 

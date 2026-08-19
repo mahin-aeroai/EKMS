@@ -168,3 +168,35 @@ export function computeCostSheet(
     gpAvgPct: sellingAmount ? gpAvg / sellingAmount : null,
   };
 }
+
+// "suggested sellin gprice traditional margin and value addition margin
+// details are must place them nicely" -- port of web calc.ts's own
+// GpMethod/suggestSellingPrice, byte-for-byte (see that file's own
+// comment for the full reasoning):
+//  1. Traditional (total_cost) -- margin applied to everything: raw
+//     materials, wastage, ink, machine cost, labour, finishing, packing,
+//     overheads.
+//  2. Value Addition (services_only) -- raw materials + wastage recovered
+//     at cost (0 margin); margin applied only to ink + work-centre
+//     process cost (ink counts as a "service" here, not a raw material).
+export type GpMethod = "total_cost" | "services_only";
+
+/**
+ * Suggested selling amount (₹, NOT per-sqft -- divide by sqft yourself) to
+ * hit `targetGpPct` (0-1) under the given method. `materialAtCost` should
+ * exclude ink (see inkCostRecent/Avg above); `servicesCost` should be
+ * ink + totalProcessCost. Returns null if targetGpPct is 100% or more --
+ * there's no finite price that recovers cost AND leaves that much margin.
+ */
+export function suggestSellingPrice(
+  materialAtCost: number,
+  servicesCost: number,
+  targetGpPct: number,
+  method: GpMethod
+): number | null {
+  if (targetGpPct >= 1) return null;
+  if (method === "total_cost") {
+    return (materialAtCost + servicesCost) / (1 - targetGpPct);
+  }
+  return materialAtCost + servicesCost / (1 - targetGpPct);
+}

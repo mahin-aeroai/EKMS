@@ -8,6 +8,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -17,41 +18,53 @@ import { radius } from "@mmdi/shared/theme";
 import { vibrant, fonts, optionAccent, sectionLabelStyle, type VibrantTheme } from "../../theme/vibrant";
 import { SoftCard, GradientButton } from "../../theme/components";
 import { supabase } from "@/lib/supabase";
-import type { BomTemplateLineRow, BomTemplateRow, RawMaterialRow, WorkCentreRateRow } from "@mmdi/shared/rows";
-import { computeCostSheet, type CostSheetInputs, type Uom } from "../../lib/costSheet/calc";
+import type {
+  BomTemplateLineAlternativeRow,
+  BomTemplateLineRow,
+  BomTemplateRow,
+  RawMaterialRow,
+  WorkCentreRateRow,
+} from "@mmdi/shared/rows";
+import {
+  computeCostSheet,
+  computeLineCost,
+  computeSqft,
+  computeWorkCentreCost,
+  suggestSellingPrice,
+  type CostSheetInputs,
+  type GpMethod,
+  type Uom,
+} from "../../lib/costSheet/calc";
 import { groupByCategory } from "../../lib/costSheet/categoryOrder";
 
 /**
  * "in my previous chat i asked to add new module cost sheet but not sign
  * costsheets. the cost sheet from tool from web app and which we build
- * costing like attached screen" -- this is the real feature: a native port
- * of apps/web/src/app/workspaces/cost-sheet/CostSheetCalcTab.tsx (Tools >
- * Cost Sheet). Pick an FG Code/Template, enter Sales Order/UOM/Qty/
- * Width/Height/Selling Price per SqFt, see a live material + work-centre
- * cost breakdown -- same math as the web tool (lib/costSheet/calc.ts is a
- * byte-for-byte port of the web version's calc.ts, see that file's header
- * for why it's duplicated rather than imported).
+ * costing like attached screen" -- native port of
+ * apps/web/src/app/workspaces/cost-sheet/CostSheetCalcTab.tsx (Tools >
+ * Cost Sheet).
  *
- * What this v1 deliberately leaves out, vs. the full web tool:
- *  - No per-line material swap (web: a dropdown per BOM line to pick a
- *    different raw material than the line's saved default).
- *  - No per-line "exclude this line" / per-work-centre "skip this
- *    process" checkboxes -- every line and every work centre on the FG
- *    code's saved template is always included.
- *  - No "Suggested selling price" / target-GP-%-solver section.
- *  - No "Add to Estimate Pool" save -- this is a read-only calculator,
- *    same as generating a number doesn't write anything on the web tool
- *    either (see calc's own note: a calculation isn't saved as its own
- *    row anywhere there either).
- * All of these are real, useful web features -- cut from this round to
- * ship the core "see the cost breakdown for an FG code" tool the user
- * asked for without a much bigger native rebuild. Flagging so it reads as
- * a scope choice, not a miss.
+ * "For Cost sheet i need to have options to select material si cant make
+ * cost sheet whtout options ... i need all capabilities select, switch
+ * off/on and price details, wastage, line cost, watage, markup details,
+ * work centre porcess costs, on/off, suggested sellin gprice traditional
+ * margin and value addition margin details are must" -- this round adds
+ * everything the first pass deliberately cut, matching the web tool
+ * feature-for-feature:
+ *  - Per-line ON/OFF (a job-only override, doesn't touch the FG code's
+ *    saved BOM -- edit that on the web app's BOM Master tab).
+ *  - Per-line material alternative picker, when the line has any on file
+ *    (bom_template_line_alternatives) -- same job-only override.
+ *  - Full price/wastage/markup/line-cost detail per line (recent + avg).
+ *  - Per-work-centre ON/OFF with each one's own process cost.
+ *  - Suggested Selling Price: Traditional (GP on everything) vs Value
+ *    Addition (materials recovered at cost, GP only on ink + process
+ *    cost) margin methods, target GP%, both bases (recent/avg).
  *
- * The OLD "Cost Sheets" screen that lived at this route (a list of past
- * Sign Costing runs from `sign_estimates`) is renamed to
- * sign-costing-history.tsx, still reachable from the link at the bottom
- * of this screen.
+ * Still NOT ported (unchanged from the first pass, still a deliberate
+ * scope cut, not an oversight): "Add to Estimate Pool" -- saving this
+ * calculation into estimate_pool_items for pickup in Estimate Builder.
+ * Wasn't asked for this round; flagging in case it's wanted next.
  */
 
 interface TemplateOption {
@@ -62,11 +75,7 @@ interface TemplateOption {
 async function fetchAllRawMaterials(): Promise<RawMaterialRow[]> {
   // raw_materials is ~1,558 rows -- past PostgREST's default 1000-row cap
   // on an unpaginated select, same issue already hit (and fixed) for
-  // customers/employees elsewhere in this app. Page through with .range()
-  // sequentially until a page comes back short, rather than firing every
-  // page in parallel -- see sales-by-rep.tsx's own fetchAllRowsParallel
-  // bug for why a silently-dropped page is worse than a slightly slower
-  // sequential load for a one-time master-data fetch like this.
+  // customers/employees elsewhere in this app.
   const PAGE = 1000;
   const rows: RawMaterialRow[] = [];
   let from = 0;
@@ -87,6 +96,15 @@ async function fetchAllRawMaterials(): Promise<RawMaterialRow[]> {
 const fmtRupee = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 const fmtPct = (n: number | null) => (n === null ? "—" : `${(n * 100).toFixed(1)}%`);
 
+// Each alternative option shows its own recent/avg ₹/unit, same as web's
+// priceLabel(), so a job can be priced against the cheapest (or most
+// in-stock) option without switching back and forth to check.
+function priceLabel(m: RawMaterialRow): string {
+  const recent = m.unit_cost_recent !== null ? `₹${m.unit_cost_recent.toFixed(2)}` : "no price";
+  const avg = m.unit_cost_avg !== null ? `₹${m.unit_cost_avg.toFixed(2)}` : "no price";
+  return `recent ${recent} / avg ${avg}`;
+}
+
 export default function CostSheetToolScreen() {
   const t = vibrant;
   const s = styles(t);
@@ -97,6 +115,7 @@ export default function CostSheetToolScreen() {
   const [templates, setTemplates] = useState<BomTemplateRow[]>([]);
   const [rates, setRates] = useState<WorkCentreRateRow[]>([]);
   const [materialsByCode, setMaterialsByCode] = useState<Map<string, RawMaterialRow>>(new Map());
+  const [alternativesByLine, setAlternativesByLine] = useState<Record<string, BomTemplateLineAlternativeRow[]>>({});
 
   const [templateId, setTemplateId] = useState("");
   const [lines, setLines] = useState<BomTemplateLineRow[]>([]);
@@ -109,12 +128,23 @@ export default function CostSheetToolScreen() {
   const [qty, setQty] = useState<number | "">(1);
   const [sellPrice, setSellPrice] = useState<number | "">("");
 
+  // Job-only overrides -- ephemeral, reset whenever the FG code changes,
+  // never written back to the template's saved BOM. Same pattern as the
+  // web tool.
+  const [excludedWorkCentres, setExcludedWorkCentres] = useState<Set<string>>(new Set());
+  const [selectedMaterialByLine, setSelectedMaterialByLine] = useState<Record<string, string | null>>({});
+  const [excludedLines, setExcludedLines] = useState<Set<string>>(new Set());
+
+  const [gpMethod, setGpMethod] = useState<GpMethod>("total_cost");
+  const [targetGpPct, setTargetGpPct] = useState<number | "">(30);
+
   useEffect(() => {
     (async () => {
-      const [templatesRes, ratesRes, materialRows] = await Promise.all([
+      const [templatesRes, ratesRes, materialRows, altsRes] = await Promise.all([
         supabase.from("bom_templates").select("*").order("sort_order", { ascending: true, nullsFirst: false }).order("code"),
         supabase.from("work_centre_rates").select("*"),
         fetchAllRawMaterials(),
+        supabase.from("bom_template_line_alternatives").select("*"),
       ]);
       if (templatesRes.error || ratesRes.error) {
         setLoadError("Couldn't load Cost Sheet master data.");
@@ -124,6 +154,13 @@ export default function CostSheetToolScreen() {
       setTemplates((templatesRes.data as BomTemplateRow[]) ?? []);
       setRates((ratesRes.data as WorkCentreRateRow[]) ?? []);
       setMaterialsByCode(new Map(materialRows.map((m) => [m.code, m])));
+      if (!altsRes.error) {
+        const byLine: Record<string, BomTemplateLineAlternativeRow[]> = {};
+        for (const row of (altsRes.data as BomTemplateLineAlternativeRow[]) ?? []) {
+          (byLine[row.line_id] ??= []).push(row);
+        }
+        setAlternativesByLine(byLine);
+      }
       setLoading(false);
     })();
   }, []);
@@ -135,6 +172,9 @@ export default function CostSheetToolScreen() {
     }
     let cancelled = false;
     setLoadingLines(true);
+    setExcludedWorkCentres(new Set());
+    setSelectedMaterialByLine({});
+    setExcludedLines(new Set());
     (async () => {
       const { data, error } = await supabase
         .from("bom_template_lines")
@@ -164,6 +204,24 @@ export default function CostSheetToolScreen() {
     return opts;
   }, [templates]);
 
+  const originalLinesById = useMemo(() => new Map(lines.map((l) => [l.id, l])), [lines]);
+
+  const effectiveTemplate = useMemo(() => {
+    if (!template) return null;
+    return { ...template, work_centres: template.work_centres.filter((wc) => !excludedWorkCentres.has(wc)) };
+  }, [template, excludedWorkCentres]);
+
+  const overriddenLines = useMemo(() => {
+    return lines.map((l) => {
+      const sel = selectedMaterialByLine[l.id];
+      return sel !== undefined ? { ...l, raw_material_code: sel } : l;
+    });
+  }, [lines, selectedMaterialByLine]);
+
+  const effectiveLines = useMemo(() => {
+    return overriddenLines.filter((l) => !excludedLines.has(l.id));
+  }, [overriddenLines, excludedLines]);
+
   const inputs: CostSheetInputs = {
     uom,
     width: width === "" ? 0 : width,
@@ -173,9 +231,66 @@ export default function CostSheetToolScreen() {
   };
 
   const result = useMemo(() => {
-    if (!template) return null;
-    return computeCostSheet(template, lines, materialsByCode, rates, inputs);
-  }, [template, lines, materialsByCode, rates, uom, width, height, qty, sellPrice]);
+    if (!effectiveTemplate) return null;
+    return computeCostSheet(effectiveTemplate, effectiveLines, materialsByCode, rates, inputs);
+  }, [effectiveTemplate, effectiveLines, materialsByCode, rates, uom, width, height, qty, sellPrice]);
+
+  // Every work centre the FG code is normally set up for, checked or not
+  // -- rendered as the checklist below so unticking one is still visible
+  // and re-checkable, instead of just disappearing once excluded.
+  const allWorkCentreCosts = useMemo(() => {
+    if (!template) return [];
+    const sqft = computeSqft(inputs);
+    return template.work_centres.map((wc) => computeWorkCentreCost(wc, template, rates, sqft, inputs.qty));
+  }, [template, rates, uom, width, height, qty]);
+
+  // Every material line the BOM normally has, excluded or not -- same
+  // pattern as allWorkCentreCosts. Built from overriddenLines (material
+  // swap applied) so the checkbox and the alternatives picker stay
+  // independent of each other.
+  const allLineCosts = useMemo(() => {
+    return overriddenLines.map((l) => computeLineCost(l, materialsByCode));
+  }, [overriddenLines, materialsByCode]);
+
+  const priceSuggestion = useMemo(() => {
+    if (!result || result.sqft <= 0 || targetGpPct === "") return null;
+    const g = targetGpPct / 100;
+    const materialAtCostRecent = result.materialCostRecent - result.inkCostRecent;
+    const materialAtCostAvg = result.materialCostAvg - result.inkCostAvg;
+    const servicesRecent = result.inkCostRecent + result.totalProcessCost;
+    const servicesAvg = result.inkCostAvg + result.totalProcessCost;
+    const totalRecent = suggestSellingPrice(materialAtCostRecent, servicesRecent, g, gpMethod);
+    const totalAvg = suggestSellingPrice(materialAtCostAvg, servicesAvg, g, gpMethod);
+    if (totalRecent === null || totalAvg === null) return null;
+    return {
+      perSqftRecent: totalRecent / result.sqft,
+      perSqftAvg: totalAvg / result.sqft,
+      totalRecent,
+      totalAvg,
+    };
+  }, [result, targetGpPct, gpMethod]);
+
+  function toggleWorkCentreForJob(workCentre: string, applicable: boolean) {
+    setExcludedWorkCentres((prev) => {
+      const next = new Set(prev);
+      if (applicable) next.delete(workCentre);
+      else next.add(workCentre);
+      return next;
+    });
+  }
+
+  function toggleLineForJob(lineId: string, applicable: boolean) {
+    setExcludedLines((prev) => {
+      const next = new Set(prev);
+      if (applicable) next.delete(lineId);
+      else next.add(lineId);
+      return next;
+    });
+  }
+
+  function selectMaterialForLine(lineId: string, code: string | null) {
+    setSelectedMaterialByLine((prev) => ({ ...prev, [lineId]: code }));
+  }
 
   return (
     <KeyboardAvoidingView style={s.screen} behavior={Platform.OS === "ios" ? "padding" : undefined}>
@@ -249,16 +364,111 @@ export default function CostSheetToolScreen() {
             <ActivityIndicator style={s.pad} color={t.primary} />
           ) : result ? (
             <>
-              <Text style={s.sectionTitle}>Cost Breakdown</Text>
-              <SoftCard style={s.card}>
-                <View style={s.metricGrid}>
-                  <Metric t={t} label="Sign Area" value={`${result.sqft.toFixed(2)} sq.ft`} />
-                  <Metric t={t} label="Selling Amount" value={fmtRupee(result.sellingAmount)} />
-                </View>
+              <View style={s.metricGrid}>
+                <Metric t={t} label="Sign Area" value={`${result.sqft.toFixed(2)} sq.ft`} />
+                <Metric t={t} label="Selling Amount" value={fmtRupee(result.sellingAmount)} />
+              </View>
 
-                <Row t={t} label="Material Cost (Recent)" value={fmtRupee(result.materialCostRecent)} />
-                <Row t={t} label="Material Cost (Average)" value={fmtRupee(result.materialCostAvg)} small />
-                <Row t={t} label="Process Cost (Work Centres)" value={fmtRupee(result.totalProcessCost)} />
+              <Text style={s.sectionTitle}>Materials</Text>
+              <Text style={s.helperText}>
+                Switch off a line this job doesn't need (e.g. white ink on a CMYK-only job) or pick a different material
+                where one's on file -- applies to this calculation only, doesn't change the FG code's saved BOM.
+              </Text>
+              <SoftCard style={s.card}>
+                {allLineCosts.length === 0 ? (
+                  <Text style={s.placeholder}>No BOM lines on this template.</Text>
+                ) : (
+                  allLineCosts.map((lc) => {
+                    const excluded = excludedLines.has(lc.line.id);
+                    const originalLine = originalLinesById.get(lc.line.id);
+                    const alts = alternativesByLine[lc.line.id] ?? [];
+                    const options: { code: string | null; label: string }[] = [];
+                    if (alts.length > 0) {
+                      const defaultMaterial = originalLine?.raw_material_code
+                        ? materialsByCode.get(originalLine.raw_material_code)
+                        : null;
+                      options.push({
+                        code: originalLine?.raw_material_code ?? null,
+                        label: defaultMaterial
+                          ? `${defaultMaterial.code} — ${defaultMaterial.name} — ${priceLabel(defaultMaterial)} (default)`
+                          : "— unmapped (default) —",
+                      });
+                      for (const alt of alts) {
+                        if (alt.raw_material_code === originalLine?.raw_material_code) continue;
+                        const m = materialsByCode.get(alt.raw_material_code);
+                        options.push({
+                          code: alt.raw_material_code,
+                          label: m ? `${m.code} — ${m.name} — ${priceLabel(m)}` : alt.raw_material_code,
+                        });
+                      }
+                    }
+                    const currentValue =
+                      selectedMaterialByLine[lc.line.id] !== undefined
+                        ? selectedMaterialByLine[lc.line.id]
+                        : originalLine?.raw_material_code ?? null;
+                    return (
+                      <MaterialLineRow
+                        key={lc.line.id}
+                        t={t}
+                        excluded={excluded}
+                        name={lc.line.material_name}
+                        mappedLabel={lc.rawMaterial ? `${lc.rawMaterial.code} — ${lc.rawMaterial.name}` : "unmapped"}
+                        options={options}
+                        currentValue={currentValue}
+                        onSelectMaterial={(code) => selectMaterialForLine(lc.line.id, code)}
+                        recentUnitPrice={lc.recentUnitPrice}
+                        avgUnitPrice={lc.avgUnitPrice}
+                        consumption={lc.line.consumption_qty}
+                        basis={lc.line.basis}
+                        wastagePct={lc.line.wastage_pct}
+                        markupPct={lc.line.markup_pct}
+                        recentLineCost={lc.recentLineCost}
+                        avgLineCost={lc.avgLineCost}
+                        onToggle={(v) => toggleLineForJob(lc.line.id, v)}
+                      />
+                    );
+                  })
+                )}
+                <Row t={t} label="Material Cost (Recent)" value={fmtRupee(result.materialCostRecent)} strong />
+                <Row t={t} label="Material Cost (Average)" value={fmtRupee(result.materialCostAvg)} strong />
+              </SoftCard>
+
+              <Text style={s.sectionTitle}>Work Centres</Text>
+              <Text style={s.helperText}>
+                Switch off a process this job doesn't need -- applies to this calculation only, doesn't change the FG
+                code's saved default.
+              </Text>
+              <SoftCard style={s.card}>
+                {allWorkCentreCosts.length === 0 ? (
+                  <Text style={s.placeholder}>No work centres on this template.</Text>
+                ) : (
+                  allWorkCentreCosts.map((wc) => {
+                    const excluded = excludedWorkCentres.has(wc.workCentre);
+                    return (
+                      <View key={wc.workCentre} style={s.wcRow}>
+                        <View style={s.wcLeft}>
+                          <Switch
+                            value={!excluded}
+                            onValueChange={(v) => toggleWorkCentreForJob(wc.workCentre, v)}
+                            trackColor={{ false: t.line, true: t.primaryTint }}
+                            thumbColor={!excluded ? t.primary : undefined}
+                          />
+                          <Text style={[s.wcName, excluded && s.strikethrough]} numberOfLines={2}>
+                            {wc.workCentre}
+                          </Text>
+                        </View>
+                        <Text style={[s.wcValue, excluded && s.mutedText]}>
+                          {excluded ? "excluded" : wc.cost !== null ? fmtRupee(wc.cost) : "no rate"}
+                        </Text>
+                      </View>
+                    );
+                  })
+                )}
+                <Row t={t} label="Total Process Cost" value={fmtRupee(result.totalProcessCost)} strong />
+              </SoftCard>
+
+              <Text style={s.sectionTitle}>Cost Summary</Text>
+              <SoftCard style={s.card}>
                 <Row t={t} label="Total Cost (Recent)" value={fmtRupee(result.totalCostRecent)} strong />
                 <Row t={t} label="Total Cost (Average)" value={fmtRupee(result.totalCostAvg)} strong />
                 <Row
@@ -279,39 +489,47 @@ export default function CostSheetToolScreen() {
                 />
               </SoftCard>
 
-              <Text style={s.sectionTitle}>Materials</Text>
+              <Text style={s.sectionTitle}>Suggested Selling Price</Text>
+              <Text style={s.helperText}>
+                What to charge for a target GP% -- independent of the Selling Price / SqFt field above (that one shows
+                the GP you'd actually get at a price you enter yourself).
+              </Text>
               <SoftCard style={s.card}>
-                {result.lineCosts.length === 0 ? (
-                  <Text style={s.placeholder}>No BOM lines on this template.</Text>
+                <Field t={t} label="Method">
+                  <View style={s.uomToggle}>
+                    <Pressable
+                      style={[s.gpMethodOption, gpMethod === "total_cost" && s.uomOptionActive]}
+                      onPress={() => setGpMethod("total_cost")}
+                    >
+                      <Text style={[s.uomOptionText, gpMethod === "total_cost" && s.uomOptionTextActive]} numberOfLines={2}>
+                        Traditional — GP on total cost
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      style={[s.gpMethodOption, gpMethod === "services_only" && s.uomOptionActive]}
+                      onPress={() => setGpMethod("services_only")}
+                    >
+                      <Text style={[s.uomOptionText, gpMethod === "services_only" && s.uomOptionTextActive]} numberOfLines={2}>
+                        Value Addition — GP on services only
+                      </Text>
+                    </Pressable>
+                  </View>
+                </Field>
+                <Text style={s.gpMethodHint}>
+                  {gpMethod === "total_cost"
+                    ? "Margin applied to everything: raw materials, wastage, ink, machine cost, labour, finishing, packing, overheads."
+                    : "Raw materials and wastage recovered at cost. Margin applied only to ink, machine time, labour, finishing, packing, and overheads."}
+                </Text>
+                <NumberField t={t} label="Target GP %" value={targetGpPct} onChange={setTargetGpPct} />
+                {priceSuggestion ? (
+                  <View style={s.metricGrid}>
+                    <Metric t={t} label="Price / SqFt (Recent)" value={fmtRupee(priceSuggestion.perSqftRecent)} />
+                    <Metric t={t} label="Price / SqFt (Average)" value={fmtRupee(priceSuggestion.perSqftAvg)} />
+                    <Metric t={t} label="Total (Recent)" value={fmtRupee(priceSuggestion.totalRecent)} />
+                    <Metric t={t} label="Total (Average)" value={fmtRupee(priceSuggestion.totalAvg)} />
+                  </View>
                 ) : (
-                  result.lineCosts.map((lc) => (
-                    <Row
-                      key={lc.line.id}
-                      t={t}
-                      label={lc.line.material_name}
-                      detail={lc.rawMaterial ? lc.rawMaterial.code : "unmapped — no raw material linked"}
-                      value={`${fmtRupee(lc.recentLineCost)} / ${fmtRupee(lc.avgLineCost)}`}
-                      small
-                    />
-                  ))
-                )}
-              </SoftCard>
-
-              <Text style={s.sectionTitle}>Work Centres</Text>
-              <SoftCard style={s.card}>
-                {result.workCentreCosts.length === 0 ? (
-                  <Text style={s.placeholder}>No work centres on this template.</Text>
-                ) : (
-                  result.workCentreCosts.map((wc) => (
-                    <Row
-                      key={wc.workCentre}
-                      t={t}
-                      label={wc.workCentre}
-                      detail={wc.rateRow ? undefined : "no rate on file"}
-                      value={wc.cost === null ? "—" : fmtRupee(wc.cost)}
-                      small
-                    />
-                  ))
+                  <Text style={s.placeholder}>Enter a target GP% under 100 to see a suggested price.</Text>
                 )}
               </SoftCard>
             </>
@@ -402,11 +620,105 @@ function PickerField({
                 <Text style={s.modalOptionText} numberOfLines={2}>{item.label}</Text>
               </Pressable>
             )}
-            ListEmptyComponent={<Text style={s.modalEmpty}>No FG codes available.</Text>}
+            ListEmptyComponent={<Text style={s.modalEmpty}>No options available.</Text>}
           />
         </View>
       </Modal>
     </Field>
+  );
+}
+
+// Compact material picker used inline within a MaterialLineRow -- same
+// bottom-sheet Modal pattern as PickerField, but `code` values (not just
+// strings) since "no material for this line" is a real, distinct option
+// (code: null) from "use the default."
+function MaterialPicker({
+  t, options, value, onChange, disabled,
+}: {
+  t: VibrantTheme; options: { code: string | null; label: string }[]; value: string | null;
+  onChange: (code: string | null) => void; disabled?: boolean;
+}) {
+  const s = styles(t);
+  const [open, setOpen] = useState(false);
+  const selected = options.find((o) => o.code === value);
+  return (
+    <>
+      <Pressable style={[s.materialPicker, disabled && { opacity: 0.5 }]} onPress={() => !disabled && setOpen(true)}>
+        <Text style={s.materialPickerText} numberOfLines={2}>{selected?.label ?? "— select material —"}</Text>
+        <Text style={s.pickerChevron}>⌄</Text>
+      </Pressable>
+      <Modal visible={open} transparent animationType="slide" onRequestClose={() => setOpen(false)}>
+        <Pressable style={s.modalBackdrop} onPress={() => setOpen(false)} />
+        <View style={s.modalSheet}>
+          <View style={s.modalHeader}>
+            <Text style={s.modalTitle}>Material</Text>
+            <Pressable onPress={() => setOpen(false)}><Text style={s.modalClose}>Done</Text></Pressable>
+          </View>
+          <FlatList
+            data={options}
+            keyExtractor={(o, i) => o.code ?? `none-${i}`}
+            style={s.modalList}
+            renderItem={({ item, index }) => (
+              <Pressable
+                style={[s.modalOption, { borderLeftColor: optionAccent(t, index) }, item.code === value && s.modalOptionActive]}
+                onPress={() => { onChange(item.code); setOpen(false); }}
+              >
+                <Text style={s.modalOptionText} numberOfLines={2}>{item.label}</Text>
+              </Pressable>
+            )}
+          />
+        </View>
+      </Modal>
+    </>
+  );
+}
+
+// One BOM line's full detail -- on/off switch, name, (when alternatives
+// exist) a material picker, else the plain mapped-material text, then a
+// compact price/consumption/wastage/markup/line-cost detail strip. Mirrors
+// every column of the web tool's line-cost table, just stacked instead of
+// side-by-side (no room for 9 columns on a phone width).
+function MaterialLineRow({
+  t, excluded, name, mappedLabel, options, currentValue, onSelectMaterial,
+  recentUnitPrice, avgUnitPrice, consumption, basis, wastagePct, markupPct,
+  recentLineCost, avgLineCost, onToggle,
+}: {
+  t: VibrantTheme; excluded: boolean; name: string; mappedLabel: string;
+  options: { code: string | null; label: string }[]; currentValue: string | null;
+  onSelectMaterial: (code: string | null) => void;
+  recentUnitPrice: number | null; avgUnitPrice: number | null;
+  consumption: number; basis: string; wastagePct: number; markupPct: number;
+  recentLineCost: number; avgLineCost: number; onToggle: (v: boolean) => void;
+}) {
+  const s = styles(t);
+  return (
+    <View style={s.lineRow}>
+      <View style={s.lineTop}>
+        <Switch
+          value={!excluded}
+          onValueChange={onToggle}
+          trackColor={{ false: t.line, true: t.primaryTint }}
+          thumbColor={!excluded ? t.primary : undefined}
+        />
+        <Text style={[s.lineName, excluded && s.strikethrough]} numberOfLines={2}>{name}</Text>
+      </View>
+      {options.length > 0 ? (
+        <MaterialPicker t={t} options={options} value={currentValue} onChange={onSelectMaterial} disabled={excluded} />
+      ) : (
+        <Text style={[s.lineMapped, excluded && s.mutedText]} numberOfLines={1}>{mappedLabel}</Text>
+      )}
+      <View style={s.lineDetailGrid}>
+        <Text style={s.lineDetailText}>Recent ₹{recentUnitPrice !== null ? recentUnitPrice.toFixed(2) : "—"}/unit</Text>
+        <Text style={s.lineDetailText}>Avg ₹{avgUnitPrice !== null ? avgUnitPrice.toFixed(2) : "—"}/unit</Text>
+        <Text style={s.lineDetailText}>{consumption} /{basis.toLowerCase()}</Text>
+        <Text style={s.lineDetailText}>Wastage {Math.round(wastagePct * 100)}%</Text>
+        <Text style={s.lineDetailText}>Markup {Math.round(markupPct * 100)}%</Text>
+      </View>
+      <View style={s.lineTop}>
+        <Text style={[s.lineCostText, excluded && s.strikethrough]}>Line cost: {fmtRupee(recentLineCost)}</Text>
+        <Text style={s.lineCostSub}>avg {fmtRupee(avgLineCost)}</Text>
+      </View>
+    </View>
   );
 }
 
@@ -443,6 +755,7 @@ const styles = (t: VibrantTheme) =>
     errorText: { fontSize: 14, fontFamily: fonts.regular, color: t.danger, textAlign: "center" },
 
     sectionTitle: { ...sectionLabelStyle(t), marginTop: 10, marginBottom: 2 },
+    helperText: { fontSize: 11, fontFamily: fonts.regular, color: t.inkMuted, marginBottom: 2 },
     card: { gap: 10 },
 
     field: { gap: 6 },
@@ -460,9 +773,14 @@ const styles = (t: VibrantTheme) =>
       flex: 1, minHeight: 44, borderRadius: 12, borderWidth: 1.5, borderColor: t.inkMuted + "40",
       alignItems: "center", justifyContent: "center", backgroundColor: t.primaryTint,
     },
+    gpMethodOption: {
+      flex: 1, minHeight: 52, borderRadius: 12, borderWidth: 1.5, borderColor: t.inkMuted + "40",
+      alignItems: "center", justifyContent: "center", backgroundColor: t.primaryTint, paddingHorizontal: 8, paddingVertical: 6,
+    },
     uomOptionActive: { backgroundColor: t.primary, borderColor: t.primary },
-    uomOptionText: { fontSize: 13, fontFamily: fonts.medium, color: t.ink },
+    uomOptionText: { fontSize: 12, fontFamily: fonts.medium, color: t.ink, textAlign: "center" },
     uomOptionTextActive: { color: t.onGradient },
+    gpMethodHint: { fontSize: 11, fontFamily: fonts.regular, color: t.inkMuted },
 
     pickerField: {
       minHeight: 44, borderRadius: 12, borderWidth: 1.5, borderColor: t.inkMuted + "40",
@@ -499,6 +817,32 @@ const styles = (t: VibrantTheme) =>
     rowDetail: { fontSize: 11, fontFamily: fonts.regular, color: t.inkMuted },
     rowValue: { fontSize: 13, fontFamily: fonts.regular, color: t.inkSecondary, textAlign: "right" },
     rowBig: { fontSize: 15 },
+
+    // Materials -- one card per line, switch + name on top, material
+    // picker (or plain mapped text) below, a small detail strip, then the
+    // line cost itself.
+    lineRow: { gap: 6, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.line },
+    lineTop: { flexDirection: "row", alignItems: "center", gap: 8 },
+    lineName: { flex: 1, fontSize: 13, fontFamily: fonts.medium, color: t.ink },
+    lineMapped: { fontSize: 12, fontFamily: fonts.regular, color: t.inkSecondary, marginLeft: 48 },
+    materialPicker: {
+      marginLeft: 48, minHeight: 36, borderRadius: 10, borderWidth: 1, borderColor: t.inkMuted + "30",
+      backgroundColor: t.surfaceSunken, paddingHorizontal: 10, paddingVertical: 6,
+      flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 6,
+    },
+    materialPickerText: { flex: 1, fontSize: 11, fontFamily: fonts.regular, color: t.ink },
+    lineDetailGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginLeft: 48 },
+    lineDetailText: { fontSize: 10, fontFamily: fonts.regular, color: t.inkMuted },
+    lineCostText: { fontSize: 12, fontFamily: fonts.bold, color: t.ink, marginLeft: 48 },
+    lineCostSub: { fontSize: 10, fontFamily: fonts.regular, color: t.inkMuted },
+    strikethrough: { textDecorationLine: "line-through", color: t.inkMuted },
+    mutedText: { color: t.inkMuted },
+
+    // Work Centres
+    wcRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, paddingVertical: 9, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.line },
+    wcLeft: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
+    wcName: { flex: 1, fontSize: 12, fontFamily: fonts.regular, color: t.ink },
+    wcValue: { fontSize: 12, fontFamily: fonts.bold, color: t.ink },
 
     placeholder: { padding: 16, textAlign: "center", fontSize: 13, fontFamily: fonts.regular, color: t.inkMuted },
     pad: { padding: 24 },

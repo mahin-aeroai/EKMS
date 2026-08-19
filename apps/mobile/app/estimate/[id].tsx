@@ -6,6 +6,7 @@ import * as Sharing from "expo-sharing";
 import { vibrant, fonts, sectionLabelStyle, type VibrantTheme } from "../../theme/vibrant";
 import { SoftCard, GradientButton } from "../../theme/components";
 import { supabase } from "../../lib/supabase";
+import { CALADEA_BOLD_BASE64, CALADEA_REGULAR_BASE64 } from "../../lib/estimatePdfFonts";
 
 /**
  * Read-only "bill view" for a saved Estimate Builder quote -- same
@@ -238,12 +239,40 @@ function buildEstimateHtml(estimate: EstimateRow, lines: LineItemRow[]): string 
 <head>
 <meta charset="utf-8" />
 <style>
+  /* "The estimate report pdf is not matching with web pdf i need exactly
+     same format and fonts and size" -- this screen previously fell back
+     to Georgia/Times New Roman (whatever serif WebKit found), which reads
+     visibly larger/wider than Caladea at the same nominal point size
+     because of different font metrics (bigger x-height) -- so "9pt" here
+     never actually looked like the web PDF's 9pt. Caladea is now embedded
+     directly (base64 data URI, see ../../lib/estimatePdfFonts.ts) --
+     byte-for-byte the same font file apps/web/src/lib/estimateBuilder/
+     pdf.ts embeds via pdf-lib, so this is now the real same typeface, not
+     an approximation, at the same sizes web already used (9pt body, 8pt
+     table).
+     Page-numbered running footers (web's per-page MMDI address/page-number
+     strip) aren't reliably supported by WebKit's print engine behind
+     expo-print/react-native's HTML->PDF path the way pdf-lib's
+     page-by-page drawing lets the web version do it -- that part is
+     deliberately NOT replicated here; a single closing address block sits
+     at the end of the letter instead (see .footer below), same
+     information, just not repeated on every page. */
+  @font-face {
+    font-family: "Caladea";
+    font-weight: 400;
+    src: url(data:font/ttf;base64,${CALADEA_REGULAR_BASE64}) format("truetype");
+  }
+  @font-face {
+    font-family: "Caladea";
+    font-weight: 700;
+    src: url(data:font/ttf;base64,${CALADEA_BOLD_BASE64}) format("truetype");
+  }
   @page { size: A4; margin: 20mm; }
-  body { font-family: Georgia, "Times New Roman", serif; color: #14161c; font-size: 9pt; line-height: 1.45; }
+  body { font-family: "Caladea", Georgia, serif; color: #14161c; font-size: 9pt; line-height: 1.45; }
   p { margin: 0 0 9pt; }
   b { font-weight: 700; }
-  table { width: 100%; border-collapse: collapse; margin: 10pt 0 12pt; }
-  th, td { border: 0.5pt solid #ccced1; padding: 4pt 3pt; font-size: 8pt; vertical-align: top; }
+  table { width: 100%; border-collapse: collapse; margin: 10pt 0 12pt; table-layout: fixed; }
+  th, td { border: 0.5pt solid #ccced1; padding: 4pt 3pt; font-size: 8pt; vertical-align: top; word-wrap: break-word; }
   th { background: #f0f1f3; text-align: left; font-weight: 700; }
   td.num, th.num { text-align: right; }
   tr.totals td { font-weight: 700; }
@@ -253,6 +282,8 @@ function buildEstimateHtml(estimate: EstimateRow, lines: LineItemRow[]): string 
   .summary { margin: 4pt 0 14pt; }
   .summary b { font-size: 9pt; }
   .signoff { margin-top: 22pt; }
+  .footer { margin-top: 24pt; padding-top: 8pt; border-top: 0.5pt solid #ccced1; font-size: 7.5pt; color: #6b6f78; }
+  .footer p { margin: 0 0 2pt; }
 </style>
 </head>
 <body>
@@ -276,6 +307,12 @@ function buildEstimateHtml(estimate: EstimateRow, lines: LineItemRow[]): string 
   <p>With reference to the above subject requirement, we hereby feel pleasure in submitting our proposal for the supply of the below items as per the given specifications. Please find below quote for your kind approval.</p>
 
   <table>
+    <colgroup>
+      <col style="width:15mm" /><col style="width:33mm" /><col style="width:17mm" />
+      <col style="width:8mm" /><col style="width:12mm" /><col style="width:12mm" />
+      <col style="width:13mm" /><col style="width:13mm" /><col style="width:12mm" />
+      <col style="width:12mm" /><col style="width:23mm" />
+    </colgroup>
     <thead>
       <tr>
         <th>Product No.</th>
@@ -329,6 +366,12 @@ function buildEstimateHtml(estimate: EstimateRow, lines: LineItemRow[]): string 
   <div class="signoff">
     <p><b>${escapeHtml(PDF_MMDI.signOffLine)}</b></p>
     ${signatoryLines.map((l) => `<p style="margin:0 0 2pt;">${escapeHtml(l)}</p>`).join("")}
+  </div>
+
+  <div class="footer">
+    <p>${escapeHtml(PDF_MMDI.legalName)}, ${escapeHtml(PDF_MMDI.address)}</p>
+    <p>Ph.: ${escapeHtml(PDF_MMDI.phone)}   |   ${escapeHtml(PDF_MMDI.email)}   |   ${escapeHtml(PDF_MMDI.web)}</p>
+    <p>${escapeHtml(estimate.quote_number)}</p>
   </div>
 </body>
 </html>`;
