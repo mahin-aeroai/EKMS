@@ -737,6 +737,29 @@ function NumberField({
 }) {
   const s = styles(t);
   const [text, setText] = useState(value === "" ? "" : String(value));
+  // "everytime i am :wq" -- unrelated to that, but the screenshot sent
+  // right after showed the real bug this fixes: Target GP % still read
+  // "50" after tapping Value Addition, even though the calculation below
+  // it had already switched to 100%. Root cause: `text` was only ever
+  // set from `value` on the very first render (useState's initializer
+  // doesn't re-run later); every OTHER field write went through
+  // onChangeText, which does keep text in sync -- but a write from
+  // OUTSIDE this component (Method's onPress calling setTargetGpPct, or
+  // "Apply to Selling Price / SqFt" calling setSellPrice) changes
+  // `value` without ever calling onChangeText, so `text` just went
+  // stale. This effect re-syncs `text` whenever `value` changes from the
+  // outside, but skips it while `text` already parses to the same
+  // number -- that's what's true while the user is mid-typing (e.g.
+  // "12." before they've typed the "5" of "12.5"), so it won't fight
+  // their keystrokes.
+  useEffect(() => {
+    if (value === "") {
+      if (text !== "") setText("");
+      return;
+    }
+    if (Number(text) !== value) setText(String(value));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
   return (
     <Field t={t} label={label}>
       <TextInput
