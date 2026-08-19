@@ -540,22 +540,58 @@ export default function CostSheetToolScreen() {
               <SoftCard style={s.card}>
                 <Row t={t} label="Total Cost (Recent)" value={fmtRupee(result.totalCostRecent)} strong />
                 <Row t={t} label="Total Cost (Average)" value={fmtRupee(result.totalCostAvg)} strong />
-                <Row
-                  t={t}
-                  label="Gross Profit (Recent)"
-                  detail={fmtPct(result.gpRecentPct)}
-                  value={fmtRupee(result.gpRecent)}
-                  strong
-                  big
-                />
-                <Row
-                  t={t}
-                  label="Gross Profit (Average)"
-                  detail={fmtPct(result.gpAvgPct)}
-                  value={fmtRupee(result.gpAvg)}
-                  strong
-                  big
-                />
+                {/* "there is something wrong i couldnt get the calculation
+                    with GP" -- root cause: Gross Profit here is
+                    sellingAmount - totalCost, and sellingAmount is
+                    sqft x Selling Price / SqFt (the Job Details field
+                    above). Leaving that field blank (its default) makes
+                    sellingAmount 0, so this correctly-but-confusingly
+                    showed the full cost as a negative number with a "—"
+                    for the percentage (division by zero) -- nothing was
+                    actually broken, but there was no way to tell that
+                    from the screen, and no link back to the Suggested
+                    Selling Price section below that already computes a
+                    real price. Now: while no price has been entered, this
+                    shows a plain explanation plus a one-tap button that
+                    fills Selling Price / SqFt straight from the Suggested
+                    Selling Price section's own Target GP% -- Gross Profit
+                    updates immediately to reflect it. */}
+                {sellPrice === "" ? (
+                  <View style={s.gpEmptyState}>
+                    <Text style={s.placeholder}>
+                      Enter a Selling Price / SqFt above to see Gross Profit here.
+                    </Text>
+                    {priceSuggestion && (
+                      <Pressable
+                        style={s.useSuggestedBtn}
+                        onPress={() => setSellPrice(Math.round(priceSuggestion.perSqftRecent))}
+                      >
+                        <Text style={s.useSuggestedBtnText}>
+                          Use Suggested Price — {fmtRupee(priceSuggestion.perSqftRecent)}/sqft ({targetGpPct}% GP)
+                        </Text>
+                      </Pressable>
+                    )}
+                  </View>
+                ) : (
+                  <>
+                    <Row
+                      t={t}
+                      label="Gross Profit (Recent)"
+                      detail={fmtPct(result.gpRecentPct)}
+                      value={fmtRupee(result.gpRecent)}
+                      strong
+                      big
+                    />
+                    <Row
+                      t={t}
+                      label="Gross Profit (Average)"
+                      detail={fmtPct(result.gpAvgPct)}
+                      value={fmtRupee(result.gpAvg)}
+                      strong
+                      big
+                    />
+                  </>
+                )}
                 <GradientButton
                   label={addingToPool ? "Adding…" : "Add to Estimate Pool"}
                   onPress={addToPool}
@@ -603,12 +639,25 @@ export default function CostSheetToolScreen() {
                 </Text>
                 <NumberField t={t} label="Target GP %" value={targetGpPct} onChange={setTargetGpPct} />
                 {priceSuggestion ? (
-                  <View style={s.metricGrid}>
-                    <Metric t={t} label="Price / SqFt (Recent)" value={fmtRupee(priceSuggestion.perSqftRecent)} />
-                    <Metric t={t} label="Price / SqFt (Average)" value={fmtRupee(priceSuggestion.perSqftAvg)} />
-                    <Metric t={t} label="Total (Recent)" value={fmtRupee(priceSuggestion.totalRecent)} />
-                    <Metric t={t} label="Total (Average)" value={fmtRupee(priceSuggestion.totalAvg)} />
-                  </View>
+                  <>
+                    <View style={s.metricGrid}>
+                      <Metric t={t} label="Price / SqFt (Recent)" value={fmtRupee(priceSuggestion.perSqftRecent)} />
+                      <Metric t={t} label="Price / SqFt (Average)" value={fmtRupee(priceSuggestion.perSqftAvg)} />
+                      <Metric t={t} label="Total (Recent)" value={fmtRupee(priceSuggestion.totalRecent)} />
+                      <Metric t={t} label="Total (Average)" value={fmtRupee(priceSuggestion.totalAvg)} />
+                    </View>
+                    {/* Feeds this section's price back up into Selling
+                        Price / SqFt so the Cost Summary's Gross Profit
+                        rows reflect it too -- see that section's own
+                        comment for the full "couldn't get the GP
+                        calculation" reasoning. */}
+                    <Pressable
+                      style={s.useSuggestedBtn}
+                      onPress={() => setSellPrice(Math.round(priceSuggestion.perSqftRecent))}
+                    >
+                      <Text style={s.useSuggestedBtnText}>Apply to Selling Price / SqFt</Text>
+                    </Pressable>
+                  </>
                 ) : (
                   <Text style={s.placeholder}>Enter a target GP% under 100 to see a suggested price.</Text>
                 )}
@@ -931,6 +980,13 @@ const styles = (t: VibrantTheme) =>
     poolBtn: { marginTop: 4 },
     poolSuccessText: { fontSize: 12, fontFamily: fonts.regular, color: t.success, textAlign: "center" },
     poolErrorText: { fontSize: 12, fontFamily: fonts.regular, color: t.danger, textAlign: "center" },
+
+    gpEmptyState: { gap: 8, paddingVertical: 4 },
+    useSuggestedBtn: {
+      minHeight: 40, borderRadius: radius.md, borderWidth: 1.5, borderColor: t.primary,
+      alignItems: "center", justifyContent: "center", paddingHorizontal: 12, backgroundColor: t.primaryTint,
+    },
+    useSuggestedBtnText: { fontSize: 12, fontFamily: fonts.bold, color: t.primary, textAlign: "center" },
 
     historyLink: { alignItems: "center", paddingVertical: 16 },
     historyLinkText: { fontSize: 13, fontFamily: fonts.medium, color: t.primary },
