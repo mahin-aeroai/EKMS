@@ -33,8 +33,41 @@ interface RecentItem {
   resumable: boolean;
 }
 
-const RECENT_LIMIT = 5;
 const SERVER_PAGE = 30;
+
+// "Remove recent activity from home page. instead display sales figures."
+function monthStartISO(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+}
+
+// Simple sequential pager, same shape as sales-by-rep.tsx's fetchAllRows --
+// this only runs once per Home visit and month-to-date is a much smaller
+// slice than that screen's all-time queries, so the extra complexity of a
+// count-based parallel fetch (and the failure mode it turned out to have,
+// see sales-by-rep.tsx's own fix note) isn't worth it here.
+async function fetchMonthSales(): Promise<{ total: number; count: number }> {
+  const pageSize = 1000;
+  const from0 = monthStartISO();
+  let total = 0;
+  let count = 0;
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from("sales_transactions")
+      .select("taxable_value")
+      .gte("invoice_date", from0)
+      .range(from, from + pageSize - 1);
+    if (error || !data) break;
+    for (const r of data) total += r.taxable_value ?? 0;
+    count += data.length;
+    if (data.length < pageSize) break;
+  }
+  return { total, count };
+}
+
+function formatCrore(rupees: number): string {
+  return rupees >= 10000000 ? `₹${(rupees / 10000000).toFixed(2)} Cr` : `₹${rupees.toLocaleString("en-IN")}`;
+}
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -48,12 +81,6 @@ function firstName(email: string | undefined): string {
   const local = email.split("@")[0] ?? "";
   const word = local.split(/[.\-_]/)[0] ?? local;
   return word ? word[0].toUpperCase() + word.slice(1) : "there";
-}
-
-function statusMeta(status: ReportStatus, t: VibrantTheme): { color: string; label: string } {
-  if (status === "complete") return { color: t.success, label: "Complete" };
-  if (status === "incomplete") return { color: t.danger, label: "Incomplete" };
-  return { color: t.inkMuted, label: "Local draft" };
 }
 
 // `as const` keeps each `icon` a string literal (e.g. "function") rather
@@ -96,10 +123,12 @@ export default function HomeScreen() {
   const { session } = useSession();
 
   const [items, setItems] = useState<RecentItem[] | null>(null);
+  const [salesSummary, setSalesSummary] = useState<{ total: number; count: number } | null>(null);
 
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
+      fetchMonthSales().then((s) => { if (!cancelled) setSalesSummary(s); });
       (async () => {
         const [drafts, userRes] = await Promise.all([listDrafts(), supabase.auth.getUser()]);
         const userId = userRes.data.user?.id;
@@ -157,8 +186,6 @@ export default function HomeScreen() {
       const now = new Date();
       return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
     }).length ?? 0;
-  const recent = (items ?? []).slice(0, RECENT_LIMIT);
-
   return (
     <ScrollView style={s.screen} contentContainerStyle={s.content}>
       <View style={s.greetRow}>
@@ -213,39 +240,25 @@ export default function HomeScreen() {
         })}
       </View>
 
-      <Text style={s.sectionTitle}>Recent activity</Text>
-      {items === null ? (
+      {/* "Remove recent activity from home page. instead display sales
+          figures." -- was a list of individual draft/report rows; now a
+          company-wide "this month" sales snapshot, same data source and
+          hero-stat visual language as Sales by Rep's own Total Sales
+          card, so Home reads as a dashboard rather than a worklist. */}
+      <Text style={s.sectionTitle}>This month's sales</Text>
+      {salesSummary === null ? (
         <ActivityIndicator style={s.pad} color={t.primary} />
-      ) : recent.length === 0 ? (
-        <SoftCard style={s.emptyCard}>
-          <Text style={s.emptyText}>No reports yet — start one from Basil Installations.</Text>
-        </SoftCard>
       ) : (
-        <View style={{ gap: 10 }}>
-          {recent.map((item) => {
-            const meta = statusMeta(item.status, t);
-            return (
-              <Pressable
-                key={item.id}
-                onPress={() => item.resumable && router.push(`/report/${item.id}`)}
-                disabled={!item.resumable}
-              >
-                {({ pressed }) => (
-                  <SoftCard style={[s.recentRow, pressed && item.resumable && { opacity: 0.7 }]}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.recentTitle} numberOfLines={1}>{item.storeName}</Text>
-                      <View style={s.statusWrap}>
-                        <View style={[s.statusDot, { backgroundColor: meta.color }]} />
-                        <Text style={s.statusText}>{meta.label}</Text>
-                      </View>
-                    </View>
-                    {item.resumable && <Text style={s.recentChev}>›</Text>}
-                  </SoftCard>
-                )}
-              </Pressable>
-            );
-          })}
-        </View>
+        <Pressable onPress={() => router.push("/sales-by-rep")}>
+          <View style={s.salesCard}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.salesLabel}>Total taxable value</Text>
+              <Text style={s.salesValue}>{formatCrore(salesSummary.total)}</Text>
+              <Text style={s.salesSub}>{salesSummary.count.toLocaleString("en-IN")} transactions this month</Text>
+            </View>
+            <Text style={s.salesChev}>›</Text>
+          </View>
+        </Pressable>
       )}
     </ScrollView>
   );
@@ -293,13 +306,18 @@ const styles = (t: VibrantTheme) =>
     gridSub: { fontSize: 12, color: t.inkSecondary },
 
     pad: { padding: 16 },
-    emptyCard: { padding: 16 },
-    emptyText: { fontSize: 14, color: t.inkMuted, textAlign: "center" },
 
-    recentRow: { flexDirection: "row", alignItems: "center", gap: 12, padding: 12, minHeight: 44 },
-    recentTitle: { fontSize: 15, color: t.ink },
-    statusWrap: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 },
-    statusDot: { width: 8, height: 8, borderRadius: 4 },
-    statusText: { fontSize: 13, color: t.inkSecondary },
-    recentChev: { fontSize: 20, color: t.inkMuted },
+    // "instead display sales figures" -- same flat hero-card language as
+    // Sales by Rep's own Total Sales card (t.inkMuted flat background, not
+    // a gradient -- see that file's own note on why flat over gradient for
+    // a grand-total figure).
+    salesCard: {
+      flexDirection: "row", alignItems: "center", gap: 12,
+      backgroundColor: t.inkMuted, borderRadius: 16, padding: 16,
+      shadowColor: "#3D2E6B", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.1, shadowRadius: 16, elevation: 4,
+    },
+    salesLabel: { fontSize: 12, color: t.onGradient, opacity: 0.85 },
+    salesValue: { fontSize: 26, fontFamily: fonts.bold, color: t.onGradient, marginTop: 2 },
+    salesSub: { fontSize: 12, color: t.onGradient, opacity: 0.75, marginTop: 4 },
+    salesChev: { fontSize: 22, color: t.onGradient, opacity: 0.85 },
   });

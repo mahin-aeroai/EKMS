@@ -144,10 +144,14 @@ export default function CostSheetScreen() {
           </>
         )}
 
+        {/* "Remove Overheads and labour permanently from the app in sign
+            Costing" -- rows dropped here too; overheadPct/overheadValue/
+            labour still exist on CostSheetCalc (optional) purely so a cost
+            sheet generated before this change still typechecks and loads,
+            they're just never rendered now regardless of whether an old
+            row happens to have them. */}
         <Text style={s.sectionTitle}>Cost breakdown</Text>
         <SoftCard style={s.summaryCard}>
-          <Row t={t} small label={`Overhead (${c.overheadPct ?? 0}%)`} value={fmtRupee(c.overheadValue ?? 0)} />
-          <Row t={t} small label="Labour" value={fmtRupee(c.labour ?? 0)} />
           <Row t={t} label="Signage Production Cost" value={fmtRupee(c.productionCost ?? 0)} strong />
         </SoftCard>
 

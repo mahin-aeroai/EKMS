@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { SymbolView } from "expo-symbols";
 import { File, Paths } from "expo-file-system";
+import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import { supabase } from "../../lib/supabase";
 import { getSignedUrl } from "../../lib/copilot";
@@ -77,6 +78,19 @@ export default function SurveysScreen() {
     };
   }, [query]);
 
+  // "Site Survey are not openign in app instead its just downlaoding to
+  // local folder" -- Sharing.shareAsync opens iOS's share sheet, which is
+  // built for choosing a DESTINATION (Mail, Files, AirDrop, WhatsApp...),
+  // not for reading the document -- tapping the obvious "Save to Files"
+  // action there is exactly "just downloads it", no preview involved. A
+  // real in-app preview needs either a WebView (new native dependency,
+  // another rebuild) or expo-print's printAsync, which on iOS opens
+  // UIPrintInteractionController -- a full-screen live preview of the
+  // document, with its own Share icon if the user still wants to send it
+  // elsewhere afterwards. expo-print is already a dependency (used by
+  // estimate/[id].tsx), so this needs no new native module and no
+  // rebuild. Sharing.shareAsync is kept as a fallback for anything
+  // printAsync can't render.
   const open = useCallback(async (row: ApplelfgSiteSurveyRow) => {
     setOpeningId(row.id);
     try {
@@ -86,8 +100,12 @@ export default function SurveysScreen() {
       // overwrite the cached copy, not throw (the default behaviour of the
       // new File API, unlike the old FileSystem.downloadAsync it replaces).
       const file = await File.downloadFileAsync(url, destination, { idempotent: true });
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(file.uri, { mimeType: "application/pdf", UTI: "com.adobe.pdf" });
+      try {
+        await Print.printAsync({ uri: file.uri });
+      } catch {
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(file.uri, { mimeType: "application/pdf", UTI: "com.adobe.pdf" });
+        }
       }
     } finally {
       setOpeningId(null);

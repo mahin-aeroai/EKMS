@@ -86,6 +86,10 @@ function RootLayoutNav() {
         <Stack.Protected guard={!!session}>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="report/[id]" options={{ title: "Installation Report" }} />
+          {/* "not able to open and see the preview" -- read-only view of an
+              already-submitted report, reading server rows directly
+              rather than the local draft editor above. */}
+          <Stack.Screen name="report-preview/[id]" options={{ title: "Report Preview" }} />
           {/* "make a screen for it" -- cost sheet detail after Generate */}
           <Stack.Screen name="cost-sheet/[ref]" options={{ title: "Cost Sheet" }} />
           {/* "let them open in diferent screena dn show them nicely like a

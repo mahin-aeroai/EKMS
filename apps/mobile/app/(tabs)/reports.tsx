@@ -6,7 +6,7 @@ import { radius } from "@mmdi/shared/theme";
 import { vibrant, type VibrantTheme } from "../../theme/vibrant";
 import { SoftCard, GradientButton } from "../../theme/components";
 import { supabase } from "@/lib/supabase";
-import { listDrafts, saveDraft } from "@/lib/installationReports/draftStore";
+import { deleteDraft, listDrafts, saveDraft } from "@/lib/installationReports/draftStore";
 import { allPhotos } from "@/lib/installationReports/submit";
 import { emptyDraftReport, type DraftReport } from "@/lib/installationReports/types";
 
@@ -152,45 +152,62 @@ export default function ReportsScreen() {
     }
   }
 
+  // "Also give delete option for unsuccessful installtion reports" --
+  // Discard used to only appear for "orphaned" incomplete reports (a
+  // server row with no matching local draft, the one case where Resume
+  // is impossible). Any OTHER unsubmitted report -- local-draft-only, or
+  // incomplete-but-resumable -- had no delete path at all. Now offered
+  // for every non-complete status; see the render below for exactly
+  // which rows get the button.
   function confirmDiscard(item: ReportListItem) {
     Alert.alert(
       "Discard this report?",
       `"${item.storeName}" and all its site and photo rows will be permanently deleted. This can't be undone.`,
       [
         { text: "Cancel", style: "cancel" },
-        { text: "Discard", style: "destructive", onPress: () => void discardReport(item.id) },
+        { text: "Discard", style: "destructive", onPress: () => void discardReport(item) },
       ]
     );
   }
 
-  async function discardReport(id: string) {
-    setDiscardingId(id);
+  async function discardReport(item: ReportListItem) {
+    setDiscardingId(item.id);
     try {
-      // installation_report_site_entries and installation_report_photos both
-      // reference report_id with `on delete cascade` (see
-      // supabase-installation-reports-schema.sql), so deleting the report row
-      // is enough to take every site and photo row with it.
-      //
-      // NOT solved here: any object this report already PUT to R2 before it
-      // got stuck is now orphaned -- deleting the DB row doesn't touch R2,
-      // and there is no reverse index from a relative_path back to "was this
-      // ever deleted". Cleaning those up needs a separate service-role sweep
-      // (list the report's R2 prefix, delete anything with no matching photo
-      // row), not something this client-side action can or should attempt.
-      const { data, error } = await supabase.from("installation_reports").delete().eq("id", id).select("id");
-      if (error) throw new Error(error.message);
-      // RLS-filtered deletes return 200 with zero rows, not an error -- a
-      // silent no-op that would otherwise look identical to success. Delete
-      // succeeds for an admin (installation_reports_delete_by_role) or for
-      // the report's own creator while it's still status = 'draft' (see
-      // supabase-installation-reports-own-draft-delete-migration.sql) --
-      // this branch is a defensive fallback for anything outside both
-      // (e.g. this row somehow isn't this signed-in user's own), which the
-      // UI shouldn't normally offer Discard on in the first place.
-      if (!data || data.length === 0) {
-        throw new Error("Nothing was deleted -- you may not have permission to discard this report.");
+      // A pure local-draft item (never reached the server at all) has no
+      // installation_reports row to delete -- only the on-device file.
+      if (item.status !== "local-draft") {
+        // installation_report_site_entries and installation_report_photos
+        // both reference report_id with `on delete cascade` (see
+        // supabase-installation-reports-schema.sql), so deleting the
+        // report row is enough to take every site and photo row with it.
+        //
+        // NOT solved here: any object this report already PUT to R2
+        // before it got stuck is now orphaned -- deleting the DB row
+        // doesn't touch R2, and there is no reverse index from a
+        // relative_path back to "was this ever deleted". Cleaning those
+        // up needs a separate service-role sweep (list the report's R2
+        // prefix, delete anything with no matching photo row), not
+        // something this client-side action can or should attempt.
+        const { data, error } = await supabase.from("installation_reports").delete().eq("id", item.id).select("id");
+        if (error) throw new Error(error.message);
+        // RLS-filtered deletes return 200 with zero rows, not an error --
+        // a silent no-op that would otherwise look identical to success.
+        // Delete succeeds for an admin (installation_reports_delete_by_role)
+        // or for the report's own creator while it's still status =
+        // 'draft' (see supabase-installation-reports-own-draft-delete-
+        // migration.sql) -- this is a defensive fallback for anything
+        // outside both, which the UI shouldn't normally offer Discard on
+        // in the first place.
+        if (!data || data.length === 0) {
+          throw new Error("Nothing was deleted -- you may not have permission to discard this report.");
+        }
       }
-      setItems((prev) => prev?.filter((it) => it.id !== id) ?? prev);
+      // Always clear the local draft file too (harmless no-op if there
+      // isn't one) -- otherwise a resumable incomplete report's on-device
+      // file would survive its own server-row delete and resurface as a
+      // fresh "local draft" item next time this list loads.
+      await deleteDraft(item.id);
+      setItems((prev) => prev?.filter((it) => it.id !== item.id) ?? prev);
     } catch (err) {
       Alert.alert("Couldn't discard", err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -219,13 +236,23 @@ export default function ReportsScreen() {
                   : `${item.photosUploaded} photo(s) uploaded — draft not on this device`
                 : null;
             const orphaned = item.status === "incomplete" && !item.resumable;
+            // "not able to open and see the preview" -- complete reports
+            // are now tappable too, opening the read-only server-backed
+            // preview instead of the local-draft editor.
+            const openTarget = item.resumable
+              ? `/report/${item.id}`
+              : item.status === "complete"
+                ? `/report-preview/${item.id}`
+                : null;
+            // "give delete option for unsuccessful installtion reports" --
+            // any non-complete report can be discarded now, not just
+            // orphaned ones (see discardReport's own comment for how a
+            // resumable one's local draft file gets cleaned up too).
+            const canDiscard = item.status !== "complete";
             return (
-              <Pressable
-                onPress={() => item.resumable && router.push(`/report/${item.id}`)}
-                disabled={!item.resumable}
-              >
+              <Pressable onPress={() => openTarget && router.push(openTarget as never)} disabled={!openTarget}>
                 {({ pressed }) => (
-                  <SoftCard style={[s.row, pressed && item.resumable && { opacity: 0.7 }]}>
+                  <SoftCard style={[s.row, pressed && !!openTarget && { opacity: 0.7 }]}>
                     <View style={{ flex: 1 }}>
                       <Text style={s.title} numberOfLines={1}>{item.storeName}</Text>
                       {progress && <Text style={s.progress}>{progress}</Text>}
@@ -235,22 +262,25 @@ export default function ReportsScreen() {
                         {orphaned && <Text style={s.statusText}> · not resumable here</Text>}
                       </View>
                     </View>
-                    {item.resumable ? (
-                      <Text style={s.chev}>{item.status === "incomplete" ? "Resume ›" : "›"}</Text>
-                    ) : orphaned ? (
-                      <Pressable
-                        onPress={() => confirmDiscard(item)}
-                        disabled={discardingId === item.id}
-                        style={s.discardBtn}
-                        hitSlop={8}
-                      >
-                        {discardingId === item.id ? (
-                          <ActivityIndicator color={t.danger} />
-                        ) : (
-                          <Text style={s.discardText}>Discard</Text>
-                        )}
-                      </Pressable>
-                    ) : null}
+                    <View style={s.rowActions}>
+                      {openTarget && (
+                        <Text style={s.chev}>{item.status === "incomplete" ? "Resume ›" : "›"}</Text>
+                      )}
+                      {canDiscard && (
+                        <Pressable
+                          onPress={() => confirmDiscard(item)}
+                          disabled={discardingId === item.id}
+                          style={s.discardBtn}
+                          hitSlop={8}
+                        >
+                          {discardingId === item.id ? (
+                            <ActivityIndicator color={t.danger} />
+                          ) : (
+                            <Text style={s.discardText}>Discard</Text>
+                          )}
+                        </Pressable>
+                      )}
+                    </View>
                   </SoftCard>
                 )}
               </Pressable>
@@ -277,6 +307,7 @@ const styles = (t: VibrantTheme) =>
     statusDot: { width: 8, height: 8, borderRadius: 4 },
     statusText: { fontSize: 13, color: t.inkSecondary },
     chev: { fontSize: 15, fontWeight: "600", color: t.primary },
+    rowActions: { flexDirection: "row", alignItems: "center", gap: 10 },
     discardBtn: { minHeight: 32, paddingHorizontal: 12, justifyContent: "center", alignItems: "center", borderRadius: radius.md, borderWidth: 1.5, borderColor: t.danger },
     discardText: { fontSize: 13, fontWeight: "600", color: t.danger },
     empty: { flex: 1, padding: 24, textAlign: "center", fontSize: 15, color: t.inkMuted },

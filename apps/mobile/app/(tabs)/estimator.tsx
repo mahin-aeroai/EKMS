@@ -151,12 +151,18 @@ export default function EstimatorScreen() {
   const [finRate, setFinRate] = useState<number | "">(80);
 
   // ── Step 6 ──
-  const [labour, setLabour] = useState<number | "">(0);
+  // "Remove Overheads and labour permanently from the app in sign
+  // Costing" -- both fields (and their contribution to the cost-plus
+  // formula in computePricing) are gone from this screen; 0 is passed for
+  // both in the PricingInputs below, same as any other sign that never
+  // set them. Not touched in packages/shared/src/sign-estimator/calc.ts
+  // itself or the web app's own Sign Costing page -- this was scoped to
+  // "the app" meaning this mobile screen, not the shared pricing engine
+  // both platforms depend on.
   const [install, setInstall] = useState<number | "">(0);
-  const [overheadPct, setOverheadPct] = useState<number | "">(10);
   // "made labour charge by defalut 0 and markup to 50% etc. take current
   // update from web and implement" -- matches EstimatorTab.tsx's own
-  // useState(50) default exactly (labour above was already 0 natively).
+  // useState(50) default exactly.
   const [markupPct, setMarkupPct] = useState<number | "">(50);
   const [discountPct, setDiscountPct] = useState<number | "">(0);
   const [gstPct, setGstPct] = useState<number | "">(18);
@@ -336,9 +342,11 @@ export default function EstimatorScreen() {
       printSell,
       0,
       numOr0(install),
-      { qty, labour: numOr0(labour), overheadPct: numOr0(overheadPct), markupPct: numOr0(markupPct), discountPct: numOr0(discountPct), gstPct: numOr0(gstPct) }
+      // labour/overheadPct hardcoded to 0 -- removed from this screen, see
+      // this file's own note by the (now-deleted) state declarations above.
+      { qty, labour: 0, overheadPct: 0, markupPct: numOr0(markupPct), discountPct: numOr0(discountPct), gstPct: numOr0(gstPct) }
     );
-  }, [profResult, sheetResult, accCost, ledCost, driverFinal, printResult, printSell, install, qty, labour, overheadPct, markupPct, discountPct, gstPct]);
+  }, [profResult, sheetResult, accCost, ledCost, driverFinal, printResult, printSell, install, qty, markupPct, discountPct, gstPct]);
 
   const [stepError, setStepError] = useState<string | null>(null);
   function goStep(n: number) {
@@ -419,8 +427,6 @@ export default function EstimatorScreen() {
         dimW: w === "" ? 0 : w, dimH: h === "" ? 0 : h, dimUnit: unit, widthMM: wMM, heightMM: hMM, qty,
         materials,
         rawMaterialCost: pricing.raw,
-        overheadPct: numOr0(overheadPct), overheadValue: pricing.ovh,
-        labour: numOr0(labour),
         productionCost: pricing.costAll,
         markupPct: numOr0(markupPct), markupValue: pricing.sellBD - pricing.costAll,
         discountPct: numOr0(discountPct), discountValue: pricing.discAmt,
@@ -752,10 +758,6 @@ export default function EstimatorScreen() {
           <View style={s.stepGap}>
             <Text style={s.sectionLabel}>Signage cost-plus terms</Text>
             <View style={s.fieldRow}>
-              <View style={s.fieldHalf}><NumberField t={t} label="Labour (₹)" value={labour} onChange={setLabour} /></View>
-              <View style={s.fieldHalf}><NumberField t={t} label="Overhead %" value={overheadPct} onChange={setOverheadPct} /></View>
-            </View>
-            <View style={s.fieldRow}>
               <View style={s.fieldHalf}><NumberField t={t} label="Markup %" value={markupPct} onChange={setMarkupPct} /></View>
               <View style={s.fieldHalf}><NumberField t={t} label="Discount %" value={discountPct} onChange={setDiscountPct} /></View>
             </View>
@@ -842,8 +844,6 @@ export default function EstimatorScreen() {
                 value={fmtRupee(driverFinal?.totalCost ?? 0)}
               />
               <Row t={t} label="Raw Material Cost (per sign)" value={fmtRupee(pricing.raw)} strong />
-              <Row t={t} small label={`Overhead (${numOr0(overheadPct)}%)`} value={fmtRupee(pricing.ovh)} />
-              <Row t={t} small label="Labour" value={fmtRupee(numOr0(labour))} />
               {qty > 1 && <Row t={t} small label={`Quantity (× ${qty})`} value={`× ${qty}`} />}
               <Row t={t} label="Signage Production Cost" value={fmtRupee(pricing.costAll)} strong />
             </SoftCard>

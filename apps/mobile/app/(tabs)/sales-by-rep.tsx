@@ -14,8 +14,9 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import { useRouter } from "expo-router";
 import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
+import { LinearGradient } from "expo-linear-gradient";
 import { radius } from "@mmdi/shared/theme";
-import { vibrant, fonts, optionAccent, type VibrantTheme } from "../../theme/vibrant";
+import { vibrant, fonts, sectionLabelStyle, optionAccent, type VibrantTheme } from "../../theme/vibrant";
 import { SoftCard, GradientButton } from "../../theme/components";
 import { supabase } from "../../lib/supabase";
 
@@ -197,6 +198,19 @@ async function fetchAllRows<T>(
 // instead -- same data transferred, but wall-clock time is roughly one
 // round-trip instead of N. Falls back to the sequential fetchAllRows if
 // the count request itself fails for any reason.
+// "Not all sales person are visible in filter .. check" -- root cause:
+// firing every page's request at once (Promise.all below) means a single
+// page hitting a transient network hiccup, timeout, or the connection
+// pool's concurrency limit comes back as { data: null, error: ... }
+// instead of throwing, and the old code just skipped it silently
+// (`if (data) all.push(...data)`), permanently dropping whichever
+// sales_manager values happened to live on that one page -- with the
+// dropdown never showing anything was wrong. fetchAllRows (the older,
+// proven-reliable sequential version this file already had) doesn't hit
+// this because it only ever has one request in flight, so it was never
+// at risk the same way. Now: if ANY page errors, this falls back to that
+// same sequential path for correctness rather than silently returning an
+// incomplete list -- a bit slower on the rare failure, but never wrong.
 async function fetchAllRowsParallel<T>(
   getCount: () => PromiseLike<{ count: number | null; error: unknown }>,
   buildPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>
@@ -208,6 +222,7 @@ async function fetchAllRowsParallel<T>(
   const pages = await Promise.all(
     Array.from({ length: pageCount }, (_, i) => buildPage(i * pageSize, i * pageSize + pageSize - 1))
   );
+  if (pages.some((p) => p.error || !p.data)) return fetchAllRows(buildPage);
   const all: T[] = [];
   for (const { data } of pages) {
     if (data) all.push(...data);
@@ -217,6 +232,137 @@ async function fetchAllRowsParallel<T>(
 
 function formatCrore(rupees: number): string {
   return `₹${(rupees / 10000000).toFixed(2)} Cr`;
+}
+
+/**
+ * "Make the sales by rep screen beautiful with sales graphs and target
+ * achivements, monthly sales, gorss margin graphs, product wise category
+ * maps. revenue models. very high tech new age graphics like attached."
+ *
+ * Built from the SAME transactions this screen already fetched for the
+ * customer breakdown (every CustomerBreakdownRow carries its own raw
+ * `transactions`) -- no new query, no new table.
+ *
+ * Two of the five things asked for aren't here: target achievement and
+ * gross margin. Checked both against the real schema before writing any
+ * of this -- there is no sales-targets table anywhere (grepped the whole
+ * repo for sales_target/target_amount/monthly_target: zero matches), and
+ * sales_transactions itself has no cost/COGS column, only the revenue
+ * side (taxable_value + the GST split) -- see
+ * supabase-sales-transactions-invoice-fidelity-migration.sql. Charting
+ * either would mean inventing numbers with nothing real behind them,
+ * which is worse than not having the chart. What's below uses only data
+ * that's actually there: a monthly trend, top products (item_description
+ * is the closest thing to a product/category field this table has), and
+ * top locations. If a real targets feature (a table plus somewhere to
+ * enter them) or a cost/COGS field ever gets added, margin and
+ * achievement charts are the natural next addition here.
+ *
+ * No charting library -- react-native-svg isn't a dependency and adding
+ * one means another native rebuild. Every bar below is a plain View
+ * (optionally with a LinearGradient fill, already a dependency), sized
+ * with plain percentage heights/widths.
+ */
+
+interface MonthValue {
+  month: string; // "YYYY-MM"
+  value: number;
+}
+
+const TREND_MONTHS = 6;
+
+function buildMonthlyTrend(rows: CustomerBreakdownRow[]): MonthValue[] {
+  const map = new Map<string, number>();
+  for (const row of rows) {
+    for (const txn of row.transactions) {
+      if (!txn.invoice_date) continue;
+      const key = txn.invoice_date.slice(0, 7);
+      map.set(key, (map.get(key) ?? 0) + txn.taxable_value);
+    }
+  }
+  return Array.from(map.entries())
+    .map(([month, value]) => ({ month, value }))
+    .sort((a, b) => a.month.localeCompare(b.month))
+    .slice(-TREND_MONTHS);
+}
+
+const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function formatMonthLabel(ym: string): string {
+  const [y, m] = ym.split("-");
+  const idx = Number(m) - 1;
+  return `${MONTH_ABBR[idx] ?? m}'${(y ?? "").slice(2)}`;
+}
+
+interface LabelValue {
+  label: string;
+  value: number;
+}
+
+const BREAKDOWN_LIMIT = 5;
+
+function buildBreakdown(rows: CustomerBreakdownRow[], pick: (t: CustomerTransaction) => string | null): LabelValue[] {
+  const map = new Map<string, number>();
+  for (const row of rows) {
+    for (const txn of row.transactions) {
+      const raw = pick(txn);
+      const label = raw && raw.trim() ? raw.trim() : "Not recorded";
+      map.set(label, (map.get(label) ?? 0) + txn.taxable_value);
+    }
+  }
+  return Array.from(map.entries())
+    .map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, BREAKDOWN_LIMIT);
+}
+
+function TrendChart({ t, data }: { t: VibrantTheme; data: MonthValue[] }) {
+  const s = chartStyles(t);
+  if (data.length === 0) return <Text style={s.chartEmpty}>No dated transactions in this period.</Text>;
+  const max = Math.max(...data.map((d) => d.value), 1);
+  return (
+    <View style={s.trendWrap}>
+      {data.map((d) => (
+        <View key={d.month} style={s.trendCol}>
+          <Text style={s.trendValue} numberOfLines={1}>
+            {d.value >= 100000 ? `${(d.value / 100000).toFixed(1)}L` : d.value.toLocaleString("en-IN")}
+          </Text>
+          <View style={s.trendTrack}>
+            <LinearGradient
+              colors={t.gradientPrimary}
+              start={{ x: 0, y: 1 }}
+              end={{ x: 0, y: 0 }}
+              style={[s.trendFill, { height: `${Math.max(6, (d.value / max) * 100)}%` }]}
+            />
+          </View>
+          <Text style={s.trendMonth}>{formatMonthLabel(d.month)}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function BreakdownBars({ t, data }: { t: VibrantTheme; data: LabelValue[] }) {
+  const s = chartStyles(t);
+  if (data.length === 0) return <Text style={s.chartEmpty}>No data in this period.</Text>;
+  const max = Math.max(...data.map((d) => d.value), 1);
+  return (
+    <View style={{ gap: 12 }}>
+      {data.map((d, i) => (
+        <View key={d.label} style={s.breakdownRow}>
+          <Text style={s.breakdownLabel} numberOfLines={1}>{d.label}</Text>
+          <View style={s.breakdownTrack}>
+            <View
+              style={[
+                s.breakdownFill,
+                { width: `${Math.max(4, (d.value / max) * 100)}%`, backgroundColor: optionAccent(t, i) },
+              ]}
+            />
+          </View>
+          <Text style={s.breakdownValue}>₹{d.value.toLocaleString("en-IN")}</Text>
+        </View>
+      ))}
+    </View>
+  );
 }
 
 function csvEscape(value: string | number): string {
@@ -445,6 +591,9 @@ export default function SalesByRepScreen() {
   const filteredRows = rows;
   const totalSales = filteredRows?.reduce((sum, r) => sum + r.total_taxable_value, 0) ?? 0;
   const totalTxns = filteredRows?.reduce((sum, r) => sum + r.transaction_count, 0) ?? 0;
+  const monthlyTrend = filteredRows ? buildMonthlyTrend(filteredRows) : [];
+  const topItems = filteredRows ? buildBreakdown(filteredRows, (txn) => txn.item_description) : [];
+  const topLocations = filteredRows ? buildBreakdown(filteredRows, (txn) => txn.location) : [];
 
   return (
     <View style={s.screen}>
@@ -523,15 +672,48 @@ export default function SalesByRepScreen() {
               data={filteredRows}
               keyExtractor={(r) => r.customer_name}
               contentInsetAdjustmentBehavior="automatic"
+              // "in the page scroll is very small at bottom can't see and
+              // difficult to scroll" -- same root cause already fixed once
+              // in copilot.tsx this session: a FlatList with only
+              // contentContainerStyle and no style={flex:1} of its own
+              // doesn't reliably claim the space its siblings (the filter
+              // fields + stat row above) leave behind, so its actual
+              // scrollable viewport ends up shorter than the real
+              // available screen space.
+              style={s.flatList}
               contentContainerStyle={s.list}
               ListHeaderComponent={
-                <Pressable style={s.exportBtn} onPress={exportCsv} disabled={exporting}>
-                  {exporting ? (
-                    <ActivityIndicator color={t.primary} />
-                  ) : (
-                    <Text style={s.exportBtnText}>Export {filteredRows.length} rows to CSV</Text>
-                  )}
-                </Pressable>
+                <>
+                  {/* Charts live inside the FlatList's own header (not as
+                      fixed siblings above it) so they scroll together with
+                      the customer list through the one flex:1 FlatList --
+                      stacking more fixed content above the list is exactly
+                      what caused the "scroll is very small" bug this same
+                      round fixed. */}
+                  <Text style={[s.chartSectionTitle, { marginTop: 0 }]}>Monthly trend</Text>
+                  <SoftCard style={s.chartCard}>
+                    <TrendChart t={t} data={monthlyTrend} />
+                  </SoftCard>
+
+                  <Text style={s.chartSectionTitle}>Top products</Text>
+                  <SoftCard style={s.chartCard}>
+                    <BreakdownBars t={t} data={topItems} />
+                  </SoftCard>
+
+                  <Text style={s.chartSectionTitle}>Top locations</Text>
+                  <SoftCard style={s.chartCard}>
+                    <BreakdownBars t={t} data={topLocations} />
+                  </SoftCard>
+
+                  <Text style={s.chartSectionTitle}>Customers</Text>
+                  <Pressable style={s.exportBtn} onPress={exportCsv} disabled={exporting}>
+                    {exporting ? (
+                      <ActivityIndicator color={t.primary} />
+                    ) : (
+                      <Text style={s.exportBtnText}>Export {filteredRows.length} rows to CSV</Text>
+                    )}
+                  </Pressable>
+                </>
               }
               renderItem={({ item }) => (
                 <Pressable onPress={() => setDetailCustomer(item)}>
@@ -749,6 +931,9 @@ const styles = (t: VibrantTheme) =>
     screen: { flex: 1, backgroundColor: t.surface },
     filters: { padding: 16, gap: 12 },
 
+    chartSectionTitle: { ...sectionLabelStyle(t), marginTop: 10, marginHorizontal: 16, marginBottom: 2 },
+    chartCard: { marginHorizontal: 16, marginBottom: 4, padding: 14 },
+
     pickerField: {
       minHeight: 44, borderRadius: 22,
       backgroundColor: t.surfaceRaised, paddingHorizontal: 16, paddingVertical: 10,
@@ -803,7 +988,8 @@ const styles = (t: VibrantTheme) =>
 
     empty: { padding: 24, textAlign: "center", fontSize: 15, color: t.inkMuted },
 
-    list: { paddingHorizontal: 16, paddingBottom: 16, gap: 8 },
+    flatList: { flex: 1 },
+    list: { paddingHorizontal: 16, paddingBottom: 32, gap: 8 },
     row: { flexDirection: "row", alignItems: "center", minHeight: 44, gap: 12 },
     rowText: { flex: 1 },
     rowTitle: { fontSize: 15, color: t.ink },
@@ -855,4 +1041,30 @@ const styles = (t: VibrantTheme) =>
     // "in small font. underneath each Bill" -- item count + first product.
     detailRowProduct: { fontSize: 11, fontFamily: fonts.regular, color: t.inkMuted, flexShrink: 1 },
     detailRowChev: { fontSize: 14, color: t.inkMuted },
+  });
+
+const TREND_TRACK_HEIGHT = 110;
+
+// TrendChart/BreakdownBars' own styles -- separate from `styles` for the
+// same reason cardStyles/overlayStyles are elsewhere in this app (used by
+// module-level components, not just the screen component itself).
+const chartStyles = (t: VibrantTheme) =>
+  StyleSheet.create({
+    chartEmpty: { fontSize: 13, color: t.inkMuted, textAlign: "center", paddingVertical: 12 },
+
+    trendWrap: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", gap: 6 },
+    trendCol: { flex: 1, alignItems: "center", gap: 4 },
+    trendValue: { fontSize: 10, fontFamily: fonts.medium, color: t.inkSecondary },
+    trendTrack: {
+      width: "100%", height: TREND_TRACK_HEIGHT, borderRadius: 8,
+      backgroundColor: t.surfaceSunken, justifyContent: "flex-end", overflow: "hidden",
+    },
+    trendFill: { width: "100%", borderRadius: 8 },
+    trendMonth: { fontSize: 11, fontFamily: fonts.medium, color: t.inkMuted },
+
+    breakdownRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+    breakdownLabel: { width: 92, fontSize: 12, fontFamily: fonts.regular, color: t.ink },
+    breakdownTrack: { flex: 1, height: 10, borderRadius: 5, backgroundColor: t.surfaceSunken, overflow: "hidden" },
+    breakdownFill: { height: "100%", borderRadius: 5 },
+    breakdownValue: { width: 78, fontSize: 12, fontFamily: fonts.medium, color: t.inkSecondary, textAlign: "right" },
   });

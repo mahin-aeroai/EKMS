@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { File, Paths } from "expo-file-system";
+import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import * as Speech from "expo-speech";
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from "expo-speech-recognition";
@@ -665,14 +666,23 @@ export default function CopilotScreen() {
     }
   }, [draft, busy, turns]);
 
+  // "Site Survey are not openign in app instead its just downlaoding to
+  // local folder" -- see surveys.tsx's own note on this same fix.
+  // printAsync opens a real in-app preview (iOS's
+  // UIPrintInteractionController); the share sheet only offers
+  // save/send-elsewhere destinations, which reads as "it just downloaded."
   const openSurvey = useCallback(async (row: SurveyRow) => {
     setOpening(row.relative_path);
     try {
       const url = await getSignedUrl("survey", { path: row.relative_path });
       const destination = new File(Paths.cache, row.file_name);
       const file = await File.downloadFileAsync(url, destination, { idempotent: true });
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(file.uri, { mimeType: "application/pdf", UTI: "com.adobe.pdf" });
+      try {
+        await Print.printAsync({ uri: file.uri });
+      } catch {
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(file.uri, { mimeType: "application/pdf", UTI: "com.adobe.pdf" });
+        }
       }
     } finally {
       setOpening(null);
