@@ -111,7 +111,14 @@ const SUGGESTIONS = [
 // expo-speech-recognition (already in use for manual dictation), so this
 // needs no setup and the toggle below is always available.
 const WAKE_WORD_LABEL = "Hey Jarvis";
-const WAKE_PHRASE = "hey jarvis";
+// "Jarvis is not responding at all" -- matching the exact phrase "hey
+// jarvis" is fragile: Apple's on-device recognizer has no strong prior for
+// an uncommon name like "Jarvis" and can easily drop or mis-hear "hey" in
+// a short, quiet utterance, especially over a few-hundred-ms burst. Just
+// "jarvis" is a much rarer word with a much lower false-positive risk in a
+// work context, so matching on that alone trades a little specificity for
+// a lot more recall.
+const WAKE_PHRASE = "jarvis";
 
 // ---- Row shapes, matching each tool's real `result` shape ----
 
@@ -315,73 +322,69 @@ function TypingDots({ t }: { t: VibrantTheme }) {
   );
 }
 
-// "an animation that Tony Stark has when he talks to Jarvis" -- a
-// full-screen takeover shown for the entire time real dictation is
-// active (not the quiet background wake-word state, only once a command
-// is actually being captured). Three rings, staggered a third of a cycle
-// apart, scale outward from the orb while fading out (a "sonar ping"
-// read), and the orb itself breathes gently the whole time so the screen
-// never looks static even between pings. Everything here is plain
-// react-native Animated -- no new dependency, no native module, so
-// unlike the rest of this round it needs no rebuild at all, just a
-// merge.
+// "an animation that Tony Stark has when he talks to Jarvis" (round 1),
+// then "Jarvis animation i want like attached screen with a color circle
+// gradient moving around and mic animation" (round 2, this pass, against
+// a reference screenshot of a light-background assistant UI with a soft
+// blue circular gradient glowing and turning behind a mic icon) -- swapped
+// the near-black sonar-ping takeover for a light backdrop (matches the
+// rest of this app rather than a generic sci-fi skin) with a genuinely
+// ROTATING gradient ring: a LinearGradient disc, continuously spun via
+// Animated's rotate transform, with a smaller solid disc masking its
+// centre so only a glowing ring shows -- the closest a plain
+// react-native Animated + expo-linear-gradient combination (no new
+// dependency, so still no rebuild) can get to a moving conic gradient.
+// The mic icon breathes gently in the middle the same way the old orb did.
 function ListeningOverlay({ t, transcript, onCancel }: { t: VibrantTheme; transcript: string; onCancel: () => void }) {
   const s = overlayStyles(t);
   const appear = useRef(new Animated.Value(0)).current;
-  const orbPulse = useRef(new Animated.Value(1)).current;
-  const rings = useRef([0, 1, 2].map(() => new Animated.Value(0))).current;
+  const micPulse = useRef(new Animated.Value(1)).current;
+  const spin = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.timing(appear, { toValue: 1, duration: 220, easing: Easing.out(Easing.ease), useNativeDriver: true }).start();
 
     const pulse = Animated.loop(
       Animated.sequence([
-        Animated.timing(orbPulse, { toValue: 1.08, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-        Animated.timing(orbPulse, { toValue: 1, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(micPulse, { toValue: 1.12, duration: 700, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(micPulse, { toValue: 1, duration: 700, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
       ])
     );
-    const ringLoops = rings.map((v, i) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.delay(i * 700),
-          Animated.timing(v, { toValue: 1, duration: 2100, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-          Animated.timing(v, { toValue: 0, duration: 0, useNativeDriver: true }),
-          Animated.delay((2 - i) * 700),
-        ])
-      )
+    // "moving around" -- a slow, continuous, linear (not eased) full
+    // rotation reads as the gradient itself circling the ring rather than
+    // the whole ring spinning like a wheel.
+    const rotate = Animated.loop(
+      Animated.timing(spin, { toValue: 1, duration: 4000, easing: Easing.linear, useNativeDriver: true })
     );
     pulse.start();
-    ringLoops.forEach((l) => l.start());
+    rotate.start();
     return () => {
       pulse.stop();
-      ringLoops.forEach((l) => l.stop());
+      rotate.stop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const spinDeg = spin.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
 
   return (
     <Animated.View style={[s.overlay, { opacity: appear }]}>
       <Pressable style={StyleSheet.absoluteFill} onPress={onCancel} />
       <View style={s.orbWrap} pointerEvents="none">
-        {rings.map((v, i) => (
-          <Animated.View
-            key={i}
-            style={[
-              s.ring,
-              {
-                opacity: v.interpolate({ inputRange: [0, 1], outputRange: [0.5, 0] }),
-                transform: [{ scale: v.interpolate({ inputRange: [0, 1], outputRange: [1, 2.4] }) }],
-              },
-            ]}
+        <Animated.View style={[s.gradientRing, { transform: [{ rotate: spinDeg }] }]}>
+          <LinearGradient
+            colors={[t.info, t.gradientPrimary[0], t.gradientPrimary[1], t.info]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={StyleSheet.absoluteFill}
           />
-        ))}
-        <Animated.View style={{ transform: [{ scale: orbPulse }] }}>
-          <LinearGradient colors={t.gradientPrimary} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.orb}>
-            <SymbolView name="waveform" tintColor={t.onGradient} size={30} />
-          </LinearGradient>
+        </Animated.View>
+        <View style={s.ringMask} />
+        <Animated.View style={[s.micWrap, { transform: [{ scale: micPulse }] }]}>
+          <SymbolView name="mic.fill" tintColor={t.primary} size={30} />
         </Animated.View>
       </View>
-      <Text style={s.overlayLabel}>Listening…</Text>
+      <Text style={s.overlayLabel}>Start speaking</Text>
       <Text style={s.overlayTranscript} numberOfLines={4}>{transcript || " "}</Text>
       <Text style={s.overlayHint}>Tap anywhere to stop</Text>
     </Animated.View>
@@ -416,6 +419,14 @@ export default function CopilotScreen() {
   // the mic at a time.
   const [wakeListening, setWakeListening] = useState(false);
   const [wakeError, setWakeError] = useState<string | null>(null);
+  // "Jarvis is not responding at all" -- there was no way to see whether
+  // the background session was actually hearing anything, so a silent
+  // failure (permission quietly not granted, a session that never
+  // restarts, ambient noise never producing a transcript) looked
+  // identical to "the mic just isn't picking anything up." This mirrors
+  // draft's live-transcript behaviour but only while wake-listening, and
+  // is shown right under the toggle -- see s.wakeTranscriptText below.
+  const [wakeTranscript, setWakeTranscript] = useState("");
   const listRef = useRef<FlatList<Turn>>(null);
   // Refs mirroring the booleans above for the useSpeechRecognitionEvent
   // handlers below -- those are wired up once per render and need to read
@@ -423,6 +434,13 @@ export default function CopilotScreen() {
   // closed over when they were first registered.
   const wakeEnabledRef = useRef(false);
   const wakeListeningRef = useRef(false);
+  // Mirrors `listening` for the same reason wakeEnabledRef/wakeListeningRef
+  // mirror their state -- resumeWakeIfNeeded (below) is called from
+  // expo-speech's onDone/onStopped/onError callbacks, which fire whenever
+  // playback actually finishes, not synchronously with any particular
+  // render, so it needs the current value rather than whatever was closed
+  // over when that render's callback was created.
+  const listeningRef = useRef(false);
   // What to do once the *current* recognition session's "end" event
   // fires -- "dictation" when we're mid-handoff from wake listening to a
   // real command, otherwise left "none" and the "end" handler falls back
@@ -449,12 +467,21 @@ export default function CopilotScreen() {
 
   const beginDictation = useCallback(() => {
     try {
+      // "Listen voice ... cuts like old days radio signal" -- a
+      // recognition session competing for the same audio session as
+      // an in-progress TTS playback is exactly the kind of thing that
+      // produces choppy/interrupted audio, so make sure nothing is
+      // still speaking before the mic takes over.
+      Speech.stop();
+      setSpeakingIndex(null);
       setMicError(null);
       setDraft("");
       setListening(true);
+      listeningRef.current = true;
       ExpoSpeechRecognitionModule.start({ lang: "en-US", interimResults: true, continuous: false, addsPunctuation: true });
     } catch (err) {
       setListening(false);
+      listeningRef.current = false;
       setMicError((err as Error).message || "Couldn't start listening.");
     }
   }, []);
@@ -476,7 +503,12 @@ export default function CopilotScreen() {
         wakeEnabledRef.current = false;
         return;
       }
+      // Same reasoning as beginDictation above -- don't let background
+      // wake-listening start while TTS is still using the audio session.
+      Speech.stop();
+      setSpeakingIndex(null);
       setWakeError(null);
+      setWakeTranscript("");
       wakeListeningRef.current = true;
       setWakeListening(true);
       ExpoSpeechRecognitionModule.start({ lang: "en-US", interimResults: true, continuous: false, addsPunctuation: false });
@@ -500,6 +532,7 @@ export default function CopilotScreen() {
     } else if (wakeListeningRef.current) {
       wakeListeningRef.current = false;
       setWakeListening(false);
+      setWakeTranscript("");
       safeStop();
     }
   }, [wakeEnabled, listening, beginWakeListening, safeStop]);
@@ -511,6 +544,11 @@ export default function CopilotScreen() {
   useSpeechRecognitionEvent("result", (event) => {
     const transcript = event.results[0]?.transcript ?? "";
     if (wakeListeningRef.current) {
+      // Diagnostic caption (see wakeTranscript's declaration above) -- set
+      // on every partial result, not just a match, so "nothing shows up
+      // here at all" and "it shows up but never matches" are visibly
+      // different problems next time this is tested.
+      setWakeTranscript(transcript);
       if (transcript.toLowerCase().includes(WAKE_PHRASE)) {
         nextActionRef.current = "dictation";
         wakeListeningRef.current = false;
@@ -523,6 +561,7 @@ export default function CopilotScreen() {
   });
   useSpeechRecognitionEvent("end", () => {
     setListening(false);
+    listeningRef.current = false;
     const next = nextActionRef.current;
     nextActionRef.current = "none";
     if (next === "dictation") {
@@ -533,6 +572,7 @@ export default function CopilotScreen() {
   });
   useSpeechRecognitionEvent("error", (event) => {
     setListening(false);
+    listeningRef.current = false;
     wakeListeningRef.current = false;
     setWakeListening(false);
     if (event.error !== "no-speech" && event.error !== "aborted") {
@@ -567,20 +607,43 @@ export default function CopilotScreen() {
   // Voice output -- read a single reply aloud on demand (never auto-played
   // on arrival, see file header note). Tapping the same bubble's speaker
   // again stops it; tapping a different one switches to that reply.
+  //
+  // "Listen voice is not coming clear it cut like old days radio signal
+  // with lot of cuts" -- the background wake-listening session (if
+  // enabled) keeps restarting itself on a short loop the whole time it's
+  // on, including while a reply is being read aloud. Two recognition/
+  // playback sessions fighting over the same iOS audio session at once is
+  // a well-known cause of exactly this kind of stuttering, so this now
+  // explicitly pauses wake-listening for the duration of playback and
+  // resumes it afterwards (onDone/onStopped/onError all lead back to the
+  // same resume path) rather than leaving it running underneath.
+  const resumeWakeIfNeeded = useCallback(() => {
+    if (wakeEnabledRef.current && !wakeListeningRef.current && !listeningRef.current) {
+      beginWakeListening();
+    }
+  }, [beginWakeListening]);
+
   const toggleSpeak = useCallback((index: number, text: string) => {
     if (speakingIndex === index) {
       Speech.stop();
       setSpeakingIndex(null);
+      resumeWakeIfNeeded();
       return;
     }
     Speech.stop();
+    if (wakeListeningRef.current) {
+      wakeListeningRef.current = false;
+      setWakeListening(false);
+      setWakeTranscript("");
+      safeStop();
+    }
     setSpeakingIndex(index);
     Speech.speak(text, {
-      onDone: () => setSpeakingIndex(null),
-      onStopped: () => setSpeakingIndex(null),
-      onError: () => setSpeakingIndex(null),
+      onDone: () => { setSpeakingIndex(null); resumeWakeIfNeeded(); },
+      onStopped: () => { setSpeakingIndex(null); resumeWakeIfNeeded(); },
+      onError: () => { setSpeakingIndex(null); resumeWakeIfNeeded(); },
     });
-  }, [speakingIndex]);
+  }, [speakingIndex, safeStop, resumeWakeIfNeeded]);
 
   const send = useCallback(async (overrideText?: string) => {
     const text = (overrideText ?? draft).trim();
@@ -713,6 +776,14 @@ export default function CopilotScreen() {
           {wakeEnabled ? `Listening for "${WAKE_WORD_LABEL}"` : `Enable "${WAKE_WORD_LABEL}"`}
         </Text>
       </Pressable>
+      {/* Live diagnostic caption -- see wakeTranscript's declaration above.
+          Only shown while actually wake-listening, so it disappears the
+          instant real dictation takes over. */}
+      {wakeListening && (
+        <Text style={s.wakeTranscriptText} numberOfLines={1}>
+          {wakeTranscript ? `Heard: "${wakeTranscript}"` : "Listening for “Jarvis”…"}
+        </Text>
+      )}
 
       <View style={s.composer}>
         <Pressable
@@ -779,15 +850,17 @@ const styles = (t: VibrantTheme) =>
     },
     botBubble: { alignSelf: "flex-start", backgroundColor: t.surfaceRaised, borderRadius: 22, borderBottomLeftRadius: 6, paddingVertical: 12, paddingHorizontal: 16, shadowColor: "#3D2E6B", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.08, shadowRadius: 8, elevation: 2 },
     // "the text looks little confusing to read.. can you make it beautiful
-    // reading, like pleasant" -- the reply bubble had no explicit
-    // fontFamily (falling back to the OS system font, out of step with
-    // the rest of the app's Roboto) and no lineHeight, so multi-line
-    // replies like a sales summary read as a dense, cramped block. Roboto
-    // Regular + 1.5x line-height (26 for 17pt, the same ratio bill.tsx
-    // already uses for its own body copy) plus a touch of letter-spacing
-    // is a standard, well-tested combination for comfortable paragraph
-    // reading -- noticeably calmer without needing a font swap.
-    botText: { fontSize: 17, fontFamily: fonts.regular, color: t.ink, lineHeight: 26, letterSpacing: 0.1 },
+    // reading, like pleasant" (round 1: Roboto Regular + line-height) then
+    // "lets choose a thin font like claude left side bar font kind but
+    // nicely readable" (round 2, this pass) -- swapped to Roboto Light,
+    // which is what most chat-style UIs (Claude included) actually use for
+    // body copy: a lighter weight reads as calmer/more "designed" than
+    // Regular at this size, as long as line-height and letter-spacing pick
+    // up the slack so it doesn't go thin-and-cramped. Kept the same 26pt
+    // line-height (the ~1.5x ratio bill.tsx uses for body copy) and bumped
+    // letter-spacing slightly, since light weights need a touch more
+    // breathing room between letters to stay crisp at small sizes.
+    botText: { fontSize: 17, fontFamily: fonts.light, color: t.ink, lineHeight: 26, letterSpacing: 0.15 },
     speakBtn: { flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start", paddingHorizontal: 4, paddingVertical: 2 },
     speakBtnText: { fontSize: 12, fontFamily: fonts.medium, color: t.inkMuted },
 
@@ -810,6 +883,7 @@ const styles = (t: VibrantTheme) =>
     wakeDotActive: { backgroundColor: t.success },
     wakeToggleText: { fontSize: 12, fontFamily: fonts.medium, color: t.inkMuted },
     wakeToggleTextActive: { color: t.primary },
+    wakeTranscriptText: { fontSize: 11, color: t.inkMuted, textAlign: "center", marginBottom: 6, paddingHorizontal: 24 },
 
     composer: {
       flexDirection: "row", alignItems: "flex-end", gap: 8, padding: 10,
@@ -842,45 +916,65 @@ const cardStyles = (t: VibrantTheme) =>
     statusText: { fontSize: 13, color: t.inkSecondary },
   });
 
-const ORB_SIZE = 96;
-const RING_SIZE = ORB_SIZE;
+const RING_SIZE = 190;
+const RING_THICKNESS = 22;
+const MIC_SIZE = 78;
 
 // ListeningOverlay's own styles -- separate from `styles` for the same
-// reason cardStyles is (a distinct, self-contained visual language: a
-// near-black backdrop rather than the app's usual cream surface, since
-// the whole point is a dramatic full-screen takeover, not another card).
+// reason cardStyles is (a distinct, self-contained visual language).
+// "like attached screen" -- reference was a light background with a soft
+// blue glow, not a dark sci-fi takeover, so the backdrop is now the app's
+// own cream surface (semi-transparent, so the chat behind it still shows
+// through faintly) instead of near-black.
 const overlayStyles = (t: VibrantTheme) =>
   StyleSheet.create({
     overlay: {
       position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
-      backgroundColor: "rgba(15,12,24,0.94)",
+      backgroundColor: "rgba(255,249,249,0.97)",
       alignItems: "center",
       justifyContent: "center",
       gap: 18,
       paddingHorizontal: 32,
     },
-    orbWrap: { width: RING_SIZE * 2.4, height: RING_SIZE * 2.4, alignItems: "center", justifyContent: "center" },
-    ring: {
+    orbWrap: { width: RING_SIZE, height: RING_SIZE, alignItems: "center", justifyContent: "center" },
+    // The full gradient disc -- rotated continuously in the component
+    // above. RING_MASK (below) covers everything but its outer edge, so
+    // only a glowing ring of the gradient is ever visible, and that ring
+    // reads as "turning" as the disc spins beneath it.
+    gradientRing: {
       position: "absolute",
       width: RING_SIZE,
       height: RING_SIZE,
       borderRadius: RING_SIZE / 2,
-      borderWidth: 1.5,
-      borderColor: t.gradientPrimary[0],
+      overflow: "hidden",
+      shadowColor: t.info,
+      shadowOffset: { width: 0, height: 0 },
+      shadowOpacity: 0.45,
+      shadowRadius: 20,
+      elevation: 6,
     },
-    orb: {
-      width: ORB_SIZE,
-      height: ORB_SIZE,
-      borderRadius: ORB_SIZE / 2,
+    ringMask: {
+      position: "absolute",
+      width: RING_SIZE - RING_THICKNESS * 2,
+      height: RING_SIZE - RING_THICKNESS * 2,
+      borderRadius: (RING_SIZE - RING_THICKNESS * 2) / 2,
+      backgroundColor: "#FFF9F9",
+    },
+    micWrap: {
+      position: "absolute",
+      width: MIC_SIZE,
+      height: MIC_SIZE,
+      borderRadius: MIC_SIZE / 2,
+      backgroundColor: "#FFFFFF",
       alignItems: "center",
       justifyContent: "center",
-      shadowColor: t.gradientPrimary[1],
-      shadowOffset: { width: 0, height: 0 },
-      shadowOpacity: 0.6,
-      shadowRadius: 24,
-      elevation: 8,
+      shadowColor: "#3D2E6B",
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.12,
+      shadowRadius: 10,
+      elevation: 4,
     },
-    overlayLabel: { fontSize: 15, fontFamily: fonts.medium, color: "rgba(255,255,255,0.6)", letterSpacing: 1 },
-    overlayTranscript: { fontSize: 22, fontFamily: fonts.regular, color: "#FFFFFF", textAlign: "center", lineHeight: 30 },
-    overlayHint: { position: "absolute", bottom: 48, fontSize: 12, color: "rgba(255,255,255,0.35)" },
+    overlayLabel: { fontSize: 17, fontFamily: fonts.medium, color: t.inkMuted, letterSpacing: 0.5 },
+    overlayTranscript: { fontSize: 20, fontFamily: fonts.light, color: t.ink, textAlign: "center", lineHeight: 28 },
+    overlayHint: { position: "absolute", bottom: 48, fontSize: 12, color: t.inkMuted },
   });

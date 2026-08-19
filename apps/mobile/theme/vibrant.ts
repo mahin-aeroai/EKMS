@@ -114,6 +114,13 @@ export const vibrant: VibrantTheme = {
  * "FOR YOU" / "YOUR REWARDS & BENEFITS" style labels.
  */
 export const fonts = {
+  // "lets choose a thin font like claude left side bar font kind but
+  // nicely readable" -- adds Roboto Light for Copilot's reply text. This
+  // is a pure font-asset change: Roboto_300Light ships in the same
+  // @expo-google-fonts/roboto package the app already depends on for
+  // regular/medium/bold, so it's a JS/Metro-bundle change only, no new
+  // native module and no rebuild -- see app/_layout.tsx's useFonts call.
+  light: "Roboto_300Light",
   regular: "Roboto_400Regular",
   medium: "Roboto_500Medium",
   bold: "Roboto_700Bold",

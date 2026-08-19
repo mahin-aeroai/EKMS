@@ -13,23 +13,28 @@ import { vibrant, fonts } from "../../theme/vibrant";
  * (depends on pdf-lib + canvas, out of scope for native) -- see plan
  * section 5, not built yet.
  *
- * Sales by Rep is the first of several "Tools"-section web workspaces being
- * ported natively -- Estimate Builder and Cost Sheet are next (queued
- * separately, each is a real native build in its own right, not a quick
- * add) per the user's own sequencing call. Five *visible* tabs total still
- * fits directly in the tab bar (iOS shows up to 5 before needing a "More"
- * overflow tab) -- revisit this file's structure once Estimate Builder and
- * Cost Sheet bring the count to 7.
+ * Sales by Rep was the first of several "Tools"-section web workspaces
+ * ported natively; Estimate Builder and Cost Sheet followed.
+ *
+ * "remove survey from menu and place only at home page ... add new
+ * module: estimates to the menu and add cost sheet from tools to the menu
+ * too. if place not sufficient you can remove basil installtions to move
+ * on home page icon" -- with Estimates and Cost Sheets both becoming real
+ * visible tabs, keeping every prior tab visible too would push the count
+ * to 7 (past the 5 iOS shows before folding the rest into a "More" tab).
+ * Per the user's own call, Surveys AND Basil Installations both move to
+ * hidden-route-only (same `href: null` treatment already used for
+ * Copilot below) -- both were already duplicated as Home quick-action
+ * tiles (see index.tsx's QUICK_ACTIONS), so nothing becomes unreachable,
+ * it just stops living in both places. That keeps the visible tab count
+ * at exactly 5: Home, Sign Costing, Sales by Rep, Estimates, Cost Sheets.
  *
  * "lets create a beautiful home page after login instead directly get into
  * copilot" -- index.tsx is now a Home screen (greeting, quick actions,
  * recent activity) instead of Copilot, since "index" is this group's
  * default/landing route. Per the user's own call on where Copilot should
  * live: Copilot moved to copilot.tsx and is reached from a hero
- * quick-action card on Home, NOT from the tab bar -- `href: null` below
- * keeps it a real, pushable route (router.push("/copilot")) while hiding
- * its tab bar button, so the visible tab count stays at 5 (Home, Surveys,
- * Estimate, Basil Installations, Sales by Rep) rather than growing to 6.
+ * quick-action card on Home, NOT from the tab bar.
  *
  * SF Symbols via expo-symbols rather than an icon font: they align to the text
  * baseline, respond to weight, and pick the right optical size automatically.
@@ -74,13 +79,6 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="surveys"
-        options={{
-          title: "Surveys",
-          tabBarIcon: ({ color }) => <SymbolView name="doc.text.magnifyingglass" tintColor={color} size={26} />,
-        }}
-      />
-      <Tabs.Screen
         name="estimator"
         options={{
           // "Sgn Estimator named as Estimate user get confused so chnage it
@@ -91,17 +89,52 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="reports"
-        options={{
-          title: "Basil Installations",
-          tabBarIcon: ({ color }) => <SymbolView name="list.clipboard" tintColor={color} size={26} />,
-        }}
-      />
-      <Tabs.Screen
         name="sales-by-rep"
         options={{
           title: "Sales by Rep",
           tabBarIcon: ({ color }) => <SymbolView name="chart.line.uptrend.xyaxis" tintColor={color} size={26} />,
+        }}
+      />
+      <Tabs.Screen
+        name="estimate-builder"
+        options={{
+          // "add new module: estimates to the menu" -- Estimate Builder
+          // (tools/estimate-builder on web, client quotations, NOT Sign
+          // Estimator/Sign Costing above) promoted from a Home-only hidden
+          // route to a real visible tab.
+          title: "Estimates",
+          tabBarIcon: ({ color }) => <SymbolView name="text.badge.plus" tintColor={color} size={26} />,
+        }}
+      />
+      <Tabs.Screen
+        name="cost-sheets"
+        options={{
+          // "add cost sheet from tools to the menu too" -- new list screen
+          // (cost-sheets.tsx), the missing "browse what I've already
+          // generated" counterpart to Sign Costing's "Generate Cost Sheet"
+          // button, which previously had no way back to a past sheet.
+          title: "Cost Sheets",
+          tabBarIcon: ({ color }) => <SymbolView name="doc.text" tintColor={color} size={26} />,
+        }}
+      />
+      <Tabs.Screen
+        name="surveys"
+        options={{
+          title: "Surveys",
+          // Moved off the tab bar per the user's own request -- still a
+          // real route, reached via the Surveys tile on Home (see
+          // index.tsx's QUICK_ACTIONS) or router.push("/surveys").
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="reports"
+        options={{
+          title: "Basil Installations",
+          // Moved off the tab bar to make room for Estimates/Cost Sheets
+          // per the user's own contingency -- still reachable from Home's
+          // Basil Installations tile, same as Surveys above.
+          href: null,
         }}
       />
       <Tabs.Screen
@@ -111,18 +144,6 @@ export default function TabLayout() {
           // Hidden from the tab bar (see the file header comment) -- still
           // a real route, reached via router.push("/copilot") from Home's
           // hero quick-action card.
-          href: null,
-        }}
-      />
-      <Tabs.Screen
-        name="estimate-builder"
-        options={{
-          // Estimate Builder (tools/estimate-builder on web, NOT Sign
-          // Estimator/Sign Costing -- see this file's own comment above,
-          // this is exactly the port it anticipated). Same hidden-route
-          // treatment as Copilot: reached via router.push("/estimate-builder")
-          // from a Home quick-action tile, keeping visible tabs at 5.
-          title: "Estimate Builder",
           href: null,
         }}
       />

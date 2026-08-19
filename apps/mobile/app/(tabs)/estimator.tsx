@@ -711,11 +711,22 @@ export default function EstimatorScreen() {
             <NumberField t={t} label="Printing Rate (₹/sq.ft) — editable" value={printCost} onChange={setPrintCost} />
 
             <Text style={s.sectionLabel}>Finishing</Text>
-            {isLit && <CheckField t={t} label="SEG Silicone Border" checked={finSeg} onChange={setFinSeg} />}
-            <CheckField t={t} label="Hemming / Heat-seal" checked={finHem} onChange={setFinHem} />
-            <CheckField t={t} label="Eyelets" checked={finEye} onChange={setFinEye} />
-            <CheckField t={t} label="Welding" checked={finWeld} onChange={setFinWeld} />
-            <CheckField t={t} label="Stitching" checked={finStitch} onChange={setFinStitch} />
+            {/* "for simple selection has huge buttons" -- these five rows
+                were direct children of stepGap (gap: 20, meant to separate
+                whole field groups from each other), so each short toggle
+                row got the same generous spacing as a full labeled input --
+                the switch itself wasn't oversized, the air around it was.
+                Grouped into their own tight-gap container so the group as
+                a whole still gets stepGap's normal spacing above/below,
+                but the rows read as one compact list, like a settings
+                screen, instead of five separately-spaced cards. */}
+            <View style={s.checkGroup}>
+              {isLit && <CheckField t={t} label="SEG Silicone Border" checked={finSeg} onChange={setFinSeg} />}
+              <CheckField t={t} label="Hemming / Heat-seal" checked={finHem} onChange={setFinHem} />
+              <CheckField t={t} label="Eyelets" checked={finEye} onChange={setFinEye} />
+              <CheckField t={t} label="Welding" checked={finWeld} onChange={setFinWeld} />
+              <CheckField t={t} label="Stitching" checked={finStitch} onChange={setFinStitch} />
+            </View>
 
             {(finSeg || finHem || finEye || finWeld || finStitch) && (
               <>
@@ -1153,13 +1164,25 @@ const styles = (t: VibrantTheme) =>
     // you type into" against static labels/values around it.
     // "those highlighted font size can be much smaller" + "Fonts has to be
     // smaller" -- was 15.
+    // "for simple 2 digital number there is left to right bar" -- the
+    // input box always stretched to fill its whole column (fieldHalf is
+    // flex:1, needed so labels like "Markup %"/"Discount %" still line up
+    // side by side), even for a value as short as "50" or "18". Capping
+    // the box itself at maxWidth keeps that column layout intact but stops
+    // a two-digit number from sitting in a mostly-empty full-width bar --
+    // 130 comfortably fits every value this screen actually holds
+    // (percentages, mm, ₹ amounts), nothing here runs to 6+ digits.
     input: {
-      minHeight: 44, borderRadius: 12, borderWidth: 1.5, borderColor: t.inkMuted + "40",
+      minHeight: 44, maxWidth: 130, borderRadius: 12, borderWidth: 1.5, borderColor: t.inkMuted + "40",
       backgroundColor: t.primaryTint, paddingHorizontal: 14, paddingVertical: 10,
       fontSize: 13, fontFamily: fonts.regular, color: t.ink,
     },
     fieldRow: { flexDirection: "row", gap: 12 },
     fieldHalf: { flex: 1 },
+    // See the Finishing section's own comment (step 5, above) -- keeps a
+    // run of toggle rows visually grouped instead of each getting
+    // stepGap's full 20px.
+    checkGroup: { gap: 2 },
 
     optionCard: { minHeight: 44, padding: 12, gap: 4, borderWidth: 2, borderColor: "transparent" },
     optionCardActive: { borderColor: t.primary, backgroundColor: t.primaryTint },

@@ -5,6 +5,7 @@ import { useEffect } from 'react';
 import { useColorScheme } from 'react-native';
 import 'react-native-reanimated';
 import {
+  Roboto_300Light,
   Roboto_400Regular,
   Roboto_500Medium,
   Roboto_700Bold,
@@ -40,6 +41,7 @@ export default function RootLayout() {
   // below.
   const [loaded, error] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
+    Roboto_300Light,
     Roboto_400Regular,
     Roboto_500Medium,
     Roboto_700Bold,

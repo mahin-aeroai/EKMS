@@ -74,15 +74,19 @@ const ACCENT_MAP: Record<string, (t: VibrantTheme) => { main: string; tint: stri
 };
 
 const QUICK_ACTIONS = [
+  // "remove survey from menu and place only at home page" -- Surveys is
+  // now href:null in _layout.tsx (no tab bar button); this tile is its
+  // only remaining entry point, same for Basil Installations below.
   { label: "Surveys", sub: "Search & open site surveys", icon: "doc.text.magnifyingglass", route: "/surveys", color: "info" },
   { label: "Sign Costing", sub: "Build a signage cost sheet", icon: "function", route: "/estimator", color: "primary" },
   { label: "Basil Installations", sub: "Reports & new capture", icon: "list.clipboard", route: "/reports", color: "warning" },
   { label: "Sales by Rep", sub: "Customer breakdown by rep", icon: "chart.line.uptrend.xyaxis", route: "/sales-by-rep", color: "success" },
-  // "lets add the tools/estimate module in the same way like this bill
-  // view kind of appearances" -- Estimate Builder (client quotations),
-  // NOT Sign Estimator/Sign Costing above. Hidden tab per _layout.tsx,
-  // reached only from here, matching the Copilot pattern.
-  { label: "Estimate Builder", sub: "Build & save client quotes", icon: "text.badge.plus", route: "/estimate-builder", color: "info" },
+  // Estimates and Cost Sheets are now real tabs (see _layout.tsx) -- kept
+  // here too, same as every other tool, since this grid lists every tool
+  // regardless of tab-bar visibility (Surveys/Basil Installations above
+  // prove that already).
+  { label: "Estimates", sub: "Build & save client quotes", icon: "text.badge.plus", route: "/estimate-builder", color: "info" },
+  { label: "Cost Sheets", sub: "Browse previously generated sheets", icon: "doc.text", route: "/cost-sheets", color: "warning" },
 ] as const;
 
 export default function HomeScreen() {
