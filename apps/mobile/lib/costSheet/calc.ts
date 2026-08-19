@@ -169,34 +169,64 @@ export function computeCostSheet(
   };
 }
 
-// "suggested sellin gprice traditional margin and value addition margin
-// details are must place them nicely" -- port of web calc.ts's own
-// GpMethod/suggestSellingPrice, byte-for-byte (see that file's own
-// comment for the full reasoning):
-//  1. Traditional (total_cost) -- margin applied to everything: raw
-//     materials, wastage, ink, machine cost, labour, finishing, packing,
-//     overheads.
-//  2. Value Addition (services_only) -- raw materials + wastage recovered
-//     at cost (0 margin); margin applied only to ink + work-centre
-//     process cost (ink counts as a "service" here, not a raw material).
+// "The Traditional GP and Value-Addition GP should be calculated on a
+// cost-based methodology, not on the selling price" -- this replaces an
+// earlier, WRONG implementation of this function that used the
+// gross-profit-MARGIN formula (price = cost / (1 - GP%), i.e. GP% as a
+// fraction of the final selling price). That was verified against a
+// chat-shorthand example earlier in this project's history ("GP 50%
+// means 100 becomes 200") and looked consistent at the time, but this
+// round's detailed written methodology makes clear the real intent was
+// always a cost-plus MARKUP -- GP% as a fraction of the COST BASE, added
+// on top of it -- which is a different formula except by coincidence at
+// certain percentages. Implemented literally from that methodology:
+//
+//  1. Traditional (total_cost) -- "Raw Material Cost + Wastage +
+//     Material Mark-up + All Work Centre Costs + 50% GP ... the 50% GP
+//     is applied to the overall cost base, including the raw material
+//     component." GP% x (material + ink + work centre cost), added to
+//     that same total. Default 50% -> price = 1.5x total cost.
+//
+//  2. Value Addition (services_only) -- "Raw Material Cost + Wastage +
+//     Material Mark-up + Work Centre Costs + GP on Work Centre Costs +
+//     Ink Cost ... the raw material component is excluded from the GP
+//     calculation ... by default it should be charged more GP% like
+//     instead 50% we make it 100%." Material and ink are both recovered
+//     at cost (no GP on either) -- GP% applies ONLY to work centre cost,
+//     added on top of it. Default 100% -> price = material + ink +
+//     2x work centre cost, which typically lands the overall total
+//     somewhere around 1.5x depending on how much of the job's cost is
+//     raw material vs. processing (the "1.5X" the methodology mentions
+//     is that rough real-world outcome, not a fixed multiplier baked
+//     into the formula itself).
 export type GpMethod = "total_cost" | "services_only";
 
+/** Traditional method's default -- GP on the full cost base. */
+export const TRADITIONAL_DEFAULT_GP_PCT = 50;
+/** Value Addition method's default -- GP only on work centre cost, so it
+ * needs to run higher to recover a comparable margin overall. */
+export const VALUE_ADDITION_DEFAULT_GP_PCT = 100;
+
 /**
- * Suggested selling amount (₹, NOT per-sqft -- divide by sqft yourself) to
- * hit `targetGpPct` (0-1) under the given method. `materialAtCost` should
- * exclude ink (see inkCostRecent/Avg above); `servicesCost` should be
- * ink + totalProcessCost. Returns null if targetGpPct is 100% or more --
- * there's no finite price that recovers cost AND leaves that much margin.
+ * Suggested selling amount (₹, NOT per-sqft -- divide by sqft yourself)
+ * under the given method's cost-plus markup formula. `materialAtCost`
+ * should exclude ink (see inkCostRecent/Avg on CostSheetResult);
+ * `inkCost` and `workCentreCost` are passed separately since Value
+ * Addition treats them differently (ink recovered at cost, GP only on
+ * work centre cost) -- Traditional applies the same GP% to all three
+ * either way, so the split doesn't change its result, just lets one
+ * function serve both methods with one clear contract.
  */
 export function suggestSellingPrice(
   materialAtCost: number,
-  servicesCost: number,
+  inkCost: number,
+  workCentreCost: number,
   targetGpPct: number,
   method: GpMethod
-): number | null {
-  if (targetGpPct >= 1) return null;
+): number {
   if (method === "total_cost") {
-    return (materialAtCost + servicesCost) / (1 - targetGpPct);
+    const totalCost = materialAtCost + inkCost + workCentreCost;
+    return totalCost * (1 + targetGpPct);
   }
-  return materialAtCost + servicesCost / (1 - targetGpPct);
+  return materialAtCost + inkCost + workCentreCost * (1 + targetGpPct);
 }
