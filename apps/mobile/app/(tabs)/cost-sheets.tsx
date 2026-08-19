@@ -629,7 +629,7 @@ export default function CostSheetToolScreen() {
                       }}
                     >
                       <Text style={[s.uomOptionText, gpMethod === "services_only" && s.uomOptionTextActive]} numberOfLines={2}>
-                        Value Addition — GP on work centre cost
+                        Value Addition — GP on ink + work centre
                       </Text>
                     </Pressable>
                   </View>
@@ -654,6 +654,40 @@ export default function CostSheetToolScreen() {
                       <Metric t={t} label="Total (Recent)" value={fmtRupee(priceSuggestion.totalRecent)} />
                       <Metric t={t} label="Total (Average)" value={fmtRupee(priceSuggestion.totalAvg)} />
                     </View>
+
+                    {/* "can we show the calculation at the bottom it is
+                        very confusing" -- the formula itself was never
+                        shown, just its result, so there was no way to
+                        see WHY a number came out the way it did without
+                        reading code. This lays out every step on the
+                        Recent basis (same numbers Average follows,
+                        proportionally) using the SAME field names as the
+                        Materials/Work Centres sections above, so it reads
+                        as an extension of the cost breakdown already on
+                        screen rather than a separate black box. */}
+                    <View style={s.calcBox}>
+                      <Text style={s.calcTitle}>How this price was calculated (Recent)</Text>
+                      {gpMethod === "total_cost" ? (
+                        <>
+                          <Row t={t} small label="Raw Material (incl. wastage & markup)" value={fmtRupee(result.materialCostRecent - result.inkCostRecent)} />
+                          <Row t={t} small label="Ink Cost" value={fmtRupee(result.inkCostRecent)} />
+                          <Row t={t} small label="Work Centre Cost" value={fmtRupee(result.totalProcessCost)} />
+                          <Row t={t} small strong label="= Total Cost" value={fmtRupee(result.totalCostRecent)} />
+                          <Row t={t} small label={`+ GP (${targetGpPct}% of Total Cost)`} value={fmtRupee(result.totalCostRecent * ((targetGpPct as number) / 100))} />
+                          <Row t={t} small strong big label="= Suggested Selling Price" value={fmtRupee(priceSuggestion.totalRecent)} />
+                        </>
+                      ) : (
+                        <>
+                          <Row t={t} small label="Raw Material (recovered at cost, no GP)" value={fmtRupee(result.materialCostRecent - result.inkCostRecent)} />
+                          <Row t={t} small label="Ink Cost" value={fmtRupee(result.inkCostRecent)} />
+                          <Row t={t} small label="Work Centre Cost" value={fmtRupee(result.totalProcessCost)} />
+                          <Row t={t} small strong label="= Ink + Work Centre (GP base)" value={fmtRupee(result.inkCostRecent + result.totalProcessCost)} />
+                          <Row t={t} small label={`+ GP (${targetGpPct}% of Ink + Work Centre)`} value={fmtRupee((result.inkCostRecent + result.totalProcessCost) * ((targetGpPct as number) / 100))} />
+                          <Row t={t} small strong big label="= Suggested Selling Price" value={fmtRupee(priceSuggestion.totalRecent)} />
+                        </>
+                      )}
+                    </View>
+
                     {/* Feeds this section's price back up into Selling
                         Price / SqFt so the Cost Summary's Gross Profit
                         rows reflect it too -- see that section's own
@@ -988,6 +1022,12 @@ const styles = (t: VibrantTheme) =>
     poolBtn: { marginTop: 4 },
     poolSuccessText: { fontSize: 12, fontFamily: fonts.regular, color: t.success, textAlign: "center" },
     poolErrorText: { fontSize: 12, fontFamily: fonts.regular, color: t.danger, textAlign: "center" },
+
+    calcBox: {
+      gap: 0, marginTop: 4, borderRadius: radius.md, borderWidth: 1, borderColor: t.inkMuted + "30",
+      backgroundColor: t.surfaceSunken, paddingHorizontal: 12, paddingTop: 2, paddingBottom: 4,
+    },
+    calcTitle: { fontSize: 11, fontFamily: fonts.bold, color: t.inkSecondary, paddingTop: 8, paddingBottom: 2 },
 
     gpEmptyState: { gap: 8, paddingVertical: 4 },
     useSuggestedBtn: {
