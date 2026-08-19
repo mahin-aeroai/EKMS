@@ -643,7 +643,7 @@ export default function CostSheetToolScreen() {
                 <Text style={s.gpMethodHint}>
                   {gpMethod === "total_cost"
                     ? "GP% applied to everything: raw material (incl. wastage & markup), ink, and all work centre costs. Default 50% adds half the total cost on top (₹100 cost → ₹150)."
-                    : "Raw material and ink recovered at cost -- no GP on either. GP% applied only to work centre cost, added on top of it. Default 100% doubles just that portion, which typically brings the overall total to somewhere around 1.5x depending on how much of the job is material vs. processing."}
+                    : "Raw material recovered at cost -- no GP on it. GP% applied to ink + work centre cost together, added on top of that portion. Default 100% doubles ink + processing, which typically brings the overall total to somewhere around 1.5x depending on how much of the job is raw material vs. ink and processing."}
                 </Text>
                 <NumberField t={t} label="Target GP %" value={targetGpPct} onChange={setTargetGpPct} />
                 {priceSuggestion ? (
