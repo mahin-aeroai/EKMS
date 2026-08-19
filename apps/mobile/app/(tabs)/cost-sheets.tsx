@@ -30,7 +30,6 @@ import {
   computeLineCost,
   computeSqft,
   computeWorkCentreCost,
-  suggestSellingPrice,
   type CostSheetInputs,
   type GpMethod,
   type Uom,
@@ -72,9 +71,20 @@ interface TemplateOption {
   label: string;
 }
 
-// See the gpMethod state's own comment -- both margin methods are pinned
-// to this one fraction (a straight doubling), not user-adjustable.
-const FIXED_GP_FRACTION = 0.5;
+// "Gorss marging 50% for traditional means 100 becomes 200 and service
+// items it shoukd 100-300" -- corrects the previous round's single
+// shared 50%-GP-fraction (which doubled both methods identically) to two
+// DIFFERENT literal multipliers, applied directly rather than through a
+// GP%-fraction conversion -- no percentage math in between to get subtly
+// wrong at some inputs and not others (the "10% correct, 30% wrong"
+// report was against the OLD editable-Target-GP% version; removing the
+// percentage indirection entirely, not just picking new percentages,
+// is the actual fix).
+//  - Traditional: total cost x2 (₹100 -> ₹200).
+//  - Value Addition: raw materials recovered at cost (x1, unchanged);
+//    ink + work-centre process cost ("services") x3 (₹100 -> ₹300).
+const TRADITIONAL_MULTIPLIER = 2;
+const SERVICES_MULTIPLIER = 3;
 
 async function fetchAllRawMaterials(): Promise<RawMaterialRow[]> {
   // raw_materials is ~1,558 rows -- past PostgREST's default 1000-row cap
@@ -269,14 +279,21 @@ export default function CostSheetToolScreen() {
 
   const priceSuggestion = useMemo(() => {
     if (!result || result.sqft <= 0) return null;
-    const g = FIXED_GP_FRACTION;
     const materialAtCostRecent = result.materialCostRecent - result.inkCostRecent;
     const materialAtCostAvg = result.materialCostAvg - result.inkCostAvg;
     const servicesRecent = result.inkCostRecent + result.totalProcessCost;
     const servicesAvg = result.inkCostAvg + result.totalProcessCost;
-    const totalRecent = suggestSellingPrice(materialAtCostRecent, servicesRecent, g, gpMethod);
-    const totalAvg = suggestSellingPrice(materialAtCostAvg, servicesAvg, g, gpMethod);
-    if (totalRecent === null || totalAvg === null) return null;
+    // Traditional: everything (materials + services) x2. Value Addition:
+    // materials recovered at cost (x1) + services x3. See
+    // TRADITIONAL_MULTIPLIER/SERVICES_MULTIPLIER's own comment above.
+    const totalRecent =
+      gpMethod === "total_cost"
+        ? (result.materialCostRecent + result.totalProcessCost) * TRADITIONAL_MULTIPLIER
+        : materialAtCostRecent + servicesRecent * SERVICES_MULTIPLIER;
+    const totalAvg =
+      gpMethod === "total_cost"
+        ? (result.materialCostAvg + result.totalProcessCost) * TRADITIONAL_MULTIPLIER
+        : materialAtCostAvg + servicesAvg * SERVICES_MULTIPLIER;
     return {
       perSqftRecent: totalRecent / result.sqft,
       perSqftAvg: totalAvg / result.sqft,
@@ -599,8 +616,8 @@ export default function CostSheetToolScreen() {
                 </Field>
                 <Text style={s.gpMethodHint}>
                   {gpMethod === "total_cost"
-                    ? "Fixed at 50% GP on everything: raw materials, wastage, ink, machine cost, labour, finishing, packing, overheads -- doubles total cost."
-                    : "Raw materials and wastage recovered at cost. Fixed at 100% markup on ink + process cost (services) only -- e.g. ₹100 of services sells at ₹200."}
+                    ? "Fixed 2x on everything: raw materials, wastage, ink, machine cost, labour, finishing, packing, overheads -- ₹100 total cost sells at ₹200."
+                    : "Raw materials and wastage recovered at cost (1x). Fixed 3x on ink + process cost (services) only -- e.g. ₹100 of services sells at ₹300."}
                 </Text>
                 {priceSuggestion ? (
                   <View style={s.metricGrid}>

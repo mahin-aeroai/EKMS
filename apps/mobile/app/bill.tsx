@@ -43,9 +43,19 @@ interface BillLine {
   sgst: number | null;
   cgst: number | null;
   igst: number | null;
-  // "Sales invoice like bill still missing some product information" --
-  // real column, already backfilled by the invoice-fidelity migration,
-  // just never passed through to this screen before.
+  // "Why HSN code? I want the product details" -- kept on the type (still
+  // passed through from sales-by-rep.tsx) but no longer rendered; HSN
+  // wasn't what was being asked for. The real ask was the missing PRODUCT
+  // NAME on some rows (e.g. the ₹3,00,375 line on the Bhima Gold invoice)
+  // -- that's item_description itself coming back NULL from
+  // sales_transactions for that row. Checked: this is a genuine gap in
+  // the source data (the Sales_day_book import's "Item Description"
+  // column was blank for that row, and its "Item" gap-fill fallback --
+  // see supabase-sales-transactions-invoice-fidelity-migration.sql --
+  // apparently didn't cover it either), not something this screen can
+  // recover or invent -- it can only be fixed by correcting/re-importing
+  // that row's source data. "Not recorded" below is deliberately honest
+  // about that rather than a bare, easy-to-miss "—".
   hsn_sac: string | null;
 }
 
@@ -140,10 +150,13 @@ export default function BillScreen() {
           ) : (
             items.map((line, i) => (
               <View key={i} style={[s.itemRow, i === items.length - 1 && s.itemRowLast]}>
-                <View style={s.colItem}>
-                  <Text style={s.itemName} numberOfLines={2}>{line.item_description || "Not recorded"}</Text>
-                  {line.hsn_sac ? <Text style={s.itemHsn}>HSN: {line.hsn_sac}</Text> : null}
-                </View>
+                {/* "Why HSN code? I want the product details" -- HSN
+                    dropped; "Not recorded" (not a bare "—") is what's
+                    actually shown when a row's real product name is
+                    genuinely missing from the source data -- see the note
+                    above BillLine on why that can happen and isn't fixable
+                    from this screen. */}
+                <Text style={[s.itemName, s.colItem]} numberOfLines={2}>{line.item_description || "Not recorded"}</Text>
                 <Text style={[s.itemQty, s.colQty]}>
                   {line.quantity != null && line.rate != null ? `${line.quantity} × ₹${line.rate.toLocaleString("en-IN")}` : "—"}
                 </Text>
@@ -246,7 +259,6 @@ const styles = (t: VibrantTheme) =>
     colQty: { flex: 1, textAlign: "right" },
     colAmt: { flex: 1, textAlign: "right" },
     itemName: { fontSize: 12, fontFamily: fonts.medium, color: t.ink },
-    itemHsn: { fontSize: 10, fontFamily: fonts.regular, color: t.inkMuted, marginTop: 1 },
     itemQty: { fontSize: 11, fontFamily: fonts.regular, color: t.inkMuted },
     itemValue: { fontSize: 12, fontFamily: fonts.regular, color: t.inkSecondary },
 

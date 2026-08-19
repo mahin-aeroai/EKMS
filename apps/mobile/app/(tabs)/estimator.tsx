@@ -610,19 +610,25 @@ export default function EstimatorScreen() {
               <View style={s.alertBox}><Text style={s.alertText}>Accessories master is empty, or dimensions haven't been entered yet.</Text></View>
             ) : (
               <>
-                {accessories.map((a) => (
-                  <SoftCard key={a.id} style={s.accRow}>
-                    <View style={s.accRowHead}>
-                      <Text style={s.accName}>{a.name}{a.mandatory ? " •" : ""}</Text>
-                      <Text style={s.accUnit}>{a.unit}</Text>
-                    </View>
-                    <View style={s.fieldRow}>
-                      <View style={s.fieldHalf}><NumberField t={t} label="Qty" value={a.qty} onChange={(v) => setAccessoryQty(a, v === "" ? 0 : v)} /></View>
-                      <View style={s.fieldHalf}><NumberField t={t} label="Unit Cost (₹)" value={a.unitCost} onChange={(v) => setAccessoryCost(a, v === "" ? 0 : v)} /></View>
-                    </View>
-                    <Text style={s.accLineTotal}>{fmtRupee(a.qty * a.unitCost)}</Text>
-                  </SoftCard>
-                ))}
+                {/* "accessories should look much compact" -- tight gap
+                    container so consecutive cards sit close together
+                    instead of getting stepGap's full 20pt group spacing
+                    between every single one. */}
+                <View style={s.accList}>
+                  {accessories.map((a) => (
+                    <SoftCard key={a.id} style={s.accRow}>
+                      <View style={s.accRowHead}>
+                        <Text style={s.accName}>{a.name}{a.mandatory ? " •" : ""}</Text>
+                        <Text style={s.accUnit}>{a.unit}</Text>
+                      </View>
+                      <View style={s.fieldRow}>
+                        <View style={s.fieldHalf}><NumberField t={t} label="Qty" value={a.qty} onChange={(v) => setAccessoryQty(a, v === "" ? 0 : v)} /></View>
+                        <View style={s.fieldHalf}><NumberField t={t} label="Unit Cost (₹)" value={a.unitCost} onChange={(v) => setAccessoryCost(a, v === "" ? 0 : v)} /></View>
+                      </View>
+                      <Text style={s.accLineTotal}>{fmtRupee(a.qty * a.unitCost)}</Text>
+                    </SoftCard>
+                  ))}
+                </View>
                 <Text style={s.totalLine}>Accessories total: {fmtRupee(accCost)}</Text>
               </>
             )}
@@ -878,14 +884,18 @@ export default function EstimatorScreen() {
               <Text style={s.totalCardLabel}>Final Amount (incl. GST)</Text>
               <Text style={s.totalCardValue}>{fmtRupee(pricing.final)}</Text>
               <Text style={s.totalCardMargin}>Gross margin {pricing.margin}% ({fmtRupee(pricing.mgnAmt)})</Text>
-              {/* "Add per Sqft price arrival under gross magin" -- sign area
-                  comes from the Backing Sheet step's own sqft (same number
-                  shown there as "Sign Area"); final amount includes
-                  printing/installation too, so this is the all-in ₹/sq.ft
-                  a customer would actually be quoted, not just the signage
-                  portion. */}
+              {/* "I dont want gorss margin per SQFt i want the sigane final
+                  cost per sqft and print cost per sqft" -- two separate
+                  figures, not one blended final-amount/sqft: Signage's own
+                  selling price over the Backing Sheet step's sign area, and
+                  Printing's own selling price over its own chargeable area
+                  (bleed-inclusive, from computePrint -- not necessarily the
+                  same sqft as the signage substrate). */}
               {sheetResult && sheetResult.sigSqFt > 0 && (
-                <Text style={s.totalCardMargin}>{fmtRupee(pricing.final / sheetResult.sigSqFt)} / sq.ft</Text>
+                <Text style={s.totalCardMargin}>Signage: {fmtRupee(pricing.signageSell / sheetResult.sigSqFt)} / sq.ft</Text>
+              )}
+              {printResult && printResult.printSqFt > 0 && (
+                <Text style={s.totalCardMargin}>Print: {fmtRupee(pricing.printSell / printResult.printSqFt)} / sq.ft</Text>
               )}
             </View>
 
@@ -1255,16 +1265,16 @@ const styles = (t: VibrantTheme) =>
     successBox: { borderRadius: radius.md, backgroundColor: t.successTint, padding: 12 },
     successText: { fontSize: 13, fontFamily: fonts.bold, color: t.success },
 
-    // "Accessories still look very very compact" -- more padding/gap inside
-    // each card and a size bump on every text element (name/unit/line
-    // total), plus a bit of breathing room between consecutive cards
-    // (marginBottom -- these render as sibling SoftCards, not rows inside
-    // one shared container, so gap alone on a parent doesn't reach them).
-    accRow: { padding: 16, gap: 14, marginBottom: 4 },
+    // "accessories should look much compact" -- reverses the previous
+    // round's size bump (padding 16->12, gap 14->8, name/unit/total back
+    // down a size) -- the more spacious version read as too loose once
+    // actually tested on-device, back to a tighter list-style card.
+    accList: { gap: 8 },
+    accRow: { padding: 12, gap: 8 },
     accRowHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" },
-    accName: { fontSize: 15, fontFamily: fonts.medium, color: t.ink, flex: 1 },
-    accUnit: { fontSize: 13, fontFamily: fonts.regular, color: t.inkSecondary },
-    accLineTotal: { fontSize: 15, fontFamily: fonts.bold, color: t.ink, textAlign: "right" },
+    accName: { fontSize: 14, fontFamily: fonts.medium, color: t.ink, flex: 1 },
+    accUnit: { fontSize: 12, fontFamily: fonts.regular, color: t.inkSecondary },
+    accLineTotal: { fontSize: 13, fontFamily: fonts.bold, color: t.ink, textAlign: "right" },
 
     row: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12, paddingVertical: 9, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.line },
     rowStrong: { backgroundColor: t.surfaceSunken, marginHorizontal: -12, paddingHorizontal: 12, borderRadius: radius.sm },
