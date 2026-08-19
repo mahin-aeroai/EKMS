@@ -1,0 +1,15 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "8dbfb06c-d71d-4c36-97d8-2682a53ac6d3"
+      }
+    },
+    "ios": {
+      "bundleIdentifier": "com.ekms.mmdione",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    }
+  }
+}
