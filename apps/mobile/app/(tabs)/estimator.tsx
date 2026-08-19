@@ -12,6 +12,8 @@ import {
   Text,
   TextInput,
   View,
+  type StyleProp,
+  type TextStyle,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { useHeaderHeight } from "expo-router/react-navigation";
@@ -622,8 +624,8 @@ export default function EstimatorScreen() {
                         <Text style={s.accUnit}>{a.unit}</Text>
                       </View>
                       <View style={s.fieldRow}>
-                        <View style={s.fieldHalf}><NumberField t={t} label="Qty" value={a.qty} onChange={(v) => setAccessoryQty(a, v === "" ? 0 : v)} /></View>
-                        <View style={s.fieldHalf}><NumberField t={t} label="Unit Cost (₹)" value={a.unitCost} onChange={(v) => setAccessoryCost(a, v === "" ? 0 : v)} /></View>
+                        <View style={s.fieldHalf}><NumberField t={t} label="Qty" value={a.qty} onChange={(v) => setAccessoryQty(a, v === "" ? 0 : v)} inputStyle={s.accInput} /></View>
+                        <View style={s.fieldHalf}><NumberField t={t} label="Unit Cost (₹)" value={a.unitCost} onChange={(v) => setAccessoryCost(a, v === "" ? 0 : v)} inputStyle={s.accInput} /></View>
                       </View>
                       <Text style={s.accLineTotal}>{fmtRupee(a.qty * a.unitCost)}</Text>
                     </SoftCard>
@@ -952,9 +954,10 @@ function Field({ t, label, children }: { t: VibrantTheme; label: string; childre
 }
 
 function NumberField({
-  t, label, value, onChange, keyboardType = "decimal-pad",
+  t, label, value, onChange, keyboardType = "decimal-pad", inputStyle,
 }: {
   t: VibrantTheme; label: string; value: number | ""; onChange: (v: number | "") => void; keyboardType?: "decimal-pad" | "number-pad";
+  inputStyle?: StyleProp<TextStyle>;
 }) {
   const s = styles(t);
   // Local text buffer, not re-derived from `value` on every keystroke -- a
@@ -965,7 +968,7 @@ function NumberField({
   return (
     <Field t={t} label={label}>
       <TextInput
-        style={s.input}
+        style={[s.input, inputStyle]}
         value={text}
         onChangeText={(raw) => {
           setText(raw);
@@ -1269,12 +1272,24 @@ const styles = (t: VibrantTheme) =>
     // round's size bump (padding 16->12, gap 14->8, name/unit/total back
     // down a size) -- the more spacious version read as too loose once
     // actually tested on-device, back to a tighter list-style card.
-    accList: { gap: 8 },
-    accRow: { padding: 12, gap: 8 },
+    // "accessories should not just back to compact it should be more
+    // compact with samll fonrs and boxes" -- one more step down from the
+    // previous revert: smaller padding/gap, smaller name/unit/total text,
+    // and the Qty/Unit Cost NumberFields below get their own tighter
+    // accInput override (shorter minHeight, smaller font/padding) rather
+    // than the general-purpose `input` style shared with every other
+    // screen's fields.
+    accList: { gap: 6 },
+    accRow: { padding: 8, gap: 5 },
     accRowHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" },
-    accName: { fontSize: 14, fontFamily: fonts.medium, color: t.ink, flex: 1 },
-    accUnit: { fontSize: 12, fontFamily: fonts.regular, color: t.inkSecondary },
-    accLineTotal: { fontSize: 13, fontFamily: fonts.bold, color: t.ink, textAlign: "right" },
+    accName: { fontSize: 12, fontFamily: fonts.medium, color: t.ink, flex: 1 },
+    accUnit: { fontSize: 10, fontFamily: fonts.regular, color: t.inkSecondary },
+    accLineTotal: { fontSize: 12, fontFamily: fonts.bold, color: t.ink, textAlign: "right" },
+    accInput: {
+      minHeight: 34, maxWidth: 110, borderRadius: 8, borderWidth: 1, borderColor: t.inkMuted + "40",
+      backgroundColor: t.primaryTint, paddingHorizontal: 8, paddingVertical: 5,
+      fontSize: 11, fontFamily: fonts.regular, color: t.ink,
+    },
 
     row: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12, paddingVertical: 9, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.line },
     rowStrong: { backgroundColor: t.surfaceSunken, marginHorizontal: -12, paddingHorizontal: 12, borderRadius: radius.sm },

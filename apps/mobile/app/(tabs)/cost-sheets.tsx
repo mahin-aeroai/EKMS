@@ -30,6 +30,7 @@ import {
   computeLineCost,
   computeSqft,
   computeWorkCentreCost,
+  suggestSellingPrice,
   type CostSheetInputs,
   type GpMethod,
   type Uom,
@@ -71,20 +72,16 @@ interface TemplateOption {
   label: string;
 }
 
-// "Gorss marging 50% for traditional means 100 becomes 200 and service
-// items it shoukd 100-300" -- corrects the previous round's single
-// shared 50%-GP-fraction (which doubled both methods identically) to two
-// DIFFERENT literal multipliers, applied directly rather than through a
-// GP%-fraction conversion -- no percentage math in between to get subtly
-// wrong at some inputs and not others (the "10% correct, 30% wrong"
-// report was against the OLD editable-Target-GP% version; removing the
-// percentage indirection entirely, not just picking new percentages,
-// is the actual fix).
-//  - Traditional: total cost x2 (₹100 -> ₹200).
-//  - Value Addition: raw materials recovered at cost (x1, unchanged);
-//    ink + work-centre process cost ("services") x3 (₹100 -> ₹300).
-const TRADITIONAL_MULTIPLIER = 2;
-const SERVICES_MULTIPLIER = 3;
+// "I need gorss margin percentage for adjustment" -- back to an editable
+// Target GP%, reversing the previous round's fixed multipliers per this
+// round's own instruction. The underlying formula (suggestSellingPrice,
+// price = cost / (1 - GP%) -- the standard gross-profit-MARGIN
+// definition, not a simple markup) was always mathematically correct at
+// every percentage -- verified directly against the user's own example:
+// at 50% it gives cost / 0.5 = cost x2, i.e. "GP 50% means ₹100 becomes
+// ₹200," exactly as described. Defaults to 50 so a fresh calculation
+// opens on that same verified point for either method.
+const DEFAULT_TARGET_GP_PCT = 50;
 
 async function fetchAllRawMaterials(): Promise<RawMaterialRow[]> {
   // raw_materials is ~1,558 rows -- past PostgREST's default 1000-row cap
@@ -149,19 +146,11 @@ export default function CostSheetToolScreen() {
   const [selectedMaterialByLine, setSelectedMaterialByLine] = useState<Record<string, string | null>>({});
   const [excludedLines, setExcludedLines] = useState<Set<string>>(new Set());
 
-  // "cost sheet: make traditional GP 50% fixed and valuadded services as
-  // 100% fix i mean if service cost is 100 sales should sell at 200" --
-  // both wordings land on the same math: suggestSellingPrice's formula is
-  // cost / (1 - g) for Traditional and materialAtCost + services / (1 - g)
-  // for Value Addition, so g = 0.5 makes BOTH double whatever they're
-  // applied to (a ₹100 service cost -> ₹200), matching "GP 50%" and
-  // "100% markup" as the same fixed point rather than two different
-  // numbers. No longer a user-editable Target GP% field -- see
-  // FIXED_GP_FRACTION below.
   const [addingToPool, setAddingToPool] = useState(false);
   const [poolMessage, setPoolMessage] = useState<{ kind: "success" | "danger"; text: string } | null>(null);
 
   const [gpMethod, setGpMethod] = useState<GpMethod>("total_cost");
+  const [targetGpPct, setTargetGpPct] = useState<number | "">(DEFAULT_TARGET_GP_PCT);
 
   useEffect(() => {
     (async () => {
@@ -278,29 +267,22 @@ export default function CostSheetToolScreen() {
   }, [overriddenLines, materialsByCode]);
 
   const priceSuggestion = useMemo(() => {
-    if (!result || result.sqft <= 0) return null;
+    if (!result || result.sqft <= 0 || targetGpPct === "") return null;
+    const g = targetGpPct / 100;
     const materialAtCostRecent = result.materialCostRecent - result.inkCostRecent;
     const materialAtCostAvg = result.materialCostAvg - result.inkCostAvg;
     const servicesRecent = result.inkCostRecent + result.totalProcessCost;
     const servicesAvg = result.inkCostAvg + result.totalProcessCost;
-    // Traditional: everything (materials + services) x2. Value Addition:
-    // materials recovered at cost (x1) + services x3. See
-    // TRADITIONAL_MULTIPLIER/SERVICES_MULTIPLIER's own comment above.
-    const totalRecent =
-      gpMethod === "total_cost"
-        ? (result.materialCostRecent + result.totalProcessCost) * TRADITIONAL_MULTIPLIER
-        : materialAtCostRecent + servicesRecent * SERVICES_MULTIPLIER;
-    const totalAvg =
-      gpMethod === "total_cost"
-        ? (result.materialCostAvg + result.totalProcessCost) * TRADITIONAL_MULTIPLIER
-        : materialAtCostAvg + servicesAvg * SERVICES_MULTIPLIER;
+    const totalRecent = suggestSellingPrice(materialAtCostRecent, servicesRecent, g, gpMethod);
+    const totalAvg = suggestSellingPrice(materialAtCostAvg, servicesAvg, g, gpMethod);
+    if (totalRecent === null || totalAvg === null) return null;
     return {
       perSqftRecent: totalRecent / result.sqft,
       perSqftAvg: totalAvg / result.sqft,
       totalRecent,
       totalAvg,
     };
-  }, [result, gpMethod]);
+  }, [result, gpMethod, targetGpPct]);
 
   function toggleWorkCentreForJob(workCentre: string, applicable: boolean) {
     setExcludedWorkCentres((prev) => {
@@ -616,9 +598,10 @@ export default function CostSheetToolScreen() {
                 </Field>
                 <Text style={s.gpMethodHint}>
                   {gpMethod === "total_cost"
-                    ? "Fixed 2x on everything: raw materials, wastage, ink, machine cost, labour, finishing, packing, overheads -- ₹100 total cost sells at ₹200."
-                    : "Raw materials and wastage recovered at cost (1x). Fixed 3x on ink + process cost (services) only -- e.g. ₹100 of services sells at ₹300."}
+                    ? "Margin applied to everything: raw materials, wastage, ink, machine cost, labour, finishing, packing, overheads. 50% doubles total cost (₹100 → ₹200)."
+                    : "Raw materials and wastage recovered at cost. Margin applied only to ink, machine time, labour, finishing, packing, and overheads."}
                 </Text>
+                <NumberField t={t} label="Target GP %" value={targetGpPct} onChange={setTargetGpPct} />
                 {priceSuggestion ? (
                   <View style={s.metricGrid}>
                     <Metric t={t} label="Price / SqFt (Recent)" value={fmtRupee(priceSuggestion.perSqftRecent)} />
