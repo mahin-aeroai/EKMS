@@ -120,7 +120,8 @@ export default function EstimatorScreen() {
   const [customAccs] = useState<AccessoryLine[]>([]);
 
   // ── Step 4 ──
-  const [ledMode, setLedMode] = useState<"module" | "bar">("module");
+  // "Make default LED as Bar not modules" -- was "module".
+  const [ledMode, setLedMode] = useState<"module" | "bar">("bar");
   const [ledModId, setLedModId] = useState("");
   const [modMargin, setModMargin] = useState<number | "">(30);
   const [modHGap, setModHGap] = useState<number | "">("");
@@ -196,6 +197,18 @@ export default function EstimatorScreen() {
       cancelled = true;
     };
   }, []);
+
+  // "Make default Backing sheet as ACP" -- once the sheet master loads,
+  // pre-select whichever active sheet's name mentions ACP (Aluminium
+  // Composite Panel) rather than leaving the picker on "Select a sheet."
+  // Only fires if nothing's been picked yet, so it never overrides a
+  // user's own choice.
+  useEffect(() => {
+    if (!masters || sheetId !== "") return;
+    const acp = masters.sheets.find((sh) => /\bacp\b/i.test(sh.name));
+    if (acp) setSheetId(acp.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [masters]);
 
   const numOr0 = (v: number | "") => (v === "" ? 0 : v);
 
@@ -865,6 +878,15 @@ export default function EstimatorScreen() {
               <Text style={s.totalCardLabel}>Final Amount (incl. GST)</Text>
               <Text style={s.totalCardValue}>{fmtRupee(pricing.final)}</Text>
               <Text style={s.totalCardMargin}>Gross margin {pricing.margin}% ({fmtRupee(pricing.mgnAmt)})</Text>
+              {/* "Add per Sqft price arrival under gross magin" -- sign area
+                  comes from the Backing Sheet step's own sqft (same number
+                  shown there as "Sign Area"); final amount includes
+                  printing/installation too, so this is the all-in ₹/sq.ft
+                  a customer would actually be quoted, not just the signage
+                  portion. */}
+              {sheetResult && sheetResult.sigSqFt > 0 && (
+                <Text style={s.totalCardMargin}>{fmtRupee(pricing.final / sheetResult.sigSqFt)} / sq.ft</Text>
+              )}
             </View>
 
             {savedRef && (
@@ -1233,11 +1255,16 @@ const styles = (t: VibrantTheme) =>
     successBox: { borderRadius: radius.md, backgroundColor: t.successTint, padding: 12 },
     successText: { fontSize: 13, fontFamily: fonts.bold, color: t.success },
 
-    accRow: { padding: 12, gap: 10 },
+    // "Accessories still look very very compact" -- more padding/gap inside
+    // each card and a size bump on every text element (name/unit/line
+    // total), plus a bit of breathing room between consecutive cards
+    // (marginBottom -- these render as sibling SoftCards, not rows inside
+    // one shared container, so gap alone on a parent doesn't reach them).
+    accRow: { padding: 16, gap: 14, marginBottom: 4 },
     accRowHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" },
-    accName: { fontSize: 14, fontFamily: fonts.medium, color: t.ink, flex: 1 },
-    accUnit: { fontSize: 12, fontFamily: fonts.regular, color: t.inkSecondary },
-    accLineTotal: { fontSize: 13, fontFamily: fonts.bold, color: t.ink, textAlign: "right" },
+    accName: { fontSize: 15, fontFamily: fonts.medium, color: t.ink, flex: 1 },
+    accUnit: { fontSize: 13, fontFamily: fonts.regular, color: t.inkSecondary },
+    accLineTotal: { fontSize: 15, fontFamily: fonts.bold, color: t.ink, textAlign: "right" },
 
     row: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12, paddingVertical: 9, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.line },
     rowStrong: { backgroundColor: t.surfaceSunken, marginHorizontal: -12, paddingHorizontal: 12, borderRadius: radius.sm },

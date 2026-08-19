@@ -121,6 +121,19 @@ const WAKE_WORD_LABEL = "Hey Jarvis";
 // a lot more recall.
 const WAKE_PHRASE = "jarvis";
 
+// "Copilot has session activation failed error" -- a real iOS
+// AVAudioSession error, not a bug in the phrase-matching logic. It was
+// showing up here because the restart-on-end loop called start() again
+// in the SAME tick as the previous session's "end"/"error" event -- the
+// native audio session hadn't finished tearing itself down yet, so
+// reactivating it immediately fails. A short delay before every restart
+// (both the wake-listening loop and the wake -> dictation handoff) gives
+// iOS time to actually finish deactivating first. This is also the most
+// likely explanation for "jarvis unresponsive": if every restart was
+// silently failing this way, the background session may rarely have
+// been alive long enough to hear anything at all.
+const RESTART_DELAY_MS = 400;
+
 // ---- Row shapes, matching each tool's real `result` shape ----
 
 interface SurveyRow {
@@ -373,8 +386,18 @@ function ListeningOverlay({ t, transcript, onCancel }: { t: VibrantTheme; transc
       <Pressable style={StyleSheet.absoluteFill} onPress={onCancel} />
       <View style={s.orbWrap} pointerEvents="none">
         <Animated.View style={[s.gradientRing, { transform: [{ rotate: spinDeg }] }]}>
+          {/* "Animation still showing blue ring i don't want that I want the
+              animated ring gradient that i shown" -- the previous 4-stop
+              gradient was really only two colours (t.info and both ends of
+              gradientPrimary, all blue/navy), which reads as flat/two-tone
+              once it's actually spinning rather than a genuine multi-hue
+              ring. This cycles through four distinct hues (blue -> violet
+              -> pink -> back to blue) so the rotation itself is visibly
+              colour-shifting, closer to the reference's moving colour
+              ring, while still opening on t.info so it doesn't clash with
+              the rest of the app on the first frame. */}
           <LinearGradient
-            colors={[t.info, t.gradientPrimary[0], t.gradientPrimary[1], t.info]}
+            colors={[t.info, "#8B5CF6", "#EC4899", t.gradientPrimary[1], t.info]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={StyleSheet.absoluteFill}
@@ -601,9 +624,12 @@ export default function CopilotScreen() {
     const next = nextActionRef.current;
     nextActionRef.current = "none";
     if (next === "dictation") {
-      beginDictation();
+      // Same audio-session-teardown-race reasoning as below -- a fresh
+      // session starting in the very same tick the previous one's "end"
+      // fires is exactly what "Session activation failed" looks like.
+      setTimeout(beginDictation, RESTART_DELAY_MS);
     } else if (wakeEnabledRef.current) {
-      beginWakeListening();
+      setTimeout(beginWakeListening, RESTART_DELAY_MS);
     }
   });
   useSpeechRecognitionEvent("error", (event) => {
@@ -617,9 +643,9 @@ export default function CopilotScreen() {
     const next = nextActionRef.current;
     nextActionRef.current = "none";
     if (next === "dictation") {
-      beginDictation();
+      setTimeout(beginDictation, RESTART_DELAY_MS);
     } else if (wakeEnabledRef.current) {
-      beginWakeListening();
+      setTimeout(beginWakeListening, RESTART_DELAY_MS);
     }
   });
 

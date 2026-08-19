@@ -43,6 +43,10 @@ interface BillLine {
   sgst: number | null;
   cgst: number | null;
   igst: number | null;
+  // "Sales invoice like bill still missing some product information" --
+  // real column, already backfilled by the invoice-fidelity migration,
+  // just never passed through to this screen before.
+  hsn_sac: string | null;
 }
 
 function formatISOToDMY(iso: string | null): string {
@@ -62,7 +66,7 @@ export default function BillScreen() {
   const s = styles(t);
   const router = useRouter();
   const {
-    customerName, address, gstin, date, invoiceNo, campaign, location, placeOfSupply, total, gstAmount, lines,
+    customerName, address, gstin, date, invoiceNo, campaign, location, placeOfSupply, total, gstAmount, lines, salesRep,
   } = useLocalSearchParams<{
     customerName?: string;
     address?: string;
@@ -75,6 +79,7 @@ export default function BillScreen() {
     total?: string;
     gstAmount?: string;
     lines?: string;
+    salesRep?: string;
   }>();
 
   let items: BillLine[] = [];
@@ -117,6 +122,7 @@ export default function BillScreen() {
 
           <MetaRow t={t} label="Invoice No" value={invoiceNo || "—"} />
           <MetaRow t={t} label="Date" value={formatISOToDMY(date ?? null)} />
+          {salesRep ? <MetaRow t={t} label="Sales Rep" value={salesRep} /> : null}
           {campaign ? <MetaRow t={t} label="Campaign" value={campaign} /> : null}
           {location ? <MetaRow t={t} label="Location" value={location} /> : null}
           {placeOfSupply ? <MetaRow t={t} label="Place of Supply" value={placeOfSupply} /> : null}
@@ -134,7 +140,10 @@ export default function BillScreen() {
           ) : (
             items.map((line, i) => (
               <View key={i} style={[s.itemRow, i === items.length - 1 && s.itemRowLast]}>
-                <Text style={[s.itemName, s.colItem]} numberOfLines={2}>{line.item_description || "—"}</Text>
+                <View style={s.colItem}>
+                  <Text style={s.itemName} numberOfLines={2}>{line.item_description || "Not recorded"}</Text>
+                  {line.hsn_sac ? <Text style={s.itemHsn}>HSN: {line.hsn_sac}</Text> : null}
+                </View>
                 <Text style={[s.itemQty, s.colQty]}>
                   {line.quantity != null && line.rate != null ? `${line.quantity} × ₹${line.rate.toLocaleString("en-IN")}` : "—"}
                 </Text>
@@ -237,6 +246,7 @@ const styles = (t: VibrantTheme) =>
     colQty: { flex: 1, textAlign: "right" },
     colAmt: { flex: 1, textAlign: "right" },
     itemName: { fontSize: 12, fontFamily: fonts.medium, color: t.ink },
+    itemHsn: { fontSize: 10, fontFamily: fonts.regular, color: t.inkMuted, marginTop: 1 },
     itemQty: { fontSize: 11, fontFamily: fonts.regular, color: t.inkMuted },
     itemValue: { fontSize: 12, fontFamily: fonts.regular, color: t.inkSecondary },
 

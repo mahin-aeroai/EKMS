@@ -72,6 +72,10 @@ interface TemplateOption {
   label: string;
 }
 
+// See the gpMethod state's own comment -- both margin methods are pinned
+// to this one fraction (a straight doubling), not user-adjustable.
+const FIXED_GP_FRACTION = 0.5;
+
 async function fetchAllRawMaterials(): Promise<RawMaterialRow[]> {
   // raw_materials is ~1,558 rows -- past PostgREST's default 1000-row cap
   // on an unpaginated select, same issue already hit (and fixed) for
@@ -135,8 +139,19 @@ export default function CostSheetToolScreen() {
   const [selectedMaterialByLine, setSelectedMaterialByLine] = useState<Record<string, string | null>>({});
   const [excludedLines, setExcludedLines] = useState<Set<string>>(new Set());
 
+  // "cost sheet: make traditional GP 50% fixed and valuadded services as
+  // 100% fix i mean if service cost is 100 sales should sell at 200" --
+  // both wordings land on the same math: suggestSellingPrice's formula is
+  // cost / (1 - g) for Traditional and materialAtCost + services / (1 - g)
+  // for Value Addition, so g = 0.5 makes BOTH double whatever they're
+  // applied to (a ₹100 service cost -> ₹200), matching "GP 50%" and
+  // "100% markup" as the same fixed point rather than two different
+  // numbers. No longer a user-editable Target GP% field -- see
+  // FIXED_GP_FRACTION below.
+  const [addingToPool, setAddingToPool] = useState(false);
+  const [poolMessage, setPoolMessage] = useState<{ kind: "success" | "danger"; text: string } | null>(null);
+
   const [gpMethod, setGpMethod] = useState<GpMethod>("total_cost");
-  const [targetGpPct, setTargetGpPct] = useState<number | "">(30);
 
   useEffect(() => {
     (async () => {
@@ -253,8 +268,8 @@ export default function CostSheetToolScreen() {
   }, [overriddenLines, materialsByCode]);
 
   const priceSuggestion = useMemo(() => {
-    if (!result || result.sqft <= 0 || targetGpPct === "") return null;
-    const g = targetGpPct / 100;
+    if (!result || result.sqft <= 0) return null;
+    const g = FIXED_GP_FRACTION;
     const materialAtCostRecent = result.materialCostRecent - result.inkCostRecent;
     const materialAtCostAvg = result.materialCostAvg - result.inkCostAvg;
     const servicesRecent = result.inkCostRecent + result.totalProcessCost;
@@ -268,7 +283,7 @@ export default function CostSheetToolScreen() {
       totalRecent,
       totalAvg,
     };
-  }, [result, targetGpPct, gpMethod]);
+  }, [result, gpMethod]);
 
   function toggleWorkCentreForJob(workCentre: string, applicable: boolean) {
     setExcludedWorkCentres((prev) => {
@@ -290,6 +305,61 @@ export default function CostSheetToolScreen() {
 
   function selectMaterialForLine(lineId: string, code: string | null) {
     setSelectedMaterialByLine((prev) => ({ ...prev, [lineId]: code }));
+  }
+
+  // "Cost Sheet is perfect and add to pool" -- port of web's addToPool():
+  // saves a snapshot of this job into estimate_pool_items, customer-less
+  // by design (Estimate Builder picks who it's for when pulling this into
+  // an actual quote). A calculation itself still isn't saved anywhere on
+  // its own otherwise -- this is the one explicit, opt-in save action.
+  async function addToPool() {
+    if (!template || !result) return;
+    setAddingToPool(true);
+    setPoolMessage(null);
+    const { data: userData } = await supabase.auth.getUser();
+    const sellAmountTotal = sellPrice !== "" ? result.sellingAmount : priceSuggestion?.totalRecent ?? null;
+    const unitRatePerSqft = sellAmountTotal !== null && result.sqft > 0 ? sellAmountTotal / result.sqft : null;
+    // Ink is priced in as a service, not a customer-facing material line --
+    // same category+name keyword filter as web's own addToPool, so the
+    // pool item's material list only carries actual physical materials.
+    const poolMaterials = result.lineCosts
+      .filter((lc) => {
+        const category = (lc.line.material_category ?? "").toLowerCase();
+        const name = lc.line.material_name.toLowerCase();
+        return category !== "ink" && !name.includes("ink") && !name.includes("layer");
+      })
+      .map((lc) => ({ name: lc.line.material_name, mappedTo: lc.rawMaterial?.name ?? null }));
+    const clientFacingDescription = template.description.split(" -  ")[0].trim();
+    const { error } = await supabase.from("estimate_pool_items").insert({
+      source: "cost_sheet",
+      source_ref_id: null,
+      label: salesOrder ? `${template.code} — ${salesOrder}` : template.code,
+      sell_amount: sellAmountTotal,
+      cost_amount: result.totalCostRecent,
+      summary: {
+        fgCode: template.code,
+        description: clientFacingDescription,
+        salesOrder: salesOrder || null,
+        uom,
+        width: width === "" ? null : width,
+        height: height === "" ? null : height,
+        qty: qty === "" ? null : qty,
+        sqft: result.sqft,
+        unitRatePerSqft,
+        materials: poolMaterials,
+        materialCostRecent: result.materialCostRecent,
+        totalProcessCost: result.totalProcessCost,
+        totalCostRecent: result.totalCostRecent,
+        totalCostAvg: result.totalCostAvg,
+      },
+      created_by: userData?.user?.id ?? null,
+    });
+    setAddingToPool(false);
+    if (error) {
+      setPoolMessage({ kind: "danger", text: `Couldn't add to the estimate pool: ${error.message}` });
+      return;
+    }
+    setPoolMessage({ kind: "success", text: `${template.code} added to the estimate pool — pull it into a quote from Estimates.` });
   }
 
   return (
@@ -487,6 +557,18 @@ export default function CostSheetToolScreen() {
                   strong
                   big
                 />
+                <GradientButton
+                  label={addingToPool ? "Adding…" : "Add to Estimate Pool"}
+                  onPress={addToPool}
+                  loading={addingToPool}
+                  variant="secondary"
+                  style={s.poolBtn}
+                />
+                {poolMessage && (
+                  <Text style={poolMessage.kind === "success" ? s.poolSuccessText : s.poolErrorText}>
+                    {poolMessage.text}
+                  </Text>
+                )}
               </SoftCard>
 
               <Text style={s.sectionTitle}>Suggested Selling Price</Text>
@@ -517,10 +599,9 @@ export default function CostSheetToolScreen() {
                 </Field>
                 <Text style={s.gpMethodHint}>
                   {gpMethod === "total_cost"
-                    ? "Margin applied to everything: raw materials, wastage, ink, machine cost, labour, finishing, packing, overheads."
-                    : "Raw materials and wastage recovered at cost. Margin applied only to ink, machine time, labour, finishing, packing, and overheads."}
+                    ? "Fixed at 50% GP on everything: raw materials, wastage, ink, machine cost, labour, finishing, packing, overheads -- doubles total cost."
+                    : "Raw materials and wastage recovered at cost. Fixed at 100% markup on ink + process cost (services) only -- e.g. ₹100 of services sells at ₹200."}
                 </Text>
-                <NumberField t={t} label="Target GP %" value={targetGpPct} onChange={setTargetGpPct} />
                 {priceSuggestion ? (
                   <View style={s.metricGrid}>
                     <Metric t={t} label="Price / SqFt (Recent)" value={fmtRupee(priceSuggestion.perSqftRecent)} />
@@ -846,6 +927,10 @@ const styles = (t: VibrantTheme) =>
 
     placeholder: { padding: 16, textAlign: "center", fontSize: 13, fontFamily: fonts.regular, color: t.inkMuted },
     pad: { padding: 24 },
+
+    poolBtn: { marginTop: 4 },
+    poolSuccessText: { fontSize: 12, fontFamily: fonts.regular, color: t.success, textAlign: "center" },
+    poolErrorText: { fontSize: 12, fontFamily: fonts.regular, color: t.danger, textAlign: "center" },
 
     historyLink: { alignItems: "center", paddingVertical: 16 },
     historyLinkText: { fontSize: 13, fontFamily: fonts.medium, color: t.primary },

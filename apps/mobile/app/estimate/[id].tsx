@@ -267,42 +267,66 @@ function buildEstimateHtml(estimate: EstimateRow, lines: LineItemRow[]): string 
     font-weight: 700;
     src: url(data:font/ttf;base64,${CALADEA_BOLD_BASE64}) format("truetype");
   }
-  @page { size: A4; margin: 20mm; }
-  body { font-family: "Caladea", Georgia, serif; color: #14161c; font-size: 9pt; line-height: 1.45; }
-  p { margin: 0 0 9pt; }
+  /* "export pdf should for estimate should have colors and boxes like our
+     bill model details like on top billing address in one color, etc.
+     make it compact too" -- moves this away from the plain black/white
+     letter format toward the same tinted-card + small-caps-label
+     language app/bill.tsx already uses on-screen (metaCard/
+     metaSectionLabel/metaRow there): one navy-bordered, cream-tinted box
+     carries the billing address AND the quote meta rows (previously two
+     separate plain paragraphs), the table header goes navy-on-white
+     instead of flat grey, and rows/margins throughout are tightened
+     (line-height 1.45->1.28, paragraph margin 9pt->6pt) for a shorter,
+     denser document -- same colour values as theme/vibrant.ts
+     (surfaceSunken #F0E7E1, primary #1F2947, lineStrong #CEC5C1) so this
+     reads as the same brand as the rest of the app, not a separate look. */
+  @page { size: A4; margin: 18mm; }
+  body { font-family: "Caladea", Georgia, serif; color: #14161c; font-size: 9pt; line-height: 1.28; }
+  p { margin: 0 0 6pt; }
   b { font-weight: 700; }
-  table { width: 100%; border-collapse: collapse; margin: 10pt 0 12pt; table-layout: fixed; }
-  th, td { border: 0.5pt solid #ccced1; padding: 4pt 3pt; font-size: 8pt; vertical-align: top; word-wrap: break-word; }
-  th { background: #f0f1f3; text-align: left; font-weight: 700; }
+  table { width: 100%; border-collapse: collapse; margin: 8pt 0 10pt; table-layout: fixed; }
+  th, td { border: 0.5pt solid #CEC5C1; padding: 3.5pt 3pt; font-size: 8pt; vertical-align: top; word-wrap: break-word; }
+  th { background: #1F2947; color: #FFFFFF; text-align: left; font-weight: 700; }
   td.num, th.num { text-align: right; }
-  tr.totals td { font-weight: 700; }
-  .bullets { margin: 0 0 6pt; padding: 0; list-style: none; }
-  .bullets li { margin-bottom: 3pt; }
-  h3 { font-size: 9pt; margin: 10pt 0 4pt; }
-  .summary { margin: 4pt 0 14pt; }
+  tbody tr:nth-child(even) td { background: #F6EFED; }
+  tr.totals td { font-weight: 700; background: #F0E7E1 !important; }
+  .bullets { margin: 0 0 5pt; padding: 0; list-style: none; }
+  .bullets li { margin-bottom: 2pt; }
+  h3 { font-size: 9pt; margin: 8pt 0 3pt; color: #1F2947; }
+  .summary { margin: 3pt 0 12pt; }
   .summary b { font-size: 9pt; }
-  .signoff { margin-top: 22pt; }
-  .footer { margin-top: 24pt; padding-top: 8pt; border-top: 0.5pt solid #ccced1; font-size: 7.5pt; color: #6b6f78; }
+  .signoff { margin-top: 18pt; }
+  .footer { margin-top: 20pt; padding-top: 6pt; border-top: 0.75pt solid #1F2947; font-size: 7.5pt; color: #6b6f78; }
   .footer p { margin: 0 0 2pt; }
+  .metabox {
+    border: 0.75pt solid #CEC5C1; border-left: 3pt solid #1F2947; border-radius: 4pt;
+    background: #F0E7E1; padding: 8pt 10pt; margin: 8pt 0 10pt;
+  }
+  .metaLabel { font-size: 7pt; font-weight: 700; letter-spacing: 0.5pt; text-transform: uppercase; color: #415181; margin-bottom: 2pt; }
+  .metaName { font-size: 11pt; font-weight: 700; color: #1F2947; margin-bottom: 1pt; }
+  .metaAddr { font-size: 8pt; color: #415181; margin-bottom: 1pt; }
+  .metaDivider { border-top: 0.5pt solid #CEC5C1; margin: 6pt 0; }
+  .metaRow { display: flex; justify-content: space-between; gap: 8pt; padding: 1.5pt 0; font-size: 8.5pt; }
+  .metaRow span:first-child { color: #415181; }
+  .metaRow span:last-child { font-weight: 700; color: #1F2947; text-align: right; }
 </style>
 </head>
 <body>
   <p>Date: ${formatLongDate(estimate.created_at)}</p>
 
-  <p>
-    To,<br/>
-    <b>${escapeHtml(estimate.customers?.name ?? "—")}</b><br/>
-    ${estimate.customer_address ? `${escapeHtml(estimate.customer_address)}<br/>` : ""}
-    ${estimate.customer_gstin ? `GST: ${escapeHtml(estimate.customer_gstin)}<br/>` : ""}
-  </p>
+  <div class="metabox">
+    <div class="metaLabel">Bill To</div>
+    <div class="metaName">${escapeHtml(estimate.customers?.name ?? "—")}</div>
+    ${estimate.customer_address ? `<div class="metaAddr">${escapeHtml(estimate.customer_address)}</div>` : ""}
+    ${estimate.customer_gstin ? `<div class="metaAddr">GST: ${escapeHtml(estimate.customer_gstin)}</div>` : ""}
+    <div class="metaDivider"></div>
+    <div class="metaRow"><span>Quote No.</span><span>${escapeHtml(estimate.quote_number)} (Version 1)</span></div>
+    ${estimate.job_number ? `<div class="metaRow"><span>Campaign / Job#</span><span>${escapeHtml(estimate.job_number)}</span></div>` : ""}
+    ${estimate.attention_person ? `<div class="metaRow"><span>Attn</span><span>${escapeHtml(estimate.attention_person)}</span></div>` : ""}
+    ${estimate.quote_subject ? `<div class="metaRow"><span>Subject</span><span>${escapeHtml(estimate.quote_subject)}</span></div>` : ""}
+  </div>
 
-  <p>
-    Dear Sir/Madam,<br/><br/>
-    ${estimate.attention_person ? `<b>Attn: ${escapeHtml(estimate.attention_person)},</b><br/>` : ""}
-    ${estimate.quote_subject ? `<b>SUB: ${escapeHtml(estimate.quote_subject)}</b><br/>` : ""}
-    <b>Quote No.: ${escapeHtml(estimate.quote_number)} (Version 1)</b><br/>
-    <b>Campaign/Job#/Program: ${escapeHtml(estimate.job_number)}</b>
-  </p>
+  <p>Dear Sir/Madam,</p>
 
   <p>With reference to the above subject requirement, we hereby feel pleasure in submitting our proposal for the supply of the below items as per the given specifications. Please find below quote for your kind approval.</p>
 

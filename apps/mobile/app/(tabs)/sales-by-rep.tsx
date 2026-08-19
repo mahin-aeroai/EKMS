@@ -112,6 +112,12 @@ interface CustomerTransaction {
   sgst: number | null;
   cgst: number | null;
   igst: number | null;
+  // "Sales invoice like bill still missing some product information" --
+  // hsn_sac was already added to sales_transactions by the same
+  // invoice-fidelity migration as invoice_no/campaign/GST, but was never
+  // selected/passed through to the Bill screen. Shown under each item
+  // name there, same convention as the Estimate PDF's "HSN: ..." line.
+  hsn_sac: string | null;
 }
 
 // "the detail we added in previous section is sufficient some of them
@@ -482,6 +488,7 @@ export default function SalesByRepScreen() {
         sgst: number | null;
         cgst: number | null;
         igst: number | null;
+        hsn_sac: string | null;
       }>(
         () =>
           withFilters(
@@ -492,7 +499,7 @@ export default function SalesByRepScreen() {
             supabase
               .from("sales_transactions")
               .select(
-                "customer_id, customer_name, taxable_value, invoice_date, item_description, quantity, rate, location, invoice_no, campaign, place_of_supply, sgst, cgst, igst"
+                "customer_id, customer_name, taxable_value, invoice_date, item_description, quantity, rate, location, invoice_no, campaign, place_of_supply, sgst, cgst, igst, hsn_sac"
               )
               .eq("sales_manager", selectedRep)
               .range(from, to)
@@ -517,6 +524,7 @@ export default function SalesByRepScreen() {
           sgst: r.sgst,
           cgst: r.cgst,
           igst: r.igst,
+          hsn_sac: r.hsn_sac,
         });
         groups.set(name, g);
       }
@@ -898,6 +906,12 @@ export default function SalesByRepScreen() {
                       customerName: detailCustomer.customer_name,
                       address: detailCustomer.address ?? "",
                       gstin: detailCustomer.gstin ?? "",
+                      // "sales rep not recorded in top products" -- read as
+                      // "the bill doesn't show which sales rep this is" --
+                      // selectedRep is already known here (this whole
+                      // report is scoped to one rep), just wasn't being
+                      // passed through to the Bill screen before.
+                      salesRep: selectedRep,
                       date: bill.date ?? "",
                       invoiceNo: bill.invoiceNo ?? "",
                       campaign: bill.campaign ?? "",
