@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Settings, ShieldAlert, ChevronDown, Check } from "lucide-react";
+import { Settings, ShieldAlert, ChevronDown, Check, UserX, UserCheck } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { StatCard } from "@/components/ui/Card";
@@ -37,6 +37,13 @@ const ROLE_BADGE_STATUS: Record<UserRole, "success" | "info" | "neutral"> = {
 };
 
 const ROLE_OPTIONS: UserRole[] = ["admin", "editor", "viewer"];
+
+async function authHeaders() {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  return { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token ?? ""}` };
+}
 
 // The 8 real business-domain sidebar groups a user's module access can be
 // restricted to — matches SECTION_GROUP in AppShell.tsx and the group_map
@@ -160,6 +167,8 @@ export default function AdministrationPage() {
   const [profiles, setProfiles] = useState<ProfileRow[] | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [pendingChange, setPendingChange] = useState<{ profile: ProfileRow; newRole: UserRole } | null>(null);
+  const [pendingDeactivate, setPendingDeactivate] = useState<ProfileRow | null>(null);
+  const [deactivatingId, setDeactivatingId] = useState<string | null>(null);
 
   useEffect(() => {
     supabase
@@ -223,6 +232,41 @@ export default function AdministrationPage() {
     toast("success", `${profile.email} is now ${newRole}`);
   }
 
+  // Reactivating never needs confirmation; deactivating (blocking someone's
+  // sign-in) goes through the same confirm-dialog pattern as the
+  // self-demotion guard above, since it's the one genuinely disruptive
+  // action on this page.
+  function requestDeactivate(profile: ProfileRow) {
+    if (!profile.active) {
+      applyActiveChange(profile, true);
+      return;
+    }
+    setPendingDeactivate(profile);
+  }
+
+  async function applyActiveChange(profile: ProfileRow, active: boolean) {
+    setDeactivatingId(profile.id);
+    try {
+      const headers = await authHeaders();
+      const res = await fetch(`/api/staff/${profile.id}/deactivate`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ active }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast("danger", data?.message ?? `Couldn't update ${profile.email}'s status.`);
+        return;
+      }
+      setProfiles((prev) => prev?.map((p) => (p.id === profile.id ? { ...p, active } : p)) ?? prev);
+      toast("success", active ? `${profile.email} can sign in again` : `${profile.email} is deactivated`);
+    } catch (err) {
+      toast("danger", err instanceof Error ? err.message : `Couldn't reach the server to update ${profile.email}'s status.`);
+    } finally {
+      setDeactivatingId(null);
+    }
+  }
+
   async function applyGroupChange(profile: ProfileRow, groups: string[]) {
     // Empty selection means "unrestricted" in the UI, which is NULL in the
     // database — not an empty array (an empty array would mean "no module
@@ -270,6 +314,30 @@ export default function AdministrationPage() {
         ) : (
           <Badge status={ROLE_BADGE_STATUS[p.role]}>{p.role.charAt(0).toUpperCase() + p.role.slice(1)}</Badge>
         ),
+    },
+    {
+      key: "active",
+      header: "Status",
+      sortable: true,
+      render: (p) => {
+        const isSelf = p.id === currentUserId;
+        return (
+          <div className="flex items-center gap-2">
+            <Badge status={p.active ? "success" : "danger"}>{p.active ? "Active" : "Deactivated"}</Badge>
+            {isAdmin && !isSelf && (
+              <button
+                type="button"
+                onClick={() => requestDeactivate(p)}
+                disabled={deactivatingId === p.id}
+                className="flex items-center gap-1 text-xs font-medium text-ink-muted hover:text-ink disabled:opacity-50"
+              >
+                {p.active ? <UserX size={12} /> : <UserCheck size={12} />}
+                {p.active ? "Deactivate" : "Reactivate"}
+              </button>
+            )}
+          </div>
+        );
+      },
     },
     {
       key: "allowed_groups",
@@ -391,6 +459,22 @@ export default function AdministrationPage() {
         You&apos;re about to change your own role from Admin to {pendingChange ? pendingChange.newRole : ""}. If you&apos;re
         the only admin, no one will be able to manage roles from this page afterward — you&apos;d need to run an UPDATE
         directly in the Supabase SQL editor to undo it. Continue?
+      </Dialog>
+
+      <Dialog
+        open={pendingDeactivate !== null}
+        onClose={() => setPendingDeactivate(null)}
+        title="Deactivate this account?"
+        variant="confirm"
+        destructive
+        confirmLabel="Deactivate"
+        onConfirm={() => {
+          if (pendingDeactivate) applyActiveChange(pendingDeactivate, false);
+          setPendingDeactivate(null);
+        }}
+      >
+        {pendingDeactivate?.email} won&apos;t be able to sign in until you reactivate them — this doesn&apos;t delete
+        their account or anything they&apos;ve created, and it&apos;s reversible any time from this page. Continue?
       </Dialog>
     </div>
   );
