@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LogOut, Package, ClipboardList, Building2, ShieldCheck, ShoppingCart, Apple } from "lucide-react";
+import { LogOut, Package, ClipboardList, Building2, ShieldCheck, ShoppingCart } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/cn";
 import { usePortalHost, portalHref } from "@/lib/portal-links";
@@ -43,19 +43,16 @@ export function PortalTopBar({
         <div className="flex items-center gap-3">
           <Link href={portalHref("/", onPortalHost)} className="flex items-center gap-2">
             {/*
-              Small grey mark, replacing the old bold "M" -- the products
-              ordered through this portal are Apple-format retail signage,
-              so a small apple mark reads as more relevant here than the
-              MMDI initial. This is lucide's plain "Apple" glyph (a generic
-              fruit-with-leaf silhouette, the same icon set used everywhere
-              else in this app), NOT Apple Inc.'s actual trademarked logo --
-              embedding that real mark on a live commercial site without
-              confirmed brand-usage authorization isn't something to do
-              silently. Swap this for the real mark only once that's sorted.
+              MMDI's own real logo (the same file already used in the
+              estimate-PDF builder), not the bold "M" placeholder square nor
+              any Apple-shaped icon. This portal is a customer-facing MMDI
+              product, not an Apple one -- an Apple logo mark here would be
+              using Apple's actual trademark on a live commercial site
+              without any brand-usage agreement covering that, which isn't
+              something to do just because it'd look "more relevant."
             */}
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-surface-sunken text-ink-muted">
-              <Apple size={16} strokeWidth={2} aria-hidden />
-            </span>
+            {/* eslint-disable-next-line @next/next/no-img-element -- small static local asset, next/image isn't used anywhere else in this app */}
+            <img src="/brand/mmdi-logo-sm.png" alt="MMDI" className="h-8 w-8 shrink-0 rounded-md object-cover" />
             <span className="flex flex-col leading-tight">
               <span className="text-sm font-semibold text-ink">{companyName || "Customer Portal"}</span>
               <span className="text-xs text-ink-muted">{fullName || email}</span>
