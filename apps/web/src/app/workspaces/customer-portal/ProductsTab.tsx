@@ -221,13 +221,15 @@ function ProductCard({ product, onUpdated }: { product: PortalProductRow; onUpda
     if (!error && data) onUpdated(data as PortalProductRow);
   }
 
+  // Image on the left, details on the right -- a full-width A4-portrait
+  // image stacked above the details made the card enormous (the whole
+  // point of A4-portrait is a tall image, so stacking it just pushed
+  // everything else far down). Keeping the image narrow and to the side
+  // lets the card stay a normal compact height either way.
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-line bg-surface p-3">
-      <div className="relative">
+    <div className="flex gap-3 rounded-lg border border-line bg-surface p-3">
+      <div className="relative w-28 shrink-0 sm:w-32">
         {previewUrl ? (
-          // A4-portrait aspect (210:297) to match the real sign artwork's own
-          // shape instead of a short landscape crop -- GPX04/GPX05 previews
-          // are vertical designs, not wide banners.
           // eslint-disable-next-line @next/next/no-img-element -- short-lived signed R2 URL
           <img src={previewUrl} alt={product.name} className="aspect-[210/297] w-full rounded-md object-cover" />
         ) : (
@@ -239,9 +241,9 @@ function ProductCard({ product, onUpdated }: { product: PortalProductRow; onUpda
           type="button"
           onClick={() => fileInputRef.current?.click()}
           disabled={uploading}
-          className="absolute bottom-1 right-1 flex items-center gap-1 rounded-md bg-surface/90 px-2 py-1 text-xs font-medium text-ink shadow-1 hover:bg-surface"
+          className="absolute bottom-1 right-1 flex items-center gap-1 rounded-md bg-surface/90 px-1.5 py-1 text-[11px] font-medium text-ink shadow-1 hover:bg-surface"
         >
-          <UploadCloud size={12} /> {uploading ? "Uploading…" : "Change"}
+          <UploadCloud size={11} /> {uploading ? "…" : "Change"}
         </button>
         <input
           ref={fileInputRef}
@@ -255,28 +257,30 @@ function ProductCard({ product, onUpdated }: { product: PortalProductRow; onUpda
           }}
         />
       </div>
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">{product.code}</p>
-        <p className="text-sm font-semibold text-ink">{product.name}</p>
-      </div>
-      {uploadError && <p className="text-xs text-danger">{uploadError}</p>}
-      <div className="flex items-center gap-2">
-        <input
-          value={unitPrice}
-          onChange={(e) => setUnitPrice(e.target.value)}
-          type="number"
-          className="w-24 rounded-md border border-line-strong bg-surface px-2 py-1 text-sm text-ink focus:border-primary focus:outline-none"
-        />
-        <span className="text-xs text-ink-muted">+ {product.gst_percent}% GST</span>
-      </div>
-      <label className="flex items-center gap-1.5 text-xs text-ink-secondary">
-        <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Active in catalog
-      </label>
-      <div className="flex items-center justify-between">
-        <Badge status={active ? "success" : "neutral"}>{active ? "Active" : "Hidden"}</Badge>
-        <Button size="sm" variant="secondary" onClick={handleSaveDetails} loading={saving}>
-          Save
-        </Button>
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">{product.code}</p>
+          <p className="text-sm font-semibold text-ink">{product.name}</p>
+        </div>
+        {uploadError && <p className="text-xs text-danger">{uploadError}</p>}
+        <div className="flex items-center gap-2">
+          <input
+            value={unitPrice}
+            onChange={(e) => setUnitPrice(e.target.value)}
+            type="number"
+            className="w-24 rounded-md border border-line-strong bg-surface px-2 py-1 text-sm text-ink focus:border-primary focus:outline-none"
+          />
+          <span className="text-xs text-ink-muted">+ {product.gst_percent}% GST</span>
+        </div>
+        <label className="flex items-center gap-1.5 text-xs text-ink-secondary">
+          <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Active in catalog
+        </label>
+        <div className="mt-auto flex items-center justify-between">
+          <Badge status={active ? "success" : "neutral"}>{active ? "Active" : "Hidden"}</Badge>
+          <Button size="sm" variant="secondary" onClick={handleSaveDetails} loading={saving}>
+            Save
+          </Button>
+        </div>
       </div>
     </div>
   );
