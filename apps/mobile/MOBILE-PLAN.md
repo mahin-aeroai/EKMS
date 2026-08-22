@@ -1,5 +1,15 @@
 # MMDI ONE — iOS app plan
 
+> **Status (22 August 2026): historical.** This is the original pre-build
+> scaffold plan — useful for the reasoning behind the monorepo split and
+> the Bearer-auth patch, but the "v1 tabs" list and effort estimates below
+> no longer describe the real app. The actual current tab bar, feature
+> set, and session-by-session build history live in
+> [`PROJECT_STATUS.md`](../../PROJECT_STATUS.md) (repo root) and the
+> `apps/mobile` section of [`README.md`](../../README.md) — read those
+> first for "what's actually built," and treat everything below this note
+> as the plan that got it started, not a live description.
+
 Scaffold and migration notes, written against the EKMS repo as uploaded
 (Next 16.2.10, React 19.2.4, Tailwind v4, Supabase, 33 workspaces).
 
