@@ -173,8 +173,10 @@ setup, in order:
    checkout / per-store GSTN feature shipped, also run
    `supabase-portal-checkout-migration.sql` once, and if it was set up
    before customer self-service store editing shipped, also run
-   `supabase-portal-store-self-service-migration.sql` once — see each
-   file's own header comment for exactly what it changes.
+   `supabase-portal-store-self-service-migration.sql` once, and if it was
+   set up before the customer-facing Cart (pay/cancel unpaid orders)
+   shipped, also run `supabase-portal-cart-cancel-migration.sql` once —
+   see each file's own header comment for exactly what it changes.
 2. Add the credentials in section 6 above that don't already exist:
    `SUPABASE_SERVICE_ROLE_KEY`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`,
    `RAZORPAY_WEBHOOK_SECRET`. R2 vars are already set from earlier work.
@@ -304,6 +306,33 @@ that moment and freezes it there — editing a store's address afterward
 update` on those three columns for the `authenticated` role, mirroring how
 `payment_status`/`razorpay_payment_id`/`paid_at` are already frozen after
 payment), not just by the UI not offering an edit button.
+
+### 8d. Cart — unpaid orders can be paid or cancelled (real delete) by the customer
+
+The "New order" page's Cart icon now means something: any order of theirs
+still unpaid shows in a "Your cart" panel at the top of that page (payment
+happens at checkout, before design-approval/production starts, so
+"unpaid" is exactly "unfinished" — this also covers orders left behind by
+an interrupted or failed checkout, not just a fresh visit). Each cart
+order has two actions:
+
+- **Pay now** — same single-order Razorpay flow as `OrderDetailClient`'s
+  own "Pay now" button (`POST .../razorpay-order`, reuses an existing
+  `razorpay_order_id` instead of creating a duplicate if checkout was
+  already opened once for it).
+- **Cancel** — a real `DELETE` (`DELETE /api/portal/orders/[orderId]`),
+  not a status flag. Only reachable for the customer's own company's
+  orders while genuinely unpaid (enforced by the
+  `portal_orders_delete_customer` RLS policy, company-scoped); its line
+  items and any already-uploaded design files are removed automatically
+  via existing cascade FKs. The underlying Cloudflare R2 file objects for
+  an already-uploaded design PDF are **not** deleted — same as every
+  other delete path in this app (admin's product/store/order deletes),
+  R2 objects are left orphaned rather than being cleaned up here.
+
+Pre-existing unpaid test/duplicate orders (e.g. ones created before the
+retry-dedup fix in 8b existed) can now be cleaned up by the customer
+themselves from this Cart panel instead of needing a staff admin delete.
 
 ---
 

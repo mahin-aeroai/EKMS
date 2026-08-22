@@ -6,6 +6,7 @@ import Script from "next/script";
 import { Trash2, Plus, UploadCloud, X, FileText, Store } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
+import { CartPanel, type CartOrder } from "@/components/portal/CartPanel";
 import { usePortalHost, portalHref } from "@/lib/portal-links";
 import { usePortalUser } from "@/lib/PortalUserContext";
 import type { PortalCompanyStoreRow, PortalProductRow } from "@mmdi/shared/rows";
@@ -79,17 +80,115 @@ function NewOrderForm() {
     Record<number, { id: string; order_no: string; items: { id: string; product_id: string | null }[] }>
   >({});
 
+  // The customer's "Cart" -- every order of theirs still unpaid, i.e.
+  // genuinely unfinished (payment happens at checkout, before design-
+  // approval/production even starts). Loaded alongside stores/products and
+  // refetched after a cart action (pay or cancel) so it never goes stale.
+  const [cartOrders, setCartOrders] = useState<CartOrder[]>([]);
+  const [payingCartId, setPayingCartId] = useState<string | null>(null);
+  const [cancellingCartId, setCancellingCartId] = useState<string | null>(null);
+  // Includes inactive stores — a cart order's store label should still
+  // resolve even if the store was deactivated after ordering.
+  const [allStoreNames, setAllStoreNames] = useState<Record<string, string>>({});
+
+  async function loadCart() {
+    const { data } = await supabase
+      .from("portal_orders")
+      .select("*, portal_order_items(id, product_code, product_name, quantity)")
+      .eq("payment_status", "unpaid")
+      .neq("status", "cancelled")
+      .order("created_at", { ascending: false });
+    type CartOrderRaw = Omit<CartOrder, "items"> & { portal_order_items: CartOrder["items"] };
+    setCartOrders(
+      ((data ?? []) as CartOrderRaw[]).map((o) => ({
+        ...o,
+        items: o.portal_order_items ?? [],
+      }))
+    );
+  }
+
   useEffect(() => {
     (async () => {
-      const [storesRes, productsRes] = await Promise.all([
+      const [storesRes, allStoresRes, productsRes] = await Promise.all([
         supabase.from("portal_company_stores").select("*").eq("active", true).order("store_name"),
+        // Unfiltered (includes inactive) — a cart order's store label should
+        // still resolve even if the store was deactivated after ordering.
+        supabase.from("portal_company_stores").select("id, store_name"),
         supabase.from("portal_products").select("*").eq("active", true).order("code"),
+        loadCart(),
       ]);
       setAllStores((storesRes.data ?? []) as PortalCompanyStoreRow[]);
+      setAllStoreNames(Object.fromEntries(((allStoresRes.data ?? []) as { id: string; store_name: string }[]).map((s) => [s.id, s.store_name])));
       setProducts((productsRes.data ?? []) as PortalProductRow[]);
       setLoading(false);
     })();
   }, []);
+
+  async function authHeaders() {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    return { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token ?? ""}` };
+  }
+
+  async function handlePayCartOrder(order: CartOrder) {
+    setPayingCartId(order.id);
+    setError(null);
+    const headers = await authHeaders();
+    const res = await fetch(`/api/portal/orders/${order.id}/razorpay-order`, { method: "POST", headers });
+    const data = await res.json();
+    if (!res.ok) {
+      setError(data.message || data.error || "Couldn't start payment for that order.");
+      setPayingCartId(null);
+      return;
+    }
+    if (!window.Razorpay) {
+      setError("Payment isn't ready yet — wait a moment and try again.");
+      setPayingCartId(null);
+      return;
+    }
+    const razorpay = new window.Razorpay({
+      key: data.key_id,
+      amount: data.amount,
+      currency: data.currency,
+      order_id: data.razorpay_order_id,
+      name: "MMDI",
+      description: `Order ${data.order_no}`,
+      prefill: { name: portalUser?.fullName ?? "", email: portalUser?.email ?? "" },
+      handler: async (response: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }) => {
+        const verifyHeaders = await authHeaders();
+        await fetch(`/api/portal/orders/${order.id}/razorpay-verify`, {
+          method: "POST",
+          headers: verifyHeaders,
+          body: JSON.stringify(response),
+        });
+        setPayingCartId(null);
+        router.push(portalHref(`/orders/${order.id}`, onPortalHost));
+      },
+      modal: {
+        // Left the popup without paying — the order is still safe in the
+        // cart, just still unpaid. Nothing to clean up.
+        ondismiss: () => setPayingCartId(null),
+      },
+    });
+    razorpay.open();
+  }
+
+  async function handleCancelCartOrder(order: CartOrder) {
+    if (!window.confirm(`Cancel and delete order ${order.order_no}? This can't be undone.`)) return;
+    setCancellingCartId(order.id);
+    setError(null);
+    const headers = await authHeaders();
+    const res = await fetch(`/api/portal/orders/${order.id}`, { method: "DELETE", headers });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setError(data.message || data.error || "Couldn't cancel that order.");
+      setCancellingCartId(null);
+      return;
+    }
+    await loadCart();
+    setCancellingCartId(null);
+  }
 
   // A store missing its delivery address or GSTIN can't be ordered for —
   // enforced again server-side (POST /api/portal/orders) so this is a
@@ -408,6 +507,17 @@ function NewOrderForm() {
           </p>
         )}
       </div>
+
+      <CartPanel
+        orders={cartOrders}
+        storeNames={allStoreNames}
+        payingId={payingCartId}
+        cancellingId={cancellingCartId}
+        onPay={handlePayCartOrder}
+        onCancel={handleCancelCartOrder}
+      />
+
+      {cartOrders.length > 0 && <h2 className="-mb-2 text-sm font-semibold text-ink">Start a new order</h2>}
 
       {groups.map((group, gi) => {
         const totals = groupTotals(group);
