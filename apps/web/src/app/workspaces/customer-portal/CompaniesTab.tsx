@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { Plus, Mail, MapPin, Check, Clock, Copy, Check as CheckIcon, Trash2 } from "lucide-react";
+import { Plus, Mail, MapPin, Check, Clock, Trash2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -220,15 +220,14 @@ function CompanyDetail({
   const [storeCity, setStoreCity] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteContactName, setInviteContactName] = useState("");
-  const [invitePassword, setInvitePassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [creatingLogin, setCreatingLogin] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
-  // The one and only time the plaintext password is ever visible — shown
-  // once right after creation, never persisted, never re-fetchable.
-  const [newCredential, setNewCredential] = useState<{ email: string; password: string } | null>(null);
-  const [copied, setCopied] = useState(false);
+  // Set once right after a successful invite -- shown as a brief
+  // confirmation, not a credential (no password is ever generated or shown
+  // here now; the customer sets their own via the emailed invite link).
+  const [invitedEmail, setInvitedEmail] = useState<string | null>(null);
   // Tracks which single row is mid-delete, so only that row's button shows
   // a disabled/loading state rather than freezing the whole list.
   const [deletingStoreId, setDeletingStoreId] = useState<string | null>(null);
@@ -297,7 +296,7 @@ function CompanyDetail({
     if (!inviteEmail.trim()) return;
     setCreatingLogin(true);
     setLoginError(null);
-    setNewCredential(null);
+    setInvitedEmail(null);
     try {
       const headers = await authHeaders();
       const res = await fetch(`/api/portal/companies/${company.id}/create-login`, {
@@ -306,21 +305,19 @@ function CompanyDetail({
         body: JSON.stringify({
           email: inviteEmail.trim(),
           contact_name: inviteContactName.trim() || undefined,
-          password: invitePassword.trim() || undefined,
         }),
       });
       const data = await res.json();
       if (!res.ok) {
-        setLoginError(data?.message ?? "Could not create the login.");
+        setLoginError(data?.message ?? "Could not send the invite.");
         return;
       }
-      setNewCredential({ email: data.email, password: data.password });
+      setInvitedEmail(data.email);
       setInviteEmail("");
       setInviteContactName("");
-      setInvitePassword("");
       onChanged();
     } catch (err) {
-      setLoginError(err instanceof Error ? err.message : "Could not create the login — check your connection and try again.");
+      setLoginError(err instanceof Error ? err.message : "Could not send the invite — check your connection and try again.");
     } finally {
       setCreatingLogin(false);
     }
@@ -419,33 +416,15 @@ function CompanyDetail({
           {invites.length === 0 && <p className="text-sm text-ink-muted">No logins invited yet.</p>}
         </ul>
 
-        {newCredential && (
-          <div className="mb-2 flex flex-col gap-1.5 rounded-md border border-success bg-success-tint px-3 py-2 text-sm">
-            <p className="font-medium text-ink">
-              Login created for <span className="font-semibold">{newCredential.email}</span> — copy this password now,
-              it will not be shown again:
+        {invitedEmail && (
+          <div className="mb-2 flex items-center justify-between gap-2 rounded-md border border-success bg-success-tint px-3 py-2 text-sm">
+            <p className="text-ink">
+              Invite sent to <span className="font-semibold">{invitedEmail}</span> — they&apos;ll get an email with a
+              link to set their own password.
             </p>
-            <div className="flex items-center gap-2">
-              <code className="flex-1 truncate rounded-md bg-surface px-2 py-1 text-sm text-ink">{newCredential.password}</code>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={async () => {
-                  await navigator.clipboard.writeText(newCredential.password);
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 2000);
-                }}
-              >
-                {copied ? <CheckIcon size={14} /> : <Copy size={14} />} {copied ? "Copied" : "Copy"}
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setNewCredential(null)}>
-                Dismiss
-              </Button>
-            </div>
-            <p className="text-xs text-ink-muted">
-              Share this email and password with the retail chain directly (phone/WhatsApp, not email — the same
-              caution as any other credential handoff).
-            </p>
+            <Button size="sm" variant="ghost" onClick={() => setInvitedEmail(null)}>
+              Dismiss
+            </Button>
           </div>
         )}
 
@@ -463,21 +442,14 @@ function CompanyDetail({
             placeholder="Contact name (optional)"
             className="min-w-[140px] flex-1 rounded-md border border-line-strong bg-surface px-3 py-1.5 text-sm text-ink focus:border-primary focus:outline-none"
           />
-          <input
-            value={invitePassword}
-            onChange={(e) => setInvitePassword(e.target.value)}
-            placeholder="Password (leave blank to auto-generate)"
-            type="text"
-            className="min-w-[220px] flex-1 rounded-md border border-line-strong bg-surface px-3 py-1.5 text-sm text-ink focus:border-primary focus:outline-none"
-          />
           <Button size="sm" type="submit" loading={creatingLogin}>
-            <Plus size={14} /> Create login
+            <Plus size={14} /> Send invite
           </Button>
         </form>
         {loginError && <p className="mt-1 text-xs text-danger">{loginError}</p>}
         <p className="mt-2 text-xs text-ink-muted">
-          This creates the real sign-in immediately — no separate Supabase dashboard step needed. The password shows
-          once, right above, so copy it before doing anything else.
+          No password to share — this emails the customer a link to set their own, which also confirms the address is
+          real. No separate Supabase dashboard step needed.
         </p>
       </div>
 
