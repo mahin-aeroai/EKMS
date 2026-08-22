@@ -1,10 +1,9 @@
 import type { ReactNode } from "react";
 import { headers } from "next/headers";
 import { getPortalIdentity } from "@/lib/portal-auth";
-import { PortalUserContext } from "@/lib/PortalUserContext";
-import { PortalHostContext } from "@/lib/portal-links";
 import { PORTAL_HOST } from "@/lib/portal-host";
 import { PortalTopBar } from "@/components/portal/PortalTopBar";
+import { PortalProviders } from "@/components/portal/PortalProviders";
 
 // Deliberately its own layout, not a child of AppShell — the customer
 // portal is a separate, compact surface for external retail-chain
@@ -24,24 +23,22 @@ export default async function PortalLayout({ children }: { children: ReactNode }
 
   return (
     <div className="min-h-screen bg-surface-sunken">
-      <PortalHostContext.Provider value={onPortalHost}>
+      <PortalProviders onPortalHost={onPortalHost} identity={identity}>
         {identity && <PortalTopBar companyName={identity.companyName} fullName={identity.fullName} email={identity.email} />}
-        <PortalUserContext.Provider value={identity}>
-          <main className="mx-auto max-w-4xl px-4 py-6 sm:px-6">
-            {identity ? (
-              children
-            ) : (
-              <div className="mx-auto mt-16 max-w-md rounded-lg border border-line bg-surface p-6 text-center shadow-1">
-                <h1 className="text-base font-semibold text-ink">No customer-portal account here</h1>
-                <p className="mt-2 text-sm text-ink-secondary">
-                  This sign-in isn&apos;t linked to a customer-portal account. If you&apos;re MMDI staff, use the main
-                  app; if you&apos;re a customer expecting access, contact MMDI to confirm your account.
-                </p>
-              </div>
-            )}
-          </main>
-        </PortalUserContext.Provider>
-      </PortalHostContext.Provider>
+        <main className="mx-auto max-w-4xl px-4 py-6 sm:px-6">
+          {identity ? (
+            children
+          ) : (
+            <div className="mx-auto mt-16 max-w-md rounded-lg border border-line bg-surface p-6 text-center shadow-1">
+              <h1 className="text-base font-semibold text-ink">No customer-portal account here</h1>
+              <p className="mt-2 text-sm text-ink-secondary">
+                This sign-in isn&apos;t linked to a customer-portal account. If you&apos;re MMDI staff, use the main
+                app; if you&apos;re a customer expecting access, contact MMDI to confirm your account.
+              </p>
+            </div>
+          )}
+        </main>
+      </PortalProviders>
     </div>
   );
 }
