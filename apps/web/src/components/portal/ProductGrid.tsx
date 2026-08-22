@@ -25,16 +25,19 @@ function ProductPreview({ productId, name }: { productId: string; name: string }
     };
   }, [productId]);
 
+  // A4-portrait aspect (210:297) to match the real sign artwork's own shape
+  // instead of a short landscape crop -- GPX04/GPX05 previews are vertical
+  // designs, not wide banners.
   if (failed || !url) {
     return (
-      <div className="flex h-40 w-full items-center justify-center rounded-md bg-surface-sunken text-ink-muted">
+      <div className="flex aspect-[210/297] w-full items-center justify-center rounded-md bg-surface-sunken text-ink-muted">
         <ImageOff size={24} />
       </div>
     );
   }
 
   // eslint-disable-next-line @next/next/no-img-element -- short-lived signed R2 URL, next/image can't cache/optimize a URL that expires in minutes
-  return <img src={url} alt={name} className="h-40 w-full rounded-md object-cover" />;
+  return <img src={url} alt={name} className="aspect-[210/297] w-full rounded-md object-cover" />;
 }
 
 export function ProductGrid({ products }: { products: PortalProductRow[] }) {
@@ -55,7 +58,7 @@ export function ProductGrid({ products }: { products: PortalProductRow[] }) {
           {product.preview_image_path ? (
             <ProductPreview productId={product.id} name={product.name} />
           ) : (
-            <div className="flex h-40 w-full items-center justify-center rounded-md bg-surface-sunken text-ink-muted">
+            <div className="flex aspect-[210/297] w-full items-center justify-center rounded-md bg-surface-sunken text-ink-muted">
               <ImageOff size={24} />
             </div>
           )}
