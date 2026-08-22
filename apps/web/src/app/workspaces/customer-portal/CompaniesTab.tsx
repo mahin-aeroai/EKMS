@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { Plus, Mail, MapPin, Check, Clock, Trash2 } from "lucide-react";
+import { Plus, Mail, MapPin, Check, Clock, Trash2, Pencil, AlertTriangle, X } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -218,6 +218,21 @@ function CompanyDetail({
   const [storeName, setStoreName] = useState("");
   const [storeAddress, setStoreAddress] = useState("");
   const [storeCity, setStoreCity] = useState("");
+  const [storeGstin, setStoreGstin] = useState("");
+  // The store currently open for inline editing (id), plus its own draft
+  // field state -- separate from the "add store" fields above so editing
+  // one existing store never clobbers whatever's half-typed in the add
+  // form. Address + GSTN are both required by the portal's order-placement
+  // check (see POST /api/portal/orders) before customers can order for a
+  // store, but not enforced here at the DB level -- this form is exactly
+  // where staff fills in what's missing on the stores seeded before that
+  // requirement existed.
+  const [editingStoreId, setEditingStoreId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editCity, setEditCity] = useState("");
+  const [editAddress, setEditAddress] = useState("");
+  const [editGstin, setEditGstin] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteContactName, setInviteContactName] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -279,6 +294,7 @@ function CompanyDetail({
       store_name: storeName.trim(),
       address: storeAddress || null,
       city: storeCity || null,
+      gstin: storeGstin || null,
     });
     setSaving(false);
     if (insertError) {
@@ -288,6 +304,42 @@ function CompanyDetail({
     setStoreName("");
     setStoreAddress("");
     setStoreCity("");
+    setStoreGstin("");
+    onChanged();
+  }
+
+  function startEditStore(s: PortalCompanyStoreRow) {
+    setEditingStoreId(s.id);
+    setEditName(s.store_name);
+    setEditCity(s.city ?? "");
+    setEditAddress(s.address ?? "");
+    setEditGstin(s.gstin ?? "");
+    setError(null);
+  }
+
+  async function handleSaveStoreEdit(e: FormEvent) {
+    e.preventDefault();
+    if (!editingStoreId || !editName.trim()) return;
+    setSavingEdit(true);
+    const { error: updateError } = await supabase
+      .from("portal_company_stores")
+      .update({
+        store_name: editName.trim(),
+        city: editCity.trim() || null,
+        address: editAddress.trim() || null,
+        gstin: editGstin.trim() || null,
+      })
+      .eq("id", editingStoreId);
+    setSavingEdit(false);
+    if (updateError) {
+      setError(
+        updateError.message.toLowerCase().includes("row-level security") || updateError.code === "42501"
+          ? "Only an admin or editor account can update a store."
+          : updateError.message
+      );
+      return;
+    }
+    setEditingStoreId(null);
     onChanged();
   }
 
@@ -334,26 +386,90 @@ function CompanyDetail({
         <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-ink">
           <MapPin size={14} /> Store locations ({stores.length})
         </p>
-        <ul className="mb-2 flex flex-col gap-1">
-          {stores.map((s) => (
-            <li
-              key={s.id}
-              className="flex items-center justify-between rounded-md bg-surface-sunken px-3 py-1.5 text-sm text-ink-secondary"
-            >
-              <span>
-                {s.store_name} {s.city && <span className="text-ink-muted">— {s.city}</span>}
-              </span>
-              <button
-                type="button"
-                onClick={() => handleDeleteStore(s)}
-                disabled={deletingStoreId === s.id}
-                className="flex h-6 w-6 items-center justify-center rounded-md text-ink-muted hover:bg-danger-tint hover:text-danger disabled:opacity-50"
-                aria-label={`Remove ${s.store_name}`}
+        <ul className="mb-2 flex flex-col gap-1.5">
+          {stores.map((s) => {
+            const incomplete = !s.address?.trim() || !s.gstin?.trim();
+            if (editingStoreId === s.id) {
+              return (
+                <li key={s.id} className="rounded-md border border-line bg-surface p-2">
+                  <form onSubmit={handleSaveStoreEdit} className="flex flex-wrap gap-2">
+                    <input
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      placeholder="Store name"
+                      className="min-w-[140px] flex-1 rounded-md border border-line-strong bg-surface px-3 py-1.5 text-sm text-ink focus:border-primary focus:outline-none"
+                    />
+                    <input
+                      value={editCity}
+                      onChange={(e) => setEditCity(e.target.value)}
+                      placeholder="City"
+                      className="w-24 rounded-md border border-line-strong bg-surface px-3 py-1.5 text-sm text-ink focus:border-primary focus:outline-none"
+                    />
+                    <input
+                      value={editAddress}
+                      onChange={(e) => setEditAddress(e.target.value)}
+                      placeholder="Delivery address"
+                      className="min-w-[160px] flex-1 rounded-md border border-line-strong bg-surface px-3 py-1.5 text-sm text-ink focus:border-primary focus:outline-none"
+                    />
+                    <input
+                      value={editGstin}
+                      onChange={(e) => setEditGstin(e.target.value.toUpperCase())}
+                      placeholder="GSTIN"
+                      className="w-36 rounded-md border border-line-strong bg-surface px-3 py-1.5 text-sm text-ink focus:border-primary focus:outline-none"
+                    />
+                    <Button size="sm" type="submit" loading={savingEdit}>
+                      Save
+                    </Button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingStoreId(null)}
+                      className="flex h-8 w-8 items-center justify-center rounded-md text-ink-muted hover:bg-surface-sunken hover:text-ink"
+                      aria-label="Cancel editing"
+                    >
+                      <X size={14} />
+                    </button>
+                  </form>
+                </li>
+              );
+            }
+            return (
+              <li
+                key={s.id}
+                className="flex items-center justify-between rounded-md bg-surface-sunken px-3 py-1.5 text-sm text-ink-secondary"
               >
-                <Trash2 size={13} />
-              </button>
-            </li>
-          ))}
+                <span className="flex items-center gap-1.5">
+                  {s.store_name} {s.city && <span className="text-ink-muted">— {s.city}</span>}
+                  {incomplete && (
+                    <span
+                      className="flex items-center gap-1 text-xs font-medium text-warning"
+                      title="Missing delivery address or GSTIN — customers can't order for this store until it's filled in."
+                    >
+                      <AlertTriangle size={12} /> Needs address/GSTIN
+                    </span>
+                  )}
+                </span>
+                <span className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => startEditStore(s)}
+                    className="flex h-6 w-6 items-center justify-center rounded-md text-ink-muted hover:bg-surface hover:text-ink"
+                    aria-label={`Edit ${s.store_name}`}
+                  >
+                    <Pencil size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteStore(s)}
+                    disabled={deletingStoreId === s.id}
+                    className="flex h-6 w-6 items-center justify-center rounded-md text-ink-muted hover:bg-danger-tint hover:text-danger disabled:opacity-50"
+                    aria-label={`Remove ${s.store_name}`}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </span>
+              </li>
+            );
+          })}
           {stores.length === 0 && <p className="text-sm text-ink-muted">No stores yet.</p>}
         </ul>
         <form onSubmit={handleAddStore} className="flex flex-wrap gap-2">
@@ -372,13 +488,22 @@ function CompanyDetail({
           <input
             value={storeAddress}
             onChange={(e) => setStoreAddress(e.target.value)}
-            placeholder="Address (optional)"
+            placeholder="Delivery address"
             className="min-w-[160px] flex-1 rounded-md border border-line-strong bg-surface px-3 py-1.5 text-sm text-ink focus:border-primary focus:outline-none"
+          />
+          <input
+            value={storeGstin}
+            onChange={(e) => setStoreGstin(e.target.value.toUpperCase())}
+            placeholder="GSTIN"
+            className="w-36 rounded-md border border-line-strong bg-surface px-3 py-1.5 text-sm text-ink focus:border-primary focus:outline-none"
           />
           <Button size="sm" type="submit" loading={saving}>
             Add store
           </Button>
         </form>
+        <p className="mt-1 text-xs text-ink-muted">
+          Delivery address and GSTIN aren&apos;t required to save a store, but a customer can&apos;t place an order for one until both are filled in.
+        </p>
       </div>
 
       <div>

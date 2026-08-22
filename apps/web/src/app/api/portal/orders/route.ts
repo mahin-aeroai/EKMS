@@ -56,11 +56,23 @@ export async function POST(request: Request) {
 
   const { data: store, error: storeErr } = await supabase
     .from("portal_company_stores")
-    .select("id, company_id")
+    .select("id, company_id, address, gstin")
     .eq("id", storeId)
     .maybeSingle();
   if (storeErr || !store || store.company_id !== portalUser.company_id) {
     return NextResponse.json({ error: "invalid_store" }, { status: 400 });
+  }
+  // Enforced here, not just in the store picker's own filtering client-side
+  // — a store missing either field must never end up on an order, and the
+  // UI check alone isn't load-bearing (see NewOrderForm's comment on why).
+  if (!store.address?.trim() || !store.gstin?.trim()) {
+    return NextResponse.json(
+      {
+        error: "store_incomplete",
+        message: "This store is missing a delivery address or GSTN — ask MMDI to add it before ordering for this location.",
+      },
+      { status: 400 }
+    );
   }
 
   const productIds = [...new Set(items.map((i) => i.product_id as string))];
@@ -121,9 +133,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "insert_failed", message: orderErr.message }, { status: 500 });
   }
 
-  const { error: itemsErr } = await supabase
+  // .select() (not just .insert()) so the response carries each inserted
+  // row's real id — NewOrderForm needs these to attach each item's
+  // mandatory design PDF to the correct line item (order_item_id), and
+  // Postgres/PostgREST returns a multi-row insert's rows in the same order
+  // they were given, so matching by array index (not by product_id, which
+  // isn't unique when the same product appears twice in one order) is safe.
+  const { data: insertedItems, error: itemsErr } = await supabase
     .from("portal_order_items")
-    .insert(lineItems.map((li) => ({ ...li, order_id: order.id })));
+    .insert(lineItems.map((li) => ({ ...li, order_id: order.id })))
+    .select("id, product_id");
   if (itemsErr) {
     // Best-effort cleanup so a failed item insert doesn't leave an empty
     // order behind — the customer's own RLS covers deleting their own
@@ -134,5 +153,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "items_insert_failed", message: itemsErr.message, order_id: order.id }, { status: 500 });
   }
 
-  return NextResponse.json({ id: order.id, order_no: order.order_no });
+  return NextResponse.json({
+    id: order.id,
+    order_no: order.order_no,
+    total_amount: totalAmount,
+    items: insertedItems ?? [],
+  });
 }

@@ -65,10 +65,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ ord
     return NextResponse.json({ error: "not_configured", message: "SUPABASE_SERVICE_ROLE_KEY must be set." }, { status: 503 });
   }
 
-  const { data: updated, error: updateErr } = await markOrderPaid(admin, razorpayOrderId, razorpayPaymentId);
+  // markOrderPaid updates every order sharing this razorpay_order_id, not
+  // just the one named in the URL — a multi-store checkout pays several
+  // sibling orders (one per store) with a single Razorpay order, so this
+  // one call marks all of them paid together. See
+  // razorpay-combined-order/route.ts and portal-payments.ts's comment.
+  const { data: updatedOrders, error: updateErr } = await markOrderPaid(admin, razorpayOrderId, razorpayPaymentId);
   if (updateErr) {
     return NextResponse.json({ error: "update_failed", message: updateErr.message }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true, order: updated });
+  return NextResponse.json({ ok: true, orders: updatedOrders ?? [] });
 }

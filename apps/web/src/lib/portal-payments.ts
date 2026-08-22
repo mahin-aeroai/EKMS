@@ -33,12 +33,19 @@ export function verifyWebhookSignature(rawBody: string, signature: string, webho
 }
 
 /**
- * Marks an order paid — idempotent (a second call for the same
- * razorpay_order_id, whether from the verify route firing then the
- * webhook firing too, or the webhook retrying, is a harmless no-op once
- * payment_status is already 'paid'). Only updates a row that's still
- * 'unpaid' and whose razorpay_order_id matches, so a stray/forged
- * payment_id can't be pinned onto an unrelated order.
+ * Marks every order sharing this razorpay_order_id paid — idempotent (a
+ * second call for the same razorpay_order_id, whether from the verify
+ * route firing then the webhook firing too, or the webhook retrying, is a
+ * harmless no-op once payment_status is already 'paid'). Only updates rows
+ * that are still 'unpaid' and whose razorpay_order_id matches, so a
+ * stray/forged payment_id can't be pinned onto an unrelated order.
+ *
+ * Returns an ARRAY, not a single row: a multi-store checkout (see
+ * razorpay-combined-order/route.ts) pays for several sibling portal_orders
+ * — one per store — with ONE Razorpay order, by writing the same
+ * razorpay_order_id onto all of them. This one update call is what marks
+ * all of them paid together; a single-order checkout just happens to
+ * produce a one-element array.
  */
 export async function markOrderPaid(admin: SupabaseClient, razorpayOrderId: string, razorpayPaymentId: string) {
   return admin
@@ -46,6 +53,5 @@ export async function markOrderPaid(admin: SupabaseClient, razorpayOrderId: stri
     .update({ payment_status: "paid", razorpay_payment_id: razorpayPaymentId, paid_at: new Date().toISOString() })
     .eq("razorpay_order_id", razorpayOrderId)
     .eq("payment_status", "unpaid")
-    .select("id, order_no, company_id")
-    .maybeSingle();
+    .select("id, order_no, company_id");
 }

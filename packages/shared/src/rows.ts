@@ -1081,6 +1081,7 @@ export interface PortalCompanyStoreRow {
   store_name: string;
   address: string | null;
   city: string | null;
+  gstin: string | null;
   lfg_sfo_id: string | null;
   active: boolean;
 }
@@ -1146,12 +1147,13 @@ export interface PortalOrderItemRow {
 export interface PortalOrderFileRow {
   id: string;
   order_id: string;
+  order_item_id: string | null;
   uploaded_by_role: "customer" | "staff";
   uploaded_by: string;
   relative_path: string;
   file_name: string;
   file_size: number | null;
-  kind: "reference" | "proof" | "other";
+  kind: "reference" | "proof" | "other" | "design";
   revision_number: number | null;
   created_at: string;
 }

@@ -2,15 +2,46 @@
 
 import { Suspense, useEffect, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Trash2, Plus, UploadCloud, X } from "lucide-react";
+import Script from "next/script";
+import { Trash2, Plus, UploadCloud, X, FileText, Store } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
 import { usePortalHost, portalHref } from "@/lib/portal-links";
+import { usePortalUser } from "@/lib/PortalUserContext";
 import type { PortalCompanyStoreRow, PortalProductRow } from "@mmdi/shared/rows";
 
-interface LineItem {
+declare global {
+  interface Window {
+    Razorpay: new (options: Record<string, unknown>) => { open: () => void };
+  }
+}
+
+interface CartItem {
   productId: string;
   quantity: number;
+  // Mandatory — each product needs its own artwork PDF; see
+  // apps/web/src/app/api/portal/orders/[orderId]/files/upload-url/route.ts
+  // for the matching server-side PDF-only enforcement.
+  designFile: File | null;
+}
+
+// One group per store — the whole point of letting a customer add items
+// for several stores in one visit without leaving this page. Checkout
+// still creates one portal_orders row per group/store (each gets its own
+// design-proof/approval/production tracking downstream, unchanged) but
+// pays for all of them together in a single Razorpay Checkout popup — see
+// /api/portal/orders/razorpay-combined-order.
+interface CartGroup {
+  storeId: string;
+  items: CartItem[];
+}
+
+function emptyItem(productId = ""): CartItem {
+  return { productId, quantity: 1, designFile: null };
+}
+
+function emptyGroup(productId = ""): CartGroup {
+  return { storeId: "", items: [emptyItem(productId)] };
 }
 
 export default function NewPortalOrderPage() {
@@ -25,16 +56,16 @@ function NewOrderForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const onPortalHost = usePortalHost();
+  const portalUser = usePortalUser();
   const preselectedProduct = searchParams.get("product");
 
-  const [stores, setStores] = useState<PortalCompanyStoreRow[]>([]);
+  const [allStores, setAllStores] = useState<PortalCompanyStoreRow[]>([]);
   const [products, setProducts] = useState<PortalProductRow[]>([]);
-  const [storeId, setStoreId] = useState("");
-  const [items, setItems] = useState<LineItem[]>([{ productId: preselectedProduct ?? "", quantity: 1 }]);
+  const [groups, setGroups] = useState<CartGroup[]>([emptyGroup(preselectedProduct ?? "")]);
   const [notes, setNotes] = useState("");
-  const [files, setFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -43,50 +74,94 @@ function NewOrderForm() {
         supabase.from("portal_company_stores").select("*").eq("active", true).order("store_name"),
         supabase.from("portal_products").select("*").eq("active", true).order("code"),
       ]);
-      setStores((storesRes.data ?? []) as PortalCompanyStoreRow[]);
+      setAllStores((storesRes.data ?? []) as PortalCompanyStoreRow[]);
       setProducts((productsRes.data ?? []) as PortalProductRow[]);
       setLoading(false);
     })();
   }, []);
 
+  // A store missing its delivery address or GSTIN can't be ordered for —
+  // enforced again server-side (POST /api/portal/orders) so this is a
+  // convenience filter, not the real guard. See CompaniesTab.tsx for where
+  // staff fill these in.
+  const eligibleStores = allStores.filter((s) => s.address?.trim() && s.gstin?.trim());
+  const incompleteStoreCount = allStores.length - eligibleStores.length;
+
   function productById(id: string) {
     return products.find((p) => p.id === id);
   }
 
-  function updateItem(index: number, patch: Partial<LineItem>) {
-    setItems((prev) => prev.map((it, i) => (i === index ? { ...it, ...patch } : it)));
+  function updateGroup(gi: number, patch: Partial<CartGroup>) {
+    setGroups((prev) => prev.map((g, i) => (i === gi ? { ...g, ...patch } : g)));
+  }
+  function updateItem(gi: number, ii: number, patch: Partial<CartItem>) {
+    setGroups((prev) =>
+      prev.map((g, i) => (i === gi ? { ...g, items: g.items.map((it, j) => (j === ii ? { ...it, ...patch } : it)) } : g))
+    );
+  }
+  function addGroup() {
+    setGroups((prev) => [...prev, emptyGroup()]);
+  }
+  function removeGroup(gi: number) {
+    setGroups((prev) => prev.filter((_, i) => i !== gi));
+  }
+  function addItem(gi: number) {
+    setGroups((prev) => prev.map((g, i) => (i === gi ? { ...g, items: [...g.items, emptyItem()] } : g)));
+  }
+  function removeItem(gi: number, ii: number) {
+    setGroups((prev) => prev.map((g, i) => (i === gi ? { ...g, items: g.items.filter((_, j) => j !== ii) } : g)));
   }
 
-  function addItem() {
-    setItems((prev) => [...prev, { productId: "", quantity: 1 }]);
+  function groupTotals(group: CartGroup) {
+    return group.items.reduce(
+      (acc, it) => {
+        const p = productById(it.productId);
+        if (!p) return acc;
+        const lineSubtotal = p.unit_price * it.quantity;
+        const lineGst = lineSubtotal * (p.gst_percent / 100);
+        return { subtotal: acc.subtotal + lineSubtotal, gst: acc.gst + lineGst };
+      },
+      { subtotal: 0, gst: 0 }
+    );
   }
 
-  function removeItem(index: number) {
-    setItems((prev) => prev.filter((_, i) => i !== index));
-  }
-
-  const subtotal = items.reduce((sum, it) => {
-    const p = productById(it.productId);
-    return sum + (p ? p.unit_price * it.quantity : 0);
-  }, 0);
-  const gstAmount = items.reduce((sum, it) => {
-    const p = productById(it.productId);
-    return sum + (p ? p.unit_price * it.quantity * (p.gst_percent / 100) : 0);
-  }, 0);
-  const total = subtotal + gstAmount;
+  const grand = groups.reduce(
+    (acc, g) => {
+      const t = groupTotals(g);
+      return { subtotal: acc.subtotal + t.subtotal, gst: acc.gst + t.gst };
+    },
+    { subtotal: 0, gst: 0 }
+  );
+  const grandTotal = grand.subtotal + grand.gst;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
 
-    const validItems = items.filter((it) => it.productId && it.quantity > 0);
-    if (!storeId) {
-      setError("Choose which store this order is for.");
-      return;
-    }
-    if (validItems.length === 0) {
-      setError("Add at least one product and quantity.");
-      return;
+    // Validate every group has a store and at least one complete item, and
+    // every single item — the mandatory-PDF rule is per PRODUCT, not just
+    // "somewhere on the order" — has its design file attached.
+    for (const [gi, group] of groups.entries()) {
+      if (!group.storeId) {
+        setError(`Choose a store for cart section ${gi + 1}.`);
+        return;
+      }
+      const validItems = group.items.filter((it) => it.productId && it.quantity > 0);
+      if (validItems.length === 0) {
+        setError(`Add at least one product to the order for ${allStores.find((s) => s.id === group.storeId)?.store_name ?? "that store"}.`);
+        return;
+      }
+      for (const it of validItems) {
+        if (!it.designFile) {
+          const p = productById(it.productId);
+          setError(`Attach a design PDF for ${p ? `${p.code} — ${p.name}` : "each product"} before placing this order.`);
+          return;
+        }
+        if (it.designFile.type !== "application/pdf" && !it.designFile.name.toLowerCase().endsWith(".pdf")) {
+          setError(`"${it.designFile.name}" isn't a PDF — the design file for each product must be a PDF.`);
+          return;
+        }
+      }
     }
 
     setSubmitting(true);
@@ -94,50 +169,125 @@ function NewOrderForm() {
       const {
         data: { session },
       } = await supabase.auth.getSession();
+      const authHeaders = { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token ?? ""}` };
 
-      const res = await fetch("/api/portal/orders", {
+      const createdOrders: { id: string; order_no: string }[] = [];
+
+      for (const group of groups) {
+        const validItems = group.items.filter((it) => it.productId && it.quantity > 0);
+        const store = allStores.find((s) => s.id === group.storeId);
+        setProgress(`Creating order for ${store?.store_name ?? "store"}…`);
+
+        const res = await fetch("/api/portal/orders", {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify({
+            store_id: group.storeId,
+            notes: notes.trim() || undefined,
+            items: validItems.map((it) => ({ product_id: it.productId, quantity: it.quantity })),
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(
+            `${data.message || data.error || "Couldn't place the order."}${
+              createdOrders.length > 0 ? ` (${createdOrders.length} earlier order(s) in this checkout were already placed and are safe — see Orders.)` : ""
+            }`
+          );
+        }
+
+        createdOrders.push({ id: data.id, order_no: data.order_no });
+
+        // Response items come back in the same order they were submitted
+        // (see the route's own comment) — zip by index to know which
+        // order_item_id each design PDF belongs to.
+        const insertedItems = (data.items ?? []) as { id: string; product_id: string | null }[];
+        for (let i = 0; i < validItems.length; i++) {
+          const item = validItems[i];
+          const orderItemId = insertedItems[i]?.id;
+          if (!item.designFile || !orderItemId) continue;
+
+          setProgress(`Uploading design file for ${productById(item.productId)?.code ?? "product"}…`);
+          const uploadRes = await fetch(`/api/portal/orders/${data.id}/files/upload-url`, {
+            method: "POST",
+            headers: authHeaders,
+            body: JSON.stringify({ kind: "design", file_name: item.designFile.name, content_type: item.designFile.type || "application/pdf" }),
+          });
+          const uploadData = await uploadRes.json();
+          if (!uploadRes.ok) continue;
+
+          await fetch(uploadData.url, {
+            method: "PUT",
+            headers: { "Content-Type": item.designFile.type || "application/pdf" },
+            body: item.designFile,
+          });
+          await supabase.from("portal_order_files").insert({
+            order_id: data.id,
+            order_item_id: orderItemId,
+            uploaded_by_role: "customer",
+            uploaded_by: session?.user.id,
+            relative_path: uploadData.relative_path,
+            file_name: item.designFile.name,
+            file_size: item.designFile.size,
+            kind: "design",
+          });
+        }
+      }
+
+      // Pay for every order created in this checkout with one combined
+      // Razorpay Checkout popup rather than one per store.
+      setProgress("Preparing payment…");
+      const payRes = await fetch("/api/portal/orders/razorpay-combined-order", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token ?? ""}` },
-        body: JSON.stringify({
-          store_id: storeId,
-          notes: notes.trim() || undefined,
-          items: validItems.map((it) => ({ product_id: it.productId, quantity: it.quantity })),
-        }),
+        headers: authHeaders,
+        body: JSON.stringify({ order_ids: createdOrders.map((o) => o.id) }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.message || data.error || "Couldn't place the order.");
-        setSubmitting(false);
+      const payData = await payRes.json();
+      if (!payRes.ok) {
+        throw new Error(`${payData.message || payData.error || "Orders were placed, but payment couldn't start."} Find them in Orders to pay from there.`);
+      }
+
+      setProgress(null);
+      setSubmitting(false);
+
+      if (!window.Razorpay) {
+        setError("Orders were placed, but payment isn't ready — open Orders and pay from there.");
+        router.push(portalHref("/orders", onPortalHost));
         return;
       }
 
-      const orderId = data.id as string;
-
-      for (const file of files) {
-        const uploadRes = await fetch(`/api/portal/orders/${orderId}/files/upload-url`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token ?? ""}` },
-          body: JSON.stringify({ kind: "reference", file_name: file.name, content_type: file.type || "application/octet-stream" }),
-        });
-        const uploadData = await uploadRes.json();
-        if (!uploadRes.ok) continue;
-
-        await fetch(uploadData.url, { method: "PUT", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file });
-        await supabase.from("portal_order_files").insert({
-          order_id: orderId,
-          uploaded_by_role: "customer",
-          uploaded_by: session?.user.id,
-          relative_path: uploadData.relative_path,
-          file_name: file.name,
-          file_size: file.size,
-          kind: "reference",
-        });
-      }
-
-      router.push(portalHref(`/orders/${orderId}`, onPortalHost));
-    } catch {
-      setError("Something went wrong placing the order. Try again.");
+      const razorpay = new window.Razorpay({
+        key: payData.key_id,
+        amount: payData.amount,
+        currency: payData.currency,
+        order_id: payData.razorpay_order_id,
+        name: "MMDI",
+        description: createdOrders.length > 1 ? `${createdOrders.length} orders` : `Order ${createdOrders[0].order_no}`,
+        prefill: { name: portalUser?.fullName ?? "", email: portalUser?.email ?? "" },
+        handler: async (response: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }) => {
+          const verifyHeaders = { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token ?? ""}` };
+          await fetch(`/api/portal/orders/${createdOrders[0].id}/razorpay-verify`, {
+            method: "POST",
+            headers: verifyHeaders,
+            body: JSON.stringify(response),
+          });
+          router.push(portalHref(createdOrders.length > 1 ? "/orders" : `/orders/${createdOrders[0].id}`, onPortalHost));
+        },
+        modal: {
+          // Orders are already placed at this point — closing the popup
+          // just means payment didn't happen yet, not that the order
+          // vanished. Send them somewhere they can pay from, rather than
+          // leaving this form sitting there looking like nothing happened.
+          ondismiss: () => {
+            router.push(portalHref("/orders", onPortalHost));
+          },
+        },
+      });
+      razorpay.open();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong placing the order. Try again.");
       setSubmitting(false);
+      setProgress(null);
     }
   }
 
@@ -147,91 +297,156 @@ function NewOrderForm() {
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+      <Script src="https://checkout.razorpay.com/v1/checkout.js" strategy="lazyOnload" />
+
       <div>
         <h1 className="text-lg font-semibold text-ink">New order</h1>
-        <p className="text-sm text-ink-muted">Choose a store and the products you need — no payment yet, MMDI will share a design proof first.</p>
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="store" className="text-sm font-medium text-ink-secondary">
-          Store location
-        </label>
-        <select
-          id="store"
-          value={storeId}
-          onChange={(e) => setStoreId(e.target.value)}
-          className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
-        >
-          <option value="">Select a store…</option>
-          {stores.map((store) => (
-            <option key={store.id} value={store.id}>
-              {store.store_name}
-              {store.city ? ` — ${store.city}` : ""}
-            </option>
-          ))}
-        </select>
-        {stores.length === 0 && (
-          <p className="text-xs text-ink-muted">No store locations are set up on your account yet — contact MMDI.</p>
+        <p className="text-sm text-ink-muted">
+          Add products for as many stores as you need, then pay for everything together — attach each product&apos;s design PDF as you go.
+        </p>
+        {incompleteStoreCount > 0 && (
+          <p className="mt-1 text-xs text-warning">
+            {incompleteStoreCount} store{incompleteStoreCount > 1 ? "s aren't" : " isn't"} available to order for yet — missing a delivery address or
+            GSTIN. Contact MMDI to have {incompleteStoreCount > 1 ? "them" : "it"} added.
+          </p>
         )}
       </div>
 
-      <div className="flex flex-col gap-3">
-        <p className="text-sm font-medium text-ink-secondary">Items</p>
-        {items.map((item, index) => {
-          const product = productById(item.productId);
-          return (
-            <div key={index} className="flex flex-wrap items-end gap-3 rounded-lg border border-line bg-surface p-3">
-              <div className="flex min-w-[180px] flex-1 flex-col gap-1.5">
-                <label className="text-xs text-ink-muted">Product</label>
+      {groups.map((group, gi) => {
+        const totals = groupTotals(group);
+        const total = totals.subtotal + totals.gst;
+        return (
+          <div key={gi} className="flex flex-col gap-4 rounded-lg border border-line bg-surface p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-[220px] flex-1 flex-col gap-1.5">
+                <label className="flex items-center gap-1.5 text-sm font-medium text-ink-secondary">
+                  <Store size={14} /> Store location
+                </label>
                 <select
-                  value={item.productId}
-                  onChange={(e) => updateItem(index, { productId: e.target.value })}
+                  value={group.storeId}
+                  onChange={(e) => updateGroup(gi, { storeId: e.target.value })}
                   className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
                 >
-                  <option value="">Select…</option>
-                  {products.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.code} — {p.name}
+                  <option value="">Select a store…</option>
+                  {eligibleStores.map((store) => (
+                    <option key={store.id} value={store.id}>
+                      {store.store_name}
+                      {store.city ? ` — ${store.city}` : ""}
                     </option>
                   ))}
                 </select>
+                {eligibleStores.length === 0 && (
+                  <p className="text-xs text-ink-muted">No store locations are ready to order for yet — contact MMDI.</p>
+                )}
               </div>
-              <div className="flex w-24 flex-col gap-1.5">
-                <label className="text-xs text-ink-muted">Qty</label>
-                <input
-                  type="number"
-                  min={1}
-                  value={item.quantity}
-                  onChange={(e) => updateItem(index, { quantity: Math.max(1, parseInt(e.target.value, 10) || 1) })}
-                  className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
-                />
-              </div>
-              {product && (
-                <p className="text-sm text-ink-secondary">
-                  ₹{(product.unit_price * item.quantity).toLocaleString("en-IN")}
-                </p>
-              )}
-              {items.length > 1 && (
+              {groups.length > 1 && (
                 <button
                   type="button"
-                  onClick={() => removeItem(index)}
+                  onClick={() => removeGroup(gi)}
                   className="flex h-9 w-9 items-center justify-center rounded-md text-ink-muted hover:bg-danger-tint hover:text-danger"
-                  aria-label="Remove item"
+                  aria-label="Remove this store's items"
                 >
                   <Trash2 size={14} />
                 </button>
               )}
             </div>
-          );
-        })}
-        <button
-          type="button"
-          onClick={addItem}
-          className="flex w-fit items-center gap-1.5 text-sm font-medium text-primary hover:underline"
-        >
-          <Plus size={14} /> Add another product
-        </button>
-      </div>
+
+            <div className="flex flex-col gap-3">
+              {group.items.map((item, ii) => {
+                const product = productById(item.productId);
+                return (
+                  <div key={ii} className="flex flex-wrap items-end gap-3 rounded-lg border border-line bg-surface-sunken p-3">
+                    <div className="flex min-w-[180px] flex-1 flex-col gap-1.5">
+                      <label className="text-xs text-ink-muted">Product</label>
+                      <select
+                        value={item.productId}
+                        onChange={(e) => updateItem(gi, ii, { productId: e.target.value })}
+                        className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
+                      >
+                        <option value="">Select…</option>
+                        {products.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.code} — {p.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex w-24 flex-col gap-1.5">
+                      <label className="text-xs text-ink-muted">Qty</label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={item.quantity}
+                        onChange={(e) => updateItem(gi, ii, { quantity: Math.max(1, parseInt(e.target.value, 10) || 1) })}
+                        className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
+                      />
+                    </div>
+                    <div className="flex min-w-[180px] flex-col gap-1.5">
+                      <label className="text-xs text-ink-muted">Design PDF (required)</label>
+                      {item.designFile ? (
+                        <span className="flex items-center gap-1.5 rounded-md border border-line-strong bg-surface px-3 py-2 text-xs text-ink-secondary">
+                          <FileText size={13} className="shrink-0 text-primary" />
+                          <span className="truncate">{item.designFile.name}</span>
+                          <button
+                            type="button"
+                            onClick={() => updateItem(gi, ii, { designFile: null })}
+                            className="ml-auto shrink-0 text-ink-muted hover:text-danger"
+                            aria-label="Remove design file"
+                          >
+                            <X size={12} />
+                          </button>
+                        </span>
+                      ) : (
+                        <label className="flex cursor-pointer items-center gap-1.5 rounded-md border border-dashed border-line-strong bg-surface px-3 py-2 text-xs text-ink-muted hover:border-primary hover:text-primary">
+                          <UploadCloud size={13} />
+                          Attach PDF
+                          <input
+                            type="file"
+                            accept="application/pdf,.pdf"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) updateItem(gi, ii, { designFile: file });
+                            }}
+                          />
+                        </label>
+                      )}
+                    </div>
+                    {product && (
+                      <p className="text-sm text-ink-secondary">₹{(product.unit_price * item.quantity).toLocaleString("en-IN")}</p>
+                    )}
+                    {group.items.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeItem(gi, ii)}
+                        className="flex h-9 w-9 items-center justify-center rounded-md text-ink-muted hover:bg-danger-tint hover:text-danger"
+                        aria-label="Remove item"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() => addItem(gi)}
+                className="flex w-fit items-center gap-1.5 text-sm font-medium text-primary hover:underline"
+              >
+                <Plus size={14} /> Add another product to this store
+              </button>
+            </div>
+
+            <p className="text-right text-sm text-ink-secondary">
+              Store total: <span className="font-semibold text-ink">₹{total.toLocaleString("en-IN")}</span>
+            </p>
+          </div>
+        );
+      })}
+
+      <button type="button" onClick={addGroup} className="flex w-fit items-center gap-1.5 text-sm font-medium text-primary hover:underline">
+        <Plus size={14} /> Add another store to this order
+      </button>
 
       <div className="flex flex-col gap-1.5">
         <label htmlFor="notes" className="text-sm font-medium text-ink-secondary">
@@ -243,61 +458,34 @@ function NewOrderForm() {
           onChange={(e) => setNotes(e.target.value)}
           rows={3}
           className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
-          placeholder="Any special instructions for this order…"
+          placeholder="Any special instructions — applies to every store's order in this checkout…"
         />
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        <label className="text-sm font-medium text-ink-secondary">Reference files (optional)</label>
-        <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-line-strong bg-surface p-6 text-center text-sm text-ink-muted hover:border-primary hover:text-primary">
-          <UploadCloud size={20} />
-          Click to attach reference files
-          <input
-            type="file"
-            multiple
-            className="hidden"
-            onChange={(e) => setFiles((prev) => [...prev, ...Array.from(e.target.files ?? [])])}
-          />
-        </label>
-        {files.length > 0 && (
-          <ul className="flex flex-col gap-1">
-            {files.map((f, i) => (
-              <li key={i} className="flex items-center justify-between rounded-md bg-surface-sunken px-3 py-1.5 text-xs text-ink-secondary">
-                {f.name}
-                <button
-                  type="button"
-                  onClick={() => setFiles((prev) => prev.filter((_, idx) => idx !== i))}
-                  className="text-ink-muted hover:text-danger"
-                  aria-label={`Remove ${f.name}`}
-                >
-                  <X size={12} />
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
       </div>
 
       <div className="flex flex-col gap-1 rounded-lg border border-line bg-surface-sunken p-4 text-sm">
         <div className="flex justify-between text-ink-secondary">
           <span>Subtotal</span>
-          <span>₹{subtotal.toLocaleString("en-IN")}</span>
+          <span>₹{grand.subtotal.toLocaleString("en-IN")}</span>
         </div>
         <div className="flex justify-between text-ink-secondary">
           <span>GST</span>
-          <span>₹{gstAmount.toLocaleString("en-IN")}</span>
+          <span>₹{grand.gst.toLocaleString("en-IN")}</span>
         </div>
         <div className="flex justify-between border-t border-line pt-1 font-semibold text-ink">
-          <span>Estimated total</span>
-          <span>₹{total.toLocaleString("en-IN")}</span>
+          <span>Total to pay now</span>
+          <span>₹{grandTotal.toLocaleString("en-IN")}</span>
         </div>
-        <p className="mt-1 text-xs text-ink-muted">No payment now — you&apos;ll pay online once you approve the design proof.</p>
+        <p className="mt-1 text-xs text-ink-muted">
+          {groups.length > 1
+            ? `Pays for all ${groups.length} stores' orders in one payment.`
+            : "You'll pay online right after placing this order."}
+        </p>
       </div>
 
       {error && <p className="rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">{error}</p>}
 
       <Button type="submit" loading={submitting} className="w-fit">
-        Place order
+        {progress ?? "Place order & pay"}
       </Button>
     </form>
   );

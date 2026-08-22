@@ -15,7 +15,12 @@ export const dynamic = "force-dynamic";
 // function's request-body limit and execution time would choke on.
 //
 // POST /api/portal/orders/[orderId]/files/upload-url
-// Body: { kind: "reference" | "proof" | "other", file_name: string, content_type?: string }
+// Body: { kind: "reference" | "proof" | "other" | "design", file_name: string, content_type?: string }
+//
+// "design" is the customer's mandatory per-product artwork file, uploaded
+// as part of placing an order (see NewOrderForm) — restricted to PDF only
+// (unlike "reference"/"other", which accept anything) since that's what
+// staff actually needs to hand off to production.
 //
 // After the browser PUTs the bytes to the returned `url`, it inserts the
 // portal_order_files row itself via the normal browser Supabase client —
@@ -62,11 +67,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ ord
 
   const kind = body.kind;
   const fileName = body.file_name;
-  if (!kind || !["reference", "proof", "other"].includes(kind)) {
-    return NextResponse.json({ error: "invalid_kind", message: 'kind must be "reference", "proof", or "other"' }, { status: 400 });
+  if (!kind || !["reference", "proof", "other", "design"].includes(kind)) {
+    return NextResponse.json({ error: "invalid_kind", message: 'kind must be "reference", "proof", "other", or "design"' }, { status: 400 });
   }
   if (!fileName) {
     return NextResponse.json({ error: "missing_file_name" }, { status: 400 });
+  }
+  if (kind === "design") {
+    const contentType = body.content_type || "";
+    if (contentType !== "application/pdf" && !fileName.toLowerCase().endsWith(".pdf")) {
+      return NextResponse.json({ error: "pdf_required", message: "The design file for each product must be a PDF." }, { status: 400 });
+    }
   }
 
   const supabase = await createRouteSupabaseClient(request);

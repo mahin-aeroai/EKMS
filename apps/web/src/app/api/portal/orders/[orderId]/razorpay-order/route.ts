@@ -4,16 +4,25 @@ import { createRouteSupabaseClient, requireVerifiedUser } from "@/lib/supabase-r
 
 export const dynamic = "force-dynamic";
 
-// Creates a Razorpay Order for an approved-but-unpaid portal order, and
-// returns just enough for the browser to open Razorpay's Checkout widget.
-// Runs as the caller's own session (createRouteSupabaseClient) — no
-// service-role key needed here, unlike the webhook/verify routes, because
-// every check below is a normal RLS-backed read/write as the customer who
-// owns this order (see portal_orders_update_customer's WITH CHECK in
+// Creates a Razorpay Order for a single unpaid portal order, and returns
+// just enough for the browser to open Razorpay's Checkout widget. Runs as
+// the caller's own session (createRouteSupabaseClient) — no service-role
+// key needed here, unlike the webhook/verify routes, because every check
+// below is a normal RLS-backed read/write as the customer who owns this
+// order (see portal_orders_update_customer's WITH CHECK in
 // supabase-customer-portal-schema.sql: it explicitly allows a customer to
-// touch their own 'approved'+'unpaid' order and explicitly forbids them
-// from writing payment_status themselves — this route only ever sets
-// razorpay_order_id, never payment_status).
+// touch their own unpaid order at any status from 'submitted' onward, and
+// explicitly forbids them from writing payment_status themselves — this
+// route only ever sets razorpay_order_id, never payment_status).
+//
+// Payment happens at checkout, not after design approval — this is what
+// NewOrderForm calls right after creating an order (see
+// razorpay-combined-order/route.ts for the multi-store-cart version, which
+// covers several sibling orders with one payment). This route stays as a
+// single-order fallback: OrderDetailClient's "Pay now" button still uses
+// it directly, for the case where checkout's own payment didn't go
+// through (closed the popup, connection dropped) and someone comes back to
+// pay for just that one order later.
 //
 // POST /api/portal/orders/[orderId]/razorpay-order
 
@@ -39,9 +48,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ ord
   if (orderErr || !order) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
-  if (order.status !== "approved" || order.payment_status !== "unpaid") {
+  if (order.payment_status !== "unpaid" || order.status === "cancelled") {
     return NextResponse.json(
-      { error: "not_payable", message: "This order isn't in an approved, unpaid state." },
+      { error: "not_payable", message: "This order isn't payable — it's already paid or has been cancelled." },
       { status: 409 }
     );
   }
