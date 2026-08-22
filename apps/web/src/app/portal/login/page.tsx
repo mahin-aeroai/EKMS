@@ -159,7 +159,7 @@ function PortalLoginForm() {
   const isInvite = mode === "set-password";
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-surface-sunken px-4">
+    <div data-theme="portal-vibrant" className="flex min-h-screen items-center justify-center bg-surface-sunken px-4">
       <div className="w-full max-w-sm rounded-lg border border-line bg-surface p-8 shadow-sm">
         <div className="mb-6 flex flex-col items-center gap-2 text-center">
           <span className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-on-brand">

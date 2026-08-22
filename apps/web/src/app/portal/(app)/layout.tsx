@@ -14,6 +14,12 @@ export const dynamic = "force-dynamic";
 
 export default async function PortalLayout({ children }: { children: ReactNode }) {
   const identity = await getPortalIdentity();
+  // data-theme="portal-vibrant" below opts every portal page into the
+  // mobile-app color/radius preview (see globals.css) without touching the
+  // internal staff app's own light/dark/enterprise ThemeProvider, which
+  // still governs <html> separately -- CSS custom properties redeclared on
+  // this nested element win for everything inside it regardless of what
+  // <html> is set to.
   // Whether this request came in on portal.mmdi.in vs. a /portal-prefixed
   // path on another host -- decides whether internal links below render
   // clean (subdomain) or /portal-prefixed (everywhere else). See
@@ -22,10 +28,10 @@ export default async function PortalLayout({ children }: { children: ReactNode }
   const onPortalHost = hostHeader === PORTAL_HOST;
 
   return (
-    <div className="min-h-screen bg-surface-sunken">
+    <div data-theme="portal-vibrant" className="min-h-screen bg-surface-sunken">
       <PortalProviders onPortalHost={onPortalHost} identity={identity}>
         {identity && <PortalTopBar companyName={identity.companyName} fullName={identity.fullName} email={identity.email} />}
-        <main className="mx-auto max-w-4xl px-4 py-6 sm:px-6">
+        <main className="mx-auto max-w-4xl px-4 py-4 sm:px-6">
           {identity ? (
             children
           ) : (
