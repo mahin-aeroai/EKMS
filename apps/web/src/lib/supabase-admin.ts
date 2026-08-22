@@ -1,13 +1,19 @@
 import { createClient } from "@supabase/supabase-js";
 
 /**
- * Service-role Supabase client — bypasses RLS entirely. This is the ONE
- * legitimate use in this codebase (see OPERATIONS.md section 6, "Supabase
- * service-role key ... Nowhere in this codebase, on purpose"): the
- * Razorpay webhook (src/app/api/portal/razorpay-webhook/route.ts) is
- * called by Razorpay's own servers, not a signed-in browser or the mobile
- * app, so there is no user session for RLS to evaluate against at all —
- * something has to be allowed to mark an order paid on Razorpay's say-so.
+ * Service-role Supabase client — bypasses RLS entirely. Two legitimate uses
+ * in this codebase so far (see OPERATIONS.md section 6):
+ * 1. The Razorpay webhook (src/app/api/portal/razorpay-webhook/route.ts) is
+ *    called by Razorpay's own servers, not a signed-in browser or the
+ *    mobile app, so there is no user session for RLS to evaluate against at
+ *    all — something has to be allowed to mark an order paid on Razorpay's
+ *    say-so.
+ * 2. Staff-created portal logins (src/app/api/portal/companies/[companyId]/
+ *    create-login/route.ts) need auth.admin.createUser, which is a Supabase
+ *    Admin API with no RLS-governed equivalent at all — it can only ever be
+ *    called with the service-role key, by design, regardless of who's
+ *    signed in. The route itself still checks the caller is admin/editor
+ *    before touching it.
  *
  * DO NOT import this from anywhere else. In particular:
  * - Never import it into a Client Component, or anything that ends up in
