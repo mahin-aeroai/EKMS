@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { Plus, Mail, MapPin, Check, Clock, Copy, Check as CheckIcon } from "lucide-react";
+import { Plus, Mail, MapPin, Check, Clock, Copy, Check as CheckIcon, Trash2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -229,6 +229,47 @@ function CompanyDetail({
   // once right after creation, never persisted, never re-fetchable.
   const [newCredential, setNewCredential] = useState<{ email: string; password: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  // Tracks which single row is mid-delete, so only that row's button shows
+  // a disabled/loading state rather than freezing the whole list.
+  const [deletingStoreId, setDeletingStoreId] = useState<string | null>(null);
+  const [deletingInviteEmail, setDeletingInviteEmail] = useState<string | null>(null);
+
+  async function handleDeleteStore(store: PortalCompanyStoreRow) {
+    if (!window.confirm(`Remove "${store.store_name}"? This can't be undone.`)) return;
+    setDeletingStoreId(store.id);
+    setError(null);
+    const { error: deleteError } = await supabase.from("portal_company_stores").delete().eq("id", store.id);
+    setDeletingStoreId(null);
+    if (deleteError) {
+      // Most likely cause: portal_stores_delete_admin restricts deletes to
+      // role='admin' (editors can add/rename stores but not delete them) --
+      // surface that plainly rather than a raw RLS error string.
+      setError(
+        deleteError.message.toLowerCase().includes("row-level security") || deleteError.code === "42501"
+          ? "Only an admin account can delete a store (editors can add/rename them)."
+          : deleteError.message
+      );
+      return;
+    }
+    onChanged();
+  }
+
+  async function handleDeleteInvite(inv: InvitedEmail) {
+    if (!window.confirm(`Remove the invite for "${inv.email}"? If they haven't signed in yet this just cancels it -- it does not touch an existing account.`)) return;
+    setDeletingInviteEmail(inv.email);
+    setLoginError(null);
+    const { error: deleteError } = await supabase
+      .from("portal_invited_emails")
+      .delete()
+      .eq("email", inv.email)
+      .eq("company_id", company.id);
+    setDeletingInviteEmail(null);
+    if (deleteError) {
+      setLoginError(deleteError.message);
+      return;
+    }
+    onChanged();
+  }
 
   async function handleAddStore(e: FormEvent) {
     e.preventDefault();
@@ -298,8 +339,22 @@ function CompanyDetail({
         </p>
         <ul className="mb-2 flex flex-col gap-1">
           {stores.map((s) => (
-            <li key={s.id} className="rounded-md bg-surface-sunken px-3 py-1.5 text-sm text-ink-secondary">
-              {s.store_name} {s.city && <span className="text-ink-muted">— {s.city}</span>}
+            <li
+              key={s.id}
+              className="flex items-center justify-between rounded-md bg-surface-sunken px-3 py-1.5 text-sm text-ink-secondary"
+            >
+              <span>
+                {s.store_name} {s.city && <span className="text-ink-muted">— {s.city}</span>}
+              </span>
+              <button
+                type="button"
+                onClick={() => handleDeleteStore(s)}
+                disabled={deletingStoreId === s.id}
+                className="flex h-6 w-6 items-center justify-center rounded-md text-ink-muted hover:bg-danger-tint hover:text-danger disabled:opacity-50"
+                aria-label={`Remove ${s.store_name}`}
+              >
+                <Trash2 size={13} />
+              </button>
             </li>
           ))}
           {stores.length === 0 && <p className="text-sm text-ink-muted">No stores yet.</p>}
@@ -339,15 +394,26 @@ function CompanyDetail({
               <span className="text-ink-secondary">
                 {inv.email} {inv.contact_name && <span className="text-ink-muted">({inv.contact_name})</span>}
               </span>
-              {inv.consumed_at ? (
-                <Badge status="success" dot>
-                  <Check size={10} /> Active
-                </Badge>
-              ) : (
-                <Badge status="warning" dot>
-                  <Clock size={10} /> Awaiting sign-up
-                </Badge>
-              )}
+              <div className="flex items-center gap-2">
+                {inv.consumed_at ? (
+                  <Badge status="success" dot>
+                    <Check size={10} /> Active
+                  </Badge>
+                ) : (
+                  <Badge status="warning" dot>
+                    <Clock size={10} /> Awaiting sign-up
+                  </Badge>
+                )}
+                <button
+                  type="button"
+                  onClick={() => handleDeleteInvite(inv)}
+                  disabled={deletingInviteEmail === inv.email}
+                  className="flex h-6 w-6 items-center justify-center rounded-md text-ink-muted hover:bg-danger-tint hover:text-danger disabled:opacity-50"
+                  aria-label={`Remove invite for ${inv.email}`}
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
             </li>
           ))}
           {invites.length === 0 && <p className="text-sm text-ink-muted">No logins invited yet.</p>}
