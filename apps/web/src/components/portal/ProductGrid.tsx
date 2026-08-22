@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ImageOff } from "lucide-react";
 import type { PortalProductRow } from "@mmdi/shared/rows";
 import { Button } from "@/components/ui/Button";
+import { usePortalHost, portalHref } from "@/lib/portal-links";
 
 function ProductPreview({ productId, name }: { productId: string; name: string }) {
   const [url, setUrl] = useState<string | null>(null);
@@ -42,6 +43,7 @@ function ProductPreview({ productId, name }: { productId: string; name: string }
 
 export function ProductGrid({ products }: { products: PortalProductRow[] }) {
   const router = useRouter();
+  const onPortalHost = usePortalHost();
 
   if (products.length === 0) {
     return (
@@ -72,7 +74,7 @@ export function ProductGrid({ products }: { products: PortalProductRow[] }) {
               ₹{product.unit_price.toLocaleString("en-IN")}{" "}
               <span className="text-xs font-normal text-ink-muted">+ {product.gst_percent}% GST</span>
             </p>
-            <Button size="sm" onClick={() => router.push(`/portal/orders/new?product=${product.id}`)}>
+            <Button size="sm" onClick={() => router.push(portalHref(`/orders/new?product=${product.id}`, onPortalHost))}>
               Order this
             </Button>
           </div>

@@ -150,7 +150,7 @@ it — treat it as the checklist before ever asking "do we have X."
 |---|---|---|---|
 | GitHub Personal Access Token (classic, `repo` scope) | Pushing from Srinivas's own machine | macOS Keychain (via `credential.helper osxkeychain`) | Generate at github.com/settings/tokens; rotate there if it stops working |
 | Supabase anon key | Web app client + mobile app | Vercel env vars + `apps/mobile/.env` | Safe to ship to clients — RLS is the real protection, not secrecy of this key |
-| Supabase service-role key | The Razorpay webhook route only (`/api/portal/razorpay-webhook`) | Vercel env vars only, as `SUPABASE_SERVICE_ROLE_KEY` | The ONE legitimate use in this codebase — see `src/lib/supabase-admin.ts`'s header comment for why: Razorpay calls that route directly with no user session for RLS to evaluate. Never referenced from any Client Component; every other route still uses the anon key + RLS. Get it from Supabase dashboard → Project Settings → API → `service_role` secret. |
+| Supabase service-role key | The Razorpay webhook route (`/api/portal/razorpay-webhook`) and the Customer Portal's staff "Create login" route (`/api/portal/companies/[id]/create-login`) | Vercel env vars only, as `SUPABASE_SERVICE_ROLE_KEY` | The two legitimate uses in this codebase — see `src/lib/supabase-admin.ts`'s header comment for why: Razorpay calls its route directly with no user session for RLS to evaluate, and creating a Supabase Auth user requires the Admin API, which has no RLS-governed equivalent at all. Never referenced from any Client Component; every other route still uses the anon key + RLS. Get it from Supabase dashboard → Project Settings → API → `service_role` secret. |
 | `ANTHROPIC_API_KEY` | AI Copilot's server-side model calls | Vercel env vars only | Srinivas creates/rotates this directly in Vercel; the assistant never sees the raw key |
 | Google OAuth client ID/secret | Gmail search/draft in AI Copilot | Vercel env vars | Standard OAuth app credentials from Google Cloud Console |
 | `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET_NAME` | Every presigned-URL file route, including the Customer Portal's (design proofs, reference files, product preview images) | Vercel env vars | Already set up for LFG surveys/knowledge-files/installation-photos — the Customer Portal reuses the same bucket + credentials, just new key prefixes (`portal-orders/...`, `portal-products/...`) |
@@ -180,14 +180,17 @@ setup, in order:
    `GPX04` (Tactical Sign) and `GPX05` (Compatibility Sign) with real
    prices, and upload each one's preview image.
 5. For each retail chain: Customer Portal → Companies & Stores tab →
-   create the company, add its store locations, then add a portal login
-   invite (email + optional contact name). **Then**, in the Supabase
-   dashboard (Authentication → Users → Add user), create the actual
-   account with that exact email and a temporary password — the invite
-   step alone doesn't create the login, it only allowlists that email
-   past the `@mmdi.in`-only signup restriction (see the schema file's
-   header comment for why both steps are needed). Share the email +
-   temporary password with the customer directly.
+   create the company, add its store locations, then fill in "Create
+   login" (email + optional contact name + optional password — leave the
+   password blank to auto-generate one) and submit. This one step both
+   allowlists the email past the `@mmdi.in`-only signup restriction and
+   creates the actual sign-in — no separate Supabase dashboard step
+   needed. The password is shown exactly once, right there, in a
+   copy-to-clipboard box; copy it immediately and share the email +
+   password with the customer directly (phone/WhatsApp, not email).
+   Requires `SUPABASE_SERVICE_ROLE_KEY` to already be set (see the table
+   above) — the create-login route uses the Supabase Admin API, which
+   only works with the service-role key regardless of who's signed in.
 6. Staff review/approve/upload-proof/status-change actions all happen on
    the same order page a customer sees (`/portal/orders/[id]`) — reached
    by clicking a row in Customer Portal → Orders, not a separate admin
@@ -197,6 +200,33 @@ setup, in order:
 either "it's already configured where the table above says" or "it needs
 Srinivas to create/paste it directly into Vercel/Supabase/Keychain
 himself" — never into a chat message, terminal echo, or committed file.
+
+### 8a. Portal subdomain (`portal.mmdi.in`)
+
+The Customer Portal is reachable at its own subdomain instead of
+`app.mmdi.in/portal/*`. All `/portal/*` pages are physically unchanged
+(still real files under `src/app/portal/...`); a middleware rewrite in
+`src/lib/supabase-middleware.ts` serves them without the `/portal` prefix
+ever showing in the address bar on `portal.mmdi.in`, and old
+`app.mmdi.in/portal/*` links 308-redirect to the clean subdomain URL
+automatically. `ekms.vercel.app` and any Vercel preview deployment keep
+serving `/portal/*` exactly as before, unaffected — a DNS-independent
+fallback if the subdomain is ever down.
+
+Two one-time, non-code steps are needed to actually activate it (neither
+has been done yet as of this handoff):
+
+1. **Vercel** → the EKMS web project → Settings → Domains → Add
+   `portal.mmdi.in`. Vercel will show the exact CNAME target to use
+   (usually `cname.vercel-dns.com`, but use whatever Vercel displays).
+2. **DNS** → wherever `mmdi.in`'s DNS is managed → add a CNAME record:
+   host `portal`, pointing at the target Vercel showed in step 1. Allow
+   up to a few hours to propagate; Vercel's Domains page shows when the
+   certificate issues and the domain goes live.
+
+Nothing else changes — no new env vars, no redeploy required beyond the
+one that already ships this middleware change. Once DNS resolves,
+`portal.mmdi.in/login` works immediately.
 
 ---
 

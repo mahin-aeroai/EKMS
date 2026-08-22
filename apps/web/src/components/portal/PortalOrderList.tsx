@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/Badge";
 import { orderStatusBadge, orderStatusLabel, paymentStatusBadge, paymentStatusLabel } from "./orderStatus";
+import { usePortalHost, portalHref } from "@/lib/portal-links";
 import type { PortalOrderRow } from "@mmdi/shared/rows";
 
 export function PortalOrderList({
@@ -13,6 +14,7 @@ export function PortalOrderList({
   storeNames: Record<string, string>;
 }) {
   const router = useRouter();
+  const onPortalHost = usePortalHost();
 
   if (orders.length === 0) {
     return (
@@ -39,7 +41,7 @@ export function PortalOrderList({
           {orders.map((order) => (
             <tr
               key={order.id}
-              onClick={() => router.push(`/portal/orders/${order.id}`)}
+              onClick={() => router.push(portalHref(`/orders/${order.id}`, onPortalHost))}
               className="cursor-pointer border-t border-line bg-surface transition-colors hover:bg-surface-sunken"
             >
               <td className="px-3 py-2 font-medium text-ink">{order.order_no}</td>
