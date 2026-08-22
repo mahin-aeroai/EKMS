@@ -28,7 +28,12 @@ function ProductPreview({ productId, name }: { productId: string; name: string }
 
   // A4-portrait aspect (210:297) to match the real sign artwork's own shape
   // instead of a short landscape crop -- GPX04/GPX05 previews are vertical
-  // designs, not wide banners.
+  // designs, not wide banners. That tallness is exactly why this renders
+  // narrow and beside the details (see the card markup below), not
+  // full-width above them -- a full-width A4-portrait image stacked above
+  // the details made each card enormous, the same problem already fixed
+  // once in the staff-facing product editor (ProductsTab.tsx) — same fix,
+  // applied here too.
   if (failed || !url) {
     return (
       <div className="flex aspect-[210/297] w-full items-center justify-center rounded-md bg-surface-sunken text-ink-muted">
@@ -56,27 +61,31 @@ export function ProductGrid({ products }: { products: PortalProductRow[] }) {
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
       {products.map((product) => (
-        <div key={product.id} className="flex flex-col gap-3 rounded-lg border border-line bg-surface p-4 shadow-1">
-          {product.preview_image_path ? (
-            <ProductPreview productId={product.id} name={product.name} />
-          ) : (
-            <div className="flex aspect-[210/297] w-full items-center justify-center rounded-md bg-surface-sunken text-ink-muted">
-              <ImageOff size={24} />
-            </div>
-          )}
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">{product.code}</p>
-            <p className="text-sm font-semibold text-ink">{product.name}</p>
-            {product.description && <p className="mt-1 text-xs text-ink-secondary">{product.description}</p>}
+        <div key={product.id} className="flex gap-3 rounded-lg border border-line bg-surface p-4 shadow-1">
+          <div className="w-28 shrink-0 sm:w-32">
+            {product.preview_image_path ? (
+              <ProductPreview productId={product.id} name={product.name} />
+            ) : (
+              <div className="flex aspect-[210/297] w-full items-center justify-center rounded-md bg-surface-sunken text-ink-muted">
+                <ImageOff size={24} />
+              </div>
+            )}
           </div>
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold text-ink">
-              ₹{product.unit_price.toLocaleString("en-IN")}{" "}
-              <span className="text-xs font-normal text-ink-muted">+ {product.gst_percent}% GST</span>
-            </p>
-            <Button size="sm" onClick={() => router.push(portalHref(`/orders/new?product=${product.id}`, onPortalHost))}>
-              Order this
-            </Button>
+          <div className="flex min-w-0 flex-1 flex-col gap-2">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">{product.code}</p>
+              <p className="text-sm font-semibold text-ink">{product.name}</p>
+              {product.description && <p className="mt-1 text-xs text-ink-secondary">{product.description}</p>}
+            </div>
+            <div className="mt-auto flex flex-col gap-2">
+              <p className="text-sm font-semibold text-ink">
+                ₹{product.unit_price.toLocaleString("en-IN")}{" "}
+                <span className="text-xs font-normal text-ink-muted">+ {product.gst_percent}% GST</span>
+              </p>
+              <Button size="sm" onClick={() => router.push(portalHref(`/orders/new?product=${product.id}`, onPortalHost))}>
+                Order this
+              </Button>
+            </div>
           </div>
         </div>
       ))}
