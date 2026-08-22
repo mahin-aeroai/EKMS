@@ -225,10 +225,13 @@ function ProductCard({ product, onUpdated }: { product: PortalProductRow; onUpda
     <div className="flex flex-col gap-2 rounded-lg border border-line bg-surface p-3">
       <div className="relative">
         {previewUrl ? (
+          // A4-portrait aspect (210:297) to match the real sign artwork's own
+          // shape instead of a short landscape crop -- GPX04/GPX05 previews
+          // are vertical designs, not wide banners.
           // eslint-disable-next-line @next/next/no-img-element -- short-lived signed R2 URL
-          <img src={previewUrl} alt={product.name} className="h-32 w-full rounded-md object-cover" />
+          <img src={previewUrl} alt={product.name} className="aspect-[210/297] w-full rounded-md object-cover" />
         ) : (
-          <div className="flex h-32 w-full items-center justify-center rounded-md bg-surface-sunken text-ink-muted">
+          <div className="flex aspect-[210/297] w-full items-center justify-center rounded-md bg-surface-sunken text-ink-muted">
             <ImageOff size={20} />
           </div>
         )}
