@@ -1,16 +1,28 @@
 "use client";
 
-import { Suspense, useState, type FormEvent } from "react";
+import { Suspense, useEffect, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Lock } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
 import { PORTAL_HOST } from "@/lib/portal-host";
 
-// Sign-in only — no "Register" tab. Portal accounts are strictly
-// invite-only (see supabase-customer-portal-schema.sql's header comment):
-// MMDI creates the account and shares the credentials directly, there is
-// no self-service path here at all, unlike the internal /login page.
+type Mode = "sign-in" | "set-password";
+
+function initialModeFromUrl(): Mode {
+  if (typeof window === "undefined") return "sign-in";
+  const hash = window.location.hash;
+  return hash.includes("type=invite") || hash.includes("type=recovery") ? "set-password" : "sign-in";
+}
+
+// Sign-in + set-password only — no "Register" tab. Portal accounts are
+// strictly invite-only (see supabase-customer-portal-schema.sql's header
+// comment): MMDI creates the account via the staff "Create login" flow,
+// which now emails an invite link rather than handing staff a password to
+// relay by phone/WhatsApp -- clicking that link (or a "Forgot password"
+// reset link) lands back here in set-password mode. Mirrors the same
+// invite/recovery handling in src/app/login/page.tsx (the internal login
+// page) -- see that file's comments for the fuller reasoning.
 export default function PortalLoginPage() {
   return (
     <Suspense fallback={null}>
@@ -22,12 +34,45 @@ export default function PortalLoginPage() {
 function PortalLoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const [mode] = useState<Mode>(initialModeFromUrl);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState<string | null>(null);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+
+  // Invite/reset emails land here as
+  // /login#access_token=...&type=invite (or type=recovery) -- `mode` above
+  // already read that hash once on mount to pick the right form; this
+  // effect just waits for the Supabase client to finish parsing it (it does
+  // so automatically) so the form can show whose invite this is and wipe
+  // the token out of the address bar.
+  useEffect(() => {
+    if (mode !== "set-password") return;
+
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_IN" || event === "PASSWORD_RECOVERY") {
+        setInviteEmail(session?.user?.email ?? null);
+        window.history.replaceState(null, "", window.location.pathname);
+      }
+    });
+
+    // Session may already be established by the time this effect runs.
+    supabase.auth.getUser().then(({ data }) => {
+      if (data.user?.email) setInviteEmail(data.user.email);
+    });
+
+    return () => sub.subscription.unsubscribe();
+  }, [mode]);
+
+  function defaultHome() {
+    // Bare "/" on the subdomain, "/portal" everywhere else (app.mmdi.in
+    // preview access, ekms.vercel.app, any Vercel preview deployment).
+    return window.location.hostname === PORTAL_HOST ? "/" : "/portal";
+  }
 
   async function handleSignIn(e: FormEvent) {
     e.preventDefault();
@@ -42,11 +87,7 @@ function PortalLoginForm() {
       return;
     }
 
-    // No ?redirectTo= means someone landed here directly (not bounced by
-    // the middleware) -- default to this host's own portal home: bare "/"
-    // on the subdomain, "/portal" everywhere else.
-    const defaultHome = window.location.hostname === PORTAL_HOST ? "/" : "/portal";
-    const redirectTo = searchParams.get("redirectTo") || defaultHome;
+    const redirectTo = searchParams.get("redirectTo") || defaultHome();
     router.push(redirectTo);
     router.refresh();
   }
@@ -71,6 +112,34 @@ function PortalLoginForm() {
     setResetSent(true);
   }
 
+  async function handleSetPassword(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError("Passwords don't match.");
+      return;
+    }
+
+    setLoading(true);
+    const { error: updateError } = await supabase.auth.updateUser({ password });
+    setLoading(false);
+
+    if (updateError) {
+      setError(updateError.message);
+      return;
+    }
+
+    router.push(defaultHome());
+    router.refresh();
+  }
+
+  const isInvite = mode === "set-password";
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-surface-sunken px-4">
       <div className="w-full max-w-sm rounded-lg border border-line bg-surface p-8 shadow-sm">
@@ -80,11 +149,61 @@ function PortalLoginForm() {
           </span>
           <h1 className="text-lg font-semibold text-ink">MMDI Customer Portal</h1>
           <p className="text-sm text-ink-muted">
-            {showForgotPassword ? (resetSent ? "Check your inbox" : "Reset your password") : "Sign in to place and track orders"}
+            {isInvite
+              ? inviteEmail
+                ? `Set a password for ${inviteEmail}`
+                : "Set your password"
+              : showForgotPassword
+                ? resetSent
+                  ? "Check your inbox"
+                  : "Reset your password"
+                : "Sign in to place and track orders"}
           </p>
         </div>
 
-        {showForgotPassword ? (
+        {isInvite ? (
+          <form onSubmit={handleSetPassword} className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="password" className="text-sm font-medium text-ink-secondary">
+                New password
+              </label>
+              <input
+                id="password"
+                type="password"
+                required
+                autoComplete="new-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
+                placeholder="••••••••"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="confirmPassword" className="text-sm font-medium text-ink-secondary">
+                Confirm password
+              </label>
+              <input
+                id="confirmPassword"
+                type="password"
+                required
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
+                placeholder="••••••••"
+              />
+            </div>
+
+            {error && (
+              <p className="rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">{error}</p>
+            )}
+
+            <Button type="submit" loading={loading} className="mt-2">
+              Set password &amp; continue
+            </Button>
+          </form>
+        ) : showForgotPassword ? (
           resetSent ? (
             <div className="flex flex-col gap-4">
               <p className="text-sm text-ink-secondary">
@@ -192,9 +311,11 @@ function PortalLoginForm() {
           </form>
         )}
 
-        <p className="mt-6 text-center text-xs text-ink-muted">
-          Don&apos;t have login details? Contact MMDI to set up your account.
-        </p>
+        {!isInvite && (
+          <p className="mt-6 text-center text-xs text-ink-muted">
+            Don&apos;t have login details? Contact MMDI to set up your account.
+          </p>
+        )}
       </div>
     </div>
   );

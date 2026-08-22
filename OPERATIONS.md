@@ -179,19 +179,35 @@ setup, in order:
    (under the Customers section in the sidebar) → Products tab → create
    `GPX04` (Tactical Sign) and `GPX05` (Compatibility Sign) with real
    prices, and upload each one's preview image.
-5. For each retail chain: Customer Portal → Companies & Stores tab →
-   create the company, add its store locations, then fill in "Create
-   login" (email + optional contact name + optional password — leave the
-   password blank to auto-generate one) and submit. This one step both
+5. **One-time, before the first real invite** — two settings in the
+   Supabase dashboard, both under **Authentication**:
+   - **URL Configuration → Redirect URLs**: add
+     `https://portal.mmdi.in/login`. Without this, Supabase silently
+     refuses to send people to the invite link's real destination.
+   - **Emails → SMTP Settings**: point it at a real mail sender —
+     Supabase's own built-in mailer is heavily rate-limited (a handful of
+     emails/hour) and not meant for actual customer invites. Using the
+     mmdi.in Google Workspace mailbox: Host `smtp.gmail.com`, Port `587`,
+     Username = the full mmdi.in address sending these, Password = a
+     Google **App Password** for that mailbox (Google Account → Security →
+     2-Step Verification must be on first, then App Passwords → generate
+     one — a regular Gmail password won't work here), Sender email = same
+     address (or a `noreply@mmdi.in` alias if one exists), Sender name =
+     "MMDI Customer Portal". Optionally customize the "Invite user" email
+     template under **Emails → Templates** to match MMDI's voice.
+6. For each retail chain: Customer Portal → Companies & Stores tab →
+   create the company, add its store locations, then fill in "Send
+   invite" (email + optional contact name) and submit. This both
    allowlists the email past the `@mmdi.in`-only signup restriction and
-   creates the actual sign-in — no separate Supabase dashboard step
-   needed. The password is shown exactly once, right there, in a
-   copy-to-clipboard box; copy it immediately and share the email +
-   password with the customer directly (phone/WhatsApp, not email).
-   Requires `SUPABASE_SERVICE_ROLE_KEY` to already be set (see the table
-   above) — the create-login route uses the Supabase Admin API, which
-   only works with the service-role key regardless of who's signed in.
-6. Staff review/approve/upload-proof/status-change actions all happen on
+   creates the account — no password is generated or shown to staff; the
+   customer gets a real email with a link and sets their own password,
+   which is also what confirms the address is real (a wrong/fake email
+   just never gets clicked, so no usable account exists). No separate
+   Supabase dashboard step needed either way. Requires
+   `SUPABASE_SERVICE_ROLE_KEY` to already be set (see the table above) —
+   the create-login route uses the Supabase Admin API, which only works
+   with the service-role key regardless of who's signed in.
+7. Staff review/approve/upload-proof/status-change actions all happen on
    the same order page a customer sees (`/portal/orders/[id]`) — reached
    by clicking a row in Customer Portal → Orders, not a separate admin
    view.
