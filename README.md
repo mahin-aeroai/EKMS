@@ -22,7 +22,9 @@ flow spanning both the web app and a native iOS app. The web app is installable 
 a PWA on iOS and Android.
 
 **For a full status report — what's built, what's wired to real data, known gaps,
-and suggested next steps — see [`PROJECT_STATUS.md`](./PROJECT_STATUS.md).**
+and suggested next steps — see [`PROJECT_STATUS.md`](./PROJECT_STATUS.md). For how
+to actually develop and ship (GitHub/Vercel/Supabase/mobile-build workflow, tokens,
+Apple Developer details) — see [`OPERATIONS.md`](./OPERATIONS.md).**
 
 Stack: Next.js 16 (App Router) + React 19 + TypeScript + Tailwind CSS v4 + Supabase
 for the web app; Expo (SDK 57) + React Native for the iOS app; both share code via
