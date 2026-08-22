@@ -26,30 +26,48 @@ import { InstallPrompt } from "@/components/InstallPrompt";
 import { IosInstallHint } from "@/components/IosInstallHint";
 import { getOnPortalHost } from "@/lib/portal-host-server";
 
-export const metadata: Metadata = {
-  title: "MMDI ONE — Product Design System",
-  description:
-    "The enterprise design language for MMDI ONE: design tokens, component library, layout system, navigation system, workspace pattern, AI interaction model and responsive system.",
-  manifest: "/manifest.webmanifest",
-  // iOS has no manifest-driven install flow -- these are the meta tags that
-  // actually control "Add to Home Screen" standalone display there (Android
-  // reads the manifest above instead, via Chrome's own install UI).
-  appleWebApp: {
-    capable: true,
-    statusBarStyle: "default",
-    title: "MMDI ONE",
-  },
-  icons: {
-    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180" }],
-  },
-  // Next's `appleWebApp.capable` only emits the newer unprefixed
-  // "mobile-web-app-capable" tag -- iOS Safari's own docs (Configuring Web
-  // Applications) specifically name the apple-prefixed tag as what enables
-  // standalone mode there, so it's added explicitly rather than assumed.
-  other: {
-    "apple-mobile-web-app-capable": "yes",
-  },
-};
+// A function (not a static object) so it can omit the PWA-install fields
+// below on portal.mmdi.in — see the "onPortalHost" branch in RootLayout for
+// why: this manifest/appleWebApp block is what makes Chrome/iOS treat the
+// site as "installable" as MMDI ONE (the internal staff app) in the first
+// place, including the address-bar install icon that our own
+// InstallPrompt/IosInstallHint components don't control. Just hiding those
+// two components would leave the browser's own native install affordance
+// still pointing customers at installing something branded "MMDI ONE".
+export async function generateMetadata(): Promise<Metadata> {
+  const onPortalHost = await getOnPortalHost();
+
+  return {
+    title: "MMDI ONE — Product Design System",
+    description:
+      "The enterprise design language for MMDI ONE: design tokens, component library, layout system, navigation system, workspace pattern, AI interaction model and responsive system.",
+    ...(onPortalHost
+      ? {}
+      : {
+          manifest: "/manifest.webmanifest",
+          // iOS has no manifest-driven install flow -- these are the meta
+          // tags that actually control "Add to Home Screen" standalone
+          // display there (Android reads the manifest above instead, via
+          // Chrome's own install UI).
+          appleWebApp: {
+            capable: true,
+            statusBarStyle: "default",
+            title: "MMDI ONE",
+          },
+          icons: {
+            apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180" }],
+          },
+          // Next's `appleWebApp.capable` only emits the newer unprefixed
+          // "mobile-web-app-capable" tag -- iOS Safari's own docs
+          // (Configuring Web Applications) specifically name the apple-
+          // prefixed tag as what enables standalone mode there, so it's
+          // added explicitly rather than assumed.
+          other: {
+            "apple-mobile-web-app-capable": "yes",
+          },
+        }),
+  };
+}
 
 export const viewport: Viewport = {
   themeColor: "#1f3864",
@@ -87,9 +105,29 @@ export default async function RootLayout({
         <ThemeProvider>
           <ToastProvider>
             <AppShell onPortalHost={onPortalHost}>{children}</AppShell>
-            <ServiceWorkerRegister />
-            <InstallPrompt />
-            <IosInstallHint />
+            {/*
+              The install-app prompts (and the service worker that backs
+              them) are for MMDI ONE, the internal staff app -- but this is
+              the one layout every route shares, portal.mmdi.in included.
+              Un-gated, a customer on the portal would get an "Install
+              MMDI ONE" banner for a tool they don't use and have never
+              heard of. Skipped entirely on the portal host rather than
+              re-branded for it -- see generateMetadata() above for the
+              matching manifest/appleWebApp gating (needed separately: the
+              browser's own native install icon doesn't go through either
+              of these components). ServiceWorkerRegister itself still
+              renders on the portal host -- in unregister-only mode, to
+              clean up any service worker a customer already picked up
+              before this gating existed, rather than just stopping new
+              registrations and leaving old ones stuck.
+            */}
+            <ServiceWorkerRegister unregisterOnly={onPortalHost} />
+            {!onPortalHost && (
+              <>
+                <InstallPrompt />
+                <IosInstallHint />
+              </>
+            )}
           </ToastProvider>
         </ThemeProvider>
       </body>
