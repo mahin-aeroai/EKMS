@@ -1036,3 +1036,128 @@ export interface ImportDutyCalculationRow {
   created_at: string;
   updated_at: string;
 }
+
+// ---------------------------------------------------------------------
+// Customer Portal (/portal/*) -- see supabase-customer-portal-schema.sql.
+// Separate, invite-only surface for Apple-format retail chains ordering
+// GPX04/GPX05 signage. Deliberately NOT reusing UserRole above -- that
+// type backs several `Record<UserRole, ...>` exhaustive maps in the
+// internal staff UI (TopNav, Administration) that a 4th 'portal' value
+// would break for no reason, since portal accounts never reach those
+// components (supabase-middleware.ts keeps the two surfaces apart).
+// ---------------------------------------------------------------------
+
+export type PortalOrderStatus =
+  | "submitted"
+  | "proof_uploaded"
+  | "revision_requested"
+  | "approved"
+  | "in_production"
+  | "completed"
+  | "cancelled";
+
+export type PortalPaymentStatus = "unpaid" | "paid" | "failed" | "refunded";
+
+export interface PortalCompanyRow {
+  id: string;
+  name: string;
+  contact_name: string | null;
+  contact_phone: string | null;
+  contact_email: string | null;
+  gstin: string | null;
+  billing_address: string | null;
+  active: boolean;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface PortalCompanyStoreRow {
+  id: string;
+  company_id: string;
+  store_name: string;
+  address: string | null;
+  city: string | null;
+  lfg_sfo_id: string | null;
+  active: boolean;
+}
+
+export interface PortalUserRow {
+  id: string;
+  company_id: string;
+  full_name: string | null;
+  phone: string | null;
+  active: boolean;
+  created_at: string;
+}
+
+export interface PortalProductRow {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  unit_price: number;
+  gst_percent: number;
+  preview_image_path: string | null;
+  version: number;
+  active: boolean;
+  updated_at: string;
+}
+
+export interface PortalOrderRow {
+  id: string;
+  order_no: string;
+  company_id: string;
+  store_id: string;
+  created_by: string;
+  status: PortalOrderStatus;
+  payment_status: PortalPaymentStatus;
+  razorpay_order_id: string | null;
+  razorpay_payment_id: string | null;
+  paid_at: string | null;
+  notes: string | null;
+  admin_notes: string | null;
+  current_revision_number: number;
+  subtotal: number;
+  gst_amount: number;
+  total_amount: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PortalOrderItemRow {
+  id: string;
+  order_id: string;
+  product_id: string | null;
+  product_code: string;
+  product_name: string;
+  unit_price: number;
+  gst_percent: number;
+  preview_image_path: string | null;
+  quantity: number;
+  line_subtotal: number;
+  line_gst_amount: number;
+  line_total: number;
+}
+
+export interface PortalOrderFileRow {
+  id: string;
+  order_id: string;
+  uploaded_by_role: "customer" | "staff";
+  uploaded_by: string;
+  relative_path: string;
+  file_name: string;
+  file_size: number | null;
+  kind: "reference" | "proof" | "other";
+  revision_number: number | null;
+  created_at: string;
+}
+
+export interface PortalOrderApprovalRow {
+  id: string;
+  order_id: string;
+  revision_number: number;
+  decision: "approved" | "revision_requested";
+  comment: string | null;
+  decided_by: string;
+  decided_at: string;
+}

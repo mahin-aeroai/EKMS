@@ -1,43 +1,17 @@
 # MMDI ONE — Project Status
 
-Last updated: 22 August 2026 (session: a separate Cowork — not Claude
-Code — chat, entirely inside `apps/mobile`, distinct from the BOM
-Master/Rate Card session the paragraph below this one used to describe.
-That earlier session's own outstanding items are UNCHANGED by this one —
-item 78's `supabase-bom-template-line-alternatives-dedupe-migration.sql`
-and item 76's `supabase-bom-templates-sort-order-migration.sql` are
-**still not confirmed run**; "Next up" below is still the right list for
-the web app's BOM Master work.
-
-This session's arc (full detail in item 79) was entirely mobile: rebuilt
-the "Cost Sheet" tab from a mis-scoped list of past Sign Costing runs into
-a real BOM+Work-Centre calculator with full parity to the web tool
-(per-line/work-centre on-off, alternative-material picker, "Add to
-Estimate Pool"), then iterated its Suggested Selling Price GP methodology
-through several corrections — ending on a cost-plus-markup formula
-(Traditional: GP% of total cost, default 50%; Value Addition: raw
-material recovered at cost, GP% of ink+work-centre cost, default 100%)
-with a visible on-screen calculation breakdown, after an earlier
-margin-based version turned out to not match MMDI's actual costing
-policy. Also this session: fixed a "Hey Jarvis" wake word that never
-produced a transcript (an iOS `AVAudioSession` restart race) and an
-Estimate PDF that didn't match the web app's fonts/layout; fixed a
-Sales by Rep screen whose filter panel and stat cards were frozen above
-the list (now all scrolls together, plus a new donut chart); and traced +
-fixed a real `sales_transactions.item_description` data gap (a specific
-missing product name led to finding the backfill migration's positional
-match had silently drifted for ~26% of rows — a second migration matching
-on customer+invoice+amount instead brought real-world coverage from 74%
-to 98.7%). Every mobile code change was handed off as a git bundle and
-merged locally by the user — **this sandbox has no GitHub push access**,
-same constraint as the earlier session above (fetch-only; every round
-this session, too, was `git bundle` + handoff instructions, never a
-direct push). **Confirm the latest mobile bundle from that handoff
-(`gp-hide-zero-ink-row.bundle` plus its own conflict-resolution follow-up)
-has actually been merged AND rebuilt on-device before assuming any of
-item 79's Cost Sheet GP work is live** — bundle delivery and a real
-device build are two separate steps in this workflow, and this file can't
-confirm the second one on its own.
+Last updated: 22 August 2026 (session: a separate Cowork chat, web-only —
+`apps/web` — building an entirely new surface, the Customer Portal
+(`/portal/*`, item 80). Distinct from, and non-overlapping with, both
+earlier sessions this file already describes: item 79's mobile Cost Sheet
+GP work (**still not confirmed on-device-rebuilt** — see that item) and
+items 73-78's BOM Master work (**`supabase-bom-template-line-
+alternatives-dedupe-migration.sql` and `supabase-bom-templates-sort-
+order-migration.sql` still not confirmed run**). Neither of those is
+touched by this session — see item 80 below for what actually changed,
+and OPERATIONS.md section 8 for the exact setup checklist to bring the
+Customer Portal live (nothing in it is live yet — see item 80's own
+"not yet done" list).
 
 This file exists so a new chat session (or a new contributor) can pick up this
 project without re-deriving context. Read this before making changes.
@@ -2509,3 +2483,132 @@ order:
       pass after each merge was always the user's own next step, same as
       it remains for the final round of this item's work (see the
       top-of-file note above item 79 for exactly which bundle that is).
+
+80. **Built the Customer Portal (`/portal/*`) from scratch** — a strictly
+    invite-only ordering site for the Apple-format retail chains (Aptronix,
+    Unicorn, iMagine, etc. — confirmed as the real store operators from
+    `Apple_LFG_Sites_Cleaned.xlsx`'s Store Master tab) who order two
+    signage products from MMDI, GPX04 (Tactical Sign) and GPX05
+    (Compatibility Sign). Scoped via four clarifying questions before any
+    code: (1) one login per retail CHAIN, not per individual store — an
+    account picks which of its own stores an order is for; (2) design
+    approval happens before payment, not after; (3) Razorpay as the
+    payment gateway; (4) served at `app.mmdi.in/portal`, not a separate
+    subdomain. New SQL file: `supabase-customer-portal-schema.sql`
+    (companies, stores, products, orders, order items, order files,
+    approvals, plus the trigger/role changes below) — **not yet run in
+    production.**
+    - **Why a new `profiles.role = 'portal'`, not `viewer`.** Every
+      existing table's role-based RLS (`supabase-role-based-rls-
+      migration.sql`) grants SELECT to any of admin/editor/viewer — so a
+      portal account with the default 'viewer' role would read every
+      customer/job-order/machine/raw-material record in the system. The
+      new 'portal' role is deliberately never added to any of those 24
+      tables' policies, so a portal account gets zero rows from internal
+      tables with no changes needed to a single existing policy; its own
+      access is scoped entirely by the new portal_* tables' own RLS
+      (company-ownership only, via a `portal_company_id()` security-
+      definer function, same pattern as `user_role()`).
+    - **Why the signup-domain trigger needed changing.**
+      `supabase-restrict-signup-domain-migration.sql`'s trigger blocks
+      creating ANY `auth.users` row whose email isn't `@mmdi.in` —
+      including one an admin creates by hand from the dashboard. Without a
+      change, a retail chain's real email literally cannot get an
+      account. Fix: a new `portal_invited_emails` staff-only allowlist —
+      an admin inserts the exact email there first (via the new admin
+      UI), then creates the matching Supabase Auth user for that exact
+      email as usual; the trigger permits that one email through, and a
+      replacement `handle_new_user()` recognises the match and
+      auto-creates `profiles.role='portal'` + the linked `portal_users`
+      row instead of falling back to the normal 'viewer' path.
+      Self-registration (the `/login` page's "Register" tab) is
+      untouched — still `@mmdi.in`-only, never portal accounts.
+    - **Files never sit on this server.** Every design proof, customer
+      reference file, and product preview image moves through Cloudflare
+      R2 via presigned PUT (upload) / GET (download) — same pattern
+      `installation-photos/upload-url` established, extended here with
+      the app's first *reusable* presigned-PUT route (parameterised by
+      `kind`: `reference` from the customer, `proof` from staff, `other`)
+      and its first presigned-PUT for a non-photo use (product preview
+      images, staff-only, pinned to image content types). Bytes never
+      pass through a Vercel function — matters even more here than for a
+      device photo, since a customer's reference artwork or an MMDI
+      design proof can be a heavy PSD/AI/TIFF file.
+    - **Payment: Razorpay, verified two independent ways.** The browser's
+      Checkout.js `handler` callback calls
+      `/api/portal/orders/[id]/razorpay-verify` immediately on success
+      (recomputes the HMAC signature server-side against
+      `RAZORPAY_KEY_SECRET` — this is verifying a signature only Razorpay
+      could have produced, not "trusting the client"); a
+      `/api/portal/razorpay-webhook` route is the durable fallback if the
+      browser tab closes before that fires. Both converge on the same
+      idempotent `markOrderPaid()` helper, so whichever lands first wins
+      and the second is a harmless no-op. The webhook is the one place in
+      this codebase that uses the Supabase **service-role** key (no user
+      session exists for a server-to-server webhook call to authenticate
+      as) — see `src/lib/supabase-admin.ts`'s header comment; every other
+      portal route runs as the caller's own session, RLS-scoped like
+      everything else in this app. RLS itself also blocks a portal
+      customer from ever writing `payment_status` directly (the
+      `portal_orders_update_customer` policy's `WITH CHECK` requires it
+      stay `'unpaid'`) — payment can only ever be marked paid through the
+      two signature-verified paths above.
+    - **State machine split between customer and staff actions**, each on
+      its own route rather than one shared "set status" endpoint:
+      customer-side `approve`/`request-revision` (only legal from
+      `proof_uploaded`/`revision_requested`, logs to the new
+      `portal_order_approvals` append-only table); staff-side
+      `publish-proof` (uploads the file row + bumps
+      `current_revision_number` + flips status to `proof_uploaded` as one
+      request, so the revision counter can't drift from the file it's
+      attached to) and `status` (`in_production` only once
+      approved-and-paid, `completed` only from `in_production`,
+      `cancelled` from most states).
+    - **Staff order review reuses the customer's own page.** Deliberately
+      did NOT build a separate admin order-detail view — `/portal/orders/
+      [id]` (via `OrderDetailClient.tsx`) renders the staff-only upload-
+      proof/status controls whenever the signed-in user is admin/editor,
+      alongside everything a customer sees. The internal `Customer
+      Portal` workspace (`/workspaces/customer-portal`, added to the
+      Customers nav section) is 3 tabs — Companies & Stores, Products,
+      Orders — and its Orders tab just links straight into that same
+      page rather than duplicating order UI.
+    - **Validated the schema + RLS against a real local Postgres**
+      (`@electric-sql/pglite`, same tool this project has used for every
+      prior migration) before handoff: confirmed an invited email gets
+      routed to `role='portal'` + auto-linked to the right company, a
+      non-invited external email is rejected, `@mmdi.in` signup is
+      unaffected, a portal account gets zero rows from an internal table,
+      cross-company isolation holds both directions, a portal customer
+      can't upload a `proof`-kind file or jump an order straight to
+      `in_production`, and staff (admin) sees everything. `npx tsc
+      --noEmit` and `npx eslint .` both clean on every new/changed file
+      (the handful of pre-existing lint errors elsewhere in the repo —
+      `src/app/account/page.tsx`, `src/app/workspaces/people/page.tsx` —
+      predate this session and weren't touched by it). A real `next
+      build` still isn't reliably runnable in this kind of sandbox — this
+      session hit a different failure than item 72's ARM64 "Bus error"
+      (no network path to fonts.googleapis.com for `next/font`, so
+      `layout.tsx`'s Roboto import fails at build time), reinforcing the
+      same existing note in "Current state" above: someone should run a
+      real `next build` outside a sandbox before trusting a route count,
+      here or anywhere else in this file.
+    - **What's NOT yet done** (this is a freshly-built feature, not yet
+      live): `supabase-customer-portal-schema.sql` not yet run in
+      production; `SUPABASE_SERVICE_ROLE_KEY` / `RAZORPAY_KEY_ID` /
+      `RAZORPAY_KEY_SECRET` / `RAZORPAY_WEBHOOK_SECRET` not yet set in
+      Vercel; Razorpay account not yet created; the Razorpay webhook not
+      yet registered; no company/store/product data seeded yet (GPX04/
+      GPX05 don't exist as rows until someone creates them via the new
+      Companies/Products admin UI); no real end-to-end order/payment test
+      run yet — see OPERATIONS.md section 8 for the exact setup order.
+      Smaller, non-blocking gaps for later: no customer-initiated order
+      cancellation (contact MMDI instead, by design for v1); no automated
+      matching of `Apple_LFG_Sites_Cleaned.xlsx`'s 154 stores to the new
+      `portal_company_stores` table (deliberately manual — auto-grouping
+      store names into the right retail chain risked getting it wrong
+      silently); no branded GST tax-invoice PDF yet (payment confirmation
+      is inline on the order page only); staff has no dedicated
+      "impersonate this customer" preview mode, just their own admin
+      session on the same pages a customer sees; failed/refunded payments
+      are a manual reconciliation today, not a built flow.
