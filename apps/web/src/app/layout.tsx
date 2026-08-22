@@ -24,6 +24,7 @@ import { AppShell } from "@/components/AppShell";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
 import { InstallPrompt } from "@/components/InstallPrompt";
 import { IosInstallHint } from "@/components/IosInstallHint";
+import { getOnPortalHost } from "@/lib/portal-host-server";
 
 export const metadata: Metadata = {
   title: "MMDI ONE — Product Design System",
@@ -58,17 +59,34 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Whether this request came in on portal.mmdi.in -- passed down so
+  // AppShell can skip its own sidebar/topnav chrome there. AppShell can't
+  // tell this on its own: it's a Client Component, and the customer
+  // portal's whole point is that its pages render at clean, unprefixed
+  // paths on this host (portal.mmdi.in/, not portal.mmdi.in/portal) via a
+  // middleware rewrite that's deliberately invisible to the browser --
+  // usePathname() there returns "/", identical to the main app's own
+  // static home page, so pathname alone can't distinguish them. Reading
+  // the request host here (next/headers) is the only reliable way, and
+  // since this is the ONE layout every route in the app shares, doing it
+  // here does mean every route now renders dynamically instead of some of
+  // them being statically prerendered -- a deliberate, small trade-off:
+  // correctness (no customer-facing page can ever render wrapped in the
+  // internal staff sidebar) outweighs the prerendering win for an
+  // internal tool at this traffic scale.
+  const onPortalHost = await getOnPortalHost();
+
   return (
     <html lang="en" className={`h-full antialiased ${roboto.variable}`}>
       <body className="min-h-full flex flex-col">
         <ThemeProvider>
           <ToastProvider>
-            <AppShell>{children}</AppShell>
+            <AppShell onPortalHost={onPortalHost}>{children}</AppShell>
             <ServiceWorkerRegister />
             <InstallPrompt />
             <IosInstallHint />
