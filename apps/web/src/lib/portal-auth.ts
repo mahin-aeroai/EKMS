@@ -1,3 +1,4 @@
+import { cache } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServerSupabaseClient } from "./supabase-server";
 
@@ -13,6 +14,18 @@ import { createServerSupabaseClient } from "./supabase-server";
  * — see supabase-middleware.ts's comment on why staff aren't blocked from
  * this surface). Callers should treat null as "render the signed-out /
  * not-a-portal-account state", not throw.
+ *
+ * Wrapped in React's cache() -- both the layout AND the page for every
+ * /portal/* route call this independently (App Router gives layouts no way
+ * to pass fetched data down into the page it wraps), which used to mean two
+ * full round trips (auth.getUser() + a portal_users query, each) for a
+ * single request. cache() memoizes per-request by arguments; every real
+ * call site below invokes this with no arguments, so the second and third
+ * calls in the same request resolve instantly from the first call's result
+ * instead of hitting Supabase again. This matters most right after sign-in,
+ * where these calls stack on top of the auth checks middleware already ran
+ * -- shaving round trips here is what keeps that combined chain from
+ * running long enough to fail outright.
  */
 export interface PortalIdentity {
   userId: string;
@@ -22,7 +35,7 @@ export interface PortalIdentity {
   companyName: string;
 }
 
-export async function getPortalIdentity(
+export const getPortalIdentity = cache(async function getPortalIdentity(
   supabase?: SupabaseClient
 ): Promise<PortalIdentity | null> {
   const client = supabase ?? (await createServerSupabaseClient());
@@ -52,4 +65,4 @@ export async function getPortalIdentity(
     companyId: data.company_id as string,
     companyName: (company as { name?: string } | null)?.name ?? "",
   };
-}
+});
