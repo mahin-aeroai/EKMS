@@ -17,8 +17,10 @@ Master, Rate Card, and per-job cost calculation against real raw material/work
 centre pricing) for the finished-goods product line, an Estimate Builder that
 generates versioned, GST/HSN-ready customer quote PDFs from contract rate cards,
 past sales history, or fully custom line items, a searchable archive of 333
-real site-survey PDFs backed by Cloudflare R2, and an installation-report capture
-flow spanning both the web app and a native iOS app. The web app is installable as
+real site-survey PDFs backed by Cloudflare R2, an installation-report capture
+flow spanning both the web app and a native iOS app, and a separate invite-only
+Customer Portal (`/portal`) where MMDI's retail-chain customers place, review,
+approve, and pay for GPX04/GPX05 signage orders online. The web app is installable as
 a PWA on iOS and Android.
 
 **For a full status report — what's built, what's wired to real data, known gaps,
@@ -121,6 +123,21 @@ supabase-route.ts` accepts either).
   `quotations`; `cut-file-tool` and `installation-report` run entirely client-side
   (canvas/PDF work with no server round-trip for the files themselves). See
   `PROJECT_STATUS.md` for the full build history of each.
+- `src/app/portal/*` — the **Customer Portal**, a separate invite-only
+  ordering site at `/portal` for Apple-format retail chains (Aptronix,
+  Unicorn, iMagine, etc.) ordering GPX04/GPX05 signage: browse products,
+  place an order per store location, exchange design-proof/reference
+  files via Cloudflare R2 (never through this server), approve or request
+  a revision, then pay online via Razorpay once approved. Its own login
+  (`/portal/login`), its own compact layout (no admin sidebar), and its
+  own `profiles.role = 'portal'` — deliberately kept out of every
+  internal table's RLS, so a portal account can never read normal
+  business data. Staff manage companies/stores/products from
+  `/workspaces/customer-portal`, but review/approve/upload-proof on the
+  exact same `/portal/orders/[id]` page a customer sees. Schema:
+  `supabase-customer-portal-schema.sql`; full design rationale in that
+  file's header comment and `PROJECT_STATUS.md` item 80; setup checklist
+  in `OPERATIONS.md` section 8.
 - `src/app/api/ai-copilot/route.ts` — the AI Copilot's backend: Claude tool use
   grounded in live Supabase data, 19 tools including Gmail `search_email` /
   `draft_email`. Every route (this one included) authenticates via

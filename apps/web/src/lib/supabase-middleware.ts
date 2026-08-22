@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login"];
+const PUBLIC_PATHS = ["/login", "/portal/login"];
 
 function isPublicPath(pathname: string) {
   return (
@@ -10,6 +10,18 @@ function isPublicPath(pathname: string) {
     pathname.startsWith("/favicon") ||
     pathname.startsWith("/public")
   );
+}
+
+/**
+ * The customer portal (/portal/*) is a completely separate, invite-only
+ * surface from the internal admin/editor/viewer app -- see
+ * supabase-customer-portal-schema.sql's header comment for the full
+ * reasoning. Same Supabase project/session mechanics (cookie-based auth,
+ * same middleware refreshing it), but its own login page and its own
+ * post-login home.
+ */
+function isPortalPath(pathname: string) {
+  return pathname.startsWith("/portal");
 }
 
 /**
@@ -70,10 +82,12 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const { pathname } = request.nextUrl;
+  const portalPath = isPortalPath(pathname);
+  const loginPath = portalPath ? "/portal/login" : "/login";
 
   if (!user && !isPublicPath(pathname)) {
     const loginUrl = request.nextUrl.clone();
-    loginUrl.pathname = "/login";
+    loginUrl.pathname = loginPath;
     loginUrl.searchParams.set("redirectTo", pathname);
     return NextResponse.redirect(loginUrl);
   }
@@ -88,14 +102,35 @@ export async function updateSession(request: NextRequest) {
   // src/app/login/page.tsx) only runs if the person actually goes through
   // that page. getAuthenticatorAssuranceLevel reads the current session's
   // JWT claims (no extra network round trip beyond the getUser() above).
+  // Portal (customer) accounts are never given an authenticator to enroll,
+  // so nextLevel never diverges from currentLevel for them and this never
+  // fires in practice — left path-aware anyway so it degrades correctly if
+  // that ever changes.
   if (user && !isPublicPath(pathname)) {
     const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
     if (aal && aal.nextLevel === "aal2" && aal.nextLevel !== aal.currentLevel) {
       const loginUrl = request.nextUrl.clone();
-      loginUrl.pathname = "/login";
+      loginUrl.pathname = loginPath;
       loginUrl.searchParams.set("redirectTo", pathname);
       loginUrl.searchParams.set("mfa", "1");
       return NextResponse.redirect(loginUrl);
+    }
+  }
+
+  // Keep the two surfaces apart: a portal (customer) account that somehow
+  // navigates to an internal URL gets sent back to their own home instead
+  // of rendering an internal page shell with no data (RLS already returns
+  // zero rows for them there — this is about not leaking the internal
+  // app's structure/UI to an external account, not the actual security
+  // boundary). Staff accounts are deliberately NOT blocked from visiting
+  // /portal/* — useful for previewing exactly what a customer sees.
+  if (user && !isPublicPath(pathname)) {
+    const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+    if (profile?.role === "portal" && !portalPath) {
+      const portalHome = request.nextUrl.clone();
+      portalHome.pathname = "/portal";
+      portalHome.search = "";
+      return NextResponse.redirect(portalHome);
     }
   }
 

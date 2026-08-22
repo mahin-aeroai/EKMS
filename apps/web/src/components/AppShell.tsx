@@ -40,6 +40,7 @@ import {
   Layers,
   PackageCheck,
   Ship,
+  Store,
 } from "lucide-react";
 import { Sidebar, type SidebarSection } from "@/components/ui/Sidebar";
 import { TopNav } from "@/components/ui/TopNav";
@@ -109,6 +110,7 @@ export const NAV: SidebarSection[] = [
       { id: "crm", label: "CRM", icon: <Users size={16} />, href: "/workspaces/crm" },
       { id: "contracts", label: "Contracts", icon: <FileSignature size={16} />, href: "/workspaces/contracts" },
       { id: "quotations", label: "Quotations", icon: <FileText size={16} />, href: "/workspaces/quotations" },
+      { id: "customer-portal", label: "Customer Portal", icon: <Store size={16} />, href: "/workspaces/customer-portal" },
     ],
   },
   {

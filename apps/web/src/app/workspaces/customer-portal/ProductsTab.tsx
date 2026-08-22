@@ -1,0 +1,255 @@
+"use client";
+
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { ImageOff, Plus, UploadCloud } from "lucide-react";
+import { supabase } from "@/lib/supabase";
+import { Button } from "@/components/ui/Button";
+import { Badge } from "@/components/ui/Badge";
+import type { PortalProductRow } from "@mmdi/shared/rows";
+
+async function authHeaders() {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  return { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token ?? ""}` };
+}
+
+export function ProductsTab() {
+  const [products, setProducts] = useState<PortalProductRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showNew, setShowNew] = useState(false);
+
+  useEffect(() => {
+    supabase
+      .from("portal_products")
+      .select("*")
+      .order("code")
+      .then(({ data }) => {
+        setProducts((data ?? []) as PortalProductRow[]);
+        setLoading(false);
+      });
+  }, []);
+
+  if (loading) return <p className="text-sm text-ink-muted">Loading…</p>;
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold text-ink">Catalog ({products.length})</p>
+        <Button size="sm" variant="secondary" onClick={() => setShowNew((v) => !v)}>
+          <Plus size={14} /> New product
+        </Button>
+      </div>
+
+      {showNew && (
+        <ProductForm
+          onSaved={(p) => {
+            setProducts((prev) => [...prev, p].sort((a, b) => a.code.localeCompare(b.code)));
+            setShowNew(false);
+          }}
+        />
+      )}
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {products.map((p) => (
+          <ProductCard key={p.id} product={p} onUpdated={(updated) => setProducts((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ProductForm({ onSaved }: { onSaved: (product: PortalProductRow) => void }) {
+  const [code, setCode] = useState("");
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [unitPrice, setUnitPrice] = useState("");
+  const [gstPercent, setGstPercent] = useState("18");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!code.trim() || !name.trim()) {
+      setError("Code and name are required.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    const { data, error: insertError } = await supabase
+      .from("portal_products")
+      .insert({
+        code: code.trim().toUpperCase(),
+        name: name.trim(),
+        description: description || null,
+        unit_price: parseFloat(unitPrice) || 0,
+        gst_percent: parseFloat(gstPercent) || 0,
+      })
+      .select()
+      .single();
+    setSaving(false);
+    if (insertError) {
+      setError(insertError.message);
+      return;
+    }
+    onSaved(data as PortalProductRow);
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="flex flex-col gap-2 rounded-md border border-line bg-surface-sunken p-3">
+      <div className="grid grid-cols-2 gap-2">
+        <input
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          placeholder="Code (e.g. GPX04)"
+          className="rounded-md border border-line-strong bg-surface px-3 py-1.5 text-sm text-ink focus:border-primary focus:outline-none"
+        />
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Name (e.g. Tactical Sign)"
+          className="rounded-md border border-line-strong bg-surface px-3 py-1.5 text-sm text-ink focus:border-primary focus:outline-none"
+        />
+      </div>
+      <input
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        placeholder="Description (optional)"
+        className="rounded-md border border-line-strong bg-surface px-3 py-1.5 text-sm text-ink focus:border-primary focus:outline-none"
+      />
+      <div className="grid grid-cols-2 gap-2">
+        <input
+          value={unitPrice}
+          onChange={(e) => setUnitPrice(e.target.value)}
+          placeholder="Unit price (₹)"
+          type="number"
+          className="rounded-md border border-line-strong bg-surface px-3 py-1.5 text-sm text-ink focus:border-primary focus:outline-none"
+        />
+        <input
+          value={gstPercent}
+          onChange={(e) => setGstPercent(e.target.value)}
+          placeholder="GST %"
+          type="number"
+          className="rounded-md border border-line-strong bg-surface px-3 py-1.5 text-sm text-ink focus:border-primary focus:outline-none"
+        />
+      </div>
+      {error && <p className="text-xs text-danger">{error}</p>}
+      <Button size="sm" type="submit" loading={saving} className="w-fit">
+        Create product
+      </Button>
+    </form>
+  );
+}
+
+function ProductCard({ product, onUpdated }: { product: PortalProductRow; onUpdated: (product: PortalProductRow) => void }) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [unitPrice, setUnitPrice] = useState(String(product.unit_price));
+  const [active, setActive] = useState(product.active);
+  const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!product.preview_image_path) return;
+    fetch(`/api/portal/products/${product.id}/preview-url`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => data && setPreviewUrl(data.url));
+  }, [product.id, product.preview_image_path]);
+
+  async function handleImageChange(file: File) {
+    setUploading(true);
+    const headers = await authHeaders();
+    const uploadRes = await fetch(`/api/portal/products/${product.id}/preview-upload-url`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ content_type: file.type }),
+    });
+    const uploadData = await uploadRes.json();
+    if (!uploadRes.ok) {
+      setUploading(false);
+      return;
+    }
+    await fetch(uploadData.url, { method: "PUT", headers: { "Content-Type": file.type }, body: file });
+
+    const { data, error } = await supabase
+      .from("portal_products")
+      .update({ preview_image_path: uploadData.relative_path, version: product.version + 1 })
+      .eq("id", product.id)
+      .select()
+      .single();
+    setUploading(false);
+    if (!error && data) {
+      onUpdated(data as PortalProductRow);
+      const viewRes = await fetch(`/api/portal/products/${product.id}/preview-url`);
+      if (viewRes.ok) setPreviewUrl((await viewRes.json()).url);
+    }
+  }
+
+  async function handleSaveDetails() {
+    setSaving(true);
+    const { data, error } = await supabase
+      .from("portal_products")
+      .update({ unit_price: parseFloat(unitPrice) || 0, active })
+      .eq("id", product.id)
+      .select()
+      .single();
+    setSaving(false);
+    if (!error && data) onUpdated(data as PortalProductRow);
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-line bg-surface p-3">
+      <div className="relative">
+        {previewUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element -- short-lived signed R2 URL
+          <img src={previewUrl} alt={product.name} className="h-32 w-full rounded-md object-cover" />
+        ) : (
+          <div className="flex h-32 w-full items-center justify-center rounded-md bg-surface-sunken text-ink-muted">
+            <ImageOff size={20} />
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+          className="absolute bottom-1 right-1 flex items-center gap-1 rounded-md bg-surface/90 px-2 py-1 text-xs font-medium text-ink shadow-1 hover:bg-surface"
+        >
+          <UploadCloud size={12} /> {uploading ? "Uploading…" : "Change"}
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handleImageChange(file);
+            e.target.value = "";
+          }}
+        />
+      </div>
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">{product.code}</p>
+        <p className="text-sm font-semibold text-ink">{product.name}</p>
+      </div>
+      <div className="flex items-center gap-2">
+        <input
+          value={unitPrice}
+          onChange={(e) => setUnitPrice(e.target.value)}
+          type="number"
+          className="w-24 rounded-md border border-line-strong bg-surface px-2 py-1 text-sm text-ink focus:border-primary focus:outline-none"
+        />
+        <span className="text-xs text-ink-muted">+ {product.gst_percent}% GST</span>
+      </div>
+      <label className="flex items-center gap-1.5 text-xs text-ink-secondary">
+        <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Active in catalog
+      </label>
+      <div className="flex items-center justify-between">
+        <Badge status={active ? "success" : "neutral"}>{active ? "Active" : "Hidden"}</Badge>
+        <Button size="sm" variant="secondary" onClick={handleSaveDetails} loading={saving}>
+          Save
+        </Button>
+      </div>
+    </div>
+  );
+}

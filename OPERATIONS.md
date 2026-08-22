@@ -150,10 +150,48 @@ it — treat it as the checklist before ever asking "do we have X."
 |---|---|---|---|
 | GitHub Personal Access Token (classic, `repo` scope) | Pushing from Srinivas's own machine | macOS Keychain (via `credential.helper osxkeychain`) | Generate at github.com/settings/tokens; rotate there if it stops working |
 | Supabase anon key | Web app client + mobile app | Vercel env vars + `apps/mobile/.env` | Safe to ship to clients — RLS is the real protection, not secrecy of this key |
-| Supabase service-role key | — | **Nowhere in this codebase, on purpose** | Never put this in an env var an app ships with; if ever needed for an admin script, keep it off any client bundle entirely |
+| Supabase service-role key | The Razorpay webhook route only (`/api/portal/razorpay-webhook`) | Vercel env vars only, as `SUPABASE_SERVICE_ROLE_KEY` | The ONE legitimate use in this codebase — see `src/lib/supabase-admin.ts`'s header comment for why: Razorpay calls that route directly with no user session for RLS to evaluate. Never referenced from any Client Component; every other route still uses the anon key + RLS. Get it from Supabase dashboard → Project Settings → API → `service_role` secret. |
 | `ANTHROPIC_API_KEY` | AI Copilot's server-side model calls | Vercel env vars only | Srinivas creates/rotates this directly in Vercel; the assistant never sees the raw key |
 | Google OAuth client ID/secret | Gmail search/draft in AI Copilot | Vercel env vars | Standard OAuth app credentials from Google Cloud Console |
+| `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET_NAME` | Every presigned-URL file route, including the Customer Portal's (design proofs, reference files, product preview images) | Vercel env vars | Already set up for LFG surveys/knowledge-files/installation-photos — the Customer Portal reuses the same bucket + credentials, just new key prefixes (`portal-orders/...`, `portal-products/...`) |
+| `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | Creating Razorpay Orders + verifying the Checkout.js success signature | Vercel env vars (`KEY_ID` is also sent to the browser to open Checkout — that's expected, only `KEY_SECRET` is sensitive) | From the Razorpay Dashboard → Settings → API Keys. Use test-mode keys until go-live, then switch to live-mode keys (same env var names) |
+| `RAZORPAY_WEBHOOK_SECRET` | Verifying the Razorpay webhook's signature | Vercel env vars only | Set when creating the webhook (Razorpay Dashboard → Settings → Webhooks → add `https://app.mmdi.in/api/portal/razorpay-webhook`, subscribe to `payment.captured`, set a secret) — paste that same secret here |
 | Apple Developer account | EAS local iOS builds | Srinivas's own Apple ID / Keychain, used implicitly by `eas build --local` | Individual enrollment — see section 5 for what that limits |
+
+---
+
+## 8. Customer Portal (`/portal/*`) — setup checklist
+
+New invite-only ordering site for Apple-format retail chains (GPX04/GPX05
+signage) — see `supabase-customer-portal-schema.sql`'s header comment for
+the full design and `PROJECT_STATUS.md` for the build history. First-time
+setup, in order:
+
+1. Run `supabase-customer-portal-schema.sql` in the Supabase SQL Editor
+   (after the role-based RLS migration, which it depends on).
+2. Add the credentials in section 6 above that don't already exist:
+   `SUPABASE_SERVICE_ROLE_KEY`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`,
+   `RAZORPAY_WEBHOOK_SECRET`. R2 vars are already set from earlier work.
+3. Set up the Razorpay webhook (Dashboard → Settings → Webhooks) pointing
+   at `https://app.mmdi.in/api/portal/razorpay-webhook`, event
+   `payment.captured`.
+4. Seed the two products: sign in as an admin, open **Customer Portal**
+   (under the Customers section in the sidebar) → Products tab → create
+   `GPX04` (Tactical Sign) and `GPX05` (Compatibility Sign) with real
+   prices, and upload each one's preview image.
+5. For each retail chain: Customer Portal → Companies & Stores tab →
+   create the company, add its store locations, then add a portal login
+   invite (email + optional contact name). **Then**, in the Supabase
+   dashboard (Authentication → Users → Add user), create the actual
+   account with that exact email and a temporary password — the invite
+   step alone doesn't create the login, it only allowlists that email
+   past the `@mmdi.in`-only signup restriction (see the schema file's
+   header comment for why both steps are needed). Share the email +
+   temporary password with the customer directly.
+6. Staff review/approve/upload-proof/status-change actions all happen on
+   the same order page a customer sees (`/portal/orders/[id]`) — reached
+   by clicking a row in Customer Portal → Orders, not a separate admin
+   view.
 
 **Rule of thumb:** if a task seems to need a credential, the answer is
 either "it's already configured where the table above says" or "it needs
