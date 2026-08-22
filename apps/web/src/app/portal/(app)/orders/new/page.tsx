@@ -207,21 +207,60 @@ function NewOrderForm() {
           const orderItemId = insertedItems[i]?.id;
           if (!item.designFile || !orderItemId) continue;
 
-          setProgress(`Uploading design file for ${productById(item.productId)?.code ?? "product"}…`);
+          const productLabel = productById(item.productId)?.code ?? "product";
+          const designFileLabel = `the design file for ${productLabel} (${store?.store_name ?? "this store"})`;
+
+          setProgress(`Uploading design file for ${productLabel}…`);
           const uploadRes = await fetch(`/api/portal/orders/${data.id}/files/upload-url`, {
             method: "POST",
             headers: authHeaders,
             body: JSON.stringify({ kind: "design", file_name: item.designFile.name, content_type: item.designFile.type || "application/pdf" }),
           });
           const uploadData = await uploadRes.json();
-          if (!uploadRes.ok) continue;
+          // Was silently `continue`-ing here before -- the order would get
+          // placed successfully but quietly missing its mandatory design
+          // PDF, with no error shown at all. This IS a mandatory file, so
+          // failing to even get an upload slot for it has to stop checkout
+          // and say so, same as any other failure in this loop.
+          if (!uploadRes.ok) {
+            throw new Error(
+              `Couldn't prepare an upload for ${designFileLabel}: ${uploadData.message || uploadData.error || "unknown error"}. ` +
+                `${createdOrders.length > 0 ? `${createdOrders.length} earlier order(s) in this checkout were already placed and are safe — see Orders. ` : ""}Try again.`
+            );
+          }
 
-          await fetch(uploadData.url, {
-            method: "PUT",
-            headers: { "Content-Type": item.designFile.type || "application/pdf" },
-            body: item.designFile,
-          });
-          await supabase.from("portal_order_files").insert({
+          // Uploads straight to Cloudflare R2, not through our own server —
+          // a *different* origin than portal.mmdi.in, so this is the one
+          // request in this whole flow that a cross-origin (CORS) block
+          // would actually surface as a raw, unhelpful browser network
+          // error ("Load failed" on Safari, "Failed to fetch" on Chrome)
+          // instead of a proper HTTP error status. Checking putRes.ok
+          // catches an R2-side rejection (e.g. an expired presigned URL);
+          // the catch block below is what catches the network-level
+          // failure and gives it a message that actually says what to look at.
+          let putRes: Response;
+          try {
+            putRes = await fetch(uploadData.url, {
+              method: "PUT",
+              headers: { "Content-Type": item.designFile.type || "application/pdf" },
+              body: item.designFile,
+            });
+          } catch {
+            throw new Error(
+              `Couldn't upload ${designFileLabel} — the connection to file storage failed (browser said "Load failed"/"Failed to fetch"). ` +
+                `This is usually either a network hiccup (try again) or, if it keeps happening from this device every time, MMDI should check ` +
+                `that the file storage's CORS settings allow uploads from portal.mmdi.in specifically. ` +
+                `${createdOrders.length > 0 ? `${createdOrders.length} earlier order(s) in this checkout were already placed and are safe — see Orders.` : ""}`
+            );
+          }
+          if (!putRes.ok) {
+            throw new Error(
+              `Couldn't upload ${designFileLabel} — file storage rejected the upload (status ${putRes.status}). ` +
+                `${createdOrders.length > 0 ? `${createdOrders.length} earlier order(s) in this checkout were already placed and are safe — see Orders. ` : ""}Try again.`
+            );
+          }
+
+          const { error: fileInsertError } = await supabase.from("portal_order_files").insert({
             order_id: data.id,
             order_item_id: orderItemId,
             uploaded_by_role: "customer",
@@ -231,6 +270,12 @@ function NewOrderForm() {
             file_size: item.designFile.size,
             kind: "design",
           });
+          if (fileInsertError) {
+            throw new Error(
+              `Uploaded ${designFileLabel}, but couldn't attach it to the order: ${fileInsertError.message}. ` +
+                `${createdOrders.length > 0 ? `${createdOrders.length} earlier order(s) in this checkout were already placed and are safe — see Orders.` : ""}`
+            );
+          }
         }
       }
 
