@@ -171,8 +171,10 @@ setup, in order:
    (after the role-based RLS migration, which it depends on). If the
    portal was already set up before the multi-store checkout / pay-at-
    checkout / per-store GSTN feature shipped, also run
-   `supabase-portal-checkout-migration.sql` once — see its own header
-   comment for exactly what it changes.
+   `supabase-portal-checkout-migration.sql` once, and if it was set up
+   before customer self-service store editing shipped, also run
+   `supabase-portal-store-self-service-migration.sql` once — see each
+   file's own header comment for exactly what it changes.
 2. Add the credentials in section 6 above that don't already exist:
    `SUPABASE_SERVICE_ROLE_KEY`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`,
    `RAZORPAY_WEBHOOK_SECRET`. R2 vars are already set from earlier work.
@@ -205,7 +207,11 @@ setup, in order:
    delivery address and GSTIN** (an "Add store"/edit row shows a "Needs
    address/GSTIN" warning until both are set; it's not enforced at the
    database level, but a customer literally cannot select that store when
-   placing an order until it's complete — see point 9 below), then fill in
+   placing an order until it's complete — see point 9 below). This is a
+   one-time convenience, not the only way it ever gets fixed: the customer
+   can also fill in a missing address/GSTIN themselves from the portal's
+   Account page (see 8c below) — no need to do this step perfectly before
+   inviting them. Then fill in
    "Send invite" (email + optional contact name) and submit. This both
    allowlists the email past the `@mmdi.in`-only signup restriction and
    creates the account — no password is generated or shown to staff; the
@@ -277,6 +283,27 @@ for a single order.
 A store missing its delivery address or GSTIN can't be selected when
 placing an order (enforced both in the store picker and server-side in
 `POST /api/portal/orders`) — see point 6 above for filling those in.
+
+### 8c. Customer self-service store edits, address history, frozen order addresses
+
+A customer can update their own store's delivery address/city/GSTIN
+directly from the portal's Account page ("Your stores" → Edit) — applies
+immediately, no MMDI approval step. Every change to a store's
+address/city/GSTIN, from either side (this self-service form or staff's
+own CompaniesTab edit), is written automatically to
+`portal_store_address_history` by a database trigger — nothing in the app
+code has to remember to log it — and both the customer (Account page →
+"History") and staff (CompaniesTab) can see the full trail of who changed
+what and when.
+
+Placing an order snapshots the store's address/city/GSTIN onto the order
+itself (`portal_orders.delivery_address/delivery_city/delivery_gstin`) at
+that moment and freezes it there — editing a store's address afterward
+(by either side) never changes what an already-placed order shows on
+`/portal/orders/[id]`. This is enforced at the database level (a `revoke
+update` on those three columns for the `authenticated` role, mirroring how
+`payment_status`/`razorpay_payment_id`/`paid_at` are already frozen after
+payment), not just by the UI not offering an edit button.
 
 ---
 

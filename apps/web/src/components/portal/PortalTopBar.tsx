@@ -39,7 +39,7 @@ export function PortalTopBar({
 
   return (
     <header className="border-b border-line bg-surface">
-      <div className="mx-auto flex max-w-4xl flex-col gap-2.5 px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+      <div className="mx-auto flex max-w-4xl flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
         <div className="flex items-center gap-3">
           <Link href={portalHref("/", onPortalHost)} className="flex items-center gap-2">
             {/*
@@ -72,7 +72,7 @@ export function PortalTopBar({
                 key={href}
                 href={resolvedHref}
                 className={cn(
-                  "flex items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors",
+                  "flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
                   active ? "bg-primary text-on-brand" : "text-ink-secondary hover:bg-surface-sunken hover:text-ink"
                 )}
               >
@@ -91,7 +91,7 @@ export function PortalTopBar({
           </Link>
           <button
             onClick={handleSignOut}
-            className="flex items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-sm font-medium text-ink-secondary transition-colors hover:bg-surface-sunken hover:text-ink"
+            className="flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium text-ink-secondary transition-colors hover:bg-surface-sunken hover:text-ink"
             aria-label="Sign out"
           >
             <LogOut size={14} />

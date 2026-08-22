@@ -228,6 +228,22 @@ export function OrderDetailClient({
       </div>
 
       <div className="rounded-lg border border-line bg-surface p-4">
+        <p className="mb-2 text-sm font-semibold text-ink">Delivery</p>
+        {/*
+          order.delivery_address/city/gstin, NOT store.address/gstin --
+          this is a snapshot frozen at the moment the order was placed
+          (see the migration comment on portal_orders). The store's own
+          address can be edited later (by the customer or MMDI staff) and
+          must never retroactively change what an already-placed order
+          shows.
+        */}
+        <p className="text-sm text-ink">{store?.store_name ?? "—"}</p>
+        <p className="text-sm text-ink-secondary">{order.delivery_address || "No delivery address on file for this order."}</p>
+        {order.delivery_city && <p className="text-sm text-ink-secondary">{order.delivery_city}</p>}
+        {order.delivery_gstin && <p className="mt-1 text-xs text-ink-muted">GSTIN: {order.delivery_gstin}</p>}
+      </div>
+
+      <div className="rounded-lg border border-line bg-surface p-4">
         <p className="mb-2 text-sm font-semibold text-ink">Items</p>
         <table className="w-full text-left text-sm">
           <thead className="text-xs uppercase tracking-wide text-ink-muted">

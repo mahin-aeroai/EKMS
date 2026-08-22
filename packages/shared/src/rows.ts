@@ -1086,6 +1086,26 @@ export interface PortalCompanyStoreRow {
   active: boolean;
 }
 
+// One row per customer- or staff-made edit to a store's address/city/GSTIN
+// -- written automatically by a database trigger on portal_company_stores
+// (see supabase-portal-store-self-service-migration.sql), never inserted
+// directly by application code, so it can't be skipped or faked by
+// forgetting to call some "log this" helper from one of the two edit paths
+// (portal self-service, CompaniesTab staff edit).
+export interface PortalStoreAddressHistoryRow {
+  id: string;
+  store_id: string;
+  changed_at: string;
+  changed_by: string | null;
+  changed_by_role: "customer" | "staff" | null;
+  old_address: string | null;
+  new_address: string | null;
+  old_city: string | null;
+  new_city: string | null;
+  old_gstin: string | null;
+  new_gstin: string | null;
+}
+
 export interface PortalUserRow {
   id: string;
   company_id: string;
@@ -1119,6 +1139,16 @@ export interface PortalOrderRow {
   razorpay_order_id: string | null;
   razorpay_payment_id: string | null;
   paid_at: string | null;
+  // Snapshot of the store's address/city/GSTIN at the moment this order was
+  // placed -- deliberately NOT a live join to portal_company_stores. A
+  // store's address can be edited later (by the customer or MMDI staff);
+  // an already-placed order must keep showing the address it actually
+  // shipped against, not whatever the store record says today. Frozen
+  // after insert (see the REVOKE UPDATE next to these columns in the
+  // schema) -- nothing can change them once the order exists.
+  delivery_address: string | null;
+  delivery_city: string | null;
+  delivery_gstin: string | null;
   notes: string | null;
   admin_notes: string | null;
   current_revision_number: number;
