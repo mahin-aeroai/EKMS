@@ -155,45 +155,54 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // A user can be signed in at the password-only level (aal1) but have a
-  // verified authenticator app enrolled on their account, which requires
-  // stepping up to aal2 before they're treated as fully authenticated.
-  // Without this check, someone who enrolled MFA could just navigate
-  // straight to a protected URL right after entering their password,
-  // skipping the code prompt entirely and defeating the point of having
-  // enrolled — the login page's own MFA step-up (see beginMfaChallenge in
-  // src/app/login/page.tsx) only runs if the person actually goes through
-  // that page. getAuthenticatorAssuranceLevel reads the current session's
-  // JWT claims (no extra network round trip beyond the getUser() above).
-  // Portal (customer) accounts are never given an authenticator to enroll,
-  // so nextLevel never diverges from currentLevel for them and this never
-  // fires in practice — left path-aware anyway so it degrades correctly if
-  // that ever changes.
-  if (user && !isPublicPath(pathname)) {
-    const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
-    if (aal && aal.nextLevel === "aal2" && aal.nextLevel !== aal.currentLevel) {
-      const loginUrl = request.nextUrl.clone();
-      loginUrl.pathname = loginPath;
-      loginUrl.searchParams.set("redirectTo", incomingPathname);
-      loginUrl.searchParams.set("mfa", "1");
-      return NextResponse.redirect(loginUrl);
-    }
-  }
-
-  // Keep the two surfaces apart: a portal (customer) account that somehow
-  // navigates to an internal URL gets sent back to their own home instead
-  // of rendering an internal page shell with no data (RLS already returns
-  // zero rows for them there — this is about not leaking the internal
-  // app's structure/UI to an external account, not the actual security
-  // boundary). Staff accounts are deliberately NOT blocked from visiting
-  // /portal/* — useful for previewing exactly what a customer sees.
+  // Both checks below used to run as two separate blocks, each doing its
+  // own Supabase round trip (MFA assurance level, then profile role) --
+  // fetch the profile once here and let it decide which of the two checks
+  // actually applies, instead of always paying for both. This isn't just
+  // tidiness: stacked on top of getUser() above and everything a portal
+  // page's Server Components fetch afterward (see getPortalIdentity's
+  // comment in portal-auth.ts), every extra sequential round trip here
+  // adds to how long a signed-in request takes to resolve -- long enough,
+  // occasionally, to fail outright rather than render.
   if (user && !isPublicPath(pathname)) {
     const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
-    if (profile?.role === "portal" && !portalPath) {
-      const portalHome = request.nextUrl.clone();
-      portalHome.pathname = onPortalHost ? "/" : "/portal";
-      portalHome.search = "";
-      return NextResponse.redirect(portalHome);
+
+    // Keep the two surfaces apart: a portal (customer) account that somehow
+    // navigates to an internal URL gets sent back to their own home instead
+    // of rendering an internal page shell with no data (RLS already
+    // returns zero rows for them there — this is about not leaking the
+    // internal app's structure/UI to an external account, not the actual
+    // security boundary). Staff accounts are deliberately NOT blocked from
+    // visiting /portal/* — useful for previewing exactly what a customer
+    // sees.
+    if (profile?.role === "portal") {
+      if (!portalPath) {
+        const portalHome = request.nextUrl.clone();
+        portalHome.pathname = onPortalHost ? "/" : "/portal";
+        portalHome.search = "";
+        return NextResponse.redirect(portalHome);
+      }
+      // Portal (customer) accounts are never given an authenticator to
+      // enroll (see below) — skip the MFA round trip entirely for them
+      // rather than making it and finding out it never applies.
+    } else {
+      // A user can be signed in at the password-only level (aal1) but have
+      // a verified authenticator app enrolled on their account, which
+      // requires stepping up to aal2 before they're treated as fully
+      // authenticated. Without this check, someone who enrolled MFA could
+      // just navigate straight to a protected URL right after entering
+      // their password, skipping the code prompt entirely and defeating
+      // the point of having enrolled — the login page's own MFA step-up
+      // (see beginMfaChallenge in src/app/login/page.tsx) only runs if the
+      // person actually goes through that page.
+      const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+      if (aal && aal.nextLevel === "aal2" && aal.nextLevel !== aal.currentLevel) {
+        const loginUrl = request.nextUrl.clone();
+        loginUrl.pathname = loginPath;
+        loginUrl.searchParams.set("redirectTo", incomingPathname);
+        loginUrl.searchParams.set("mfa", "1");
+        return NextResponse.redirect(loginUrl);
+      }
     }
   }
 
