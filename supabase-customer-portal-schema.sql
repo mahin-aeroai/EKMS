@@ -86,6 +86,14 @@ create table if not exists public.portal_company_stores (
   store_name text not null,
   address text,
   city text,
+  -- Each store can carry its own GST registration (common for multi-state
+  -- retail chains — a company's stores in different states each have their
+  -- own GSTIN, distinct from portal_companies.gstin above which is the
+  -- billing-level one). Nullable here — required by the app before a
+  -- customer can place an order for this store, but not a hard NOT NULL:
+  -- existing seeded stores don't have it filled in yet. See
+  -- supabase-portal-checkout-migration.sql.
+  gstin text,
   -- Optional free-text link back to installation_report_stores.sfo_id
   -- (Apple_LFG_Sites_Cleaned.xlsx's "SFO ID" column) when this store is
   -- also one MMDI already does installation reports for — purely a
@@ -166,7 +174,11 @@ create table if not exists public.portal_orders (
   created_by uuid not null references auth.users(id),
   -- Design-approval workflow status. Payment is tracked separately below
   -- (payment_status) since "approved" and "paid" are independent facts —
-  -- this project's chosen flow is approve-then-pay, not pay-then-approve.
+  -- this project's chosen flow is pay-at-checkout: payment happens right
+  -- when the order is placed (status is still 'submitted'), independent
+  -- of the design-proof/approval steps that follow. See
+  -- supabase-portal-checkout-migration.sql for the RLS change that made
+  -- writing razorpay_order_id onto a 'submitted' order possible.
   status text not null default 'submitted' check (status in (
     'submitted', 'proof_uploaded', 'revision_requested', 'approved',
     'in_production', 'completed', 'cancelled'
@@ -221,18 +233,25 @@ create index if not exists portal_order_items_order_idx on public.portal_order_i
 create table if not exists public.portal_order_files (
   id uuid primary key default gen_random_uuid(),
   order_id uuid not null references public.portal_orders(id) on delete cascade,
+  -- Set for kind='design' (the customer's mandatory per-product artwork
+  -- PDF, uploaded at checkout) so it can be shown against the specific
+  -- line item it belongs to, not just loose on the order. Null for every
+  -- other kind — proofs and generic reference/other attachments stay
+  -- order-level, same as before.
+  order_item_id uuid references public.portal_order_items(id) on delete cascade,
   uploaded_by_role text not null check (uploaded_by_role in ('customer', 'staff')),
   uploaded_by uuid not null references auth.users(id),
   relative_path text not null,
   file_name text not null,
   file_size bigint,
-  kind text not null check (kind in ('reference', 'proof', 'other')),
+  kind text not null check (kind in ('reference', 'proof', 'other', 'design')),
   -- Set only for kind='proof' — which design round this file represents.
   revision_number integer,
   created_at timestamptz not null default now()
 );
 
 create index if not exists portal_order_files_order_idx on public.portal_order_files(order_id);
+create index if not exists portal_order_files_order_item_idx on public.portal_order_files(order_item_id);
 
 -- ============================================================
 -- STEP 9 — portal_order_approvals (append-only decision log)
@@ -540,17 +559,41 @@ create policy portal_orders_insert_staff on public.portal_orders
 -- /api/portal/orders/[id]/{approve,request-revision,razorpay-order}
 -- route code, same layered approach as installation-photos/upload-url's
 -- own comment about RLS not being able to express everything.
+-- 'submitted' is included below (both clauses) for pay-at-checkout: the
+-- razorpay-order / razorpay-combined-order routes write razorpay_order_id
+-- onto a brand-new order immediately, before any design-approval step, so
+-- a customer must be allowed to touch their own order while it's still
+-- freshly 'submitted' — not only once staff has moved it further along.
+--
+-- No payment_status condition here (there used to be one, requiring it
+-- stay 'unpaid' — that's wrong under pay-at-checkout: an order is normally
+-- ALREADY 'paid' by the time its design gets approved, and a status-only
+-- update carries payment_status over unchanged regardless of what it was,
+-- so requiring ='unpaid' on the resulting row would reject that completely
+-- legitimate approve/revision-request action). Preventing a customer from
+-- writing payment_status themselves is handled below by column-level
+-- GRANTs instead, not by a row-check here — the right tool for "this
+-- column must never be customer-writable, full stop", since RLS's
+-- WITH CHECK has no clean way to express "must equal whatever this column
+-- already was" (there's no old-vs-new comparison in a single expression).
 create policy portal_orders_update_customer on public.portal_orders
   for update to authenticated
   using (
     company_id = public.portal_company_id()
-    and status in ('proof_uploaded', 'revision_requested', 'approved')
+    and status in ('submitted', 'proof_uploaded', 'revision_requested', 'approved')
   )
   with check (
     company_id = public.portal_company_id()
-    and status in ('revision_requested', 'approved')
-    and payment_status = 'unpaid'
+    and status in ('submitted', 'revision_requested', 'approved')
   );
+
+-- Belt-and-suspenders alongside the policy above: even if a future policy
+-- change loosens the row-level check, these three columns are structurally
+-- off-limits to the authenticated role at the grant level — only
+-- markOrderPaid (portal-payments.ts), running as the service-role client
+-- in razorpay-verify/razorpay-webhook, can ever set them. Doesn't affect
+-- the service role itself (Supabase's service_role bypasses RLS/grants).
+revoke update (payment_status, razorpay_payment_id, paid_at) on public.portal_orders from authenticated;
 
 create policy portal_orders_update_staff on public.portal_orders
   for update to authenticated
@@ -604,14 +647,14 @@ create policy portal_order_files_select on public.portal_order_files
     or exists (select 1 from public.portal_orders o where o.id = order_id and o.company_id = public.portal_company_id())
   );
 
--- Customers may attach reference/other files to their own orders, never
--- a 'proof' (that's MMDI's design-proof upload, staff-only).
+-- Customers may attach reference/design/other files to their own orders,
+-- never a 'proof' (that's MMDI's design-proof upload, staff-only).
 create policy portal_order_files_insert_customer on public.portal_order_files
   for insert to authenticated
   with check (
     uploaded_by_role = 'customer'
     and uploaded_by = auth.uid()
-    and kind in ('reference', 'other')
+    and kind in ('reference', 'other', 'design')
     and exists (select 1 from public.portal_orders o where o.id = order_id and o.company_id = public.portal_company_id())
   );
 

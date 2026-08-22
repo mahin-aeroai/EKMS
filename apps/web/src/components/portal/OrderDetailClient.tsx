@@ -67,7 +67,13 @@ export function OrderDetailClient({
   // customer-only actions below all also check `portalUser` for that reason.
   const isCustomer = !!portalUser;
   const canDecide = isCustomer && (order.status === "proof_uploaded" || order.status === "revision_requested");
-  const canPay = isCustomer && order.status === "approved" && order.payment_status === "unpaid";
+  // Payment happens at checkout now (see NewOrderForm) — this button is
+  // the fallback for when that combined payment didn't complete (popup
+  // closed, connection dropped) and someone comes back to finish paying
+  // for just this one order. No longer gated on design approval — pay and
+  // design-approval are independent tracks, same as payment_status and
+  // status always were in the schema.
+  const canPay = isCustomer && order.payment_status === "unpaid" && order.status !== "cancelled";
 
   async function refresh() {
     router.refresh();
@@ -199,7 +205,9 @@ export function OrderDetailClient({
   }
 
   const proofFiles = files.filter((f) => f.kind === "proof");
-  const referenceFiles = files.filter((f) => f.kind !== "proof");
+  // 'design' files show inline against their own line item in the Items
+  // table above instead of in this generic list.
+  const referenceFiles = files.filter((f) => f.kind !== "proof" && f.kind !== "design");
   const latestProof = proofFiles[0];
 
   return (
@@ -231,17 +239,28 @@ export function OrderDetailClient({
             </tr>
           </thead>
           <tbody>
-            {items.map((item) => (
-              <tr key={item.id} className="border-t border-line">
-                <td className="py-1.5">
-                  <span className="font-medium text-ink">{item.product_code}</span>{" "}
-                  <span className="text-ink-secondary">{item.product_name}</span>
-                </td>
-                <td className="py-1.5 text-right text-ink-secondary">{item.quantity}</td>
-                <td className="py-1.5 text-right text-ink-secondary">₹{item.unit_price.toLocaleString("en-IN")}</td>
-                <td className="py-1.5 text-right text-ink-secondary">₹{item.line_total.toLocaleString("en-IN")}</td>
-              </tr>
-            ))}
+            {items.map((item) => {
+              const designFile = files.find((f) => f.kind === "design" && f.order_item_id === item.id);
+              return (
+                <tr key={item.id} className="border-t border-line">
+                  <td className="py-1.5">
+                    <span className="font-medium text-ink">{item.product_code}</span>{" "}
+                    <span className="text-ink-secondary">{item.product_name}</span>
+                    {designFile && (
+                      <button
+                        onClick={() => downloadFile(designFile.id)}
+                        className="mt-0.5 flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                      >
+                        <Download size={11} /> {designFile.file_name}
+                      </button>
+                    )}
+                  </td>
+                  <td className="py-1.5 text-right text-ink-secondary">{item.quantity}</td>
+                  <td className="py-1.5 text-right text-ink-secondary">₹{item.unit_price.toLocaleString("en-IN")}</td>
+                  <td className="py-1.5 text-right text-ink-secondary">₹{item.line_total.toLocaleString("en-IN")}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
         <div className="mt-3 flex flex-col items-end gap-0.5 text-sm">
@@ -308,7 +327,9 @@ export function OrderDetailClient({
         <div className="rounded-lg border border-line bg-surface p-4">
           <p className="mb-2 text-sm font-semibold text-ink">Payment</p>
           <p className="mb-3 text-sm text-ink-secondary">
-            Design approved — pay ₹{order.total_amount.toLocaleString("en-IN")} to move this into production.
+            {order.payment_status === "unpaid"
+              ? `Pay ₹${order.total_amount.toLocaleString("en-IN")} to finish placing this order.`
+              : ""}
           </p>
           <Button onClick={handlePay} loading={busy}>
             <CreditCard size={14} /> Pay now

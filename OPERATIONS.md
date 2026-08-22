@@ -168,7 +168,11 @@ the full design and `PROJECT_STATUS.md` for the build history. First-time
 setup, in order:
 
 1. Run `supabase-customer-portal-schema.sql` in the Supabase SQL Editor
-   (after the role-based RLS migration, which it depends on).
+   (after the role-based RLS migration, which it depends on). If the
+   portal was already set up before the multi-store checkout / pay-at-
+   checkout / per-store GSTN feature shipped, also run
+   `supabase-portal-checkout-migration.sql` once — see its own header
+   comment for exactly what it changes.
 2. Add the credentials in section 6 above that don't already exist:
    `SUPABASE_SERVICE_ROLE_KEY`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`,
    `RAZORPAY_WEBHOOK_SECRET`. R2 vars are already set from earlier work.
@@ -197,8 +201,12 @@ setup, in order:
      "Invite user" email template under **Emails → Templates** to match
      MMDI's voice.
 6. For each retail chain: Customer Portal → Companies & Stores tab →
-   create the company, add its store locations, then fill in "Send
-   invite" (email + optional contact name) and submit. This both
+   create the company, add its store locations — **fill in each store's
+   delivery address and GSTIN** (an "Add store"/edit row shows a "Needs
+   address/GSTIN" warning until both are set; it's not enforced at the
+   database level, but a customer literally cannot select that store when
+   placing an order until it's complete — see point 9 below), then fill in
+   "Send invite" (email + optional contact name) and submit. This both
    allowlists the email past the `@mmdi.in`-only signup restriction and
    creates the account — no password is generated or shown to staff; the
    customer gets a real email with a link and sets their own password,
@@ -244,6 +252,31 @@ has been done yet as of this handoff):
 Nothing else changes — no new env vars, no redeploy required beyond the
 one that already ships this middleware change. Once DNS resolves,
 `portal.mmdi.in/login` works immediately.
+
+### 8b. Multi-store checkout, mandatory design PDFs, pay-at-checkout
+
+A customer's "New order" page is a cart, not a single-store form: they can
+add products for several of their stores in one visit ("Add another store
+to this order"), each product needs its own PDF design file attached
+before it can be submitted, and payment happens immediately at checkout —
+one Razorpay Checkout popup pays for every store's order created in that
+session together, before MMDI has uploaded any design proof.
+
+Under the hood this still creates one `portal_orders` row per store (each
+gets its own design-approval/production tracking exactly as before) — the
+"one cart, multiple stores" part is purely a checkout-page convenience,
+not a database change to what an order is. Design-approval
+(approve/request-revision) and production status are unaffected and still
+work exactly as before; they're just no longer what gates payment.
+
+If a customer closes the Razorpay popup before paying, the order(s) are
+already saved (unpaid) — they land on the Orders list and can pay from
+there later; `OrderDetailClient`'s "Pay now" button is that fallback path
+for a single order.
+
+A store missing its delivery address or GSTIN can't be selected when
+placing an order (enforced both in the store picker and server-side in
+`POST /api/portal/orders`) — see point 6 above for filling those in.
 
 ---
 
