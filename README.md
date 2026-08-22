@@ -32,11 +32,19 @@ an npm workspaces monorepo.
 
 - **`apps/web`** — the Next.js app (deployed to `app.mmdi.in` / `ekms.vercel.app`).
   Everything under "What's here" below lives inside this app.
-- **`apps/mobile`** — the Expo/React Native iOS app: five tabs (Copilot, Surveys,
-  Estimate, Documents, Reports), sign-in via Supabase, installation report capture
-  with local drafts and idempotent submit. Runs on a physical device today via a
-  development build (Apple Developer: Individual enrollment); not yet on the App
-  Store.
+- **`apps/mobile`** — the Expo/React Native iOS app: five visible tabs (Home, Sign
+  Costing, Sales by Rep, Estimates, Cost Sheets), plus Copilot, Surveys, Basil
+  Installations, and Sign Costing History reached from Home's quick actions rather
+  than the tab bar (`app/(tabs)/_layout.tsx`). Sign-in via Supabase, an AI Copilot
+  with a "Hey Jarvis" wake word (`expo-speech-recognition`), a native Sign Costing
+  estimator and a full BOM+Work-Centre Cost Sheet calculator (material/work-centre
+  on-off overrides, alternative-material picker, a cost-plus-markup Suggested
+  Selling Price with a visible calculation breakdown, "Add to Estimate Pool"),
+  Sales by Rep with a donut chart + bar breakdowns, a Bill/Estimate PDF viewer
+  matching the web app's fonts/layout, and installation report capture with local
+  drafts and idempotent submit. Runs on a physical device today via a development
+  build (Apple Developer: Individual enrollment) built with `eas build --local`;
+  not yet on the App Store.
 - **`packages/shared`** (`@mmdi/shared`) — code genuinely shared between both apps:
   the sign estimator's `calc.ts` (pure, dependency-free, runs unmodified under
   Hermes), ~45 Supabase row-type interfaces (`rows.ts`), and the design tokens

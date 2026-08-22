@@ -1,33 +1,43 @@
 # MMDI ONE — Project Status
 
-Last updated: 7 August 2026 (session: another Cowork — not Claude Code —
-chat, continuing directly on the Cost Sheet module item 72 built. That
-module was merged and put into real use since (the user has been actively
-mapping BOM lines and running Rate Card/BOM Master through this session's
-whole arc), which is what surfaced everything below — every item this
-session fixed came from the user hitting a real rough edge while actually
-using the module, not from a cold read of "Next up." See items 73-78 for
-the full list: raw material picker data contamination + a real category
-consolidation migration, a dropdown that couldn't be closed, editable FG
-code names + a better clone flow + manual display ordering (needs
-`supabase-bom-templates-sort-order-migration.sql`), a checkbox multi-select
-for adding several alternative materials at once, a missing-work-centre
-gap (WC4 Lamination/WC5 Application had zero rows in `work_centre_rates`
-so never appeared as checkable options — needs
-`supabase-work-centre-4-5-bootstrap-migration.sql`, **confirmed run in
-production**), and a "material can't be its own alternative" duplicate-
-listing bug (needs
-`supabase-bom-template-line-alternatives-dedupe-migration.sql`). Every
-code change including item 78 (`bom-alternative-material-no-self-
-duplicate`) was confirmed merged into `main` via a live `git fetch origin
-main` check, same handoff mechanics as always in this sandbox
-(fetch-only, no push access — bundle + handoff instructions each round).
-**Item 78's `supabase-bom-template-line-alternatives-dedupe-migration.sql`
-and item 76's `supabase-bom-templates-sort-order-migration.sql` are the
-two SQL files not yet confirmed run** — confirm those next, then work
-through the refreshed "Next up" list below (BOM line mapping and the rate
-card are both real, ongoing, partly-done efforts now, not a cold-start
-task).
+Last updated: 22 August 2026 (session: a separate Cowork — not Claude
+Code — chat, entirely inside `apps/mobile`, distinct from the BOM
+Master/Rate Card session the paragraph below this one used to describe.
+That earlier session's own outstanding items are UNCHANGED by this one —
+item 78's `supabase-bom-template-line-alternatives-dedupe-migration.sql`
+and item 76's `supabase-bom-templates-sort-order-migration.sql` are
+**still not confirmed run**; "Next up" below is still the right list for
+the web app's BOM Master work.
+
+This session's arc (full detail in item 79) was entirely mobile: rebuilt
+the "Cost Sheet" tab from a mis-scoped list of past Sign Costing runs into
+a real BOM+Work-Centre calculator with full parity to the web tool
+(per-line/work-centre on-off, alternative-material picker, "Add to
+Estimate Pool"), then iterated its Suggested Selling Price GP methodology
+through several corrections — ending on a cost-plus-markup formula
+(Traditional: GP% of total cost, default 50%; Value Addition: raw
+material recovered at cost, GP% of ink+work-centre cost, default 100%)
+with a visible on-screen calculation breakdown, after an earlier
+margin-based version turned out to not match MMDI's actual costing
+policy. Also this session: fixed a "Hey Jarvis" wake word that never
+produced a transcript (an iOS `AVAudioSession` restart race) and an
+Estimate PDF that didn't match the web app's fonts/layout; fixed a
+Sales by Rep screen whose filter panel and stat cards were frozen above
+the list (now all scrolls together, plus a new donut chart); and traced +
+fixed a real `sales_transactions.item_description` data gap (a specific
+missing product name led to finding the backfill migration's positional
+match had silently drifted for ~26% of rows — a second migration matching
+on customer+invoice+amount instead brought real-world coverage from 74%
+to 98.7%). Every mobile code change was handed off as a git bundle and
+merged locally by the user — **this sandbox has no GitHub push access**,
+same constraint as the earlier session above (fetch-only; every round
+this session, too, was `git bundle` + handoff instructions, never a
+direct push). **Confirm the latest mobile bundle from that handoff
+(`gp-hide-zero-ink-row.bundle` plus its own conflict-resolution follow-up)
+has actually been merged AND rebuilt on-device before assuming any of
+item 79's Cost Sheet GP work is live** — bundle delivery and a real
+device build are two separate steps in this workflow, and this file can't
+confirm the second one on its own.
 
 This file exists so a new chat session (or a new contributor) can pick up this
 project without re-deriving context. Read this before making changes.
@@ -93,10 +103,14 @@ over what the code actually does again.
 - Cloudflare R2 for files, always via short-lived presigned URLs
 - Copilot with 19 tools (counted directly from the `TOOLS` array in
   `src/app/api/ai-copilot/route.ts`) including Gmail search and draft
-- iOS app running on a physical device: five tabs (Copilot, Surveys,
-  Estimate, Documents, Reports — confirmed against
-  `apps/mobile/app/(tabs)/_layout.tsx`), sign-in, downloads, estimator,
-  installation report capture with drafts and idempotent submit
+- iOS app running on a physical device (see item 79 for this round's full
+  arc): five visible tabs (Home, Sign Costing, Sales by Rep, Estimates,
+  Cost Sheets), plus Copilot/Surveys/Basil Installations/Sign Costing
+  History reached from Home's quick actions rather than the tab bar
+  (confirmed against `apps/mobile/app/(tabs)/_layout.tsx`) — sign-in,
+  downloads, a Sign Costing estimator, a full BOM+Work-Centre Cost Sheet
+  calculator, Sales by Rep with charts, a Copilot with a "Hey Jarvis" wake
+  word, installation report capture with drafts and idempotent submit
 
 **Monorepo**
 
@@ -2381,3 +2395,117 @@ order:
     `bom-alternative-material-no-self-duplicate`, **confirmed merged into
     `main`** — the dedupe migration itself is the one piece of this item
     not yet confirmed run (see "Next up").
+
+79. **Mobile: real Cost Sheet calculator, GP methodology correction, Jarvis
+    wake word, Estimate PDF parity, Sales by Rep unfreeze + charts, and a
+    sales_transactions item_description data-quality fix.** A separate,
+    later Cowork session, entirely inside `apps/mobile` — unrelated to
+    items 73-78's web BOM Master work above (those items' own outstanding
+    SQL files are untouched by this one). Delivered across many rounds as
+    git bundles (this sandbox has no GitHub push access — same
+    fetch-only/bundle-handoff constraint as every prior session in this
+    file), each merged and rebuilt locally by the user via
+    `eas build --platform ios --profile preview --local`.
+    - **Cost Sheet tool rebuilt from scratch.** The existing mobile "Cost
+      Sheet" tab was actually a list of past Sign Costing runs, not the
+      web app's real Tools > Cost Sheet BOM+Work Centre calculator ("in my
+      previous chat i asked to add new module cost sheet but not sign
+      costsheets"). Built a real native port
+      (`app/(tabs)/cost-sheets.tsx`, `lib/costSheet/calc.ts`,
+      `lib/costSheet/categoryOrder.ts`) with full parity to
+      `CostSheetCalcTab.tsx`: per-line on/off overrides, a per-line
+      alternative-material picker (`bom_template_line_alternatives`),
+      per-work-centre on/off, full price/wastage/markup/line-cost detail,
+      and "Add to Estimate Pool" (writes to `estimate_pool_items`, same
+      shape the web tool uses, pickable later from Estimates). The old
+      Sign Costing history list was kept, just moved to its own
+      `href: null` route (`sign-costing-history.tsx`) reached via a link
+      on the new Cost Sheet screen, not lost.
+    - **Suggested Selling Price GP methodology went through several real
+      corrections, not one clean build.** First pass used a
+      gross-profit-MARGIN formula (`price = cost / (1 - GP%)`), which
+      looked right against one early chat-shorthand example ("GP 50%
+      means 100 becomes 200") but was actually wrong — a later, detailed
+      written methodology made clear MMDI's real costing policy is a
+      cost-plus MARKUP (GP% as a percentage of a cost base, added on top
+      of it), a different formula except by coincidence at certain
+      percentages. Final formula (`suggestSellingPrice` in `calc.ts`):
+      Traditional = GP% applied to the full cost base (raw material incl.
+      wastage/markup + ink + work centre cost), default 50%; Value
+      Addition = raw material recovered at cost (no GP), GP% applied to
+      ink + work centre cost together, default 100% — ink was initially
+      left out of Value Addition's GP base per an early reading of the
+      methodology, then corrected back in per explicit follow-up
+      instruction ("we should take ink cost component also in value
+      addition GP"). Target GP% is user-editable (not fixed), resets to
+      each method's own default when the Method toggle is switched, and a
+      real on-screen "How this price was calculated" breakdown was added
+      (raw material → ink → work centre → GP amount → final price, ink
+      row hidden when it's ₹0) after the user reported the numbers alone
+      were confusing without seeing the math. Also fixed along the way: a
+      shared `NumberField` component whose displayed text never
+      re-synced when its value changed from OUTSIDE the input itself
+      (Method-switch reset, "Apply Suggested Price" button) — the
+      underlying number was always correct, but the visible text box
+      could show a stale value, which is exactly the kind of thing that
+      looks like a math bug but isn't one.
+    - **"Hey Jarvis" wake word fixed twice.** First: the on-device speech
+      recognizer wasn't biased toward the wake phrase at all — added
+      `contextualStrings: ["Jarvis", "Hey Jarvis"]` to
+      `expo-speech-recognition`'s `start()` call, plus a visible
+      diagnostic caption and session counter so "is it even listening"
+      stopped being a guess. That surfaced a second, real bug: an iOS
+      `AVAudioSession` activation race (restarting the recognizer in the
+      same tick as the previous session's `end`/`error` event throws
+      "Session activation failed") — fixed with a 400ms delay before
+      every restart, both the wake-loop restart and the wake-to-dictation
+      handoff (`app/(tabs)/copilot.tsx`).
+    - **Estimate PDF matched to the web app's fonts/layout/colors.**
+      `app/estimate/[id].tsx` now embeds the real Caladea TTF (base64
+      `@font-face`, copied from `apps/web/public/fonts/`) instead of
+      falling back to WebKit's default serif, and its HTML/CSS was
+      redesigned with a colored `metabox` (customer/quote details) and a
+      navy header row + zebra striping, mirroring the in-app Bill
+      screen's look instead of plain black-on-white paragraphs.
+    - **Sales by Rep: unfroze the top panel, added a donut chart.** The
+      rep/customer pickers, date range, Run report button, and the Total
+      Sales/Customers/Transactions cards used to be fixed siblings above
+      the customer `FlatList`, permanently eating the top of the screen.
+      Restructured so everything — filters, stat cards, the existing
+      trend/bar charts, and the customer list — lives inside one
+      `FlatList`'s own header/data, so the whole screen scrolls together.
+      Also added `react-native-svg` (new native dependency — needs
+      `npx expo install react-native-svg` once before the next rebuild)
+      and a real donut/ring chart ("Sales mix by product," top 4 + an
+      "Others" slice) alongside the existing bar breakdowns.
+    - **sales_transactions.item_description data-quality gap found and
+      mostly fixed.** User reported a specific missing product name on a
+      real invoice (Bhima Gold, ₹3,00,375 line showing "Not recorded").
+      Traced it to `supabase-sales-transactions-invoice-fidelity-
+      migration.sql`'s own embedded backfill data (found the confirmed-
+      correct name, "HSD STAR BLACKOUT FLEX," by matching invoice number +
+      taxable value against that file's 9,274-row dataset) — that
+      migration's gap-fill had run, but only reached 74% of rows
+      (`supabase-sales-transactions-prefer-item-name-migration.sql`,
+      confirmed via a live count query: 6,863/9,274). Root cause of the
+      remaining 26%: the live table's `import_row_seq` had drifted from
+      the source data's row numbers partway through the import (off by
+      +3 at the point checked), so the original migration's exact-position
+      match silently skipped every row after that drift began. Fixed with
+      a second migration matching on (customer_name, taxable_value,
+      invoice_no) instead of position
+      (`supabase-sales-transactions-item-name-by-invoice-match-part*of9.sql`,
+      9 parts — both this and the first migration had to be split into
+      several files each since the full dataset was too large for a
+      single Supabase SQL Editor query) — **confirmed run**, brought real
+      coverage to 9,157/9,274 (98.7%). The remaining 117 rows are
+      believed to be ones the second migration deliberately skipped as
+      ambiguous (duplicate customer+amount+invoice combos where guessing
+      wrong would be worse than leaving them alone), not a further bug.
+    - Every code change verified via `npx tsc --noEmit` (this app's
+      pre-existing `TS7016`/`TS7031`/`process` noise filtered out, zero
+      real errors each round) — this sandbox cannot run `eas build`
+      itself (no Apple credentials), so an actual on-device build/test
+      pass after each merge was always the user's own next step, same as
+      it remains for the final round of this item's work (see the
+      top-of-file note above item 79 for exactly which bundle that is).
