@@ -46,10 +46,16 @@ function PortalLoginForm() {
 
   // Invite/reset emails land here as
   // /login#access_token=...&type=invite (or type=recovery) -- `mode` above
-  // already read that hash once on mount to pick the right form; this
-  // effect just waits for the Supabase client to finish parsing it (it does
-  // so automatically) so the form can show whose invite this is and wipe
-  // the token out of the address bar.
+  // already read that hash once on mount to pick the right form. The
+  // Supabase client is *supposed* to auto-detect and establish a session
+  // from that hash on its own (detectSessionInUrl), but that doesn't
+  // reliably fire inside every in-app browser that might open this link
+  // (Mail apps' built-in webview, in particular) -- when it doesn't,
+  // updateUser() below fails with "Auth session missing!" even though the
+  // token in the hash is perfectly valid. Parse it ourselves and call
+  // setSession() explicitly as a fallback; this is a no-op (same tokens)
+  // on top of a session the client already auto-established, so it's safe
+  // either way.
   useEffect(() => {
     if (mode !== "set-password") return;
 
@@ -60,10 +66,22 @@ function PortalLoginForm() {
       }
     });
 
-    // Session may already be established by the time this effect runs.
-    supabase.auth.getUser().then(({ data }) => {
-      if (data.user?.email) setInviteEmail(data.user.email);
-    });
+    const hashParams = new URLSearchParams(window.location.hash.slice(1));
+    const access_token = hashParams.get("access_token");
+    const refresh_token = hashParams.get("refresh_token");
+    if (access_token && refresh_token) {
+      supabase.auth.setSession({ access_token, refresh_token }).then(({ data, error: sessionError }) => {
+        if (data.session?.user?.email) setInviteEmail(data.session.user.email);
+        if (sessionError) setError(sessionError.message);
+      });
+    } else {
+      // No tokens in the hash (shouldn't happen given `mode` already
+      // matched on it) -- fall back to whatever the client may already
+      // have established automatically.
+      supabase.auth.getUser().then(({ data }) => {
+        if (data.user?.email) setInviteEmail(data.user.email);
+      });
+    }
 
     return () => sub.subscription.unsubscribe();
   }, [mode]);
