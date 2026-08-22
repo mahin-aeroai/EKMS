@@ -1,7 +1,13 @@
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { getPortalIdentity } from "@/lib/portal-auth";
 import { AccountForm } from "@/components/portal/AccountForm";
-import type { PortalCompanyRow, PortalCompanyStoreRow, PortalUserRow } from "@mmdi/shared/rows";
+import { StoresPanel } from "@/components/portal/StoresPanel";
+import type {
+  PortalCompanyRow,
+  PortalCompanyStoreRow,
+  PortalStoreAddressHistoryRow,
+  PortalUserRow,
+} from "@mmdi/shared/rows";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +21,20 @@ export default async function PortalAccountPage() {
     supabase.from("portal_company_stores").select("*").eq("company_id", identity.companyId).eq("active", true).order("store_name"),
     supabase.from("portal_users").select("*").eq("id", identity.userId).maybeSingle(),
   ]);
+
+  const storeIds = (stores ?? []).map((s) => s.id);
+  const { data: history } =
+    storeIds.length > 0
+      ? await supabase
+          .from("portal_store_address_history")
+          .select("*")
+          .in("store_id", storeIds)
+          .order("changed_at", { ascending: false })
+      : { data: [] as PortalStoreAddressHistoryRow[] };
+  const historyByStore: Record<string, PortalStoreAddressHistoryRow[]> = {};
+  for (const h of (history ?? []) as PortalStoreAddressHistoryRow[]) {
+    (historyByStore[h.store_id] ??= []).push(h);
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -44,21 +64,7 @@ export default async function PortalAccountPage() {
 
       <AccountForm portalUser={portalUser as PortalUserRow | null} userId={identity.userId} email={identity.email} />
 
-      <div className="rounded-lg border border-line bg-surface p-4">
-        <p className="mb-3 text-sm font-semibold text-ink">Your stores</p>
-        {(stores ?? []).length === 0 ? (
-          <p className="text-sm text-ink-muted">No store locations set up yet — contact MMDI.</p>
-        ) : (
-          <ul className="flex flex-col gap-1.5">
-            {(stores as PortalCompanyStoreRow[]).map((store) => (
-              <li key={store.id} className="rounded-md bg-surface-sunken px-3 py-2 text-sm">
-                <p className="font-medium text-ink">{store.store_name}</p>
-                {store.address && <p className="text-xs text-ink-muted">{store.address}</p>}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      <StoresPanel stores={(stores ?? []) as PortalCompanyStoreRow[]} historyByStore={historyByStore} />
     </div>
   );
 }

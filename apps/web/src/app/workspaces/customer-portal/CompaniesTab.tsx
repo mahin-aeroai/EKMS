@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { Plus, Mail, MapPin, Check, Clock, Trash2, Pencil, AlertTriangle, X } from "lucide-react";
+import { Plus, Mail, MapPin, Check, Clock, Trash2, Pencil, AlertTriangle, X, History } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
-import type { PortalCompanyRow, PortalCompanyStoreRow } from "@mmdi/shared/rows";
+import type { PortalCompanyRow, PortalCompanyStoreRow, PortalStoreAddressHistoryRow } from "@mmdi/shared/rows";
 
 async function authHeaders() {
   const {
@@ -247,6 +247,30 @@ function CompanyDetail({
   // a disabled/loading state rather than freezing the whole list.
   const [deletingStoreId, setDeletingStoreId] = useState<string | null>(null);
   const [deletingInviteEmail, setDeletingInviteEmail] = useState<string | null>(null);
+  // Revision history (portal_store_address_history, written automatically
+  // by a DB trigger on every address/city/gstin change -- either from this
+  // tab or the customer's own self-service edit in the portal). Fetched
+  // lazily per store on first expand, cached after that.
+  const [historyOpenId, setHistoryOpenId] = useState<string | null>(null);
+  const [historyByStore, setHistoryByStore] = useState<Record<string, PortalStoreAddressHistoryRow[]>>({});
+  const [loadingHistoryId, setLoadingHistoryId] = useState<string | null>(null);
+
+  async function toggleHistory(storeId: string) {
+    if (historyOpenId === storeId) {
+      setHistoryOpenId(null);
+      return;
+    }
+    setHistoryOpenId(storeId);
+    if (historyByStore[storeId]) return;
+    setLoadingHistoryId(storeId);
+    const { data } = await supabase
+      .from("portal_store_address_history")
+      .select("*")
+      .eq("store_id", storeId)
+      .order("changed_at", { ascending: false });
+    setLoadingHistoryId(null);
+    setHistoryByStore((prev) => ({ ...prev, [storeId]: (data ?? []) as PortalStoreAddressHistoryRow[] }));
+  }
 
   async function handleDeleteStore(store: PortalCompanyStoreRow) {
     if (!window.confirm(`Remove "${store.store_name}"? This can't be undone.`)) return;
@@ -433,40 +457,81 @@ function CompanyDetail({
               );
             }
             return (
-              <li
-                key={s.id}
-                className="flex items-center justify-between rounded-md bg-surface-sunken px-3 py-1.5 text-sm text-ink-secondary"
-              >
-                <span className="flex items-center gap-1.5">
-                  {s.store_name} {s.city && <span className="text-ink-muted">— {s.city}</span>}
-                  {incomplete && (
-                    <span
-                      className="flex items-center gap-1 text-xs font-medium text-warning"
-                      title="Missing delivery address or GSTIN — customers can't order for this store until it's filled in."
+              <li key={s.id} className="rounded-md bg-surface-sunken px-3 py-1.5 text-sm text-ink-secondary">
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    {s.store_name} {s.city && <span className="text-ink-muted">— {s.city}</span>}
+                    {incomplete && (
+                      <span
+                        className="flex items-center gap-1 text-xs font-medium text-warning"
+                        title="Missing delivery address or GSTIN — customers can't order for this store until it's filled in."
+                      >
+                        <AlertTriangle size={12} /> Needs address/GSTIN
+                      </span>
+                    )}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => toggleHistory(s.id)}
+                      className="flex h-6 w-6 items-center justify-center rounded-md text-ink-muted hover:bg-surface hover:text-ink"
+                      aria-label={`View address history for ${s.store_name}`}
+                      title="Address/GSTIN history — includes the customer's own edits"
                     >
-                      <AlertTriangle size={12} /> Needs address/GSTIN
-                    </span>
-                  )}
-                </span>
-                <span className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => startEditStore(s)}
-                    className="flex h-6 w-6 items-center justify-center rounded-md text-ink-muted hover:bg-surface hover:text-ink"
-                    aria-label={`Edit ${s.store_name}`}
-                  >
-                    <Pencil size={13} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteStore(s)}
-                    disabled={deletingStoreId === s.id}
-                    className="flex h-6 w-6 items-center justify-center rounded-md text-ink-muted hover:bg-danger-tint hover:text-danger disabled:opacity-50"
-                    aria-label={`Remove ${s.store_name}`}
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </span>
+                      <History size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => startEditStore(s)}
+                      className="flex h-6 w-6 items-center justify-center rounded-md text-ink-muted hover:bg-surface hover:text-ink"
+                      aria-label={`Edit ${s.store_name}`}
+                    >
+                      <Pencil size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteStore(s)}
+                      disabled={deletingStoreId === s.id}
+                      className="flex h-6 w-6 items-center justify-center rounded-md text-ink-muted hover:bg-danger-tint hover:text-danger disabled:opacity-50"
+                      aria-label={`Remove ${s.store_name}`}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </span>
+                </div>
+                {historyOpenId === s.id && (
+                  <div className="mt-1.5 border-t border-line pt-1.5">
+                    {loadingHistoryId === s.id ? (
+                      <p className="text-xs text-ink-muted">Loading…</p>
+                    ) : (historyByStore[s.id] ?? []).length === 0 ? (
+                      <p className="text-xs text-ink-muted">No changes recorded yet.</p>
+                    ) : (
+                      <ul className="flex flex-col gap-1.5">
+                        {historyByStore[s.id].map((h) => (
+                          <li key={h.id} className="text-xs">
+                            <span className="font-medium text-ink">{h.changed_by_role === "customer" ? "Customer" : "MMDI staff"}</span>{" "}
+                            <span className="text-ink-muted">on {new Date(h.changed_at).toLocaleString("en-IN")}</span>
+                            {h.old_address !== h.new_address && (
+                              <p>
+                                Address: <span className="line-through">{h.old_address || "—"}</span> → {h.new_address || "—"}
+                              </p>
+                            )}
+                            {h.old_city !== h.new_city && (
+                              <p>
+                                City: <span className="line-through">{h.old_city || "—"}</span> → {h.new_city || "—"}
+                              </p>
+                            )}
+                            {h.old_gstin !== h.new_gstin && (
+                              <p>
+                                GSTIN: <span className="line-through">{h.old_gstin || "—"}</span> → {h.new_gstin || "—"}
+                              </p>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
               </li>
             );
           })}

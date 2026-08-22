@@ -187,6 +187,17 @@ create table if not exists public.portal_orders (
   razorpay_order_id text,
   razorpay_payment_id text,
   paid_at timestamptz,
+  -- Snapshot of the destination store's address/city/GSTIN at the moment
+  -- this order was placed — deliberately NOT read live from
+  -- portal_company_stores at display time. A store's address can be edited
+  -- later (by the customer via the self-service edit below, or by MMDI
+  -- staff in CompaniesTab); an already-placed order must keep showing the
+  -- address it actually shipped against. Set once at INSERT by
+  -- POST /api/portal/orders and then frozen — see the REVOKE UPDATE next
+  -- to portal_orders_update_customer below for how "frozen" is enforced.
+  delivery_address text,
+  delivery_city text,
+  delivery_gstin text,
   -- Customer's own instructions at order time (e.g. "match the exact blue
   -- from last time"). Separate from admin_notes, which the customer never sees.
   notes text,
@@ -428,6 +439,7 @@ create policy portal_companies_delete_admin on public.portal_companies
 drop policy if exists portal_stores_select on public.portal_company_stores;
 drop policy if exists portal_stores_write_staff on public.portal_company_stores;
 drop policy if exists portal_stores_update_staff on public.portal_company_stores;
+drop policy if exists portal_stores_update_customer on public.portal_company_stores;
 drop policy if exists portal_stores_delete_admin on public.portal_company_stores;
 
 create policy portal_stores_select on public.portal_company_stores
@@ -443,9 +455,109 @@ create policy portal_stores_update_staff on public.portal_company_stores
   using (public.user_role() in ('admin', 'editor'))
   with check (public.user_role() in ('admin', 'editor'));
 
+-- Self-service: a customer may also update their own company's stores, but
+-- ONLY address/city/gstin — never store_name/active/company_id/lfg_sfo_id.
+-- RLS's WITH CHECK only sees the new row, so it can't by itself express
+-- "these columns changed, and only these" (same old-vs-new limitation noted
+-- throughout this file) — portal_company_stores_guard_customer_update_trg
+-- below is what actually enforces the column restriction; this policy just
+-- admits the row.
+create policy portal_stores_update_customer on public.portal_company_stores
+  for update to authenticated
+  using (company_id = public.portal_company_id())
+  with check (company_id = public.portal_company_id());
+
 create policy portal_stores_delete_admin on public.portal_company_stores
   for delete to authenticated
   using (public.user_role() = 'admin');
+
+create or replace function public.portal_company_stores_guard_customer_update()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if public.is_portal_user() then
+    if new.company_id is distinct from old.company_id
+      or new.store_name is distinct from old.store_name
+      or new.active is distinct from old.active
+      or new.lfg_sfo_id is distinct from old.lfg_sfo_id
+    then
+      raise exception 'Customers may only update a store''s address, city, and GSTIN.';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists portal_company_stores_guard_customer_update_trg on public.portal_company_stores;
+create trigger portal_company_stores_guard_customer_update_trg
+  before update on public.portal_company_stores
+  for each row execute function public.portal_company_stores_guard_customer_update();
+
+-- portal_store_address_history — full audit trail of every address/city/
+-- gstin change to a store, from either edit path (this self-service one or
+-- CompaniesTab). Written only by the trigger below (security definer, so
+-- it bypasses RLS on insert) — never by application code directly — so it
+-- can't be skipped by a future third edit path forgetting to log it.
+create table if not exists public.portal_store_address_history (
+  id uuid primary key default gen_random_uuid(),
+  store_id uuid not null references public.portal_company_stores(id) on delete cascade,
+  changed_at timestamptz not null default now(),
+  changed_by uuid references auth.users(id),
+  changed_by_role text check (changed_by_role in ('customer', 'staff')),
+  old_address text,
+  new_address text,
+  old_city text,
+  new_city text,
+  old_gstin text,
+  new_gstin text
+);
+
+create index if not exists portal_store_address_history_store_idx
+  on public.portal_store_address_history(store_id, changed_at desc);
+
+alter table public.portal_store_address_history enable row level security;
+
+drop policy if exists portal_store_address_history_select on public.portal_store_address_history;
+create policy portal_store_address_history_select on public.portal_store_address_history
+  for select to authenticated
+  using (
+    public.is_mmdi_staff()
+    or exists (
+      select 1 from public.portal_company_stores s
+      where s.id = store_id and s.company_id = public.portal_company_id()
+    )
+  );
+
+create or replace function public.portal_store_address_history_log()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.address is distinct from old.address
+     or new.city is distinct from old.city
+     or new.gstin is distinct from old.gstin
+  then
+    insert into public.portal_store_address_history (
+      store_id, changed_by, changed_by_role,
+      old_address, new_address, old_city, new_city, old_gstin, new_gstin
+    ) values (
+      new.id, auth.uid(), case when public.is_portal_user() then 'customer' else 'staff' end,
+      old.address, new.address, old.city, new.city, old.gstin, new.gstin
+    );
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists portal_store_address_history_trg on public.portal_company_stores;
+create trigger portal_store_address_history_trg
+  after update on public.portal_company_stores
+  for each row execute function public.portal_store_address_history_log();
 
 -- portal_invited_emails — staff-only, end to end -------------------------
 drop policy if exists portal_invites_staff_all on public.portal_invited_emails;
@@ -594,6 +706,11 @@ create policy portal_orders_update_customer on public.portal_orders
 -- in razorpay-verify/razorpay-webhook, can ever set them. Doesn't affect
 -- the service role itself (Supabase's service_role bypasses RLS/grants).
 revoke update (payment_status, razorpay_payment_id, paid_at) on public.portal_orders from authenticated;
+-- Same tool, same reasoning, for the delivery snapshot: once an order
+-- exists, nobody using the authenticated role — customer or staff — can
+-- change what address it shipped against. (Doesn't block the INSERT that
+-- sets these in the first place; REVOKE UPDATE only touches UPDATE.)
+revoke update (delivery_address, delivery_city, delivery_gstin) on public.portal_orders from authenticated;
 
 create policy portal_orders_update_staff on public.portal_orders
   for update to authenticated

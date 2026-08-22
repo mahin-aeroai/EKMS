@@ -56,7 +56,7 @@ export async function POST(request: Request) {
 
   const { data: store, error: storeErr } = await supabase
     .from("portal_company_stores")
-    .select("id, company_id, address, gstin")
+    .select("id, company_id, address, city, gstin")
     .eq("id", storeId)
     .maybeSingle();
   if (storeErr || !store || store.company_id !== portalUser.company_id) {
@@ -122,6 +122,13 @@ export async function POST(request: Request) {
       company_id: portalUser.company_id,
       store_id: storeId,
       created_by: user.id,
+      // Snapshotted now, frozen forever after (see the REVOKE UPDATE next
+      // to these columns in the schema) -- this order must keep showing
+      // the address it was actually placed against even if the store's
+      // address is edited later.
+      delivery_address: store.address,
+      delivery_city: store.city,
+      delivery_gstin: store.gstin,
       notes: body.notes ?? null,
       subtotal,
       gst_amount: gstAmount,
