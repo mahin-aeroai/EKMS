@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Lock } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
+import { PORTAL_HOST } from "@/lib/portal-host";
 
 // Sign-in only — no "Register" tab. Portal accounts are strictly
 // invite-only (see supabase-customer-portal-schema.sql's header comment):
@@ -41,7 +42,11 @@ function PortalLoginForm() {
       return;
     }
 
-    const redirectTo = searchParams.get("redirectTo") || "/portal";
+    // No ?redirectTo= means someone landed here directly (not bounced by
+    // the middleware) -- default to this host's own portal home: bare "/"
+    // on the subdomain, "/portal" everywhere else.
+    const defaultHome = window.location.hostname === PORTAL_HOST ? "/" : "/portal";
+    const redirectTo = searchParams.get("redirectTo") || defaultHome;
     router.push(redirectTo);
     router.refresh();
   }
@@ -51,8 +56,11 @@ function PortalLoginForm() {
     setError(null);
     setLoading(true);
 
+    // Send the reset link back to wherever this login page is actually
+    // being viewed from -- bare "/login" on the subdomain, "/portal/login"
+    // elsewhere -- rather than hardcoding one form.
     const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/portal/login`,
+      redirectTo: `${window.location.origin}${window.location.pathname}`,
     });
     setLoading(false);
 

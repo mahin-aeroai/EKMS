@@ -2,6 +2,8 @@ import Link from "next/link";
 import { ArrowRight, Package, ClipboardCheck } from "lucide-react";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { getPortalIdentity } from "@/lib/portal-auth";
+import { getOnPortalHost } from "@/lib/portal-host-server";
+import { portalHref } from "@/lib/portal-links-shared";
 import { Badge } from "@/components/ui/Badge";
 import { orderStatusBadge, orderStatusLabel } from "@/components/portal/orderStatus";
 import type { PortalOrderRow } from "@mmdi/shared/rows";
@@ -12,6 +14,7 @@ export default async function PortalHomePage() {
   const identity = await getPortalIdentity();
   if (!identity) return null;
 
+  const onPortalHost = await getOnPortalHost();
   const supabase = await createServerSupabaseClient();
   const { data: orders } = await supabase
     .from("portal_orders")
@@ -32,7 +35,7 @@ export default async function PortalHomePage() {
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Link
-          href="/portal/products"
+          href={portalHref("/products", onPortalHost)}
           className="flex items-center justify-between rounded-lg border border-line bg-surface p-4 shadow-1 transition-shadow hover:shadow-2"
         >
           <div className="flex items-center gap-3">
@@ -48,7 +51,7 @@ export default async function PortalHomePage() {
         </Link>
 
         <Link
-          href="/portal/orders"
+          href={portalHref("/orders", onPortalHost)}
           className="flex items-center justify-between rounded-lg border border-line bg-surface p-4 shadow-1 transition-shadow hover:shadow-2"
         >
           <div className="flex items-center gap-3">
@@ -70,7 +73,7 @@ export default async function PortalHomePage() {
       <div>
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-ink">Recent orders</h2>
-          <Link href="/portal/orders" className="text-xs font-medium text-primary hover:underline">
+          <Link href={portalHref("/orders", onPortalHost)} className="text-xs font-medium text-primary hover:underline">
             View all
           </Link>
         </div>
@@ -83,7 +86,7 @@ export default async function PortalHomePage() {
             {rows.map((order) => (
               <Link
                 key={order.id}
-                href={`/portal/orders/${order.id}`}
+                href={portalHref(`/orders/${order.id}`, onPortalHost)}
                 className="flex items-center justify-between rounded-lg border border-line bg-surface p-3 text-sm shadow-1 transition-shadow hover:shadow-2"
               >
                 <div>

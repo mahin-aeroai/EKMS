@@ -5,12 +5,15 @@ import { usePathname, useRouter } from "next/navigation";
 import { LogOut, Package, ClipboardList, Building2, ShieldCheck } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/cn";
+import { usePortalHost, portalHref } from "@/lib/portal-links";
 
+// Bare, /portal-less paths -- portalHref() below adds the /portal prefix
+// back on hosts where the middleware doesn't rewrite it for us.
 const NAV = [
-  { href: "/portal/products", label: "Products", icon: Package },
-  { href: "/portal/orders", label: "Orders", icon: ClipboardList },
-  { href: "/portal/account", label: "Account", icon: Building2 },
-  { href: "/portal/security", label: "Security", icon: ShieldCheck },
+  { href: "/products", label: "Products", icon: Package },
+  { href: "/orders", label: "Orders", icon: ClipboardList },
+  { href: "/account", label: "Account", icon: Building2 },
+  { href: "/security", label: "Security", icon: ShieldCheck },
 ];
 
 export function PortalTopBar({
@@ -24,10 +27,11 @@ export function PortalTopBar({
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  const onPortalHost = usePortalHost();
 
   async function handleSignOut() {
     await supabase.auth.signOut();
-    router.push("/portal/login");
+    router.push(portalHref("/login", onPortalHost));
     router.refresh();
   }
 
@@ -35,7 +39,7 @@ export function PortalTopBar({
     <header className="border-b border-line bg-surface">
       <div className="mx-auto flex max-w-4xl flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
         <div className="flex items-center gap-3">
-          <Link href="/portal" className="flex items-center gap-2">
+          <Link href={portalHref("/", onPortalHost)} className="flex items-center gap-2">
             <span className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-sm font-bold text-on-brand">
               M
             </span>
@@ -48,11 +52,12 @@ export function PortalTopBar({
 
         <nav className="flex items-center gap-1 overflow-x-auto">
           {NAV.map(({ href, label, icon: Icon }) => {
-            const active = pathname === href || pathname?.startsWith(href + "/");
+            const resolvedHref = portalHref(href, onPortalHost);
+            const active = pathname === resolvedHref || pathname?.startsWith(resolvedHref + "/");
             return (
               <Link
                 key={href}
-                href={href}
+                href={resolvedHref}
                 className={cn(
                   "flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
                   active ? "bg-primary text-on-brand" : "text-ink-secondary hover:bg-surface-sunken hover:text-ink"

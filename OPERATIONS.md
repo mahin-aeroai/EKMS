@@ -201,6 +201,33 @@ either "it's already configured where the table above says" or "it needs
 Srinivas to create/paste it directly into Vercel/Supabase/Keychain
 himself" — never into a chat message, terminal echo, or committed file.
 
+### 8a. Portal subdomain (`portal.mmdi.in`)
+
+The Customer Portal is reachable at its own subdomain instead of
+`app.mmdi.in/portal/*`. All `/portal/*` pages are physically unchanged
+(still real files under `src/app/portal/...`); a middleware rewrite in
+`src/lib/supabase-middleware.ts` serves them without the `/portal` prefix
+ever showing in the address bar on `portal.mmdi.in`, and old
+`app.mmdi.in/portal/*` links 308-redirect to the clean subdomain URL
+automatically. `ekms.vercel.app` and any Vercel preview deployment keep
+serving `/portal/*` exactly as before, unaffected — a DNS-independent
+fallback if the subdomain is ever down.
+
+Two one-time, non-code steps are needed to actually activate it (neither
+has been done yet as of this handoff):
+
+1. **Vercel** → the EKMS web project → Settings → Domains → Add
+   `portal.mmdi.in`. Vercel will show the exact CNAME target to use
+   (usually `cname.vercel-dns.com`, but use whatever Vercel displays).
+2. **DNS** → wherever `mmdi.in`'s DNS is managed → add a CNAME record:
+   host `portal`, pointing at the target Vercel showed in step 1. Allow
+   up to a few hours to propagate; Vercel's Domains page shows when the
+   certificate issues and the domain goes live.
+
+Nothing else changes — no new env vars, no redeploy required beyond the
+one that already ships this middleware change. Once DNS resolves,
+`portal.mmdi.in/login` works immediately.
+
 ---
 
 ## 7. Quick command reference

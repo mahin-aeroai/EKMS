@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Trash2, Plus, UploadCloud, X } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
+import { usePortalHost, portalHref } from "@/lib/portal-links";
 import type { PortalCompanyStoreRow, PortalProductRow } from "@mmdi/shared/rows";
 
 interface LineItem {
@@ -23,6 +24,7 @@ export default function NewPortalOrderPage() {
 function NewOrderForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const onPortalHost = usePortalHost();
   const preselectedProduct = searchParams.get("product");
 
   const [stores, setStores] = useState<PortalCompanyStoreRow[]>([]);
@@ -132,7 +134,7 @@ function NewOrderForm() {
         });
       }
 
-      router.push(`/portal/orders/${orderId}`);
+      router.push(portalHref(`/orders/${orderId}`, onPortalHost));
     } catch {
       setError("Something went wrong placing the order. Try again.");
       setSubmitting(false);
