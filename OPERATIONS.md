@@ -150,7 +150,7 @@ it — treat it as the checklist before ever asking "do we have X."
 |---|---|---|---|
 | GitHub Personal Access Token (classic, `repo` scope) | Pushing from Srinivas's own machine | macOS Keychain (via `credential.helper osxkeychain`) | Generate at github.com/settings/tokens; rotate there if it stops working |
 | Supabase anon key | Web app client + mobile app | Vercel env vars + `apps/mobile/.env` | Safe to ship to clients — RLS is the real protection, not secrecy of this key |
-| Supabase service-role key | The Razorpay webhook route (`/api/portal/razorpay-webhook`) and the Customer Portal's staff "Create login" route (`/api/portal/companies/[id]/create-login`) | Vercel env vars only, as `SUPABASE_SERVICE_ROLE_KEY` | The two legitimate uses in this codebase — see `src/lib/supabase-admin.ts`'s header comment for why: Razorpay calls its route directly with no user session for RLS to evaluate, and creating a Supabase Auth user requires the Admin API, which has no RLS-governed equivalent at all. Never referenced from any Client Component; every other route still uses the anon key + RLS. Get it from Supabase dashboard → Project Settings → API → `service_role` secret. |
+| Supabase service-role key | The Razorpay webhook route (`/api/portal/razorpay-webhook`), the Customer Portal's staff "Create login" route (`/api/portal/companies/[id]/create-login`), and the internal staff deactivate/reactivate route (`/api/staff/[userId]/deactivate`) | Vercel env vars only, as `SUPABASE_SERVICE_ROLE_KEY` | The three legitimate uses in this codebase — see `src/lib/supabase-admin.ts`'s header comment for why: Razorpay calls its route directly with no user session for RLS to evaluate, and both creating and banning a Supabase Auth user require the Admin API, which has no RLS-governed equivalent at all. Never referenced from any Client Component; every other route still uses the anon key + RLS. Get it from Supabase dashboard → Project Settings → API → `service_role` secret. |
 | `ANTHROPIC_API_KEY` | AI Copilot's server-side model calls | Vercel env vars only | Srinivas creates/rotates this directly in Vercel; the assistant never sees the raw key |
 | Google OAuth client ID/secret | Gmail search/draft in AI Copilot | Vercel env vars | Standard OAuth app credentials from Google Cloud Console |
 | `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET_NAME` | Every presigned-URL file route, including the Customer Portal's (design proofs, reference files, product preview images) | Vercel env vars | Already set up for LFG surveys/knowledge-files/installation-photos — the Customer Portal reuses the same bucket + credentials, just new key prefixes (`portal-orders/...`, `portal-products/...`) |
@@ -255,3 +255,22 @@ git fetch "/absolute/path/to/change-name.bundle" HEAD:incoming-change-name
 git merge incoming-change-name --no-edit
 git push origin HEAD:main
 ```
+
+---
+
+## 9. Deactivating an internal staff account
+
+One-time setup: run `supabase-profiles-active-migration.sql` in the
+Supabase SQL Editor (adds `profiles.active`). Requires
+`SUPABASE_SERVICE_ROLE_KEY` to already be set (see section 6).
+
+To use it: Administration → Users & roles table → each row (other than
+your own) has a **Deactivate** link next to its status badge. Deactivating
+blocks that person's sign-in immediately — including kicking them out of
+an already-open session on their very next click, not just future
+sign-ins — but keeps their profile and everything tied to their account
+(estimates, orders, uploads) intact. **Reactivate** on the same row
+reverses it instantly, any time. This is intentionally a soft block, not
+account deletion — there is no delete option, by design (see chat history
+for why: losing the attribution on that person's past records wasn't
+worth it for a rarely-needed action that deactivate already covers).

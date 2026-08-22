@@ -568,6 +568,10 @@ export interface ProfileRow {
   // RLS-backed -- see supabase-tool-access-migration.sql and
   // apps/web/src/lib/UserToolsContext.tsx.
   allowed_tools: string[] | null;
+  // Display flag only -- see supabase-profiles-active-migration.sql. The
+  // real block is Supabase Auth's own ban on the auth.users row, applied by
+  // /api/staff/[userId]/deactivate.
+  active: boolean;
 }
 
 // ── Sign Estimator (React rewrite of SignERP_v2.html) ──────────────────────
