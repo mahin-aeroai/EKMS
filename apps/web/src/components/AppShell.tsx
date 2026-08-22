@@ -187,7 +187,21 @@ export function getVisibleNav(role: UserRole | null, allowedGroups: string[] | n
   );
 }
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({
+  children,
+  onPortalHost = false,
+}: {
+  children: React.ReactNode;
+  /**
+   * True when this request came in on portal.mmdi.in -- see the comment
+   * where RootLayout computes this and passes it down. Defaults to false
+   * (show the internal chrome) so any caller that doesn't pass it --
+   * there shouldn't be one outside src/app/layout.tsx, but this is a
+   * component, not a guarantee -- fails toward the existing behavior
+   * rather than toward accidentally hiding the internal app's own chrome.
+   */
+  onPortalHost?: boolean;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const { toast } = useToast();
@@ -276,8 +290,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // avatar menu in TopNav, not a workspace someone navigates to directly.
   const activeId = NAV.flatMap((s) => s.items).find((i) => i.href === pathname)?.id ?? "";
 
-  // /login renders its own full-page layout — no sidebar/topnav chrome.
-  if (pathname === "/login") {
+  // The customer portal is a completely separate, compact surface with its
+  // own top bar (PortalTopBar) — it must never render wrapped in the
+  // internal 36-workspace sidebar. Three ways a request can land here as a
+  // portal page, all needing the same bypass:
+  //  - portal.mmdi.in's own bare paths (any path at all — the middleware
+  //    rewrite that gives this host clean URLs is invisible to
+  //    usePathname(), so onPortalHost, computed server-side from the
+  //    actual Host header, is the only way to know)
+  //  - /portal/* on another host (app.mmdi.in during the transition
+  //    window, ekms.vercel.app, a Vercel preview) — staff previewing
+  //    exactly what a customer sees, or a not-yet-canonicalized old link
+  //  - /login and /portal/login, the two sign-in pages, which already
+  //    render their own full-page layout
+  if (onPortalHost || pathname.startsWith("/portal") || pathname === "/login") {
     return <>{children}</>;
   }
 
