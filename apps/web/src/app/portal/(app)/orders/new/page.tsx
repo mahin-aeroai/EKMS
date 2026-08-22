@@ -67,6 +67,17 @@ function NewOrderForm() {
   const [submitting, setSubmitting] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Orders already placed, keyed by their cart-group index -- survives a
+  // FAILED submit (e.g. a design-file upload dying partway through), so
+  // clicking "Place order & pay" again after a partial failure resumes
+  // instead of creating a second, duplicate order for a group that already
+  // has one. Without this, every group's order is unconditionally created
+  // fresh on every submit attempt, and "try again" after any failure past
+  // the order-creation step (which is most of this loop) silently doubles
+  // up whichever group had already succeeded.
+  const [committedOrders, setCommittedOrders] = useState<
+    Record<number, { id: string; order_no: string; items: { id: string; product_id: string | null }[] }>
+  >({});
 
   useEffect(() => {
     (async () => {
@@ -171,37 +182,72 @@ function NewOrderForm() {
       } = await supabase.auth.getSession();
       const authHeaders = { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token ?? ""}` };
 
-      const createdOrders: { id: string; order_no: string }[] = [];
+      // Local mirror of committedOrders -- setState is async, so later
+      // iterations in THIS SAME submit call need a synchronous read of
+      // what's already been committed (both from a previous failed attempt,
+      // and from earlier groups within this very call).
+      const committedLocal = { ...committedOrders };
 
-      for (const group of groups) {
+      for (const [gi, group] of groups.entries()) {
         const validItems = group.items.filter((it) => it.productId && it.quantity > 0);
         const store = allStores.find((s) => s.id === group.storeId);
-        setProgress(`Creating order for ${store?.store_name ?? "store"}…`);
 
-        const res = await fetch("/api/portal/orders", {
-          method: "POST",
-          headers: authHeaders,
-          body: JSON.stringify({
-            store_id: group.storeId,
-            notes: notes.trim() || undefined,
-            items: validItems.map((it) => ({ product_id: it.productId, quantity: it.quantity })),
-          }),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          throw new Error(
-            `${data.message || data.error || "Couldn't place the order."}${
-              createdOrders.length > 0 ? ` (${createdOrders.length} earlier order(s) in this checkout were already placed and are safe — see Orders.)` : ""
-            }`
-          );
+        let orderId: string;
+        let orderNo: string;
+        let insertedItems: { id: string; product_id: string | null }[];
+
+        const already = committedLocal[gi];
+        if (already) {
+          // This group's order was already created on a previous (failed)
+          // submit attempt -- reuse it instead of placing a duplicate.
+          // Guard against the cart having changed shape since then (an item
+          // added/removed after the partial failure): the order's line
+          // items are fixed at creation, so a mismatched count here would
+          // silently zip the wrong design PDF to the wrong product below.
+          const itemsMatch =
+            already.items.length === validItems.length &&
+            already.items.every((it, i) => it.product_id === validItems[i].productId);
+          if (!itemsMatch) {
+            throw new Error(
+              `The order for ${store?.store_name ?? "this store"} (${already.order_no}) was already placed with a different set of items than ` +
+                `what's in this cart section now. Reload the page and start a fresh order for this store rather than editing it here — the ` +
+                `already-placed order itself is safe and visible in Orders.`
+            );
+          }
+          orderId = already.id;
+          orderNo = already.order_no;
+          insertedItems = already.items;
+        } else {
+          setProgress(`Creating order for ${store?.store_name ?? "store"}…`);
+          const res = await fetch("/api/portal/orders", {
+            method: "POST",
+            headers: authHeaders,
+            body: JSON.stringify({
+              store_id: group.storeId,
+              notes: notes.trim() || undefined,
+              items: validItems.map((it) => ({ product_id: it.productId, quantity: it.quantity })),
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            const otherCommitted = Object.keys(committedLocal).length;
+            throw new Error(
+              `${data.message || data.error || "Couldn't place the order."}${
+                otherCommitted > 0 ? ` (${otherCommitted} earlier order(s) in this checkout were already placed and are safe — see Orders.)` : ""
+              }`
+            );
+          }
+
+          orderId = data.id;
+          orderNo = data.order_no;
+          // Response items come back in the same order they were submitted
+          // (see the route's own comment) — zip by index to know which
+          // order_item_id each design PDF belongs to.
+          insertedItems = (data.items ?? []) as { id: string; product_id: string | null }[];
+          committedLocal[gi] = { id: orderId, order_no: orderNo, items: insertedItems };
+          setCommittedOrders((prev) => ({ ...prev, [gi]: committedLocal[gi] }));
         }
 
-        createdOrders.push({ id: data.id, order_no: data.order_no });
-
-        // Response items come back in the same order they were submitted
-        // (see the route's own comment) — zip by index to know which
-        // order_item_id each design PDF belongs to.
-        const insertedItems = (data.items ?? []) as { id: string; product_id: string | null }[];
         for (let i = 0; i < validItems.length; i++) {
           const item = validItems[i];
           const orderItemId = insertedItems[i]?.id;
@@ -209,9 +255,15 @@ function NewOrderForm() {
 
           const productLabel = productById(item.productId)?.code ?? "product";
           const designFileLabel = `the design file for ${productLabel} (${store?.store_name ?? "this store"})`;
+          const otherCommitted = Object.keys(committedLocal).length - 1;
+          const safetyNote =
+            `The order for ${store?.store_name ?? "this store"} (${orderNo}) was already placed and is safe — it's just missing this file. ` +
+            `Placing the order again for this store won't create a duplicate; it'll pick up right where this left off.` +
+            (otherCommitted > 0 ? ` ${otherCommitted} other order(s) in this checkout were also placed successfully.` : "") +
+            ` See Orders.`;
 
           setProgress(`Uploading design file for ${productLabel}…`);
-          const uploadRes = await fetch(`/api/portal/orders/${data.id}/files/upload-url`, {
+          const uploadRes = await fetch(`/api/portal/orders/${orderId}/files/upload-url`, {
             method: "POST",
             headers: authHeaders,
             body: JSON.stringify({ kind: "design", file_name: item.designFile.name, content_type: item.designFile.type || "application/pdf" }),
@@ -224,8 +276,7 @@ function NewOrderForm() {
           // and say so, same as any other failure in this loop.
           if (!uploadRes.ok) {
             throw new Error(
-              `Couldn't prepare an upload for ${designFileLabel}: ${uploadData.message || uploadData.error || "unknown error"}. ` +
-                `${createdOrders.length > 0 ? `${createdOrders.length} earlier order(s) in this checkout were already placed and are safe — see Orders. ` : ""}Try again.`
+              `Couldn't prepare an upload for ${designFileLabel}: ${uploadData.message || uploadData.error || "unknown error"}. ${safetyNote}`
             );
           }
 
@@ -249,19 +300,15 @@ function NewOrderForm() {
             throw new Error(
               `Couldn't upload ${designFileLabel} — the connection to file storage failed (browser said "Load failed"/"Failed to fetch"). ` +
                 `This is usually either a network hiccup (try again) or, if it keeps happening from this device every time, MMDI should check ` +
-                `that the file storage's CORS settings allow uploads from portal.mmdi.in specifically. ` +
-                `${createdOrders.length > 0 ? `${createdOrders.length} earlier order(s) in this checkout were already placed and are safe — see Orders.` : ""}`
+                `that the file storage's CORS settings allow uploads from portal.mmdi.in specifically. ${safetyNote}`
             );
           }
           if (!putRes.ok) {
-            throw new Error(
-              `Couldn't upload ${designFileLabel} — file storage rejected the upload (status ${putRes.status}). ` +
-                `${createdOrders.length > 0 ? `${createdOrders.length} earlier order(s) in this checkout were already placed and are safe — see Orders. ` : ""}Try again.`
-            );
+            throw new Error(`Couldn't upload ${designFileLabel} — file storage rejected the upload (status ${putRes.status}). ${safetyNote}`);
           }
 
           const { error: fileInsertError } = await supabase.from("portal_order_files").insert({
-            order_id: data.id,
+            order_id: orderId,
             order_item_id: orderItemId,
             uploaded_by_role: "customer",
             uploaded_by: session?.user.id,
@@ -271,13 +318,18 @@ function NewOrderForm() {
             kind: "design",
           });
           if (fileInsertError) {
-            throw new Error(
-              `Uploaded ${designFileLabel}, but couldn't attach it to the order: ${fileInsertError.message}. ` +
-                `${createdOrders.length > 0 ? `${createdOrders.length} earlier order(s) in this checkout were already placed and are safe — see Orders.` : ""}`
-            );
+            throw new Error(`Uploaded ${designFileLabel}, but couldn't attach it to the order: ${fileInsertError.message}. ${safetyNote}`);
           }
         }
       }
+
+      // Every group now has a committed order (either just-created or
+      // reused from a prior attempt) -- gather them in cart order for
+      // payment.
+      const createdOrders = groups.map((_, gi) => committedLocal[gi]).filter((o) => o != null) as {
+        id: string;
+        order_no: string;
+      }[];
 
       // Pay for every order created in this checkout with one combined
       // Razorpay Checkout popup rather than one per store.
