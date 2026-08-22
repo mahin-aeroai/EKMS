@@ -633,6 +633,7 @@ drop policy if exists portal_orders_insert_staff on public.portal_orders;
 drop policy if exists portal_orders_update_customer on public.portal_orders;
 drop policy if exists portal_orders_update_staff on public.portal_orders;
 drop policy if exists portal_orders_delete_admin on public.portal_orders;
+drop policy if exists portal_orders_delete_customer on public.portal_orders;
 
 create policy portal_orders_select on public.portal_orders
   for select to authenticated
@@ -720,6 +721,23 @@ create policy portal_orders_update_staff on public.portal_orders
 create policy portal_orders_delete_admin on public.portal_orders
   for delete to authenticated
   using (public.user_role() = 'admin');
+
+-- A customer's own "Cart" — an order that's still unpaid is unfinished by
+-- definition (payment happens at checkout, before design-approval/
+-- production even starts), so "cancel" on one of these means a real
+-- delete, not a status flag, so it stops cluttering Orders. Row-ownership
+-- via company_id, same as every other customer policy on this table; the
+-- status exclusion is defense-in-depth for a state that shouldn't be
+-- reachable while unpaid anyway. portal_order_items/portal_order_files
+-- rows for the deleted order are removed automatically via their existing
+-- "on delete cascade" FKs -- see STEP 7/8 above.
+create policy portal_orders_delete_customer on public.portal_orders
+  for delete to authenticated
+  using (
+    company_id = public.portal_company_id()
+    and payment_status = 'unpaid'
+    and status not in ('in_production', 'completed', 'cancelled')
+  );
 
 -- portal_order_items ---------------------------------------------------
 drop policy if exists portal_order_items_select on public.portal_order_items;
