@@ -186,15 +186,16 @@ setup, in order:
      refuses to send people to the invite link's real destination.
    - **Emails → SMTP Settings**: point it at a real mail sender —
      Supabase's own built-in mailer is heavily rate-limited (a handful of
-     emails/hour) and not meant for actual customer invites. Using the
-     mmdi.in Google Workspace mailbox: Host `smtp.gmail.com`, Port `587`,
-     Username = the full mmdi.in address sending these, Password = a
-     Google **App Password** for that mailbox (Google Account → Security →
-     2-Step Verification must be on first, then App Passwords → generate
-     one — a regular Gmail password won't work here), Sender email = same
-     address (or a `noreply@mmdi.in` alias if one exists), Sender name =
-     "MMDI Customer Portal". Optionally customize the "Invite user" email
-     template under **Emails → Templates** to match MMDI's voice.
+     emails/hour) and not meant for actual customer invites. Sender
+     mailbox is `noreply@mmdi.in` (Google Workspace): Host
+     `smtp.gmail.com`, Port `587`, Username = `noreply@mmdi.in`, Password
+     = a Google **App Password** generated while signed in as
+     `noreply@mmdi.in` (Google Account → Security → 2-Step Verification
+     must be on first, then App Passwords → generate one — its regular
+     Gmail password won't work here), Sender email = `noreply@mmdi.in`,
+     Sender name = "MMDI Customer Portal". Optionally customize the
+     "Invite user" email template under **Emails → Templates** to match
+     MMDI's voice.
 6. For each retail chain: Customer Portal → Companies & Stores tab →
    create the company, add its store locations, then fill in "Send
    invite" (email + optional contact name) and submit. This both
