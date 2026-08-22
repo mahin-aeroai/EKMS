@@ -59,9 +59,9 @@ export function ProductGrid({ products }: { products: PortalProductRow[] }) {
   }
 
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
       {products.map((product) => (
-        <div key={product.id} className="flex gap-3 rounded-lg border border-line bg-surface p-4 shadow-1">
+        <div key={product.id} className="flex gap-2.5 rounded-lg border border-line bg-surface p-3 shadow-1">
           <div className="w-28 shrink-0 sm:w-32">
             {product.preview_image_path ? (
               <ProductPreview productId={product.id} name={product.name} />
