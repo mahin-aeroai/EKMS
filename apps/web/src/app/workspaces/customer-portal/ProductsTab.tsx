@@ -146,6 +146,7 @@ function ProductCard({ product, onUpdated }: { product: PortalProductRow; onUpda
   const [unitPrice, setUnitPrice] = useState(String(product.unit_price));
   const [active, setActive] = useState(product.active);
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -156,32 +157,55 @@ function ProductCard({ product, onUpdated }: { product: PortalProductRow; onUpda
       .then((data) => data && setPreviewUrl(data.url));
   }, [product.id, product.preview_image_path]);
 
+  // NOTE: everything here is wrapped in try/catch/finally on purpose -- an
+  // earlier version had neither, so any failure (a rejected PUT to R2 from
+  // a network hiccup, an expired 120s presigned URL, a CORS/extension
+  // block, etc.) left the button stuck on "Uploading…" forever with no
+  // error shown, recoverable only by reloading the page. The PUT's own
+  // response status is also checked now -- fetch doesn't throw on a non-2xx
+  // HTTP status, so an unchecked PUT could "succeed" while silently saving
+  // a preview_image_path that points at nothing actually uploaded.
   async function handleImageChange(file: File) {
     setUploading(true);
-    const headers = await authHeaders();
-    const uploadRes = await fetch(`/api/portal/products/${product.id}/preview-upload-url`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ content_type: file.type }),
-    });
-    const uploadData = await uploadRes.json();
-    if (!uploadRes.ok) {
-      setUploading(false);
-      return;
-    }
-    await fetch(uploadData.url, { method: "PUT", headers: { "Content-Type": file.type }, body: file });
+    setUploadError(null);
+    try {
+      const headers = await authHeaders();
+      const uploadRes = await fetch(`/api/portal/products/${product.id}/preview-upload-url`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ content_type: file.type }),
+      });
+      const uploadData = await uploadRes.json();
+      if (!uploadRes.ok) {
+        setUploadError(uploadData?.message ?? "Could not get an upload URL.");
+        return;
+      }
 
-    const { data, error } = await supabase
-      .from("portal_products")
-      .update({ preview_image_path: uploadData.relative_path, version: product.version + 1 })
-      .eq("id", product.id)
-      .select()
-      .single();
-    setUploading(false);
-    if (!error && data) {
-      onUpdated(data as PortalProductRow);
-      const viewRes = await fetch(`/api/portal/products/${product.id}/preview-url`);
-      if (viewRes.ok) setPreviewUrl((await viewRes.json()).url);
+      const putRes = await fetch(uploadData.url, { method: "PUT", headers: { "Content-Type": file.type }, body: file });
+      if (!putRes.ok) {
+        setUploadError(`Upload to storage failed (HTTP ${putRes.status}). Try again.`);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("portal_products")
+        .update({ preview_image_path: uploadData.relative_path, version: product.version + 1 })
+        .eq("id", product.id)
+        .select()
+        .single();
+      if (error) {
+        setUploadError(error.message);
+        return;
+      }
+      if (data) {
+        onUpdated(data as PortalProductRow);
+        const viewRes = await fetch(`/api/portal/products/${product.id}/preview-url`);
+        if (viewRes.ok) setPreviewUrl((await viewRes.json()).url);
+      }
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "Upload failed — check your connection and try again.");
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -232,6 +256,7 @@ function ProductCard({ product, onUpdated }: { product: PortalProductRow; onUpda
         <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">{product.code}</p>
         <p className="text-sm font-semibold text-ink">{product.name}</p>
       </div>
+      {uploadError && <p className="text-xs text-danger">{uploadError}</p>}
       <div className="flex items-center gap-2">
         <input
           value={unitPrice}
