@@ -2,7 +2,6 @@
 
 import { Suspense, useEffect, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Lock } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
 import { LFG_HOST } from "@/lib/lfg-host";
@@ -143,13 +142,14 @@ function LfgLoginForm() {
   const isInvite = mode === "set-password";
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-surface-sunken px-4">
+    <div data-theme="lfg" className="flex min-h-screen items-center justify-center bg-surface-sunken px-4">
       <div className="w-full max-w-sm rounded-lg border border-line bg-surface p-8 shadow-sm">
         <div className="mb-6 flex flex-col items-center gap-2 text-center">
-          <span className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-on-brand">
-            <Lock size={18} />
-          </span>
-          <h1 className="text-lg font-semibold text-ink">LFG Connect</h1>
+          {/* eslint-disable-next-line @next/next/no-img-element -- small static local asset, same as LfgTopBar */}
+          <img src="/brand/lfg-connect-logo.png" alt="LFG Connect" className="h-12 w-12 shrink-0 rounded-md object-cover" />
+          <h1 className="text-lg font-semibold text-ink">
+            LFG <span className="text-danger">Connect</span>
+          </h1>
           <p className="text-sm text-ink-muted">
             {isInvite
               ? inviteEmail

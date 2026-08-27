@@ -39,7 +39,7 @@ export function LfgTopBar({
         <div className="flex items-center gap-3">
           <Link href={lfgHref("/", onLfgHost)} className="flex items-center gap-2">
             {/* eslint-disable-next-line @next/next/no-img-element -- small static local asset, same as PortalTopBar */}
-            <img src="/brand/mmdi-logo-sm.png" alt="MMDI" className="h-8 w-8 shrink-0 rounded-md object-cover" />
+            <img src="/brand/lfg-connect-logo.png" alt="LFG Connect" className="h-8 w-8 shrink-0 rounded-md object-cover" />
             <span className="flex flex-col leading-tight">
               <span className="text-sm font-semibold text-ink">{partnerName || "LFG Connect"}</span>
               <span className="text-xs text-ink-muted">{fullName || email}</span>

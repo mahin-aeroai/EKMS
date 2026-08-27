@@ -110,6 +110,18 @@
   --shadow-4: 0 24px 56px rgba(0, 0, 0, 0.6);
 }
 
+/* LFG Connect brand override -- scoped via data-theme="lfg" on the
+   partner-portal root wrappers (lfg/login/page.tsx, lfg/(app)/layout.tsx)
+   only, NOT applied globally -- the rest of the app (main workspace,
+   customer portal) keeps the default MMDI steel-blue primary. Grey +
+   red pulled from the LFG Connect logo (charcoal wordmark, red pin/
+   accent) rather than introducing new one-off hex values elsewhere. */
+[data-theme="lfg"] {
+  --primary: var(--n-700);
+  --primary-hover: var(--n-800);
+  --primary-tint: var(--n-200);
+}
+
 [data-theme="enterprise"] {
   /* High-contrast, larger-scale theme for Kiosk / Factory Display / Meeting Room Display */
   --surface: #05070b;

@@ -22,7 +22,7 @@ export default async function LfgLayout({ children }: { children: ReactNode }) {
   const onLfgHost = hostHeader === LFG_HOST;
 
   return (
-    <div className="min-h-screen bg-surface-sunken">
+    <div data-theme="lfg" className="min-h-screen bg-surface-sunken">
       <LfgProviders onLfgHost={onLfgHost} identity={identity}>
         {identity && <LfgTopBar partnerName={identity.partnerName} fullName={identity.fullName} email={identity.email} />}
         <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
