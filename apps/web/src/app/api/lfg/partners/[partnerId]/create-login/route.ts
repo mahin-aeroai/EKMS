@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 // file's comments for the fuller reasoning (invite-link-not-password so a
 // wrong/fake email just never gets clicked, the consumed_at reset on
 // upsert, the two Supabase setup steps this depends on: a real SMTP
-// provider, and https://portal.lfg.mmdi.in/login added to Supabase's
+// provider, and https://lfgconnect.mmdi.in/login added to Supabase's
 // Redirect URLs allowlist) -- all of it applies unchanged here.
 //
 // The existing handle_new_user() trigger (extended in

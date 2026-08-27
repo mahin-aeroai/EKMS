@@ -7,4 +7,4 @@
  * /lfg-prefixed -- see lfg-links.ts). Direct structural mirror of
  * portal-host.ts -- keeping it in one file means the two never drift.
  */
-export const LFG_HOST = "portal.lfg.mmdi.in";
+export const LFG_HOST = "lfgconnect.mmdi.in";

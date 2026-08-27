@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
 
 export default async function LfgLayout({ children }: { children: ReactNode }) {
   const identity = await getLfgIdentity();
-  // Whether this request came in on portal.lfg.mmdi.in vs. a /lfg-prefixed
+  // Whether this request came in on lfgconnect.mmdi.in vs. a /lfg-prefixed
   // path on another host -- see lfg-links.ts for why this can't just be
   // inferred client-side.
   const hostHeader = (await headers()).get("host") ?? "";

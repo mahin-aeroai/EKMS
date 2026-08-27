@@ -41,6 +41,7 @@ import {
   PackageCheck,
   Ship,
   Store,
+  MapPin,
 } from "lucide-react";
 import { Sidebar, type SidebarSection } from "@/components/ui/Sidebar";
 import { TopNav } from "@/components/ui/TopNav";
@@ -165,6 +166,13 @@ export const NAV: SidebarSection[] = [
       { id: "cost-sheet", label: "Cost Sheet", icon: <Layers size={16} />, href: "/workspaces/cost-sheet" },
       { id: "material-ordering", label: "Material Ordering", icon: <PackageCheck size={16} />, href: "/workspaces/material-ordering" },
       { id: "import-duty", label: "Import Duty", icon: <Ship size={16} />, href: "/workspaces/import-duty" },
+      // Staff-side (admin/editor/viewer) Site Master + Site 360 view for
+      // the Basil LFG program -- NOT the same surface as /lfg/(app)/, which
+      // is the separate lfg_partner-only external portal (lfgconnect.mmdi.in,
+      // see supabase-middleware.ts). This is the internal view of the same
+      // lfg_* tables, reached through the normal sidebar and gated by role/
+      // RLS rather than lfg_partner_users membership.
+      { id: "lfg-site-management", label: "Basil LFG Sites", icon: <MapPin size={16} />, href: "/workspaces/lfg" },
     ],
   },
 ];

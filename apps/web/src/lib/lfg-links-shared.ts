@@ -8,7 +8,7 @@
 
 /**
  * Builds an LFG-portal-internal href from a bare, /lfg-less path (e.g.
- * "/sites/123", "/", "/login") -- clean on portal.lfg.mmdi.in, /lfg-
+ * "/sites/123", "/", "/login") -- clean on lfgconnect.mmdi.in, /lfg-
  * prefixed everywhere else. Every internal Link/router.push within the
  * LFG partner portal should go through this rather than hardcoding either
  * form directly.

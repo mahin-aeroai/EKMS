@@ -314,8 +314,13 @@ set search_path = public
 as $$
 begin
   if new.site_status is distinct from old.site_status then
-    insert into public.lfg_site_status_history (site_id, changed_by, previous_status, new_status)
-    values (new.id, auth.uid(), old.site_status, new.site_status);
+    -- current_setting(..., true) (missing_ok) returns null rather than
+    -- erroring when nothing set it -- the common case for any status
+    -- change that doesn't go through lfg_change_site_status() below (a
+    -- direct UPDATE, a future bulk-import path, etc.), which is exactly
+    -- today's no-remarks behavior, unchanged.
+    insert into public.lfg_site_status_history (site_id, changed_by, previous_status, new_status, remarks)
+    values (new.id, auth.uid(), old.site_status, new.site_status, current_setting('lfg.status_change_remarks', true));
   end if;
   return new;
 end;
@@ -789,6 +794,39 @@ drop trigger if exists lfg_sites_guard_partner_update_trigger on public.lfg_site
 create trigger lfg_sites_guard_partner_update_trigger
   before update on public.lfg_sites
   for each row execute function public.lfg_sites_guard_partner_update();
+
+-- The Site Status change action (spec: every change recorded with User,
+-- Date, Time, Previous Status, New Status, Remarks) is a single RPC
+-- rather than a bare `update lfg_sites set site_status = ...` from the
+-- client, purely so the optional remarks reach the history row the
+-- trigger above writes -- an ordinary UPDATE has no side-channel for
+-- that, and updating the history row after the fact would be a second,
+-- separately-racy statement. security invoker (the default -- no
+-- `security definer` here) is deliberate: this must run as the calling
+-- user so lfg_sites_update's own RLS (staff full; partner scoped to
+-- their own site) and the guard trigger above both still apply exactly
+-- as if the caller had written the UPDATE directly -- this function
+-- grants no privilege a caller doesn't already have.
+create or replace function public.lfg_change_site_status(
+  p_site_id uuid,
+  p_new_status text,
+  p_remarks text default null
+)
+returns void
+language plpgsql
+set search_path = public
+as $$
+begin
+  if p_remarks is not null then
+    perform set_config('lfg.status_change_remarks', p_remarks, true);
+  end if;
+  update public.lfg_sites
+    set site_status = p_new_status, updated_at = now(), updated_by = auth.uid()
+    where id = p_site_id;
+end;
+$$;
+
+grant execute on function public.lfg_change_site_status(uuid, text, text) to authenticated;
 
 -- ---- lfg_site_status_history: staff full; partner reads their sites' ----
 drop policy if exists lfg_site_status_history_select on public.lfg_site_status_history;

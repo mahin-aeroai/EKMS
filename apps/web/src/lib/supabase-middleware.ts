@@ -103,7 +103,7 @@ export async function updateSession(request: NextRequest) {
   const incomingPathname = request.nextUrl.pathname;
 
   // Canonicalize: an old app.mmdi.in/portal/* (or /lfg/*) link now belongs
-  // at portal.mmdi.in/* (or portal.lfg.mmdi.in/*) with the prefix dropped.
+  // at portal.mmdi.in/* (or lfgconnect.mmdi.in/*) with the prefix dropped.
   // Redirect rather than silently keep serving the old path, so there's
   // exactly one canonical URL going forward. Runs before any auth check --
   // an unauthenticated hit here still lands on the right host before the
@@ -121,7 +121,7 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(target, 308);
   }
 
-  // portal.mmdi.in / portal.lfg.mmdi.in serve the exact same pages that
+  // portal.mmdi.in / lfgconnect.mmdi.in serve the exact same pages that
   // live under /portal/* / /lfg/* in the app's file tree, just without
   // that prefix showing in the URL. `pathname` becomes the REWRITTEN,
   // prefixed path from here on -- every check below (isPublicPath,

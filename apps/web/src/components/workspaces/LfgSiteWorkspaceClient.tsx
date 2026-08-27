@@ -1,0 +1,754 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { MapPin, Pencil, ShieldAlert, Lock } from "lucide-react";
+import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
+import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import { Dialog } from "@/components/ui/Dialog";
+import { Tabs, type TabItem } from "@/components/ui/Tabs";
+import { Timeline, type TimelineEntry } from "@/components/ui/Timeline";
+import { useToast } from "@/components/ui/Notifications";
+import { useUserRole, canWrite } from "@/lib/UserRoleContext";
+import { supabase } from "@/lib/supabase";
+import { LFG_STATUSES, lfgStatusLabel, lfgStatusBadge, formatInr } from "@/lib/lfgStatus";
+
+// Site 360 -- the tabbed view every part of the spec (New Site through
+// Deactivation) ultimately links back to. Survey and Production are real,
+// working tabs here (there's no dedicated later task for either). Shipment,
+// Installation, and Documents are deliberately light stubs -- Courier/AWB
+// tracking (task #18), the Installation module (task #17), and Document
+// management (task #21) each replace their stub with the real thing; the
+// operational lfg_installations row IS shown read-only here in the
+// meantime since it's already fetched and there's no reason to hide data
+// that exists. Financials is gated client-side to admin/editor as a UX
+// nicety on top of the REAL boundary, which is that
+// lfg_site_financials/lfg_installation_costs simply have no RLS grant to
+// lfg_partner at all -- a viewer or partner account would get back empty
+// data here regardless of what this component renders.
+
+interface LfgSite {
+  id: string;
+  site_id: string;
+  outlet_name: string;
+  program: string | null;
+  sfo_id: string | null;
+  city: string | null;
+  store_address: string | null;
+  material: string | null;
+  number_of_sites: number;
+  width: number | null;
+  height: number | null;
+  sqft: number | null;
+  asm_name: string | null;
+  asm_mobile: string | null;
+  asm_email: string | null;
+  escalation_email: string | null;
+  remarks: string | null;
+  site_status: string;
+  partner_id: string | null;
+  lfg_partners: { id: string; name: string } | { id: string; name: string }[] | null;
+}
+
+interface StatusHistoryRow {
+  id: string;
+  changed_at: string;
+  previous_status: string | null;
+  new_status: string;
+  remarks: string | null;
+  changed_by: string | null;
+}
+
+interface FinancialsRow {
+  rate: number | null;
+  amount: number | null;
+  packing_forwarding: number | null;
+  other_charges: number | null;
+  total_commercial_value: number | null;
+  gst_amount: number | null;
+  total_printing_amount: number | null;
+  material_cost: number | null;
+  production_cost: number | null;
+  installation_amount: number | null;
+  other_expenses: number | null;
+  total_project_cost: number | null;
+  margin: number | null;
+  commercial_terms: string | null;
+  budget_category: string | null;
+}
+
+interface InstallationCostsRow {
+  installation_rate: number | null;
+  installation_amount: number | null;
+  scaffolding_rate: number | null;
+  scaffolding_amount: number | null;
+  installation_travelling: number | null;
+  scaffolding_plus_travelling: number | null;
+  installation_subtotal: number | null;
+  installation_gst_amount: number | null;
+  labour_other_expenses: number | null;
+  total_installation_cost: number | null;
+}
+
+interface InstallationRow {
+  installation_required: boolean;
+  scaffolding_required: boolean;
+  scaffolding_size: string | null;
+  installation_date: string | null;
+  installation_team: string | null;
+  installation_status: string;
+  installation_remarks: string | null;
+}
+
+interface ProductionRow {
+  status: string;
+  started_at: string | null;
+  completed_at: string | null;
+  notes: string | null;
+}
+
+interface SurveyRow {
+  id: string;
+  survey_date: string | null;
+  measured_width: number | null;
+  measured_height: number | null;
+  measurements_remarks: string | null;
+  status: string;
+  submitted_at: string | null;
+  approved_at: string | null;
+}
+
+interface AuditLogRow {
+  id: string;
+  created_at: string;
+  user_email: string | null;
+  action: string;
+  entity_type: string;
+  entity_id: string;
+}
+
+function partnerOf(site: LfgSite) {
+  const p = Array.isArray(site.lfg_partners) ? site.lfg_partners[0] : site.lfg_partners;
+  return p ?? null;
+}
+
+const inputClass =
+  "rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none";
+const labelClass = "text-xs font-medium text-ink-secondary";
+
+function Field({ label, value }: { label: string; value: string | number | null | undefined }) {
+  return (
+    <div>
+      <div className="text-xs text-ink-muted">{label}</div>
+      <div className="text-sm text-ink">{value === null || value === undefined || value === "" ? "—" : value}</div>
+    </div>
+  );
+}
+
+export function LfgSiteWorkspaceClient({
+  site,
+  initialStatusHistory,
+  initialFinancials,
+  initialInstallationCosts,
+  initialInstallation,
+  initialProduction,
+  initialSurveys,
+  initialAuditLog,
+}: {
+  site: LfgSite;
+  initialStatusHistory: StatusHistoryRow[];
+  initialFinancials: FinancialsRow | null;
+  initialInstallationCosts: InstallationCostsRow | null;
+  initialInstallation: InstallationRow | null;
+  initialProduction: ProductionRow | null;
+  initialSurveys: SurveyRow[];
+  initialAuditLog: AuditLogRow[];
+}) {
+  const router = useRouter();
+  const { toast } = useToast();
+  const role = useUserRole();
+  const editable = canWrite(role);
+  const partner = partnerOf(site);
+
+  const [statusHistory] = useState(initialStatusHistory);
+  const [showStatusDialog, setShowStatusDialog] = useState(false);
+  const [newStatus, setNewStatus] = useState(site.site_status);
+  const [statusRemarks, setStatusRemarks] = useState("");
+  const [changingStatus, setChangingStatus] = useState(false);
+
+  async function handleChangeStatus() {
+    setChangingStatus(true);
+    const { error } = await supabase.rpc("lfg_change_site_status", {
+      p_site_id: site.id,
+      p_new_status: newStatus,
+      p_remarks: statusRemarks.trim() || null,
+    });
+    setChangingStatus(false);
+    if (error) {
+      toast("danger", `Couldn't change status: ${error.message}`);
+      return;
+    }
+    toast("success", `Status changed to ${lfgStatusLabel(newStatus)}`);
+    setShowStatusDialog(false);
+    setStatusRemarks("");
+    router.refresh();
+  }
+
+  const items: TabItem[] = [
+    {
+      id: "info",
+      label: "Site Information",
+      content: (
+        <div className="grid grid-cols-2 gap-4 rounded-lg border border-line bg-surface p-4 sm:grid-cols-3">
+          <Field label="Site ID" value={site.site_id} />
+          <Field label="Outlet Name" value={site.outlet_name} />
+          <Field label="Program" value={site.program} />
+          <Field label="SFO ID" value={site.sfo_id} />
+          <Field label="City" value={site.city} />
+          <Field label="Material" value={site.material} />
+          <Field label="Number of Sites" value={site.number_of_sites} />
+          <Field label="Width" value={site.width} />
+          <Field label="Height" value={site.height} />
+          <Field label="SQFT" value={site.sqft} />
+          <Field label="Partner" value={partner?.name} />
+          <Field label="ASM Name" value={site.asm_name} />
+          <Field label="ASM Mobile" value={site.asm_mobile} />
+          <Field label="ASM Email" value={site.asm_email} />
+          <Field label="Escalation Email" value={site.escalation_email} />
+          <div className="col-span-2 sm:col-span-3">
+            <Field label="Store Address" value={site.store_address} />
+          </div>
+          <div className="col-span-2 sm:col-span-3">
+            <Field label="Remarks" value={site.remarks} />
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: "status",
+      label: "Status",
+      content: (
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center justify-between rounded-lg border border-line bg-surface p-4">
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-ink-muted">Current status</span>
+              <Badge status={lfgStatusBadge(site.site_status)}>{lfgStatusLabel(site.site_status)}</Badge>
+            </div>
+            {editable && (
+              <Button size="sm" onClick={() => { setNewStatus(site.site_status); setShowStatusDialog(true); }}>
+                Change Status
+              </Button>
+            )}
+          </div>
+          <div className="rounded-lg border border-line bg-surface p-4">
+            <h3 className="mb-3 text-sm font-semibold text-ink">History</h3>
+            {statusHistory.length === 0 ? (
+              <p className="text-sm text-ink-muted">No status changes recorded yet.</p>
+            ) : (
+              <Timeline
+                entries={statusHistory.map(
+                  (h): TimelineEntry => ({
+                    id: h.id,
+                    date: new Date(h.changed_at).toLocaleString(),
+                    title: `${h.previous_status ? lfgStatusLabel(h.previous_status) : "—"} → ${lfgStatusLabel(h.new_status)}`,
+                    description: h.remarks ?? undefined,
+                  })
+                )}
+              />
+            )}
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: "survey",
+      label: "Survey",
+      content: <SurveyTab siteId={site.id} initialSurveys={initialSurveys} editable={editable} onChanged={() => router.refresh()} />,
+    },
+    {
+      id: "production",
+      label: "Production",
+      content: <ProductionTab siteId={site.id} initial={initialProduction} editable={editable} onChanged={() => router.refresh()} />,
+    },
+    {
+      id: "shipment",
+      label: "Shipment",
+      content: <StubTab message="Courier/AWB tracking is a dedicated module, coming next." />,
+    },
+    {
+      id: "installation",
+      label: "Installation",
+      content: initialInstallation ? (
+        <div className="grid grid-cols-2 gap-4 rounded-lg border border-line bg-surface p-4 sm:grid-cols-3">
+          <Field label="Installation Required" value={initialInstallation.installation_required ? "Yes" : "No"} />
+          <Field label="Scaffolding Required" value={initialInstallation.scaffolding_required ? "Yes" : "No"} />
+          <Field label="Scaffolding Size" value={initialInstallation.scaffolding_size} />
+          <Field label="Installation Date" value={initialInstallation.installation_date} />
+          <Field label="Installation Team" value={initialInstallation.installation_team} />
+          <Field label="Status" value={initialInstallation.installation_status} />
+          <div className="col-span-2 sm:col-span-3">
+            <Field label="Remarks" value={initialInstallation.installation_remarks} />
+          </div>
+          <p className="col-span-2 text-xs text-ink-muted sm:col-span-3">
+            Full Installation module (scheduling, photo uploads, expense entry) is a dedicated task, coming next.
+          </p>
+        </div>
+      ) : (
+        <StubTab message="The Installation module is a dedicated task, coming next." />
+      ),
+    },
+    {
+      id: "documents",
+      label: "Documents",
+      content: <StubTab message="Document management (Reference/Survey/Installation uploads) is a dedicated module, coming next." />,
+    },
+    ...(editable
+      ? [
+          {
+            id: "financials",
+            label: "Financials",
+            content: (
+              <FinancialsTab
+                siteId={site.id}
+                financials={initialFinancials}
+                installationCosts={initialInstallationCosts}
+                onChanged={() => router.refresh()}
+              />
+            ),
+          } satisfies TabItem,
+        ]
+      : role
+        ? [
+            {
+              id: "financials",
+              label: "Financials",
+              content: (
+                <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-line py-16 text-center">
+                  <Lock size={28} className="text-ink-muted" />
+                  <p className="text-sm text-ink-secondary">Only admins and editors can view financial information for this site.</p>
+                </div>
+              ),
+            } satisfies TabItem,
+          ]
+        : []),
+    {
+      id: "activity",
+      label: "Activity / Audit Trail",
+      content:
+        initialAuditLog.length === 0 ? (
+          <p className="text-sm text-ink-muted">No audit events recorded yet.</p>
+        ) : (
+          <Timeline
+            audit
+            entries={initialAuditLog.map(
+              (a): TimelineEntry => ({
+                id: a.id,
+                date: new Date(a.created_at).toLocaleString(),
+                title: `${a.action.toUpperCase()} ${a.entity_type}`,
+                description: `${a.user_email ?? "system"} · ${a.entity_id}`,
+              })
+            )}
+          />
+        ),
+    },
+  ];
+
+  return (
+    <div>
+      <Breadcrumbs
+        items={[{ label: "Home", href: "/" }, { label: "Basil LFG Sites", href: "/workspaces/lfg" }, { label: site.site_id }]}
+      />
+
+      <div className="mt-4 flex flex-col gap-4 border-b border-line pb-6 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-start gap-4">
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary-tint text-primary">
+            <MapPin size={22} />
+          </span>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-xl font-semibold text-ink">{site.outlet_name}</h1>
+              <Badge status={lfgStatusBadge(site.site_status)}>{lfgStatusLabel(site.site_status)}</Badge>
+            </div>
+            <p className="mt-0.5 text-sm text-ink-secondary">
+              {site.site_id} · {site.program ?? "No program"} · {site.city ?? "No city"} {partner ? `· ${partner.name}` : ""}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-6">
+        <Tabs items={items} defaultId="info" />
+      </div>
+
+      <Dialog
+        open={showStatusDialog}
+        onClose={() => setShowStatusDialog(false)}
+        title="Change Site Status"
+        variant="form"
+        onConfirm={handleChangeStatus}
+        confirmLabel={changingStatus ? "Saving…" : "Save"}
+      >
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <label className={labelClass}>New status</label>
+            <select className={inputClass} value={newStatus} onChange={(e) => setNewStatus(e.target.value)}>
+              {LFG_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {lfgStatusLabel(s)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className={labelClass}>Remarks (optional)</label>
+            <textarea rows={3} className={inputClass} value={statusRemarks} onChange={(e) => setStatusRemarks(e.target.value)} />
+          </div>
+        </div>
+      </Dialog>
+    </div>
+  );
+}
+
+function StubTab({ message }: { message: string }) {
+  return (
+    <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-line py-16 text-center">
+      <ShieldAlert size={28} className="text-ink-muted" />
+      <p className="max-w-sm text-sm text-ink-secondary">{message}</p>
+    </div>
+  );
+}
+
+function SurveyTab({
+  siteId,
+  initialSurveys,
+  editable,
+  onChanged,
+}: {
+  siteId: string;
+  initialSurveys: SurveyRow[];
+  editable: boolean;
+  onChanged: () => void;
+}) {
+  const { toast } = useToast();
+  const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ survey_date: "", measured_width: "", measured_height: "", measurements_remarks: "" });
+
+  async function handleLog() {
+    setSaving(true);
+    const { error } = await supabase.from("lfg_site_surveys").insert({
+      site_id: siteId,
+      survey_date: form.survey_date || null,
+      measured_width: form.measured_width ? Number(form.measured_width) : null,
+      measured_height: form.measured_height ? Number(form.measured_height) : null,
+      measurements_remarks: form.measurements_remarks.trim() || null,
+      status: "completed",
+      submitted_at: new Date().toISOString(),
+    });
+    setSaving(false);
+    if (error) {
+      toast("danger", `Couldn't log survey: ${error.message}`);
+      return;
+    }
+    toast("success", "Survey logged");
+    setShowForm(false);
+    onChanged();
+  }
+
+  async function handleApprove(surveyId: string) {
+    const { error } = await supabase
+      .from("lfg_site_surveys")
+      .update({ status: "approved", approved_at: new Date().toISOString() })
+      .eq("id", surveyId);
+    if (error) {
+      toast("danger", `Couldn't approve: ${error.message}`);
+      return;
+    }
+    toast("success", "Survey approved");
+    onChanged();
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      {editable && (
+        <div className="flex justify-end">
+          <Button size="sm" onClick={() => setShowForm((s) => !s)}>
+            {showForm ? "Cancel" : "Log Survey"}
+          </Button>
+        </div>
+      )}
+
+      {showForm && (
+        <div className="grid grid-cols-2 gap-3 rounded-lg border border-line bg-surface p-4 sm:grid-cols-4">
+          <input type="date" className={inputClass} value={form.survey_date} onChange={(e) => setForm((f) => ({ ...f, survey_date: e.target.value }))} />
+          <input
+            type="number"
+            step="0.01"
+            placeholder="Measured width"
+            className={inputClass}
+            value={form.measured_width}
+            onChange={(e) => setForm((f) => ({ ...f, measured_width: e.target.value }))}
+          />
+          <input
+            type="number"
+            step="0.01"
+            placeholder="Measured height"
+            className={inputClass}
+            value={form.measured_height}
+            onChange={(e) => setForm((f) => ({ ...f, measured_height: e.target.value }))}
+          />
+          <input
+            placeholder="Remarks"
+            className={inputClass}
+            value={form.measurements_remarks}
+            onChange={(e) => setForm((f) => ({ ...f, measurements_remarks: e.target.value }))}
+          />
+          <div className="col-span-2 sm:col-span-4">
+            <Button size="sm" loading={saving} onClick={handleLog}>
+              Save Survey
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {initialSurveys.length === 0 ? (
+        <p className="text-sm text-ink-muted">No surveys logged yet.</p>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {initialSurveys.map((s) => (
+            <div key={s.id} className="flex items-center justify-between rounded-lg border border-line bg-surface p-3 text-sm">
+              <div>
+                <span className="font-medium text-ink">{s.survey_date ?? "No date"}</span>
+                <span className="ml-2 text-ink-secondary">
+                  {s.measured_width ?? "—"} × {s.measured_height ?? "—"}
+                </span>
+                {s.measurements_remarks && <p className="mt-0.5 text-xs text-ink-muted">{s.measurements_remarks}</p>}
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge status={s.status === "approved" ? "success" : s.status === "completed" ? "info" : "neutral"}>{s.status}</Badge>
+                {editable && s.status === "completed" && (
+                  <Button size="sm" variant="secondary" onClick={() => handleApprove(s.id)}>
+                    Approve
+                  </Button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProductionTab({
+  siteId,
+  initial,
+  editable,
+  onChanged,
+}: {
+  siteId: string;
+  initial: ProductionRow | null;
+  editable: boolean;
+  onChanged: () => void;
+}) {
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
+  const status = initial?.status ?? "pending";
+
+  async function setStatus(next: "in_progress" | "completed") {
+    setSaving(true);
+    const patch: Record<string, unknown> = { site_id: siteId, status: next, updated_at: new Date().toISOString() };
+    if (next === "in_progress") patch.started_at = new Date().toISOString();
+    if (next === "completed") patch.completed_at = new Date().toISOString();
+    const { error } = await supabase.from("lfg_production").upsert(patch, { onConflict: "site_id" });
+    setSaving(false);
+    if (error) {
+      toast("danger", `Couldn't update production status: ${error.message}`);
+      return;
+    }
+    toast("success", "Production status updated");
+    onChanged();
+  }
+
+  return (
+    <div className="flex flex-col gap-4 rounded-lg border border-line bg-surface p-4">
+      <div className="flex items-center justify-between">
+        <Badge status={status === "completed" ? "success" : status === "in_progress" ? "info" : "neutral"}>{status}</Badge>
+        {editable && (
+          <div className="flex gap-2">
+            {status === "pending" && (
+              <Button size="sm" loading={saving} onClick={() => setStatus("in_progress")}>
+                Start Production
+              </Button>
+            )}
+            {status === "in_progress" && (
+              <Button size="sm" loading={saving} onClick={() => setStatus("completed")}>
+                Mark Completed
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="Started" value={initial?.started_at ? new Date(initial.started_at).toLocaleString() : null} />
+        <Field label="Completed" value={initial?.completed_at ? new Date(initial.completed_at).toLocaleString() : null} />
+      </div>
+      <Field label="Notes" value={initial?.notes} />
+    </div>
+  );
+}
+
+// commercial_terms/budget_category are the only non-numeric FinancialsRow
+// fields, and neither belongs in this numeric-only edit grid (commercial
+// terms is free text with no obvious single input here; budget_category
+// is carried purely for lossless legacy import fidelity, not day-to-day
+// editing) -- excluding both here is what lets formatInr()/the number
+// inputs below assume every listed key is numeric.
+type FinancialsNumericKey = Exclude<keyof FinancialsRow, "commercial_terms" | "budget_category">;
+const FINANCIAL_FIELDS: { key: FinancialsNumericKey; label: string }[] = [
+  { key: "rate", label: "Rate" },
+  { key: "amount", label: "Amount" },
+  { key: "packing_forwarding", label: "Packing & Forwarding" },
+  { key: "other_charges", label: "Other Charges" },
+  { key: "total_commercial_value", label: "Total Commercial Value" },
+  { key: "gst_amount", label: "GST Amount" },
+  { key: "total_printing_amount", label: "Total Printing Amount" },
+  { key: "material_cost", label: "Material Cost" },
+  { key: "production_cost", label: "Production Cost" },
+  { key: "installation_amount", label: "Installation Amount" },
+  { key: "other_expenses", label: "Other Expenses" },
+  { key: "total_project_cost", label: "Total Project Cost" },
+  { key: "margin", label: "Margin" },
+];
+
+const INSTALLATION_COST_FIELDS: { key: keyof InstallationCostsRow; label: string }[] = [
+  { key: "installation_rate", label: "Installation Rate" },
+  { key: "installation_amount", label: "Installation Amount" },
+  { key: "scaffolding_rate", label: "Scaffolding Rate" },
+  { key: "scaffolding_amount", label: "Scaffolding Amount" },
+  { key: "installation_travelling", label: "Installation Travelling" },
+  { key: "scaffolding_plus_travelling", label: "Scaffolding + Travelling" },
+  { key: "installation_subtotal", label: "Installation Subtotal" },
+  { key: "installation_gst_amount", label: "Installation GST Amount" },
+  { key: "labour_other_expenses", label: "Labour / Other Expenses" },
+  { key: "total_installation_cost", label: "Total Installation Cost" },
+];
+
+// Admin/editor only -- see the parent component's comment on why this is
+// UX-only, not the real security boundary. Direct
+// supabase.from("lfg_site_financials"|"lfg_installation_costs").upsert(...)
+// from the client -- lfg_site_financials_staff_all/
+// lfg_installation_costs_staff_all are blanket `for all` policies for
+// admin/editor, so this is consistent with the schema's own model, same
+// as MastersTab's direct-insert pattern.
+function FinancialsTab({
+  siteId,
+  financials,
+  installationCosts,
+  onChanged,
+}: {
+  siteId: string;
+  financials: FinancialsRow | null;
+  installationCosts: InstallationCostsRow | null;
+  onChanged: () => void;
+}) {
+  const { toast } = useToast();
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [finForm, setFinForm] = useState<Record<string, string>>(
+    Object.fromEntries(FINANCIAL_FIELDS.map((f) => [f.key, financials?.[f.key] != null ? String(financials[f.key]) : ""]))
+  );
+  const [instForm, setInstForm] = useState<Record<string, string>>(
+    Object.fromEntries(
+      INSTALLATION_COST_FIELDS.map((f) => [f.key, installationCosts?.[f.key] != null ? String(installationCosts[f.key]) : ""])
+    )
+  );
+
+  async function handleSave() {
+    setSaving(true);
+    const finPatch: Record<string, unknown> = { site_id: siteId, updated_at: new Date().toISOString() };
+    FINANCIAL_FIELDS.forEach((f) => {
+      finPatch[f.key] = finForm[f.key] ? Number(finForm[f.key]) : null;
+    });
+    const instPatch: Record<string, unknown> = { site_id: siteId, updated_at: new Date().toISOString() };
+    INSTALLATION_COST_FIELDS.forEach((f) => {
+      instPatch[f.key] = instForm[f.key] ? Number(instForm[f.key]) : null;
+    });
+
+    const [{ error: finError }, { error: instError }] = await Promise.all([
+      supabase.from("lfg_site_financials").upsert(finPatch, { onConflict: "site_id" }),
+      supabase.from("lfg_installation_costs").upsert(instPatch, { onConflict: "site_id" }),
+    ]);
+    setSaving(false);
+
+    if (finError || instError) {
+      toast("danger", `Couldn't save financials: ${finError?.message ?? instError?.message}`);
+      return;
+    }
+    toast("success", "Financials saved");
+    setEditing(false);
+    onChanged();
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex justify-end">
+        <Button size="sm" variant="secondary" onClick={() => setEditing((e) => !e)}>
+          <Pencil size={14} className="mr-1.5" />
+          {editing ? "Cancel" : "Edit"}
+        </Button>
+      </div>
+
+      <div className="rounded-lg border border-line bg-surface p-4">
+        <h3 className="mb-3 text-sm font-semibold text-ink">Commercial</h3>
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+          {FINANCIAL_FIELDS.map((f) =>
+            editing ? (
+              <div key={f.key} className="flex flex-col gap-1">
+                <label className={labelClass}>{f.label}</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  className={inputClass}
+                  value={finForm[f.key]}
+                  onChange={(e) => setFinForm((s) => ({ ...s, [f.key]: e.target.value }))}
+                />
+              </div>
+            ) : (
+              <Field key={f.key} label={f.label} value={formatInr(financials?.[f.key] ?? null)} />
+            )
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-line bg-surface p-4">
+        <h3 className="mb-3 text-sm font-semibold text-ink">Installation Cost</h3>
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+          {INSTALLATION_COST_FIELDS.map((f) =>
+            editing ? (
+              <div key={f.key} className="flex flex-col gap-1">
+                <label className={labelClass}>{f.label}</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  className={inputClass}
+                  value={instForm[f.key]}
+                  onChange={(e) => setInstForm((s) => ({ ...s, [f.key]: e.target.value }))}
+                />
+              </div>
+            ) : (
+              <Field key={f.key} label={f.label} value={formatInr(installationCosts?.[f.key] ?? null)} />
+            )
+          )}
+        </div>
+      </div>
+
+      {editing && (
+        <Button loading={saving} onClick={handleSave} className="self-start">
+          Save Financials
+        </Button>
+      )}
+    </div>
+  );
+}
