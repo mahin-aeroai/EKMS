@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { MapPin, Search, Plus, LayoutDashboard, Users, Trash2, X } from "lucide-react";
+import { MapPin, Search, Plus, LayoutDashboard, Users, Trash2, X, ArrowLeft } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { StatCard } from "@/components/ui/Card";
@@ -233,7 +233,15 @@ export default function LfgSiteListPage() {
       </div>
 
       {programFilter && (
-        <div className="mb-3 flex items-center gap-2">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          {/* Landing here is always a Program Dashboard click-through (see
+              the ?program= seeding effect above) -- an explicit way back,
+              not just the generic header "Dashboard" button, since that's
+              easy to miss when you arrived expecting to land back where
+              you came from. */}
+          <Button size="sm" variant="secondary" onClick={() => router.push("/workspaces/lfg/dashboard")}>
+            <ArrowLeft size={14} className="mr-1.5" /> Back to Dashboard
+          </Button>
           <span className="inline-flex items-center gap-1.5 rounded-full border border-primary bg-primary-tint px-3 py-1 text-xs font-medium text-primary">
             Program: {programFilter}
             <button
