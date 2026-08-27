@@ -5,9 +5,20 @@ import { LFG_HOST } from "./lfg-host";
 
 const PUBLIC_PATHS = ["/login", "/portal/login", "/lfg/login"];
 
+// Business-website policy pages (Shipping/Contact/Pricing/Terms/Privacy/
+// Cancellation & Refunds) -- reachable with no session at all, deliberately,
+// since Razorpay's own review of portal.mmdi.in as a registered website (and
+// any real customer looking them up) needs them to load without an account.
+// Physically under /portal/policies/* so the same portalHost rewrite that
+// turns portal.mmdi.in/login into /portal/login also turns
+// portal.mmdi.in/policies/shipping into /portal/policies/shipping -- see
+// that rewrite below and portal-links-shared.ts's portalHref().
+const PUBLIC_PATH_PREFIXES = ["/portal/policies"];
+
 function isPublicPath(pathname: string) {
   return (
     PUBLIC_PATHS.includes(pathname) ||
+    PUBLIC_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix)) ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||
     pathname.startsWith("/public")
