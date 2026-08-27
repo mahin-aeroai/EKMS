@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getOnPortalHost } from "@/lib/portal-host-server";
 import { portalHref } from "@/lib/portal-links-shared";
 import { MMDI_COMPANY } from "@/lib/mmdi-company";
+import { PortalPolicyFooter } from "@/components/portal/PortalPolicyFooter";
 
 export const dynamic = "force-dynamic";
 
@@ -45,15 +46,12 @@ export default async function PoliciesLayout({ children }: { children: ReactNode
             ))}
           </nav>
         </div>
+        <div className="h-1 bg-gradient-to-r from-primary via-danger to-primary" />
       </header>
 
       <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6">{children}</main>
 
-      <footer className="border-t border-line px-4 py-6 text-center text-xs text-ink-muted sm:px-6">
-        {MMDI_COMPANY.legalName} · {MMDI_COMPANY.address}
-        <br />
-        {MMDI_COMPANY.phone} · {MMDI_COMPANY.email} · GSTIN {MMDI_COMPANY.gstin}
-      </footer>
+      <PortalPolicyFooter onPortalHost={onPortalHost} />
     </div>
   );
 }

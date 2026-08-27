@@ -27,26 +27,24 @@ const LINKS = [
 
 export function PortalPolicyFooter({ onPortalHost }: { onPortalHost: boolean }) {
   return (
-    <footer className="w-full bg-black">
-      <div className="mx-auto flex max-w-4xl flex-col items-center gap-4 px-4 py-8 sm:px-6">
-        <nav className="flex flex-wrap items-center justify-center gap-x-1 gap-y-2">
-          {LINKS.map((l, i) => (
-            <span key={l.href} className="flex items-center">
-              {i > 0 && <span className="mx-3 text-white/20">·</span>}
-              <Link href={portalHref(l.href, onPortalHost)} className="text-xs text-white/70 transition-colors hover:text-white">
-                {l.label}
-              </Link>
-            </span>
-          ))}
-        </nav>
+    <footer className="mx-auto mb-6 mt-6 flex max-w-4xl flex-col items-center gap-4 rounded-lg bg-black px-4 py-8 sm:px-6">
+      <nav className="flex flex-wrap items-center justify-center gap-x-1 gap-y-2">
+        {LINKS.map((l, i) => (
+          <span key={l.href} className="flex items-center">
+            {i > 0 && <span className="mx-3 text-white/20">·</span>}
+            <Link href={portalHref(l.href, onPortalHost)} className="text-xs text-white/70 transition-colors hover:text-white">
+              {l.label}
+            </Link>
+          </span>
+        ))}
+      </nav>
 
-        <div className="h-px w-full max-w-xs bg-white/10" />
+      <div className="h-px w-full max-w-xs bg-white/10" />
 
-        <div className="text-center text-xs leading-relaxed text-white/40">
-          {MMDI_COMPANY.legalName} · {MMDI_COMPANY.address}
-          <br />
-          {MMDI_COMPANY.phone} · {MMDI_COMPANY.email} · GSTIN {MMDI_COMPANY.gstin}
-        </div>
+      <div className="text-center text-xs leading-relaxed text-white/40">
+        {MMDI_COMPANY.legalName} · {MMDI_COMPANY.address}
+        <br />
+        {MMDI_COMPANY.phone} · {MMDI_COMPANY.email} · GSTIN {MMDI_COMPANY.gstin}
       </div>
     </footer>
   );
