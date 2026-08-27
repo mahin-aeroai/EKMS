@@ -628,6 +628,18 @@ begin
     v_site_id := null;
   end;
 
+  -- On DELETE, the lfg_sites row v_site_id points at may already be gone
+  -- by the time this AFTER trigger runs -- deleting the site itself
+  -- (v_site_id IS the row just removed), or a cascade-deleted child whose
+  -- parent site is going in the same statement. lfg_audit_log.site_id's FK
+  -- isn't deferrable, so inserting a dangling reference here would abort
+  -- the whole delete. Falling back to null loses nothing -- entity_id/
+  -- old_value above already capture exactly what was deleted, in full.
+  if TG_OP = 'DELETE' and v_site_id is not null
+     and not exists (select 1 from public.lfg_sites where id = v_site_id) then
+    v_site_id := null;
+  end if;
+
   insert into public.lfg_audit_log (user_id, user_email, action, entity_type, entity_id, site_id, old_value, new_value)
   values (
     auth.uid(),
