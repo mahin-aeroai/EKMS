@@ -2,7 +2,7 @@
 
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { MapPin, Pencil, ShieldAlert, Lock, Upload, Eye, Trash2, Truck } from "lucide-react";
+import { MapPin, Pencil, FileText, Lock, Upload, Eye, Trash2, Truck } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -64,6 +64,7 @@ interface LfgSite {
   remarks: string | null;
   site_status: string;
   creative_received_at: string | null;
+  site_reference_picture_path: string | null;
   partner_id: string | null;
   lfg_partners: { id: string; name: string } | { id: string; name: string }[] | null;
 }
@@ -122,6 +123,19 @@ interface PhotoRow {
   id: string;
   kind: "before" | "after" | "completion";
   relative_path: string;
+  uploaded_at: string;
+}
+
+interface DocumentRow {
+  id: string;
+  category: "reference" | "survey" | "installation" | "other";
+  file_name: string;
+  file_type: string | null;
+  relative_path: string;
+  file_size: number | null;
+  version: number;
+  uploaded_by: string | null;
+  uploaded_by_role: "staff" | "partner" | null;
   uploaded_at: string;
 }
 
@@ -206,6 +220,7 @@ export function LfgSiteWorkspaceClient({
   initialProduction,
   initialSurveys,
   initialShipments,
+  initialDocuments,
   initialAuditLog,
 }: {
   site: LfgSite;
@@ -217,6 +232,7 @@ export function LfgSiteWorkspaceClient({
   initialProduction: ProductionRow | null;
   initialSurveys: SurveyRow[];
   initialShipments: ShipmentRow[];
+  initialDocuments: DocumentRow[];
   initialAuditLog: AuditLogRow[];
 }) {
   const router = useRouter();
@@ -232,6 +248,69 @@ export function LfgSiteWorkspaceClient({
   const [changingStatus, setChangingStatus] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [uploadingPicture, setUploadingPicture] = useState(false);
+  const pictureInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Site reference picture (task #33) -- one picture per site, stored as an
+  // R2 key on lfg_sites.site_reference_picture_path itself (see that
+  // column's schema comment), not a child table like installation photos.
+  // Presign-then-PUT through the API route, same as every other file
+  // upload in this app, but the "record it" step here is a plain `update`
+  // on lfg_sites rather than an insert -- lfg_sites_update RLS already
+  // covers staff and the site's own partner for this column (see
+  // reference-picture/upload-url/route.ts's header comment), so there's no
+  // separate table/RLS to satisfy.
+  async function handleUploadPicture(file: File) {
+    setUploadingPicture(true);
+    try {
+      const uploadRes = await fetch(`/api/lfg/sites/${site.id}/reference-picture/upload-url`, { method: "POST" });
+      const uploadData = await uploadRes.json();
+      if (!uploadRes.ok) {
+        toast("danger", uploadData.message || uploadData.error || "Couldn't get an upload link");
+        return;
+      }
+
+      const putRes = await fetch(uploadData.url, { method: "PUT", headers: { "Content-Type": "image/jpeg" }, body: file });
+      if (!putRes.ok) {
+        toast("danger", "Upload to storage failed");
+        return;
+      }
+
+      const { error: updateError } = await supabase
+        .from("lfg_sites")
+        .update({ site_reference_picture_path: uploadData.relative_path })
+        .eq("id", site.id);
+      if (updateError) {
+        toast("danger", `Uploaded, but couldn't save it: ${updateError.message}`);
+        return;
+      }
+
+      toast("success", "Site picture uploaded");
+      router.refresh();
+    } finally {
+      setUploadingPicture(false);
+    }
+  }
+
+  async function handleViewPicture() {
+    const res = await fetch(`/api/lfg/sites/${site.id}/reference-picture/signed-url`);
+    const data = await res.json();
+    if (!res.ok) {
+      toast("danger", data.message || data.error || "Couldn't open this picture");
+      return;
+    }
+    window.open(data.url, "_blank", "noopener,noreferrer");
+  }
+
+  async function handleRemovePicture() {
+    const { error } = await supabase.from("lfg_sites").update({ site_reference_picture_path: null }).eq("id", site.id);
+    if (error) {
+      toast("danger", `Couldn't remove picture: ${error.message}`);
+      return;
+    }
+    toast("success", "Site picture removed");
+    router.refresh();
+  }
 
   async function handleChangeStatus() {
     setChangingStatus(true);
@@ -265,6 +344,7 @@ export function LfgSiteWorkspaceClient({
     { label: "Shipments", count: initialShipments.length },
     { label: "Installation record", count: initialInstallation ? 1 : 0 },
     { label: "Installation photos", count: initialInstallationPhotos.length },
+    { label: "Documents", count: initialDocuments.length },
     { label: "Financials", count: initialFinancials ? 1 : 0 },
     { label: "Installation costs", count: initialInstallationCosts ? 1 : 0 },
     { label: "Audit log entries", count: initialAuditLog.length },
@@ -287,27 +367,68 @@ export function LfgSiteWorkspaceClient({
       id: "info",
       label: "Site Information",
       content: (
-        <div className="grid grid-cols-2 gap-4 rounded-lg border border-line bg-surface p-4 sm:grid-cols-3">
-          <Field label="Site ID" value={site.site_id} />
-          <Field label="Outlet Name" value={site.outlet_name} />
-          <Field label="Program" value={site.program} />
-          <Field label="SFO ID" value={site.sfo_id} />
-          <Field label="City" value={site.city} />
-          <Field label="Material" value={site.material} />
-          <Field label="Number of Sites" value={site.number_of_sites} />
-          <Field label="Width" value={site.width} />
-          <Field label="Height" value={site.height} />
-          <Field label="SQFT" value={site.sqft} />
-          <Field label="Partner" value={partner?.name} />
-          <Field label="ASM Name" value={site.asm_name} />
-          <Field label="ASM Mobile" value={site.asm_mobile} />
-          <Field label="ASM Email" value={site.asm_email} />
-          <Field label="Escalation Email" value={site.escalation_email} />
-          <div className="col-span-2 sm:col-span-3">
-            <Field label="Store Address" value={site.store_address} />
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-surface p-4">
+            <div>
+              <h3 className="text-sm font-semibold text-ink">Site Picture</h3>
+              <p className="mt-0.5 text-xs text-ink-muted">
+                {site.site_reference_picture_path ? "A reference picture is on file for this site." : "No picture uploaded yet."}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {site.site_reference_picture_path && (
+                <Button size="sm" variant="secondary" onClick={handleViewPicture}>
+                  <Eye size={14} className="mr-1.5" /> View
+                </Button>
+              )}
+              {editable && (
+                <>
+                  <input
+                    ref={pictureInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) void handleUploadPicture(file);
+                      e.target.value = "";
+                    }}
+                  />
+                  <Button size="sm" variant="secondary" disabled={uploadingPicture} onClick={() => pictureInputRef.current?.click()}>
+                    <Upload size={14} className="mr-1.5" />
+                    {uploadingPicture ? "Uploading…" : site.site_reference_picture_path ? "Replace" : "Upload"}
+                  </Button>
+                  {site.site_reference_picture_path && (
+                    <Button size="sm" variant="ghost" onClick={handleRemovePicture}>
+                      <Trash2 size={14} className="text-danger" />
+                    </Button>
+                  )}
+                </>
+              )}
+            </div>
           </div>
-          <div className="col-span-2 sm:col-span-3">
-            <Field label="Remarks" value={site.remarks} />
+          <div className="grid grid-cols-2 gap-4 rounded-lg border border-line bg-surface p-4 sm:grid-cols-3">
+            <Field label="Site ID" value={site.site_id} />
+            <Field label="Outlet Name" value={site.outlet_name} />
+            <Field label="Program" value={site.program} />
+            <Field label="SFO ID" value={site.sfo_id} />
+            <Field label="City" value={site.city} />
+            <Field label="Material" value={site.material} />
+            <Field label="Number of Sites" value={site.number_of_sites} />
+            <Field label="Width" value={site.width} />
+            <Field label="Height" value={site.height} />
+            <Field label="SQFT" value={site.sqft} />
+            <Field label="Partner" value={partner?.name} />
+            <Field label="ASM Name" value={site.asm_name} />
+            <Field label="ASM Mobile" value={site.asm_mobile} />
+            <Field label="ASM Email" value={site.asm_email} />
+            <Field label="Escalation Email" value={site.escalation_email} />
+            <div className="col-span-2 sm:col-span-3">
+              <Field label="Store Address" value={site.store_address} />
+            </div>
+            <div className="col-span-2 sm:col-span-3">
+              <Field label="Remarks" value={site.remarks} />
+            </div>
           </div>
         </div>
       ),
@@ -388,7 +509,15 @@ export function LfgSiteWorkspaceClient({
     {
       id: "documents",
       label: "Documents",
-      content: <StubTab message="Document management (Reference/Survey/Installation uploads) is a dedicated module, coming next." />,
+      content: (
+        <DocumentsTab
+          siteId={site.id}
+          initialDocuments={initialDocuments}
+          editable={editable}
+          canDeleteDocs={canDelete(role)}
+          onChanged={() => router.refresh()}
+        />
+      ),
     },
     ...(editable
       ? [
@@ -532,15 +661,6 @@ export function LfgSiteWorkspaceClient({
           )}
         </div>
       </Dialog>
-    </div>
-  );
-}
-
-function StubTab({ message }: { message: string }) {
-  return (
-    <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-line py-16 text-center">
-      <ShieldAlert size={28} className="text-ink-muted" />
-      <p className="max-w-sm text-sm text-ink-secondary">{message}</p>
     </div>
   );
 }
@@ -1618,6 +1738,186 @@ const INSTALLATION_COST_FIELDS: { key: keyof InstallationCostsRow; label: string
   { key: "labour_other_expenses", label: "Labour / Other Expenses" },
   { key: "total_installation_cost", label: "Total Installation Cost" },
 ];
+
+const DOCUMENT_CATEGORIES: { key: DocumentRow["category"]; label: string }[] = [
+  { key: "reference", label: "Reference" },
+  { key: "survey", label: "Survey Reports" },
+  { key: "installation", label: "Installation" },
+  { key: "other", label: "Other" },
+];
+
+function formatFileSize(bytes: number | null): string {
+  if (bytes === null) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// Real Document management (task #21/#34) -- categorized (reference/
+// survey/installation/other) upload + view against lfg_site_documents,
+// replacing the earlier StubTab placeholder. This is also where survey
+// report PDFs mapped in from Cloudflare (task #37's bulk-link script)
+// will show up going forward, under category="survey" -- same table, so
+// nothing extra is needed here to display those once that script runs.
+// Same presign-then-PUT-then-record pattern as InstallationTab's photo
+// upload, just with a real file picker (any type) instead of a fixed
+// image/jpeg, and grouped by category instead of a flat list.
+function DocumentsTab({
+  siteId,
+  initialDocuments,
+  editable,
+  canDeleteDocs,
+  onChanged,
+}: {
+  siteId: string;
+  initialDocuments: DocumentRow[];
+  editable: boolean;
+  canDeleteDocs: boolean;
+  onChanged: () => void;
+}) {
+  const { toast } = useToast();
+  const [uploadingCategory, setUploadingCategory] = useState<string | null>(null);
+  const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  async function handleUpload(category: DocumentRow["category"], file: File) {
+    setUploadingCategory(category);
+    try {
+      const uploadRes = await fetch(`/api/lfg/sites/${siteId}/documents/upload-url`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ category, file_name: file.name, file_type: file.type || undefined }),
+      });
+      const uploadData = await uploadRes.json();
+      if (!uploadRes.ok) {
+        toast("danger", uploadData.message || uploadData.error || "Couldn't get an upload link");
+        return;
+      }
+
+      const putRes = await fetch(uploadData.url, {
+        method: "PUT",
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+        body: file,
+      });
+      if (!putRes.ok) {
+        toast("danger", "Upload to storage failed");
+        return;
+      }
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      const { error: insertError } = await supabase.from("lfg_site_documents").insert({
+        site_id: siteId,
+        category,
+        file_name: file.name,
+        file_type: file.type || null,
+        relative_path: uploadData.relative_path,
+        file_size: file.size,
+        uploaded_by: user?.id ?? null,
+        uploaded_by_role: uploadData.uploaded_by_role ?? "staff",
+      });
+      if (insertError) {
+        toast("danger", `Uploaded, but couldn't record it: ${insertError.message}`);
+        return;
+      }
+
+      toast("success", `${file.name} uploaded`);
+      onChanged();
+    } finally {
+      setUploadingCategory(null);
+    }
+  }
+
+  async function handleView(documentId: string) {
+    const res = await fetch(`/api/lfg/sites/${siteId}/documents/${documentId}/signed-url`);
+    const data = await res.json();
+    if (!res.ok) {
+      toast("danger", data.message || data.error || "Couldn't open this document");
+      return;
+    }
+    window.open(data.url, "_blank", "noopener,noreferrer");
+  }
+
+  async function handleDelete(documentId: string) {
+    const { error } = await supabase.from("lfg_site_documents").delete().eq("id", documentId);
+    if (error) {
+      toast("danger", `Couldn't delete document: ${error.message}`);
+      return;
+    }
+    toast("success", "Document deleted");
+    onChanged();
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      {DOCUMENT_CATEGORIES.map((cat) => {
+        const docs = initialDocuments.filter((d) => d.category === cat.key);
+        return (
+          <div key={cat.key} className="rounded-lg border border-line bg-surface p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-ink">{cat.label}</h3>
+              {editable && (
+                <>
+                  <input
+                    ref={(el) => {
+                      fileInputs.current[cat.key] = el;
+                    }}
+                    type="file"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) void handleUpload(cat.key, file);
+                      e.target.value = "";
+                    }}
+                  />
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={uploadingCategory === cat.key}
+                    onClick={() => fileInputs.current[cat.key]?.click()}
+                  >
+                    <Upload size={14} className="mr-1.5" />
+                    {uploadingCategory === cat.key ? "Uploading…" : "Upload"}
+                  </Button>
+                </>
+              )}
+            </div>
+            {docs.length === 0 ? (
+              <p className="py-3 text-center text-xs text-ink-muted">No {cat.label.toLowerCase()} files yet.</p>
+            ) : (
+              <div className="flex flex-col divide-y divide-line">
+                {docs.map((d) => (
+                  <div key={d.id} className="flex items-center justify-between gap-3 py-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <FileText size={16} className="shrink-0 text-ink-muted" />
+                      <div className="min-w-0">
+                        <p className="truncate text-sm text-ink">{d.file_name}</p>
+                        <p className="text-xs text-ink-muted">
+                          {new Date(d.uploaded_at).toLocaleDateString()}
+                          {d.file_size !== null ? ` · ${formatFileSize(d.file_size)}` : ""}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Button size="sm" variant="ghost" aria-label={`View ${d.file_name}`} onClick={() => handleView(d.id)}>
+                        <Eye size={14} />
+                      </Button>
+                      {canDeleteDocs && (
+                        <Button size="sm" variant="ghost" aria-label={`Delete ${d.file_name}`} onClick={() => handleDelete(d.id)}>
+                          <Trash2 size={14} className="text-danger" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 // Admin/editor only -- see the parent component's comment on why this is
 // UX-only, not the real security boundary. Direct

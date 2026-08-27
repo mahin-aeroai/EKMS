@@ -68,6 +68,7 @@ export default async function LfgSiteDetailPage({ params }: { params: Promise<{ 
     { data: production },
     { data: surveys },
     { data: shipments },
+    { data: documents },
     { data: auditLog },
   ] = await Promise.all([
     supabase.from("lfg_site_status_history").select("*").eq("site_id", siteId).order("changed_at", { ascending: false }),
@@ -78,6 +79,9 @@ export default async function LfgSiteDetailPage({ params }: { params: Promise<{ 
     supabase.from("lfg_production").select("*").eq("site_id", siteId).maybeSingle(),
     supabase.from("lfg_site_surveys").select("*").eq("site_id", siteId).order("created_at", { ascending: false }),
     supabase.from("lfg_shipments").select("*").eq("site_id", siteId).order("created_at", { ascending: false }),
+    // Document management (task #34) -- reference/survey/installation/other
+    // files per site, see lfg_site_documents in the schema.
+    supabase.from("lfg_site_documents").select("*").eq("site_id", siteId).order("uploaded_at", { ascending: false }),
     supabase.from("lfg_audit_log").select("*").eq("site_id", siteId).order("created_at", { ascending: false }).limit(50),
   ]);
 
@@ -92,6 +96,7 @@ export default async function LfgSiteDetailPage({ params }: { params: Promise<{ 
       initialProduction={production ?? null}
       initialSurveys={surveys ?? []}
       initialShipments={shipments ?? []}
+      initialDocuments={documents ?? []}
       initialAuditLog={auditLog ?? []}
     />
   );
