@@ -2,13 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { MapPin, Search, Plus, LayoutDashboard } from "lucide-react";
+import { MapPin, Search, Plus, LayoutDashboard, Trash2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { StatCard } from "@/components/ui/Card";
 import { Table, type TableColumn } from "@/components/ui/Table";
 import { Button } from "@/components/ui/Button";
+import { Dialog } from "@/components/ui/Dialog";
 import { useToast } from "@/components/ui/Notifications";
+import { useUserRole, canDelete } from "@/lib/UserRoleContext";
 import { supabase } from "@/lib/supabase";
 import { LFG_STATUSES, lfgStatusLabel, lfgStatusBadge } from "@/lib/lfgStatus";
 
@@ -46,10 +48,35 @@ function partnerName(row: LfgSiteListRow): string {
 export default function LfgSiteListPage() {
   const router = useRouter();
   const { toast } = useToast();
+  const role = useUserRole();
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [rows, setRows] = useState<LfgSiteListRow[] | null>(null);
   const [totalCount, setTotalCount] = useState<number | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<LfgSiteListRow | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  // Quick cleanup for the empty "Store Master" import stubs and other
+  // one-off junk records found while browsing/searching (see the dedupe
+  // script from task #24 for the bulk version of this same cleanup) --
+  // no live related-data check here the way Site 360's delete dialog has
+  // one, since checking every visible row would mean N extra queries; an
+  // admin who wants that detail opens the site's own page instead. RLS
+  // (lfg_sites_delete_staff, admin-only) is the real boundary either way.
+  async function handleDeleteSite() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    const { error } = await supabase.from("lfg_sites").delete().eq("id", deleteTarget.id);
+    setDeleting(false);
+    if (error) {
+      toast("danger", `Couldn't delete ${deleteTarget.site_id}: ${error.message}`);
+      return;
+    }
+    toast("success", `${deleteTarget.site_id} deleted`);
+    setRows((prev) => prev?.filter((r) => r.id !== deleteTarget.id) ?? prev);
+    setTotalCount((prev) => (prev === null ? prev : prev - 1));
+    setDeleteTarget(null);
+  }
 
   useEffect(() => {
     supabase
@@ -117,6 +144,27 @@ export default function LfgSiteListPage() {
     { key: "number_of_sites", header: "# Sites", sortable: true },
     { key: "asm_name", header: "ASM", sortable: true, render: (r) => r.asm_name ?? "—" },
     { key: "partner_id", header: "Partner", render: (r) => partnerName(r) },
+    ...(canDelete(role)
+      ? [
+          {
+            key: "id",
+            header: "",
+            render: (r) => (
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-label={`Delete ${r.site_id}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setDeleteTarget(r);
+                }}
+              >
+                <Trash2 size={14} className="text-danger" />
+              </Button>
+            ),
+          } satisfies TableColumn<LfgSiteListRow>,
+        ]
+      : []),
   ];
 
   return (
@@ -195,6 +243,22 @@ export default function LfgSiteListPage() {
           <Table columns={COLUMNS} rows={rows} onRowClick={(r) => router.push(`/workspaces/lfg/sites/${r.id}`)} />
         )}
       </div>
+
+      <Dialog
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        title={deleteTarget ? `Delete ${deleteTarget.site_id}?` : "Delete site?"}
+        variant="confirm"
+        destructive
+        onConfirm={handleDeleteSite}
+        confirmLabel={deleting ? "Deleting…" : "Delete Permanently"}
+      >
+        <p className="text-sm text-ink-secondary">
+          This permanently deletes <span className="font-medium text-ink">{deleteTarget?.outlet_name}</span> and
+          everything logged against it (surveys, shipments, installation, financials, etc.) — this cannot be undone.
+          Open the site&apos;s own page first if you want to see what&apos;s on it before deleting.
+        </p>
+      </Dialog>
     </div>
   );
 }

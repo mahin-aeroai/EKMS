@@ -230,6 +230,8 @@ export function LfgSiteWorkspaceClient({
   const [newStatus, setNewStatus] = useState(site.site_status);
   const [statusRemarks, setStatusRemarks] = useState("");
   const [changingStatus, setChangingStatus] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   async function handleChangeStatus() {
     setChangingStatus(true);
@@ -247,6 +249,37 @@ export function LfgSiteWorkspaceClient({
     setShowStatusDialog(false);
     setStatusRemarks("");
     router.refresh();
+  }
+
+  // What this specific site actually has on it, from data already fetched
+  // for the tabs above -- no extra query needed. Shown in the delete
+  // confirmation so an admin can see at a glance whether this is really an
+  // empty/duplicate record (like the legacy Store-Master-import stubs --
+  // see the dedupe script from task #24) or has real work logged against
+  // it, before permanently deleting it. RLS already restricts the delete
+  // itself to admin (lfg_sites_delete_staff); this is a UX safeguard on
+  // top of that, not the security boundary.
+  const relatedDataSummary = [
+    { label: "Surveys", count: initialSurveys.length },
+    { label: "Production record", count: initialProduction ? 1 : 0 },
+    { label: "Shipments", count: initialShipments.length },
+    { label: "Installation record", count: initialInstallation ? 1 : 0 },
+    { label: "Installation photos", count: initialInstallationPhotos.length },
+    { label: "Financials", count: initialFinancials ? 1 : 0 },
+    { label: "Installation costs", count: initialInstallationCosts ? 1 : 0 },
+    { label: "Audit log entries", count: initialAuditLog.length },
+  ].filter((r) => r.count > 0);
+
+  async function handleDeleteSite() {
+    setDeleting(true);
+    const { error } = await supabase.from("lfg_sites").delete().eq("id", site.id);
+    setDeleting(false);
+    if (error) {
+      toast("danger", `Couldn't delete this site: ${error.message}`);
+      return;
+    }
+    toast("success", `${site.site_id} deleted`);
+    router.push("/workspaces/lfg");
   }
 
   const items: TabItem[] = [
@@ -429,6 +462,11 @@ export function LfgSiteWorkspaceClient({
             </p>
           </div>
         </div>
+        {canDelete(role) && (
+          <Button variant="destructive" onClick={() => setShowDeleteDialog(true)}>
+            <Trash2 size={15} className="mr-1.5" /> Delete Site
+          </Button>
+        )}
       </div>
 
       <div className="mt-6">
@@ -458,6 +496,40 @@ export function LfgSiteWorkspaceClient({
             <label className={labelClass}>Remarks (optional)</label>
             <textarea rows={3} className={inputClass} value={statusRemarks} onChange={(e) => setStatusRemarks(e.target.value)} />
           </div>
+        </div>
+      </Dialog>
+
+      <Dialog
+        open={showDeleteDialog}
+        onClose={() => setShowDeleteDialog(false)}
+        title={`Delete ${site.site_id}?`}
+        variant="confirm"
+        destructive
+        onConfirm={handleDeleteSite}
+        confirmLabel={deleting ? "Deleting…" : "Delete Permanently"}
+      >
+        <div className="flex flex-col gap-3 text-sm text-ink-secondary">
+          <p>
+            This permanently deletes <span className="font-medium text-ink">{site.outlet_name}</span> ({site.site_id}) and
+            cannot be undone.
+          </p>
+          {relatedDataSummary.length === 0 ? (
+            <p className="rounded-md border border-line bg-surface-sunken px-3 py-2 text-xs text-ink-muted">
+              No surveys, production, shipments, installation, financials, or photos on file for this site — looks safe
+              to remove.
+            </p>
+          ) : (
+            <div className="rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-xs text-danger">
+              <p className="mb-1 font-medium">This site has real data on it that will be deleted too:</p>
+              <ul className="list-inside list-disc">
+                {relatedDataSummary.map((r) => (
+                  <li key={r.label}>
+                    {r.label}: {r.count}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       </Dialog>
     </div>
