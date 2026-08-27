@@ -4,6 +4,7 @@ import { getPortalIdentity } from "@/lib/portal-auth";
 import { PORTAL_HOST } from "@/lib/portal-host";
 import { PortalTopBar } from "@/components/portal/PortalTopBar";
 import { PortalProviders } from "@/components/portal/PortalProviders";
+import { PortalPolicyFooter } from "@/components/portal/PortalPolicyFooter";
 
 // Deliberately its own layout, not a child of AppShell — the customer
 // portal is a separate, compact surface for external retail-chain
@@ -38,6 +39,7 @@ export default async function PortalLayout({ children }: { children: ReactNode }
             </div>
           )}
         </main>
+        <PortalPolicyFooter onPortalHost={onPortalHost} />
       </PortalProviders>
     </div>
   );

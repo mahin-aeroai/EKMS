@@ -6,6 +6,7 @@ import { Lock } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
 import { PORTAL_HOST } from "@/lib/portal-host";
+import { PortalPolicyFooter } from "@/components/portal/PortalPolicyFooter";
 
 type Mode = "sign-in" | "set-password";
 
@@ -43,6 +44,17 @@ function PortalLoginForm() {
   const [inviteEmail, setInviteEmail] = useState<string | null>(null);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+  // Starts false to match SSR (no window there) and corrects on mount --
+  // same reasoning as LfgHostContext's default, avoiding a hydration
+  // mismatch on the footer links' hrefs.
+  const [onPortalHost, setOnPortalHost] = useState(false);
+  useEffect(() => {
+    // Must start false to match SSR (window isn't available there) and
+    // correct once mounted in the browser; setting it during render would
+    // mismatch hydration.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setOnPortalHost(window.location.hostname === PORTAL_HOST);
+  }, []);
 
   // Invite/reset emails land here as
   // /login#access_token=...&type=invite (or type=recovery) -- `mode` above
@@ -159,7 +171,8 @@ function PortalLoginForm() {
   const isInvite = mode === "set-password";
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-surface-sunken px-4">
+    <div className="flex min-h-screen flex-col bg-surface-sunken">
+      <div className="flex flex-1 items-center justify-center px-4">
       <div className="w-full max-w-sm rounded-lg border border-line bg-surface p-8 shadow-sm">
         <div className="mb-6 flex flex-col items-center gap-2 text-center">
           <span className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-on-brand">
@@ -335,6 +348,8 @@ function PortalLoginForm() {
           </p>
         )}
       </div>
+      </div>
+      <PortalPolicyFooter onPortalHost={onPortalHost} />
     </div>
   );
 }
