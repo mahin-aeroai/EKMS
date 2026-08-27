@@ -157,6 +157,43 @@ export function deliveryStatusBadge(status: string): BadgeStatus {
   return DELIVERY_STATUS_BADGE[status as DeliveryStatus] ?? "neutral";
 }
 
+/**
+ * Coarse pipeline stages for the Program Dashboard (grouping every site by
+ * program/chain -- APP, APR, Mono AAR, Multi AAR, Croma, Reliance, Vijay
+ * Sales, WC, etc. -- and showing where each group's sites sit end to end).
+ * Every LFG_STATUSES value maps to exactly one bucket here, so the
+ * dashboard's totals always add up to the same count as the Site Master
+ * list -- nothing is silently dropped. lfgStageBucketOf() falls back to
+ * "issues" for any status that somehow isn't in LFG_STATUSES (schema drift)
+ * rather than losing the site from every bucket's total.
+ */
+export const LFG_STAGE_BUCKETS = [
+  { key: "survey", label: "New / Survey", statuses: ["new", "survey_pending", "survey_completed", "survey_approved"] },
+  { key: "production", label: "Printing / Production", statuses: ["production_pending", "in_production"] },
+  { key: "shipped", label: "Shipped", statuses: ["ready_for_dispatch", "dispatched", "in_transit", "delivered"] },
+  { key: "installation", label: "Installation", statuses: ["installation_planned", "installation_in_progress", "installation_completed"] },
+  { key: "active", label: "Active", statuses: ["active"] },
+  { key: "inactive", label: "Inactive", statuses: ["deactivation_requested", "deactivated"] },
+  { key: "issues", label: "On Hold / Issues", statuses: ["on_hold", "issue_attention_required"] },
+] as const;
+
+export type LfgStageBucketKey = (typeof LFG_STAGE_BUCKETS)[number]["key"];
+
+export const LFG_STAGE_BUCKET_BADGE: Record<LfgStageBucketKey, BadgeStatus> = {
+  survey: "neutral",
+  production: "warning",
+  shipped: "info",
+  installation: "info",
+  active: "success",
+  inactive: "neutral",
+  issues: "danger",
+};
+
+export function lfgStageBucketOf(status: string): LfgStageBucketKey {
+  const bucket = LFG_STAGE_BUCKETS.find((b) => (b.statuses as readonly string[]).includes(status));
+  return bucket ? bucket.key : "issues";
+}
+
 /** ₹ with Indian digit grouping — lfg_site_financials/lfg_installation_costs
  * figures are typically in the thousands/lakhs, not crores, so
  * dashboard-queries.ts's formatCrore() (÷1e7) isn't the right shape here. */

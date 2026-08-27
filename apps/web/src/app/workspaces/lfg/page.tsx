@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { MapPin, Search, Plus } from "lucide-react";
+import { MapPin, Search, Plus, LayoutDashboard } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { StatCard } from "@/components/ui/Card";
@@ -56,6 +56,22 @@ export default function LfgSiteListPage() {
       .from("lfg_sites")
       .select("*", { count: "exact", head: true })
       .then(({ count }) => setTotalCount(count ?? 0));
+  }, []);
+
+  // Seeds the search box from ?q=... (the Program Dashboard's row click
+  // hands off a program name this way). Read via window.location directly
+  // rather than useSearchParams -- this page is fully client-rendered
+  // already, so this avoids the Suspense-boundary requirement
+  // useSearchParams imposes on statically-generated pages for no benefit
+  // here, same as workspaces/ai-copilot/page.tsx. Runs once on mount, then
+  // strips the param via replaceState so refreshing doesn't re-seed it.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get("q");
+    if (q) {
+      window.history.replaceState(null, "", "/workspaces/lfg");
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setQuery(q);
+    }
   }, []);
 
   useEffect(() => {
@@ -120,9 +136,14 @@ export default function LfgSiteListPage() {
             </p>
           </div>
         </div>
-        <Button onClick={() => router.push("/workspaces/lfg/new")}>
-          <Plus size={15} className="mr-1.5" /> New Site
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={() => router.push("/workspaces/lfg/dashboard")}>
+            <LayoutDashboard size={15} className="mr-1.5" /> Dashboard
+          </Button>
+          <Button onClick={() => router.push("/workspaces/lfg/new")}>
+            <Plus size={15} className="mr-1.5" /> New Site
+          </Button>
+        </div>
       </div>
 
       <div className="my-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
