@@ -251,6 +251,16 @@ create table if not exists public.lfg_sites (
   site_reference_picture_path text,
   remarks text,
 
+  -- Set once the client's creative/artwork file for this site has come in
+  -- -- a real production milestone (printing can't start without it) that
+  -- sits between survey approval and production, but isn't itself one of
+  -- the site_status values below: a site can be sitting in any of the
+  -- new/survey_* statuses with or without its creative in hand, and the
+  -- Program Dashboard (task #20) needs to tell those two apart. Null =
+  -- not received yet; non-null = received, at that timestamp.
+  creative_received_at timestamptz,
+  creative_received_by uuid references auth.users(id),
+
   site_status text not null default 'new' check (site_status in (
     'new', 'survey_pending', 'survey_completed', 'survey_approved',
     'production_pending', 'in_production', 'ready_for_dispatch',
@@ -285,6 +295,13 @@ create index if not exists lfg_sites_partner_idx on public.lfg_sites(partner_id)
 create index if not exists lfg_sites_status_idx on public.lfg_sites(site_status);
 create index if not exists lfg_sites_sfo_id_idx on public.lfg_sites(sfo_id);
 create index if not exists lfg_sites_program_idx on public.lfg_sites(program);
+
+-- Retrofits creative_received_at/creative_received_by onto a database that
+-- already ran this file before that pair of columns existed --
+-- "create table if not exists" above is a no-op once lfg_sites is already
+-- there, so a live database needs this too.
+alter table public.lfg_sites add column if not exists creative_received_at timestamptz;
+alter table public.lfg_sites add column if not exists creative_received_by uuid references auth.users(id);
 create index if not exists lfg_sites_city_idx on public.lfg_sites(city);
 
 -- ============================================================

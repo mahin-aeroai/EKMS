@@ -63,6 +63,7 @@ interface LfgSite {
   escalation_email: string | null;
   remarks: string | null;
   site_status: string;
+  creative_received_at: string | null;
   partner_id: string | null;
   lfg_partners: { id: string; name: string } | { id: string; name: string }[] | null;
 }
@@ -317,7 +318,15 @@ export function LfgSiteWorkspaceClient({
     {
       id: "survey",
       label: "Survey",
-      content: <SurveyTab siteId={site.id} initialSurveys={initialSurveys} editable={editable} onChanged={() => router.refresh()} />,
+      content: (
+        <SurveyTab
+          siteId={site.id}
+          initialSurveys={initialSurveys}
+          creativeReceivedAt={site.creative_received_at}
+          editable={editable}
+          onChanged={() => router.refresh()}
+        />
+      ),
     },
     {
       id: "production",
@@ -467,18 +476,61 @@ function StubTab({ message }: { message: string }) {
 function SurveyTab({
   siteId,
   initialSurveys,
+  creativeReceivedAt,
   editable,
   onChanged,
 }: {
   siteId: string;
   initialSurveys: SurveyRow[];
+  creativeReceivedAt: string | null;
   editable: boolean;
   onChanged: () => void;
 }) {
   const { toast } = useToast();
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [savingCreative, setSavingCreative] = useState(false);
   const [form, setForm] = useState({ survey_date: "", measured_width: "", measured_height: "", measurements_remarks: "" });
+
+  // Creative receipt (the client's artwork/design file for this site) --
+  // a site-level milestone, not per-survey, which is why it lives on
+  // lfg_sites itself rather than lfg_site_surveys. Sits here in the Survey
+  // tab because it's the next real step after survey approval, before
+  // production can start -- see the schema's own comment on the column for
+  // why the Program Dashboard (task #20) needs this split out from the
+  // new/survey_* statuses rather than folded into them.
+  async function handleMarkCreativeReceived() {
+    setSavingCreative(true);
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const { error } = await supabase
+      .from("lfg_sites")
+      .update({ creative_received_at: new Date().toISOString(), creative_received_by: user?.id ?? null })
+      .eq("id", siteId);
+    setSavingCreative(false);
+    if (error) {
+      toast("danger", `Couldn't mark creative received: ${error.message}`);
+      return;
+    }
+    toast("success", "Creative marked received");
+    onChanged();
+  }
+
+  async function handleUndoCreativeReceived() {
+    setSavingCreative(true);
+    const { error } = await supabase
+      .from("lfg_sites")
+      .update({ creative_received_at: null, creative_received_by: null })
+      .eq("id", siteId);
+    setSavingCreative(false);
+    if (error) {
+      toast("danger", `Couldn't undo: ${error.message}`);
+      return;
+    }
+    toast("success", "Creative receipt undone");
+    onChanged();
+  }
 
   async function handleLog() {
     setSaving(true);
@@ -516,6 +568,25 @@ function SurveyTab({
 
   return (
     <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between rounded-lg border border-line bg-surface p-4">
+        <div>
+          <span className="text-xs text-ink-muted">Creative Receipt</span>
+          <div className="text-sm text-ink">
+            {creativeReceivedAt ? `Received ${new Date(creativeReceivedAt).toLocaleString()}` : "Not yet received"}
+          </div>
+        </div>
+        {editable &&
+          (creativeReceivedAt ? (
+            <Button size="sm" variant="secondary" loading={savingCreative} onClick={handleUndoCreativeReceived}>
+              Undo
+            </Button>
+          ) : (
+            <Button size="sm" loading={savingCreative} onClick={handleMarkCreativeReceived}>
+              Mark Received
+            </Button>
+          ))}
+      </div>
+
       {editable && (
         <div className="flex justify-end">
           <Button size="sm" onClick={() => setShowForm((s) => !s)}>

@@ -158,40 +158,74 @@ export function deliveryStatusBadge(status: string): BadgeStatus {
 }
 
 /**
- * Coarse pipeline stages for the Program Dashboard (grouping every site by
- * program/chain -- APP, APR, Mono AAR, Multi AAR, Croma, Reliance, Vijay
- * Sales, WC, etc. -- and showing where each group's sites sit end to end).
- * Every LFG_STATUSES value maps to exactly one bucket here, so the
- * dashboard's totals always add up to the same count as the Site Master
- * list -- nothing is silently dropped. lfgStageBucketOf() falls back to
- * "issues" for any status that somehow isn't in LFG_STATUSES (schema drift)
- * rather than losing the site from every bucket's total.
+ * The 10 pipeline stages for the Program Dashboard (task #20), in the exact
+ * order given for the dashboard: Active, Inactive, New/Surveys, Creative
+ * Receipt, Printing, Shipping, Delivery, Schedule, Installation Status,
+ * Issues. lfgPipelineStageOf() maps every site to exactly one of these, so
+ * a program's stage totals always add up to its full site count -- nothing
+ * is silently dropped (an unrecognized status falls back to "issues" rather
+ * than disappearing).
+ *
+ * Every LFG_STATUSES value maps 1:1 EXCEPT the new/survey_* statuses, which
+ * split two ways using creative_received_at (see that column's comment in
+ * the schema): a site sitting in new/survey_pending/survey_completed/
+ * survey_approved with a creative on file is "Creative Receipt", not
+ * "New / Surveys" -- printing/shipping/delivery/etc. already imply the
+ * creative came in, so this split only matters pre-production. Because of
+ * that, lfgPipelineStageOf() takes creativeReceivedAt as a second argument
+ * (LFG_STATUSES-only callers that don't have it can pass null/undefined --
+ * every site correctly falls back to "survey").
  */
-export const LFG_STAGE_BUCKETS = [
-  { key: "survey", label: "New / Survey", statuses: ["new", "survey_pending", "survey_completed", "survey_approved"] },
-  { key: "production", label: "Printing / Production", statuses: ["production_pending", "in_production"] },
-  { key: "shipped", label: "Shipped", statuses: ["ready_for_dispatch", "dispatched", "in_transit", "delivered"] },
-  { key: "installation", label: "Installation", statuses: ["installation_planned", "installation_in_progress", "installation_completed"] },
+export const LFG_PIPELINE_STAGES = [
   { key: "active", label: "Active", statuses: ["active"] },
   { key: "inactive", label: "Inactive", statuses: ["deactivation_requested", "deactivated"] },
-  { key: "issues", label: "On Hold / Issues", statuses: ["on_hold", "issue_attention_required"] },
+  { key: "survey", label: "New / Surveys", statuses: ["new", "survey_pending", "survey_completed", "survey_approved"] },
+  { key: "creative_receipt", label: "Creative Receipt", statuses: [] },
+  { key: "printing", label: "Printing", statuses: ["production_pending", "in_production"] },
+  { key: "shipping", label: "Shipping", statuses: ["ready_for_dispatch", "dispatched"] },
+  { key: "delivery", label: "Delivery", statuses: ["in_transit", "delivered"] },
+  { key: "schedule", label: "Schedule", statuses: ["installation_planned"] },
+  { key: "installation", label: "Installation Status", statuses: ["installation_in_progress", "installation_completed"] },
+  { key: "issues", label: "Issues", statuses: ["on_hold", "issue_attention_required"] },
 ] as const;
 
-export type LfgStageBucketKey = (typeof LFG_STAGE_BUCKETS)[number]["key"];
+export type LfgPipelineStageKey = (typeof LFG_PIPELINE_STAGES)[number]["key"];
 
-export const LFG_STAGE_BUCKET_BADGE: Record<LfgStageBucketKey, BadgeStatus> = {
-  survey: "neutral",
-  production: "warning",
-  shipped: "info",
-  installation: "info",
+export const LFG_PIPELINE_STAGE_BADGE: Record<LfgPipelineStageKey, BadgeStatus> = {
   active: "success",
   inactive: "neutral",
+  survey: "neutral",
+  creative_receipt: "info",
+  printing: "warning",
+  shipping: "danger",
+  delivery: "success",
+  schedule: "neutral",
+  installation: "info",
   issues: "danger",
 };
 
-export function lfgStageBucketOf(status: string): LfgStageBucketKey {
-  const bucket = LFG_STAGE_BUCKETS.find((b) => (b.statuses as readonly string[]).includes(status));
-  return bucket ? bucket.key : "issues";
+export function lfgPipelineStageOf(status: string, creativeReceivedAt?: string | null): LfgPipelineStageKey {
+  if (status === "new" || status === "survey_pending" || status === "survey_completed" || status === "survey_approved") {
+    return creativeReceivedAt ? "creative_receipt" : "survey";
+  }
+  const stage = LFG_PIPELINE_STAGES.find((b) => (b.statuses as readonly string[]).includes(status));
+  return stage ? stage.key : "issues";
+}
+
+/**
+ * The priority order given for the Program Dashboard's program/chain
+ * groups -- everything else follows, alphabetically. Matched
+ * case-insensitively and by substring in both directions (so "Reliance"
+ * matches a program value of "Reliance Digital" or vice versa) since
+ * `lfg_sites.program` is free text carried through from two different
+ * legacy imports, not a controlled vocabulary.
+ */
+export const LFG_PROGRAM_PRIORITY = ["app", "apr", "mono aar", "multi aar", "croma", "reliance", "vijay sales", "pai international"];
+
+export function lfgProgramPriorityRank(program: string): number {
+  const p = program.trim().toLowerCase();
+  const idx = LFG_PROGRAM_PRIORITY.findIndex((keyword) => p.includes(keyword) || keyword.includes(p));
+  return idx === -1 ? LFG_PROGRAM_PRIORITY.length : idx;
 }
 
 /** ₹ with Indian digit grouping — lfg_site_financials/lfg_installation_costs

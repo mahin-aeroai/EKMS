@@ -92,7 +92,7 @@ export function formatCrore(rupees: number): string {
   return `₹${(rupees / 10000000).toFixed(2)} Cr`;
 }
 
-const DONUT_COLOR: Record<BadgeStatus, "primary" | "success" | "warning" | "danger" | "info"> = {
+export const DONUT_COLOR: Record<BadgeStatus, "primary" | "success" | "warning" | "danger" | "info"> = {
   success: "success",
   warning: "warning",
   danger: "danger",
