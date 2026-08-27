@@ -190,6 +190,31 @@ export default function InstallationReportClient() {
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
 
+  // Prefill from a linked-in site (LFG Connect's Site 360 "Create
+  // Installation Report" button hands off this way -- see
+  // LfgSiteWorkspaceClient.tsx). Read via window.location directly rather
+  // than useSearchParams, same reasoning as workspaces/lfg's ?q=/?program=
+  // seeding: avoids the Suspense-boundary requirement for no benefit here.
+  // Deliberately only the header identity fields -- storeName/address/
+  // sfoId/program/asmName/asmContact -- NOT seasonProgram or
+  // installationDate, which are this tool's own report-level concepts
+  // (season/campaign master, visit date) with nothing to prefill from an
+  // LFG site. Runs once on mount, then strips the params via replaceState
+  // so refreshing doesn't re-seed them.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const hasAny = ["store", "address", "sfo", "program", "asm", "asmContact"].some((k) => params.has(k));
+    if (!hasAny) return;
+    window.history.replaceState(null, "", "/workspaces/installation-report");
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (params.get("store")) setStoreName(params.get("store")!);
+    if (params.get("address")) setAddress(params.get("address")!);
+    if (params.get("sfo")) setSfoId(params.get("sfo")!);
+    if (params.get("program")) setProgram(params.get("program")!);
+    if (params.get("asm")) setAsmName(params.get("asm")!);
+    if (params.get("asmContact")) setAsmContact(params.get("asmContact")!);
+  }, []);
+
   useEffect(() => {
     if (!storeOpen) return;
     const handle = setTimeout(() => {

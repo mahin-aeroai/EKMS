@@ -197,6 +197,25 @@ function partnerOf(site: LfgSite) {
   return p ?? null;
 }
 
+// Hands this site's identity fields off to the (separate, pre-existing)
+// Installation Report tool via query params -- see
+// InstallationReportClient.tsx's own prefill effect for the receiving end
+// and why only these fields (not seasonProgram/installationDate, which are
+// that tool's own concepts with nothing on an LFG site to prefill from).
+// Opened in a new tab (task #36) rather than routed to in-place, since
+// it's a genuinely separate tool with its own unrelated workflow -- this
+// keeps the Site 360 tab where the user came from.
+function installationReportHref(site: LfgSite): string {
+  const params = new URLSearchParams();
+  if (site.outlet_name) params.set("store", site.outlet_name);
+  if (site.store_address) params.set("address", site.store_address);
+  if (site.sfo_id) params.set("sfo", site.sfo_id);
+  if (site.program) params.set("program", site.program);
+  if (site.asm_name) params.set("asm", site.asm_name);
+  if (site.asm_mobile) params.set("asmContact", site.asm_mobile);
+  return `/workspaces/installation-report?${params.toString()}`;
+}
+
 const inputClass =
   "rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none";
 const labelClass = "text-xs font-medium text-ink-secondary";
@@ -591,11 +610,16 @@ export function LfgSiteWorkspaceClient({
             </p>
           </div>
         </div>
-        {canDelete(role) && (
-          <Button variant="destructive" onClick={() => setShowDeleteDialog(true)}>
-            <Trash2 size={15} className="mr-1.5" /> Delete Site
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={() => window.open(installationReportHref(site), "_blank", "noopener,noreferrer")}>
+            <FileText size={15} className="mr-1.5" /> Create Installation Report
           </Button>
-        )}
+          {canDelete(role) && (
+            <Button variant="destructive" onClick={() => setShowDeleteDialog(true)}>
+              <Trash2 size={15} className="mr-1.5" /> Delete Site
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="mt-6">
