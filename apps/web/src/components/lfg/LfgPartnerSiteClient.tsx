@@ -9,6 +9,7 @@ import { Dialog } from "@/components/ui/Dialog";
 import { Tabs, type TabItem } from "@/components/ui/Tabs";
 import { Timeline, type TimelineEntry } from "@/components/ui/Timeline";
 import { useToast } from "@/components/ui/Notifications";
+import { useLfgUser } from "@/lib/LfgUserContext";
 import { supabase } from "@/lib/supabase";
 import {
   type LfgSite,
@@ -38,18 +39,30 @@ import { LFG_STATUSES, lfgStatusLabel, lfgStatusBadge } from "@/lib/lfgStatus";
 // (lfg_sites_delete_staff is admin-only regardless of what a button here
 // might show).
 //
-// `editable` is unconditionally true here, unlike the staff component's
-// `canWrite(role)` gate -- lfg_sites_update / lfg_site_surveys_insert /
-// lfg_production_* / lfg_shipments_* / lfg_installations_* /
-// lfg_installation_photos_insert / lfg_site_documents_insert all grant the
-// site's own partner write access for exactly these operational fields
-// (see supabase-lfg-site-management-schema.sql) -- RLS is what actually
+// `editable` is unconditionally true for a real partner, unlike the staff
+// component's `canWrite(role)` gate -- lfg_sites_update /
+// lfg_site_surveys_insert / lfg_production_* / lfg_shipments_* /
+// lfg_installations_* / lfg_installation_photos_insert /
+// lfg_site_documents_insert all grant the site's own partner write access
+// for exactly these operational fields (see
+// supabase-lfg-site-management-schema.sql) -- RLS is what actually
 // enforces "only THIS site, only THESE columns" (via
 // lfg_sites_guard_partner_update() for the direct lfg_sites columns);
 // this component just doesn't second-guess that with an extra UI gate.
 // Photo/document delete is kept off for partners (canDeletePhotos/
 // canDeleteDocs={false}) -- simpler than tracking "did I upload this" in
 // the UI to match the delete policies' own self-upload carve-out.
+//
+// A selectively lfg_connect_access-flagged STAFF sign-in (identity.isStaff,
+// see lfg-auth.ts) reuses this exact same component -- it's the same
+// compact UI, just not scoped to one partner's sites (see the parent
+// Server Component page). Its write access follows the account's REAL
+// role instead of always being true, mirroring what the underlying RLS
+// policies already grant that role: admin/editor get full operational
+// write (same shape a partner gets); viewer is read-only everywhere, same
+// as the rest of the app. No Financials tab and no Delete Site here
+// either way, even for an admin -- this stays the lightweight surface;
+// that stuff lives in the full internal app.
 
 export function LfgPartnerSiteClient({
   site,
@@ -72,7 +85,14 @@ export function LfgPartnerSiteClient({
 }) {
   const router = useRouter();
   const { toast } = useToast();
-  const editable = true;
+  const identity = useLfgUser();
+  const isStaff = identity?.isStaff ?? false;
+  const staffRole = identity?.staffRole ?? null;
+  // See the header comment above for the RLS mapping behind each of these.
+  const editable = isStaff ? staffRole === "admin" || staffRole === "editor" : true;
+  const canWriteProduction = isStaff ? editable : false;
+  const canApprove = isStaff ? editable : false;
+  const canDelete = isStaff && staffRole === "admin";
   // Read-only display for the partner -- moving a site between seasonal
   // Programs is a staff-only bulk operation (task #46, admin/editor
   // gated), so this surface just shows the site's current one.
@@ -256,7 +276,7 @@ export function LfgPartnerSiteClient({
           creativeReceivedAt={site.creative_received_at}
           siteVerifiedAt={site.site_verified_at}
           editable={editable}
-          canApprove={false}
+          canApprove={canApprove}
           onChanged={() => router.refresh()}
         />
       ),
@@ -265,9 +285,10 @@ export function LfgPartnerSiteClient({
       id: "production",
       label: "Production",
       // lfg_production_write_staff has no partner clause at all (see the
-      // schema comment on that table) -- partners get read-only here,
-      // unlike every other tab.
-      content: <ProductionTab siteId={site.id} initial={initialProduction} editable={false} onChanged={() => router.refresh()} />,
+      // schema comment on that table) -- a real partner gets read-only
+      // here, unlike every other tab; a staff sign-in follows canWriteProduction
+      // instead (true for admin/editor, same as `editable` there).
+      content: <ProductionTab siteId={site.id} initial={initialProduction} editable={canWriteProduction} onChanged={() => router.refresh()} />,
     },
     {
       id: "shipment",
@@ -283,7 +304,7 @@ export function LfgPartnerSiteClient({
           initial={initialInstallation}
           initialPhotos={initialInstallationPhotos}
           editable={editable}
-          canDeletePhotos={false}
+          canDeletePhotos={canDelete}
           onChanged={() => router.refresh()}
         />
       ),
@@ -296,7 +317,7 @@ export function LfgPartnerSiteClient({
           siteId={site.id}
           initialDocuments={initialDocuments}
           editable={editable}
-          canDeleteDocs={false}
+          canDeleteDocs={canDelete}
           onChanged={() => router.refresh()}
         />
       ),

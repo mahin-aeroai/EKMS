@@ -33,7 +33,9 @@ export default async function LfgLayout({ children }: { children: ReactNode }) {
               <h1 className="text-base font-semibold text-ink">No LFG partner account here</h1>
               <p className="mt-2 text-sm text-ink-secondary">
                 This sign-in isn&apos;t linked to an LFG partner account. If you&apos;re MMDI staff, use the main
-                app; if you&apos;re a partner expecting access, contact MMDI to confirm your account.
+                app -- or ask an admin to turn on &quot;Allow LFG Connect login&quot; for your account in
+                Administration if you need to sign in here directly. If you&apos;re a partner expecting access,
+                contact MMDI to confirm your account.
               </p>
             </div>
           )}

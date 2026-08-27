@@ -572,6 +572,14 @@ export interface ProfileRow {
   // real block is Supabase Auth's own ban on the auth.users row, applied by
   // /api/staff/[userId]/deactivate.
   active: boolean;
+  // Opt-in, admin-set flag: lets this staff account (admin/editor/viewer)
+  // ALSO sign in at lfgconnect.mmdi.in, seeing the compact LFG Connect UI
+  // scoped to every site rather than one partner's -- off by default. See
+  // supabase-lfg-site-management-schema.sql's STEP 1b and lfg-auth.ts's
+  // getLfgIdentity(). Write actually available there still follows the
+  // account's normal role (viewer stays read-only, admin/editor can write)
+  // -- this flag only controls whether the door is open at all.
+  lfg_connect_access: boolean;
 }
 
 // ── Sign Estimator (React rewrite of SignERP_v2.html) ──────────────────────

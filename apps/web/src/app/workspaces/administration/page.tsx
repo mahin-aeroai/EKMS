@@ -292,6 +292,21 @@ export default function AdministrationPage() {
     toast("success", `${profile.email} is now scoped to ${value === null ? "all tools" : value.map((t) => TOOL_LABEL[t] ?? t).join(", ")}`);
   }
 
+  // Selective LFG Connect access (lfgconnect.mmdi.in) -- off by default per
+  // staff account; an admin opts a specific person in here. See
+  // supabase-lfg-site-management-schema.sql's STEP 1b and lfg-auth.ts's
+  // getLfgIdentity() for what this actually gates: sign-in only, not what
+  // they can do once there -- that still follows their normal role.
+  async function applyLfgConnectAccessChange(profile: ProfileRow, allow: boolean) {
+    const { error } = await supabase.from("profiles").update({ lfg_connect_access: allow }).eq("id", profile.id);
+    if (error) {
+      toast("danger", `Couldn't update ${profile.email}'s LFG Connect access: ${error.message}`);
+      return;
+    }
+    setProfiles((prev) => prev?.map((p) => (p.id === profile.id ? { ...p, lfg_connect_access: allow } : p)) ?? prev);
+    toast("success", `${profile.email} can ${allow ? "now" : "no longer"} sign in to LFG Connect`);
+  }
+
   const PROFILE_COLUMNS: TableColumn<ProfileRow>[] = [
     { key: "email", header: "User", sortable: true },
     {
@@ -379,6 +394,24 @@ export default function AdministrationPage() {
           <span className="text-sm text-ink-muted">
             {p.allowed_tools === null ? "All tools" : p.allowed_tools.map((t) => TOOL_LABEL[t] ?? t).join(", ")}
           </span>
+        ),
+    },
+    {
+      key: "lfg_connect_access",
+      header: "LFG Connect",
+      render: (p) =>
+        isAdmin ? (
+          <label className="flex items-center gap-1.5 text-sm text-ink">
+            <input
+              type="checkbox"
+              checked={p.lfg_connect_access}
+              onChange={(e) => applyLfgConnectAccessChange(p, e.target.checked)}
+              className="h-4 w-4 rounded border-line-strong"
+            />
+            Allow login
+          </label>
+        ) : (
+          <span className="text-sm text-ink-muted">{p.lfg_connect_access ? "Allowed" : "—"}</span>
         ),
     },
     { key: "created_at", header: "Joined", sortable: true, render: (p) => timeAgo(p.created_at) },

@@ -23,7 +23,12 @@ import { LFG_STATUSES, lfgStatusLabel, lfgStatusBadge } from "@/lib/lfgStatus";
 // `.eq("partner_id", identity.partnerId)` below is belt-and-braces on top
 // of lfg_sites_select RLS (which already scopes SELECT to
 // `is_mmdi_staff() or partner_id = lfg_partner_id()`) -- not the real
-// boundary, just makes the intent explicit in the query itself.
+// boundary, just makes the intent explicit in the query itself. Skipped
+// entirely for identity.isStaff (a selectively lfg_connect_access-flagged
+// MMDI staff sign-in, see lfg-auth.ts) -- that filter would otherwise show
+// them zero sites, since a staff account has no partner_id of its own;
+// they see every site instead, with an extra Partner column so it's clear
+// whose site each row belongs to.
 //
 // Default sort is by sfo_id (SFO/Apple ID) ascending, same as the staff
 // Site Master and for the same reason (task #39-44) -- not by site_id
@@ -42,6 +47,12 @@ interface PartnerSiteRow {
   bleed: number | null;
   site_status: string;
   number_of_sites: number;
+  lfg_partners: { name: string } | { name: string }[] | null;
+}
+
+function partnerName(row: PartnerSiteRow): string {
+  const p = Array.isArray(row.lfg_partners) ? row.lfg_partners[0] : row.lfg_partners;
+  return p?.name ?? "—";
 }
 
 function formatNum(n: number | null): string {
@@ -61,11 +72,9 @@ export default function LfgPartnerSitesPage() {
 
   useEffect(() => {
     if (!identity) return;
-    supabase
-      .from("lfg_sites")
-      .select("*", { count: "exact", head: true })
-      .eq("partner_id", identity.partnerId)
-      .then(({ count }) => setTotalCount(count ?? 0));
+    let q = supabase.from("lfg_sites").select("*", { count: "exact", head: true });
+    if (!identity.isStaff) q = q.eq("partner_id", identity.partnerId);
+    q.then(({ count }) => setTotalCount(count ?? 0));
   }, [identity]);
 
   useEffect(() => {
@@ -73,10 +82,12 @@ export default function LfgPartnerSitesPage() {
     const handle = setTimeout(() => {
       let q = supabase
         .from("lfg_sites")
-        .select("id, site_id, outlet_name, sfo_id, city, region, material, mat_code, width, height, bleed, site_status, number_of_sites")
-        .eq("partner_id", identity.partnerId)
+        .select(
+          "id, site_id, outlet_name, sfo_id, city, region, material, mat_code, width, height, bleed, site_status, number_of_sites, lfg_partners(name)"
+        )
         .order("sfo_id", { ascending: true, nullsFirst: false })
-        .limit(200);
+        .limit(identity.isStaff ? 5000 : 200);
+      if (!identity.isStaff) q = q.eq("partner_id", identity.partnerId);
 
       if (statusFilter) q = q.eq("site_status", statusFilter);
 
@@ -115,18 +126,29 @@ export default function LfgPartnerSitesPage() {
       sortable: true,
       render: (r) => <Badge status={lfgStatusBadge(r.site_status)}>{lfgStatusLabel(r.site_status)}</Badge>,
     },
+    // Only meaningful once rows span more than one partner -- i.e. staff
+    // mode, where every site is shown, not just one partner's own.
+    ...(identity?.isStaff
+      ? [{ key: "lfg_partners", header: "Partner", render: (r) => partnerName(r) } satisfies TableColumn<PartnerSiteRow>]
+      : []),
   ];
 
   return (
     <div>
-      <h1 className="text-lg font-semibold text-ink">Your Sites</h1>
+      <h1 className="text-lg font-semibold text-ink">{identity?.isStaff ? "All Sites" : "Your Sites"}</h1>
       <p className="mt-1 text-sm text-ink-secondary">
-        Every site assigned to {identity?.partnerName || "your account"} — open one to log a survey, update
-        production/shipment/installation, upload photos and documents, or change its status.
+        {identity?.isStaff
+          ? "Every site across every partner — open one to log a survey, update production/shipment/installation, upload photos and documents, or change its status."
+          : `Every site assigned to ${identity?.partnerName || "your account"} — open one to log a survey, update production/shipment/installation, upload photos and documents, or change its status.`}
       </p>
 
       <div className="my-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard label="Total Sites" value={totalCount === null ? "…" : String(totalCount)} trend="flat" trendLabel="Assigned to you" />
+        <StatCard
+          label="Total Sites"
+          value={totalCount === null ? "…" : String(totalCount)}
+          trend="flat"
+          trendLabel={identity?.isStaff ? "All partners" : "Assigned to you"}
+        />
         <StatCard
           label="Showing"
           value={rows === null ? "…" : String(rows.length)}

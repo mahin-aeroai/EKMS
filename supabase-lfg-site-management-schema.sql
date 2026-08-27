@@ -74,6 +74,22 @@ alter table public.profiles add constraint profiles_role_check
   check (role in ('admin', 'editor', 'viewer', 'portal', 'lfg_partner'));
 
 -- ============================================================
+-- STEP 1b — profiles.lfg_connect_access: lets a STAFF account (role
+-- admin/editor/viewer) ALSO sign in at lfgconnect.mmdi.in, on top of their
+-- normal internal-app access -- a selective, admin-granted opt-in (off by
+-- default), NOT automatic for every staff member. See lfg-auth.ts's
+-- getLfgIdentity() for how this is checked, and Administration's "Users &
+-- roles" table for where an admin flips it per person. Deliberately its
+-- own boolean rather than reusing profiles.role -- someone with this flag
+-- is still exactly their normal admin/editor/viewer everywhere else; this
+-- only ever adds a second front door, never changes what they can do once
+-- signed in (lfg_sites_update/lfg_production_write_staff/etc. already key
+-- off user_role(), unchanged by this column).
+-- ============================================================
+
+alter table public.profiles add column if not exists lfg_connect_access boolean not null default false;
+
+-- ============================================================
 -- STEP 2 — lfg_partners (one row per installation/channel partner company)
 -- ============================================================
 
