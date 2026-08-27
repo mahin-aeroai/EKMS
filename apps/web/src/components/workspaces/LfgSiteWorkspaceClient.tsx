@@ -11,7 +11,8 @@ import { Tabs, type TabItem } from "@/components/ui/Tabs";
 import { Timeline, type TimelineEntry } from "@/components/ui/Timeline";
 import { useToast } from "@/components/ui/Notifications";
 import { useUserRole, canWrite, canDelete } from "@/lib/UserRoleContext";
-import { formatDecimal } from "@/lib/lfg-units";
+import { formatDecimal, round2 } from "@/lib/lfg-units";
+import { useLfgDistinctValues } from "@/lib/useLfgDistinctValues";
 import { supabase } from "@/lib/supabase";
 import {
   LFG_STATUSES,
@@ -337,6 +338,377 @@ export function OtherDisplaysPanel({ site, hrefFor }: { site: LfgSite; hrefFor: 
   );
 }
 
+interface PartnerOption {
+  id: string;
+  name: string;
+}
+interface ProgramOption {
+  id: string;
+  name: string;
+}
+
+type SiteInfoForm = {
+  outlet_name: string;
+  format: string;
+  sfo_id: string;
+  city: string;
+  region: string;
+  store_address: string;
+  material: string;
+  mat_code: string;
+  number_of_sites: string;
+  width: string;
+  height: string;
+  bleed: string;
+  sqft: string;
+  asm_name: string;
+  asm_mobile: string;
+  asm_email: string;
+  escalation_email: string;
+  partner_id: string;
+  program_id: string;
+  remarks: string;
+};
+
+function siteToForm(site: LfgSite, partner: { id: string } | null, program: { id: string } | null): SiteInfoForm {
+  return {
+    outlet_name: site.outlet_name,
+    format: site.format ?? "",
+    sfo_id: site.sfo_id ?? "",
+    city: site.city ?? "",
+    region: site.region ?? "",
+    store_address: site.store_address ?? "",
+    material: site.material ?? "",
+    mat_code: site.mat_code ?? "",
+    number_of_sites: String(site.number_of_sites),
+    width: site.width === null ? "" : String(site.width),
+    height: site.height === null ? "" : String(site.height),
+    bleed: site.bleed === null ? "" : String(site.bleed),
+    sqft: site.sqft === null ? "" : String(site.sqft),
+    asm_name: site.asm_name ?? "",
+    asm_mobile: site.asm_mobile ?? "",
+    asm_email: site.asm_email ?? "",
+    escalation_email: site.escalation_email ?? "",
+    partner_id: partner?.id ?? "",
+    program_id: program?.id ?? "",
+    remarks: site.remarks ?? "",
+  };
+}
+
+// A field with a <datalist> of existing values (see the identical pattern
+// on the New Site form) -- free text still works, this is just
+// autocomplete over what's already on file.
+function ComboEditField({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: string[];
+}) {
+  const listId = `edit-${label.replace(/\s+/g, "-").toLowerCase()}-options`;
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label className={labelClass}>{label}</label>
+      <input list={listId} className={inputClass} value={value} onChange={(e) => onChange(e.target.value)} autoComplete="off" />
+      <datalist id={listId}>
+        {options.map((v) => (
+          <option key={v} value={v} />
+        ))}
+      </datalist>
+    </div>
+  );
+}
+
+// Site Information edit mode (staff-only -- gated by the `editable` prop,
+// same canWrite(role) check the rest of this page already uses). Before
+// this there was no way to correct or fill in a site's own core fields
+// after creation short of a direct database edit.
+//
+// Store-level fields (outlet_name, format, sfo_id, city, region,
+// store_address, partner_id, ASM contacts, escalation email) are
+// denormalized copies of the site's lfg_stores row where one exists (see
+// STEP 6c in the schema) -- saving a change to one of those here pushes
+// it to the canonical store row AND every sibling site sharing it, so a
+// correction can't leave the store's other displays quietly showing a
+// stale outlet name/city/partner/etc. Genuinely site-specific fields
+// (material, mat code, size, bleed, sqft, remarks, program) only ever
+// touch this one row. A site with no store_id yet (not backfilled) just
+// updates itself, same as before the Store entity existed.
+function SiteInfoCard({
+  site,
+  partner,
+  program,
+  editable,
+}: {
+  site: LfgSite;
+  partner: { id: string; name: string } | null;
+  program: { id: string; name: string } | null;
+  editable: boolean;
+}) {
+  const router = useRouter();
+  const { toast } = useToast();
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [partners, setPartners] = useState<PartnerOption[]>([]);
+  const [programs, setPrograms] = useState<ProgramOption[]>([]);
+  const [form, setForm] = useState<SiteInfoForm>(() => siteToForm(site, partner, program));
+
+  const formatOptions = useLfgDistinctValues("format");
+  const materialOptions = useLfgDistinctValues("material");
+  const regionOptions = useLfgDistinctValues("region");
+  const matCodeOptions = useLfgDistinctValues("mat_code");
+  const cityOptions = useLfgDistinctValues("city");
+  const asmNameOptions = useLfgDistinctValues("asm_name");
+
+  useEffect(() => {
+    if (!editing) return;
+    supabase
+      .from("lfg_partners")
+      .select("id, name")
+      .eq("active", true)
+      .order("name")
+      .then(({ data }) => setPartners((data as PartnerOption[]) ?? []));
+    supabase
+      .from("lfg_programs")
+      .select("id, name")
+      .eq("active", true)
+      .order("name")
+      .then(({ data }) => setPrograms((data as ProgramOption[]) ?? []));
+  }, [editing]);
+
+  function startEditing() {
+    setForm(siteToForm(site, partner, program));
+    setEditing(true);
+  }
+
+  function set<K extends keyof SiteInfoForm>(key: K, value: SiteInfoForm[K]) {
+    setForm((f) => ({ ...f, [key]: value }));
+  }
+
+  async function handleSave() {
+    if (!form.outlet_name.trim()) {
+      toast("danger", "Outlet Name is required.");
+      return;
+    }
+    setSaving(true);
+
+    const storeFields = {
+      outlet_name: form.outlet_name.trim(),
+      format: form.format.trim() || null,
+      sfo_id: form.sfo_id.trim() || null,
+      city: form.city.trim() || null,
+      region: form.region.trim() || null,
+      store_address: form.store_address.trim() || null,
+      partner_id: form.partner_id || null,
+      asm_name: form.asm_name.trim() || null,
+      asm_mobile: form.asm_mobile.trim() || null,
+      asm_email: form.asm_email.trim() || null,
+      escalation_email: form.escalation_email.trim() || null,
+    };
+    const siteOnlyFields = {
+      material: form.material.trim() || null,
+      mat_code: form.mat_code.trim() || null,
+      number_of_sites: Number(form.number_of_sites) || 1,
+      width: form.width.trim() ? round2(Number(form.width)) : null,
+      height: form.height.trim() ? round2(Number(form.height)) : null,
+      bleed: form.bleed.trim() ? round2(Number(form.bleed)) : null,
+      sqft: form.sqft.trim() ? round2(Number(form.sqft)) : null,
+      program_id: form.program_id || null,
+      remarks: form.remarks.trim() || null,
+    };
+
+    if (site.store_id) {
+      const [{ error: storeError }, { error: siblingsError }] = await Promise.all([
+        supabase.from("lfg_stores").update(storeFields).eq("id", site.store_id),
+        supabase.from("lfg_sites").update(storeFields).eq("store_id", site.store_id),
+      ]);
+      if (storeError || siblingsError) {
+        setSaving(false);
+        toast("danger", `Couldn't save: ${(storeError ?? siblingsError)?.message}`);
+        return;
+      }
+      const { error: siteError } = await supabase.from("lfg_sites").update(siteOnlyFields).eq("id", site.id);
+      if (siteError) {
+        setSaving(false);
+        toast("danger", `Store saved, but couldn't save this site's own details: ${siteError.message}`);
+        return;
+      }
+    } else {
+      const { error } = await supabase
+        .from("lfg_sites")
+        .update({ ...storeFields, ...siteOnlyFields })
+        .eq("id", site.id);
+      if (error) {
+        setSaving(false);
+        toast("danger", `Couldn't save: ${error.message}`);
+        return;
+      }
+    }
+
+    setSaving(false);
+    setEditing(false);
+    toast("success", "Site details updated");
+    router.refresh();
+  }
+
+  if (!editing) {
+    return (
+      <div className="rounded-lg border border-line bg-surface p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-ink">Site Details</h3>
+          {editable && (
+            <Button size="sm" variant="secondary" onClick={startEditing}>
+              <Pencil size={14} className="mr-1.5" /> Edit
+            </Button>
+          )}
+        </div>
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+          <Field label="Site ID" value={site.site_id} />
+          <Field label="Outlet Name" value={site.outlet_name} />
+          <Field label="Format" value={site.format} />
+          <Field label="Program (Season)" value={program?.name} />
+          <Field label="SFO ID" value={site.sfo_id} />
+          <Field label="City" value={site.city} />
+          <Field label="Region" value={site.region} />
+          <Field label="Material" value={site.material} />
+          <Field label="Mat Code" value={site.mat_code} />
+          <Field label="Number of Sites" value={site.number_of_sites} />
+          <Field label="Width" value={formatDecimal(site.width)} />
+          <Field label="Height" value={formatDecimal(site.height)} />
+          <Field label="Bleed" value={formatDecimal(site.bleed)} />
+          <Field label="SQFT" value={formatDecimal(site.sqft)} />
+          <Field label="Partner" value={partner?.name} />
+          <Field label="ASM Name" value={site.asm_name} />
+          <Field label="ASM Mobile" value={site.asm_mobile} />
+          <Field label="ASM Email" value={site.asm_email} />
+          <Field label="Escalation Email" value={site.escalation_email} />
+          <div className="col-span-2 sm:col-span-3">
+            <Field label="Store Address" value={site.store_address} />
+          </div>
+          <div className="col-span-2 sm:col-span-3">
+            <Field label="Remarks" value={site.remarks} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-primary bg-surface p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-ink">Edit Site Details</h3>
+        {site.store_id && (
+          <span className="text-xs text-ink-muted">
+            Outlet fields (Outlet Name, Format, SFO ID, City, Region, Address, Partner, ASM, Escalation Email) apply to
+            every display at this store.
+          </span>
+        )}
+      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="flex flex-col gap-1.5">
+          <label className={labelClass}>Outlet Name *</label>
+          <input className={inputClass} value={form.outlet_name} onChange={(e) => set("outlet_name", e.target.value)} />
+        </div>
+        <ComboEditField label="Format" value={form.format} onChange={(v) => set("format", v)} options={formatOptions} />
+        <div className="flex flex-col gap-1.5">
+          <label className={labelClass}>Program (Season)</label>
+          <select className={inputClass} value={form.program_id} onChange={(e) => set("program_id", e.target.value)}>
+            <option value="">— Unassigned —</option>
+            {programs.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <label className={labelClass}>SFO ID</label>
+          <input className={inputClass} value={form.sfo_id} onChange={(e) => set("sfo_id", e.target.value)} />
+        </div>
+        <ComboEditField label="City" value={form.city} onChange={(v) => set("city", v)} options={cityOptions} />
+        <ComboEditField label="Region" value={form.region} onChange={(v) => set("region", v)} options={regionOptions} />
+        <ComboEditField label="Material" value={form.material} onChange={(v) => set("material", v)} options={materialOptions} />
+        <ComboEditField label="Mat Code" value={form.mat_code} onChange={(v) => set("mat_code", v)} options={matCodeOptions} />
+        <div className="flex flex-col gap-1.5">
+          <label className={labelClass}>Number of Sites</label>
+          <input
+            type="number"
+            min={1}
+            className={inputClass}
+            value={form.number_of_sites}
+            onChange={(e) => set("number_of_sites", e.target.value)}
+          />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <label className={labelClass}>Width (in)</label>
+          <input type="number" step="0.01" className={inputClass} value={form.width} onChange={(e) => set("width", e.target.value)} />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <label className={labelClass}>Height (in)</label>
+          <input type="number" step="0.01" className={inputClass} value={form.height} onChange={(e) => set("height", e.target.value)} />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <label className={labelClass}>Bleed</label>
+          <input type="number" step="0.01" className={inputClass} value={form.bleed} onChange={(e) => set("bleed", e.target.value)} />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <label className={labelClass}>SQFT</label>
+          <input type="number" step="0.01" className={inputClass} value={form.sqft} onChange={(e) => set("sqft", e.target.value)} />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <label className={labelClass}>Partner</label>
+          <select className={inputClass} value={form.partner_id} onChange={(e) => set("partner_id", e.target.value)}>
+            <option value="">— Unassigned —</option>
+            {partners.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <ComboEditField label="ASM Name" value={form.asm_name} onChange={(v) => set("asm_name", v)} options={asmNameOptions} />
+        <div className="flex flex-col gap-1.5">
+          <label className={labelClass}>ASM Mobile</label>
+          <input className={inputClass} value={form.asm_mobile} onChange={(e) => set("asm_mobile", e.target.value)} />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <label className={labelClass}>ASM Email</label>
+          <input type="email" className={inputClass} value={form.asm_email} onChange={(e) => set("asm_email", e.target.value)} />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <label className={labelClass}>Escalation Email</label>
+          <input
+            type="email"
+            className={inputClass}
+            value={form.escalation_email}
+            onChange={(e) => set("escalation_email", e.target.value)}
+          />
+        </div>
+        <div className="col-span-1 flex flex-col gap-1.5 sm:col-span-3">
+          <label className={labelClass}>Store Address</label>
+          <textarea rows={2} className={inputClass} value={form.store_address} onChange={(e) => set("store_address", e.target.value)} />
+        </div>
+        <div className="col-span-1 flex flex-col gap-1.5 sm:col-span-3">
+          <label className={labelClass}>Remarks</label>
+          <textarea rows={2} className={inputClass} value={form.remarks} onChange={(e) => set("remarks", e.target.value)} />
+        </div>
+      </div>
+      <div className="mt-4 flex gap-2">
+        <Button size="sm" loading={saving} onClick={handleSave}>
+          Save
+        </Button>
+        <Button size="sm" variant="secondary" onClick={() => setEditing(false)}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function LfgSiteWorkspaceClient({
   site,
   initialStatusHistory,
@@ -535,33 +907,7 @@ export function LfgSiteWorkspaceClient({
               )}
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4 rounded-lg border border-line bg-surface p-4 sm:grid-cols-3">
-            <Field label="Site ID" value={site.site_id} />
-            <Field label="Outlet Name" value={site.outlet_name} />
-            <Field label="Format" value={site.format} />
-            <Field label="Program (Season)" value={program?.name} />
-            <Field label="SFO ID" value={site.sfo_id} />
-            <Field label="City" value={site.city} />
-            <Field label="Region" value={site.region} />
-            <Field label="Material" value={site.material} />
-            <Field label="Mat Code" value={site.mat_code} />
-            <Field label="Number of Sites" value={site.number_of_sites} />
-            <Field label="Width" value={formatDecimal(site.width)} />
-            <Field label="Height" value={formatDecimal(site.height)} />
-            <Field label="Bleed" value={formatDecimal(site.bleed)} />
-            <Field label="SQFT" value={formatDecimal(site.sqft)} />
-            <Field label="Partner" value={partner?.name} />
-            <Field label="ASM Name" value={site.asm_name} />
-            <Field label="ASM Mobile" value={site.asm_mobile} />
-            <Field label="ASM Email" value={site.asm_email} />
-            <Field label="Escalation Email" value={site.escalation_email} />
-            <div className="col-span-2 sm:col-span-3">
-              <Field label="Store Address" value={site.store_address} />
-            </div>
-            <div className="col-span-2 sm:col-span-3">
-              <Field label="Remarks" value={site.remarks} />
-            </div>
-          </div>
+          <SiteInfoCard site={site} partner={partner} program={program} editable={editable} />
           <OtherDisplaysPanel site={site} hrefFor={(id) => `/workspaces/lfg/sites/${id}`} />
           {/* Status was previously its own tab -- folded in here (task
               #55) since it was really just one more fact about the site,
