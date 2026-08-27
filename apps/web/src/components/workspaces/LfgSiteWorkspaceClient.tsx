@@ -2,7 +2,7 @@
 
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { MapPin, Pencil, ShieldAlert, Lock, Upload, Eye, Trash2 } from "lucide-react";
+import { MapPin, Pencil, ShieldAlert, Lock, Upload, Eye, Trash2, Truck } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -12,13 +12,24 @@ import { Timeline, type TimelineEntry } from "@/components/ui/Timeline";
 import { useToast } from "@/components/ui/Notifications";
 import { useUserRole, canWrite, canDelete } from "@/lib/UserRoleContext";
 import { supabase } from "@/lib/supabase";
-import { LFG_STATUSES, lfgStatusLabel, lfgStatusBadge, formatInr } from "@/lib/lfgStatus";
+import {
+  LFG_STATUSES,
+  lfgStatusLabel,
+  lfgStatusBadge,
+  formatInr,
+  SHIPMENT_STATUSES,
+  shipmentStatusLabel,
+  shipmentStatusBadge,
+  DELIVERY_STATUSES,
+  deliveryStatusLabel,
+  deliveryStatusBadge,
+} from "@/lib/lfgStatus";
 
 // Site 360 -- the tabbed view every part of the spec (New Site through
-// Deactivation) ultimately links back to. Survey, Production, and
-// Installation are real, working tabs here. Shipment and Documents are
-// deliberately light stubs -- Courier/AWB tracking (task #18) and Document
-// management (task #21) each replace their stub with the real thing.
+// Deactivation) ultimately links back to. Survey, Production, Shipment, and
+// Installation are real, working tabs here. Documents is deliberately a
+// light stub -- Document management (task #21) replaces it with the real
+// thing.
 // Financials is gated client-side to admin/editor as a UX nicety on top of
 // the REAL boundary, which is that
 // lfg_site_financials/lfg_installation_costs simply have no RLS grant to
@@ -131,6 +142,32 @@ interface SurveyRow {
   approved_at: string | null;
 }
 
+interface ShipmentRow {
+  id: string;
+  courier: string | null;
+  awb_number: string | null;
+  dispatch_date: string | null;
+  expected_delivery_date: string | null;
+  shipment_contents: string | null;
+  number_of_packages: number | null;
+  package_details: string | null;
+  current_status: string;
+  delivery_status: string;
+  delivery_date: string | null;
+  pod_path: string | null;
+  courier_remarks: string | null;
+  internal_remarks: string | null;
+  created_at: string;
+}
+
+interface ShipmentEventRow {
+  id: string;
+  event_status: string;
+  event_time: string;
+  location: string | null;
+  source: "manual" | "api";
+}
+
 interface AuditLogRow {
   id: string;
   created_at: string;
@@ -167,6 +204,7 @@ export function LfgSiteWorkspaceClient({
   initialInstallationPhotos,
   initialProduction,
   initialSurveys,
+  initialShipments,
   initialAuditLog,
 }: {
   site: LfgSite;
@@ -177,6 +215,7 @@ export function LfgSiteWorkspaceClient({
   initialInstallationPhotos: PhotoRow[];
   initialProduction: ProductionRow | null;
   initialSurveys: SurveyRow[];
+  initialShipments: ShipmentRow[];
   initialAuditLog: AuditLogRow[];
 }) {
   const router = useRouter();
@@ -288,7 +327,7 @@ export function LfgSiteWorkspaceClient({
     {
       id: "shipment",
       label: "Shipment",
-      content: <StubTab message="Courier/AWB tracking is a dedicated module, coming next." />,
+      content: <ShipmentTab siteId={site.id} initialShipments={initialShipments} editable={editable} onChanged={() => router.refresh()} />,
     },
     {
       id: "installation",
@@ -601,6 +640,500 @@ function ProductionTab({
         <Field label="Completed" value={initial?.completed_at ? new Date(initial.completed_at).toLocaleString() : null} />
       </div>
       <Field label="Notes" value={initial?.notes} />
+    </div>
+  );
+}
+
+// Courier/AWB tracking (task #18). lfg_shipments carries no financial
+// fields, so its RLS grants the site's own partner select/write alongside
+// admin/editor -- `editable` here is canWrite(role), the same gate
+// Survey/Production/Installation use, not the admin/editor-only Financials
+// gate. lfg_shipment_events (the per-shipment timeline) is fetched
+// client-side per-shipment on expand rather than up front in page.tsx,
+// since a site can have many shipments and most won't be open at once.
+function ShipmentTab({
+  siteId,
+  initialShipments,
+  editable,
+  onChanged,
+}: {
+  siteId: string;
+  initialShipments: ShipmentRow[];
+  editable: boolean;
+  onChanged: () => void;
+}) {
+  const { toast } = useToast();
+  const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    courier: "",
+    awb_number: "",
+    dispatch_date: "",
+    expected_delivery_date: "",
+    shipment_contents: "",
+    number_of_packages: "",
+    package_details: "",
+  });
+
+  async function handleCreate() {
+    setSaving(true);
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const { error } = await supabase.from("lfg_shipments").insert({
+      site_id: siteId,
+      courier: form.courier.trim() || null,
+      awb_number: form.awb_number.trim() || null,
+      dispatch_date: form.dispatch_date || null,
+      expected_delivery_date: form.expected_delivery_date || null,
+      shipment_contents: form.shipment_contents.trim() || null,
+      number_of_packages: form.number_of_packages ? Number(form.number_of_packages) : null,
+      package_details: form.package_details.trim() || null,
+      created_by: user?.id ?? null,
+    });
+    setSaving(false);
+    if (error) {
+      toast("danger", `Couldn't create shipment: ${error.message}`);
+      return;
+    }
+    toast("success", "Shipment created");
+    setShowForm(false);
+    setForm({
+      courier: "",
+      awb_number: "",
+      dispatch_date: "",
+      expected_delivery_date: "",
+      shipment_contents: "",
+      number_of_packages: "",
+      package_details: "",
+    });
+    onChanged();
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      {editable && (
+        <div className="flex justify-end">
+          <Button size="sm" onClick={() => setShowForm((s) => !s)}>
+            {showForm ? "Cancel" : "New Shipment"}
+          </Button>
+        </div>
+      )}
+
+      {showForm && (
+        <div className="grid grid-cols-2 gap-3 rounded-lg border border-line bg-surface p-4 sm:grid-cols-4">
+          <input
+            placeholder="Courier"
+            className={inputClass}
+            value={form.courier}
+            onChange={(e) => setForm((f) => ({ ...f, courier: e.target.value }))}
+          />
+          <input
+            placeholder="AWB Number"
+            className={inputClass}
+            value={form.awb_number}
+            onChange={(e) => setForm((f) => ({ ...f, awb_number: e.target.value }))}
+          />
+          <div className="flex flex-col gap-1">
+            <label className={labelClass}>Dispatch Date</label>
+            <input
+              type="date"
+              className={inputClass}
+              value={form.dispatch_date}
+              onChange={(e) => setForm((f) => ({ ...f, dispatch_date: e.target.value }))}
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className={labelClass}>Expected Delivery</label>
+            <input
+              type="date"
+              className={inputClass}
+              value={form.expected_delivery_date}
+              onChange={(e) => setForm((f) => ({ ...f, expected_delivery_date: e.target.value }))}
+            />
+          </div>
+          <input
+            placeholder="Shipment Contents"
+            className={inputClass}
+            value={form.shipment_contents}
+            onChange={(e) => setForm((f) => ({ ...f, shipment_contents: e.target.value }))}
+          />
+          <input
+            type="number"
+            placeholder="Number of Packages"
+            className={inputClass}
+            value={form.number_of_packages}
+            onChange={(e) => setForm((f) => ({ ...f, number_of_packages: e.target.value }))}
+          />
+          <input
+            placeholder="Package Details"
+            className={`${inputClass} col-span-2`}
+            value={form.package_details}
+            onChange={(e) => setForm((f) => ({ ...f, package_details: e.target.value }))}
+          />
+          <div className="col-span-2 sm:col-span-4">
+            <Button size="sm" loading={saving} onClick={handleCreate}>
+              Save Shipment
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {initialShipments.length === 0 ? (
+        <p className="text-sm text-ink-muted">No shipments logged yet.</p>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {initialShipments.map((s) => (
+            <ShipmentCard key={s.id} shipment={s} editable={editable} onChanged={onChanged} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ShipmentCard({
+  shipment,
+  editable,
+  onChanged,
+}: {
+  shipment: ShipmentRow;
+  editable: boolean;
+  onChanged: () => void;
+}) {
+  const { toast } = useToast();
+  const [expanded, setExpanded] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    current_status: shipment.current_status,
+    delivery_status: shipment.delivery_status,
+    delivery_date: shipment.delivery_date ?? "",
+    courier_remarks: shipment.courier_remarks ?? "",
+    internal_remarks: shipment.internal_remarks ?? "",
+  });
+
+  const [events, setEvents] = useState<ShipmentEventRow[] | null>(null);
+  const [loadingEvents, setLoadingEvents] = useState(false);
+  const [showEventForm, setShowEventForm] = useState(false);
+  const [eventForm, setEventForm] = useState({ event_status: "", location: "" });
+  const [loggingEvent, setLoggingEvent] = useState(false);
+
+  const [uploadingPod, setUploadingPod] = useState(false);
+  const podInputRef = useRef<HTMLInputElement | null>(null);
+
+  async function loadEvents() {
+    setLoadingEvents(true);
+    const { data, error } = await supabase
+      .from("lfg_shipment_events")
+      .select("*")
+      .eq("shipment_id", shipment.id)
+      .order("event_time", { ascending: false });
+    setLoadingEvents(false);
+    if (error) {
+      toast("danger", `Couldn't load tracking events: ${error.message}`);
+      return;
+    }
+    setEvents(data ?? []);
+  }
+
+  function handleExpand() {
+    const next = !expanded;
+    setExpanded(next);
+    if (next && events === null) {
+      loadEvents();
+    }
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    const { error } = await supabase
+      .from("lfg_shipments")
+      .update({
+        current_status: form.current_status,
+        delivery_status: form.delivery_status,
+        delivery_date: form.delivery_date || null,
+        courier_remarks: form.courier_remarks.trim() || null,
+        internal_remarks: form.internal_remarks.trim() || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", shipment.id);
+    setSaving(false);
+    if (error) {
+      toast("danger", `Couldn't update shipment: ${error.message}`);
+      return;
+    }
+    toast("success", "Shipment updated");
+    setEditing(false);
+    onChanged();
+  }
+
+  async function handleLogEvent() {
+    if (!eventForm.event_status.trim()) {
+      toast("danger", "Event status is required");
+      return;
+    }
+    setLoggingEvent(true);
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const { error } = await supabase.from("lfg_shipment_events").insert({
+      shipment_id: shipment.id,
+      event_status: eventForm.event_status.trim(),
+      location: eventForm.location.trim() || null,
+      source: "manual",
+      created_by: user?.id ?? null,
+    });
+    setLoggingEvent(false);
+    if (error) {
+      toast("danger", `Couldn't log event: ${error.message}`);
+      return;
+    }
+    toast("success", "Event logged");
+    setShowEventForm(false);
+    setEventForm({ event_status: "", location: "" });
+    loadEvents();
+  }
+
+  async function handlePodUpload(file: File) {
+    setUploadingPod(true);
+    try {
+      const contentType = file.type || "application/pdf";
+      const uploadRes = await fetch(`/api/lfg/shipments/${shipment.id}/pod/upload-url`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content_type: contentType }),
+      });
+      const uploadData = await uploadRes.json();
+      if (!uploadRes.ok) {
+        toast("danger", uploadData.message || uploadData.error || "Couldn't get an upload link");
+        return;
+      }
+
+      const putRes = await fetch(uploadData.url, { method: "PUT", headers: { "Content-Type": contentType }, body: file });
+      if (!putRes.ok) {
+        toast("danger", "Upload to storage failed");
+        return;
+      }
+
+      const { error: updateError } = await supabase
+        .from("lfg_shipments")
+        .update({ pod_path: uploadData.relative_path, delivery_status: "pod_received", updated_at: new Date().toISOString() })
+        .eq("id", shipment.id);
+      if (updateError) {
+        toast("danger", `Uploaded, but couldn't record it: ${updateError.message}`);
+        return;
+      }
+
+      toast("success", "POD uploaded");
+      onChanged();
+    } finally {
+      setUploadingPod(false);
+    }
+  }
+
+  async function handleViewPod() {
+    const res = await fetch(`/api/lfg/shipments/${shipment.id}/pod/signed-url`);
+    const data = await res.json();
+    if (!res.ok) {
+      toast("danger", data.message || data.error || "Couldn't open the POD");
+      return;
+    }
+    window.open(data.url, "_blank", "noopener,noreferrer");
+  }
+
+  return (
+    <div className="rounded-lg border border-line bg-surface p-4">
+      <button type="button" onClick={handleExpand} className="flex w-full items-center justify-between gap-3 text-left">
+        <div className="flex items-center gap-3">
+          <Truck size={18} className="shrink-0 text-ink-muted" />
+          <div>
+            <div className="text-sm font-medium text-ink">
+              {shipment.courier ?? "No courier"} {shipment.awb_number ? `· AWB ${shipment.awb_number}` : ""}
+            </div>
+            <div className="mt-0.5 text-xs text-ink-secondary">
+              Dispatched {shipment.dispatch_date ?? "—"} · Expected {shipment.expected_delivery_date ?? "—"}
+            </div>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Badge status={shipmentStatusBadge(shipment.current_status)}>{shipmentStatusLabel(shipment.current_status)}</Badge>
+          <Badge status={deliveryStatusBadge(shipment.delivery_status)}>{deliveryStatusLabel(shipment.delivery_status)}</Badge>
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="mt-4 flex flex-col gap-4 border-t border-line pt-4">
+          <div className="flex items-center justify-between">
+            <h4 className="text-xs font-semibold text-ink-secondary">Shipment Details</h4>
+            {editable && (
+              <Button size="sm" variant="secondary" onClick={() => setEditing((e) => !e)}>
+                <Pencil size={14} className="mr-1.5" />
+                {editing ? "Cancel" : "Edit"}
+              </Button>
+            )}
+          </div>
+
+          {editing ? (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <div className="flex flex-col gap-1">
+                <label className={labelClass}>Status</label>
+                <select
+                  className={inputClass}
+                  value={form.current_status}
+                  onChange={(e) => setForm((f) => ({ ...f, current_status: e.target.value }))}
+                >
+                  {SHIPMENT_STATUSES.map((s) => (
+                    <option key={s} value={s}>
+                      {shipmentStatusLabel(s)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className={labelClass}>Delivery Status</label>
+                <select
+                  className={inputClass}
+                  value={form.delivery_status}
+                  onChange={(e) => setForm((f) => ({ ...f, delivery_status: e.target.value }))}
+                >
+                  {DELIVERY_STATUSES.map((s) => (
+                    <option key={s} value={s}>
+                      {deliveryStatusLabel(s)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className={labelClass}>Delivery Date</label>
+                <input
+                  type="date"
+                  className={inputClass}
+                  value={form.delivery_date}
+                  onChange={(e) => setForm((f) => ({ ...f, delivery_date: e.target.value }))}
+                />
+              </div>
+              <div className="col-span-2 flex flex-col gap-1 sm:col-span-3">
+                <label className={labelClass}>Courier Remarks</label>
+                <textarea
+                  rows={2}
+                  className={inputClass}
+                  value={form.courier_remarks}
+                  onChange={(e) => setForm((f) => ({ ...f, courier_remarks: e.target.value }))}
+                />
+              </div>
+              <div className="col-span-2 flex flex-col gap-1 sm:col-span-3">
+                <label className={labelClass}>Internal Remarks</label>
+                <textarea
+                  rows={2}
+                  className={inputClass}
+                  value={form.internal_remarks}
+                  onChange={(e) => setForm((f) => ({ ...f, internal_remarks: e.target.value }))}
+                />
+              </div>
+              <div className="col-span-2 sm:col-span-3">
+                <Button size="sm" loading={saving} onClick={handleSave}>
+                  Save Shipment
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+              <Field label="Shipment Contents" value={shipment.shipment_contents} />
+              <Field label="Number of Packages" value={shipment.number_of_packages} />
+              <Field label="Package Details" value={shipment.package_details} />
+              <Field label="Delivery Date" value={shipment.delivery_date} />
+              <div className="col-span-2 sm:col-span-3">
+                <Field label="Courier Remarks" value={shipment.courier_remarks} />
+              </div>
+              <div className="col-span-2 sm:col-span-3">
+                <Field label="Internal Remarks" value={shipment.internal_remarks} />
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between rounded-md border border-line bg-surface-sunken px-3 py-2">
+            <span className="text-xs text-ink-secondary">Proof of Delivery</span>
+            <div className="flex items-center gap-2">
+              {shipment.pod_path && (
+                <Button size="sm" variant="ghost" onClick={handleViewPod}>
+                  <Eye size={14} className="mr-1.5" />
+                  View
+                </Button>
+              )}
+              {editable && (
+                <>
+                  <input
+                    ref={podInputRef}
+                    type="file"
+                    accept="application/pdf,image/jpeg,image/png"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handlePodUpload(file);
+                      e.target.value = "";
+                    }}
+                  />
+                  <Button size="sm" variant="secondary" loading={uploadingPod} onClick={() => podInputRef.current?.click()}>
+                    <Upload size={14} className="mr-1.5" />
+                    {shipment.pod_path ? "Replace" : "Upload"}
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <h4 className="text-xs font-semibold text-ink-secondary">Tracking Timeline</h4>
+              {editable && (
+                <Button size="sm" variant="secondary" onClick={() => setShowEventForm((s) => !s)}>
+                  {showEventForm ? "Cancel" : "Log Event"}
+                </Button>
+              )}
+            </div>
+
+            {showEventForm && (
+              <div className="mb-3 grid grid-cols-2 gap-2 rounded-md border border-line bg-surface-sunken p-3">
+                <input
+                  placeholder="Event status (e.g. Out for delivery)"
+                  className={inputClass}
+                  value={eventForm.event_status}
+                  onChange={(e) => setEventForm((f) => ({ ...f, event_status: e.target.value }))}
+                />
+                <input
+                  placeholder="Location (optional)"
+                  className={inputClass}
+                  value={eventForm.location}
+                  onChange={(e) => setEventForm((f) => ({ ...f, location: e.target.value }))}
+                />
+                <div className="col-span-2">
+                  <Button size="sm" loading={loggingEvent} onClick={handleLogEvent}>
+                    Save Event
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {loadingEvents ? (
+              <p className="text-sm text-ink-muted">Loading…</p>
+            ) : !events || events.length === 0 ? (
+              <p className="text-sm text-ink-muted">No tracking events logged yet.</p>
+            ) : (
+              <Timeline
+                entries={events.map(
+                  (ev): TimelineEntry => ({
+                    id: ev.id,
+                    date: new Date(ev.event_time).toLocaleString(),
+                    title: ev.event_status,
+                    description: [ev.location, ev.source === "api" ? "via courier API" : "manual entry"].filter(Boolean).join(" · "),
+                  })
+                )}
+              />
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
