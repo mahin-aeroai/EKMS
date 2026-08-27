@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { MapPin, Search, Plus, LayoutDashboard, Trash2 } from "lucide-react";
+import { MapPin, Search, Plus, LayoutDashboard, Trash2, X } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { StatCard } from "@/components/ui/Card";
@@ -51,6 +51,7 @@ export default function LfgSiteListPage() {
   const role = useUserRole();
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("");
+  const [programFilter, setProgramFilter] = useState<string>("");
   const [rows, setRows] = useState<LfgSiteListRow[] | null>(null);
   const [totalCount, setTotalCount] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<LfgSiteListRow | null>(null);
@@ -85,19 +86,30 @@ export default function LfgSiteListPage() {
       .then(({ count }) => setTotalCount(count ?? 0));
   }, []);
 
-  // Seeds the search box from ?q=... (the Program Dashboard's row click
-  // hands off a program name this way). Read via window.location directly
-  // rather than useSearchParams -- this page is fully client-rendered
-  // already, so this avoids the Suspense-boundary requirement
-  // useSearchParams imposes on statically-generated pages for no benefit
-  // here, same as workspaces/ai-copilot/page.tsx. Runs once on mount, then
-  // strips the param via replaceState so refreshing doesn't re-seed it.
+  // Seeds the search box from ?q=... (fuzzy free-text) or the page from
+  // ?program=... (the Program Dashboard's row/chart click hands off an
+  // EXACT program name this way -- distinct from ?q=, which only ever
+  // ilike-matches, so a program click always lands on strictly that
+  // program's sites, not a superset that happens to fuzzy-match its name).
+  // Read via window.location directly rather than useSearchParams -- this
+  // page is fully client-rendered already, so this avoids the
+  // Suspense-boundary requirement useSearchParams imposes on
+  // statically-generated pages for no benefit here, same as
+  // workspaces/ai-copilot/page.tsx. Runs once on mount, then strips the
+  // param via replaceState so refreshing doesn't re-seed it.
   useEffect(() => {
-    const q = new URLSearchParams(window.location.search).get("q");
-    if (q) {
+    const params = new URLSearchParams(window.location.search);
+    const q = params.get("q");
+    const program = params.get("program");
+    if (q || program) {
       window.history.replaceState(null, "", "/workspaces/lfg");
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setQuery(q);
+      if (q) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setQuery(q);
+      }
+      if (program) {
+        setProgramFilter(program);
+      }
     }
   }, []);
 
@@ -107,9 +119,16 @@ export default function LfgSiteListPage() {
         .from("lfg_sites")
         .select("id, site_id, outlet_name, program, sfo_id, city, material, site_status, number_of_sites, asm_name, partner_id, lfg_partners(name)")
         .order("created_at", { ascending: false })
-        .limit(100);
+        // A program-filtered view is meant to show the WHOLE group -- e.g.
+        // "active" alone totals 791 sites across all programs, so a single
+        // chain can easily hold hundreds -- while the default unfiltered
+        // browse still caps at the most recent 100, same as before.
+        .limit(programFilter ? 5000 : 100);
 
       if (statusFilter) q = q.eq("site_status", statusFilter);
+      // Exact match, not the fuzzy `.or()` ilike below -- this is what makes
+      // a Program Dashboard click land on strictly that program's sites.
+      if (programFilter) q = q.eq("program", programFilter);
 
       const trimmed = query.trim();
       if (trimmed) {
@@ -128,7 +147,7 @@ export default function LfgSiteListPage() {
     }, 250);
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, statusFilter]);
+  }, [query, statusFilter, programFilter]);
 
   const COLUMNS: TableColumn<LfgSiteListRow>[] = [
     { key: "site_id", header: "Site ID", sortable: true },
@@ -200,7 +219,7 @@ export default function LfgSiteListPage() {
           label="Showing"
           value={rows === null ? "…" : String(rows.length)}
           trend="flat"
-          trendLabel={query.trim() || statusFilter ? "Filtered" : "Most recent 100"}
+          trendLabel={query.trim() || statusFilter || programFilter ? "Filtered" : "Most recent 100"}
         />
         <StatCard
           label="Needs Attention"
@@ -209,6 +228,22 @@ export default function LfgSiteListPage() {
           trendLabel="Of rows currently shown"
         />
       </div>
+
+      {programFilter && (
+        <div className="mb-3 flex items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-primary bg-primary-tint px-3 py-1 text-xs font-medium text-primary">
+            Program: {programFilter}
+            <button
+              type="button"
+              aria-label="Clear program filter"
+              onClick={() => setProgramFilter("")}
+              className="rounded-full p-0.5 hover:bg-primary/10"
+            >
+              <X size={12} />
+            </button>
+          </span>
+        </div>
+      )}
 
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center">
         <div className="flex flex-1 items-center gap-2 rounded-md border border-line-strong bg-surface px-3 py-2">

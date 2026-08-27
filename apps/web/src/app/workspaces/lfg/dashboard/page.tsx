@@ -6,6 +6,7 @@ import { LayoutDashboard, ArrowLeft } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { StatCard } from "@/components/ui/Card";
 import { DonutChart } from "@/components/ui/Charts";
+import { Table, type TableColumn } from "@/components/ui/Table";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
@@ -43,6 +44,7 @@ interface SiteStageRow {
 type StageCounts = Record<LfgPipelineStageKey, number>;
 
 interface ProgramGroup {
+  id: string;
   program: string;
   total: number;
   counts: StageCounts;
@@ -53,6 +55,8 @@ interface DashboardData {
   overallCounts: StageCounts;
   programGroups: ProgramGroup[];
 }
+
+type ProgramTableRow = ProgramGroup & StageCounts;
 
 function emptyCounts(): StageCounts {
   return {
@@ -84,7 +88,7 @@ async function loadDashboard(): Promise<DashboardData> {
 
     let group = byProgram.get(program);
     if (!group) {
-      group = { program, total: 0, counts: emptyCounts() };
+      group = { id: program, program, total: 0, counts: emptyCounts() };
       byProgram.set(program, group);
     }
     group.total += 1;
@@ -99,7 +103,15 @@ async function loadDashboard(): Promise<DashboardData> {
   return { totalCount: rows.length, overallCounts, programGroups };
 }
 
-function ProgramCard({ group }: { group: ProgramGroup }) {
+/** Same destination the numeric table's row click and each donut card's
+ * click use -- a NEW `?program=` param, distinct from the Site Master
+ * list's existing `?q=` free-text seeding, so this is a strict exact-match
+ * filter to only that program's sites rather than a fuzzy search. */
+function programHref(program: string): string {
+  return `/workspaces/lfg?program=${encodeURIComponent(program)}`;
+}
+
+function ProgramCard({ group, onOpen }: { group: ProgramGroup; onOpen: (program: string) => void }) {
   const donutData = LFG_PIPELINE_STAGES.filter((s) => group.counts[s.key] > 0).map((s) => ({
     label: s.label,
     value: group.counts[s.key],
@@ -107,7 +119,11 @@ function ProgramCard({ group }: { group: ProgramGroup }) {
   }));
 
   return (
-    <div className="rounded-lg border border-line bg-surface p-4">
+    <button
+      type="button"
+      onClick={() => onOpen(group.program)}
+      className="rounded-lg border border-line bg-surface p-4 text-left transition-colors hover:border-primary hover:bg-surface-sunken"
+    >
       <div className="mb-3 flex items-center justify-between">
         <h3 className="text-sm font-semibold text-ink">{group.program}</h3>
         <span className="text-xs text-ink-muted">{group.total} sites</span>
@@ -117,7 +133,7 @@ function ProgramCard({ group }: { group: ProgramGroup }) {
       ) : (
         <DonutChart data={donutData} />
       )}
-    </div>
+    </button>
   );
 }
 
@@ -125,6 +141,23 @@ export default function LfgDashboardPage() {
   const router = useRouter();
   const { toast } = useToast();
   const [data, setData] = useState<DashboardData | null>(null);
+
+  function openProgram(program: string) {
+    router.push(programHref(program));
+  }
+
+  // Flattens each group's `counts` onto the row itself (active, printing,
+  // ... match LfgPipelineStageKey 1:1) so every stage can be its own
+  // TableColumn with a distinct, real `keyof` key -- rather than 10 columns
+  // all keyed "counts" with a render() override, which would give the
+  // underlying <Table>'s th/td elements duplicate React keys.
+  const programTableRows: ProgramTableRow[] = (data?.programGroups ?? []).map((g) => ({ ...g, ...g.counts }));
+
+  const PROGRAM_TABLE_COLUMNS: TableColumn<ProgramTableRow>[] = [
+    { key: "program", header: "Program / Chain", sortable: true },
+    { key: "total", header: "Total", sortable: true },
+    ...LFG_PIPELINE_STAGES.map((s) => ({ key: s.key, header: s.label, sortable: true }) as TableColumn<ProgramTableRow>),
+  ];
 
   useEffect(() => {
     loadDashboard()
@@ -167,11 +200,17 @@ export default function LfgDashboardPage() {
       ) : data.programGroups.length === 0 ? (
         <p className="py-6 text-center text-sm text-ink-muted">No sites yet.</p>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {data.programGroups.map((g) => (
-            <ProgramCard key={g.program} group={g} />
-          ))}
-        </div>
+        <>
+          <p className="mb-3 text-xs text-ink-muted">Click a program&apos;s row or chart to see only that program&apos;s sites.</p>
+          <div className="mb-6">
+            <Table columns={PROGRAM_TABLE_COLUMNS} rows={programTableRows} onRowClick={(r) => openProgram(r.program)} />
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {data.programGroups.map((g) => (
+              <ProgramCard key={g.program} group={g} onOpen={openProgram} />
+            ))}
+          </div>
+        </>
       )}
     </div>
   );
