@@ -600,7 +600,18 @@ create table if not exists public.lfg_audit_log (
   action text not null check (action in ('insert', 'update', 'delete')),
   entity_type text not null,
   entity_id text not null,
-  site_id uuid references public.lfg_sites(id),
+  -- on delete set null — NOT the default (no action/restrict). A site
+  -- accumulates audit rows for its whole lifetime (creation, every status
+  -- change, every field edit) before anyone ever deletes it, so by
+  -- delete time there are typically several pre-existing rows already
+  -- pointing at it — not just the one row the delete's own AFTER trigger
+  -- is about to insert (see lfg_audit_log_row()'s comment below, which
+  -- only handles that one new row). Without `set null` here, deleting a
+  -- site was blocked by its OWN audit history, permanently — the
+  -- trigger-level null fallback alone was never sufficient. Nothing is
+  -- lost: entity_id/old_value/new_value already capture full details
+  -- independent of the FK.
+  site_id uuid references public.lfg_sites(id) on delete set null,
   old_value jsonb,
   new_value jsonb,
   created_at timestamptz not null default now()
@@ -608,6 +619,12 @@ create table if not exists public.lfg_audit_log (
 
 create index if not exists lfg_audit_log_site_idx on public.lfg_audit_log(site_id);
 create index if not exists lfg_audit_log_entity_idx on public.lfg_audit_log(entity_type, entity_id);
+
+-- Idempotent for already-live databases created before this constraint had
+-- `on delete set null` — safe to re-run (drops only if present).
+alter table public.lfg_audit_log drop constraint if exists lfg_audit_log_site_id_fkey;
+alter table public.lfg_audit_log
+  add constraint lfg_audit_log_site_id_fkey foreign key (site_id) references public.lfg_sites(id) on delete set null;
 
 -- Generic trigger function — attach to any lfg_* table via
 -- `for each row execute function public.lfg_audit_log_row()`. Reads
