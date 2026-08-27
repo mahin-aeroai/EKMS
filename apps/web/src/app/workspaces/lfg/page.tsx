@@ -12,7 +12,7 @@ import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
 import { LFG_STATUSES, lfgStatusLabel, lfgStatusBadge } from "@/lib/lfgStatus";
 
-// Site Master list — the entry point to the Basil LFG program's Site 360
+// Site Master list — the entry point to the LFG Connect program's Site 360
 // view. Deliberately a client component doing direct supabase.from()
 // queries, mirroring workspaces/customer/page.tsx exactly (debounced
 // search, .or() ilike across the fields the spec calls out for global
@@ -105,7 +105,7 @@ export default function LfgSiteListPage() {
 
   return (
     <div>
-      <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "Basil LFG Sites" }]} />
+      <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "LFG Connect" }]} />
 
       <div className="mt-4 flex flex-col gap-4 border-b border-line pb-6 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-4">
@@ -113,7 +113,7 @@ export default function LfgSiteListPage() {
             <MapPin size={22} />
           </span>
           <div>
-            <h1 className="text-xl font-semibold text-ink">Basil LFG Sites</h1>
+            <h1 className="text-xl font-semibold text-ink">LFG Connect</h1>
             <p className="mt-0.5 text-sm text-ink-secondary">
               Site Master for the Basil (Apple) LFG program — search or browse every site, then open its Site 360
               view.

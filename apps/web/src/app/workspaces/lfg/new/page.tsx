@@ -117,7 +117,7 @@ export default function NewLfgSitePage() {
 
   return (
     <div>
-      <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "Basil LFG Sites", href: "/workspaces/lfg" }, { label: "New Site" }]} />
+      <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "LFG Connect", href: "/workspaces/lfg" }, { label: "New Site" }]} />
 
       <div className="mt-4 flex items-start gap-4 border-b border-line pb-6">
         <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary-tint text-primary">

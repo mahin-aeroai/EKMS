@@ -149,7 +149,7 @@ function LfgLoginForm() {
           <span className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-on-brand">
             <Lock size={18} />
           </span>
-          <h1 className="text-lg font-semibold text-ink">Basil LFG Partner Portal</h1>
+          <h1 className="text-lg font-semibold text-ink">LFG Connect</h1>
           <p className="text-sm text-ink-muted">
             {isInvite
               ? inviteEmail

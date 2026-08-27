@@ -22,6 +22,12 @@ export const dynamic = "force-dynamic";
 // The client component still hides the Financials tab from non-editor
 // roles in the UI (see its own comment) -- that's a UX nicety on top of
 // the real boundary, not a substitute for it.
+//
+// lfg_installation_photos is a different case -- unlike the cost tables,
+// its RLS grants both staff and the site's own partner select/insert (see
+// supabase-lfg-site-management-schema.sql), so this fetch isn't gated to
+// any particular role here; the Installation tab just renders whatever
+// rows come back.
 export default async function LfgSiteDetailPage({ params }: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await params;
   const supabase = await createServerSupabaseClient();
@@ -50,6 +56,7 @@ export default async function LfgSiteDetailPage({ params }: { params: Promise<{ 
     { data: financials },
     { data: installationCosts },
     { data: installation },
+    { data: installationPhotos },
     { data: production },
     { data: surveys },
     { data: auditLog },
@@ -58,6 +65,7 @@ export default async function LfgSiteDetailPage({ params }: { params: Promise<{ 
     supabase.from("lfg_site_financials").select("*").eq("site_id", siteId).maybeSingle(),
     supabase.from("lfg_installation_costs").select("*").eq("site_id", siteId).maybeSingle(),
     supabase.from("lfg_installations").select("*").eq("site_id", siteId).maybeSingle(),
+    supabase.from("lfg_installation_photos").select("*").eq("site_id", siteId).order("uploaded_at", { ascending: false }),
     supabase.from("lfg_production").select("*").eq("site_id", siteId).maybeSingle(),
     supabase.from("lfg_site_surveys").select("*").eq("site_id", siteId).order("created_at", { ascending: false }),
     supabase.from("lfg_audit_log").select("*").eq("site_id", siteId).order("created_at", { ascending: false }).limit(50),
@@ -70,6 +78,7 @@ export default async function LfgSiteDetailPage({ params }: { params: Promise<{ 
       initialFinancials={financials ?? null}
       initialInstallationCosts={installationCosts ?? null}
       initialInstallation={installation ?? null}
+      initialInstallationPhotos={installationPhotos ?? []}
       initialProduction={production ?? null}
       initialSurveys={surveys ?? []}
       initialAuditLog={auditLog ?? []}

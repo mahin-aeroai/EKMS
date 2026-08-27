@@ -41,7 +41,7 @@ export function LfgTopBar({
             {/* eslint-disable-next-line @next/next/no-img-element -- small static local asset, same as PortalTopBar */}
             <img src="/brand/mmdi-logo-sm.png" alt="MMDI" className="h-8 w-8 shrink-0 rounded-md object-cover" />
             <span className="flex flex-col leading-tight">
-              <span className="text-sm font-semibold text-ink">{partnerName || "LFG Partner Portal"}</span>
+              <span className="text-sm font-semibold text-ink">{partnerName || "LFG Connect"}</span>
               <span className="text-xs text-ink-muted">{fullName || email}</span>
             </span>
           </Link>

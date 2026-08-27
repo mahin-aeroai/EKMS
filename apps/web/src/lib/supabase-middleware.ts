@@ -27,7 +27,7 @@ function isPortalPath(pathname: string) {
 }
 
 /**
- * The Basil LFG Partner Portal (/lfg/*) -- same "completely separate,
+ * The LFG Connect partner portal (/lfg/*) -- same "completely separate,
  * invite-only surface" treatment as the customer portal above, for
  * lfg_partner accounts (external Basil/Apple LFG installation partners)
  * instead of portal_users (customer companies). See

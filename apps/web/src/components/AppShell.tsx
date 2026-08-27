@@ -167,12 +167,12 @@ export const NAV: SidebarSection[] = [
       { id: "material-ordering", label: "Material Ordering", icon: <PackageCheck size={16} />, href: "/workspaces/material-ordering" },
       { id: "import-duty", label: "Import Duty", icon: <Ship size={16} />, href: "/workspaces/import-duty" },
       // Staff-side (admin/editor/viewer) Site Master + Site 360 view for
-      // the Basil LFG program -- NOT the same surface as /lfg/(app)/, which
+      // the LFG Connect program -- NOT the same surface as /lfg/(app)/, which
       // is the separate lfg_partner-only external portal (lfgconnect.mmdi.in,
       // see supabase-middleware.ts). This is the internal view of the same
       // lfg_* tables, reached through the normal sidebar and gated by role/
       // RLS rather than lfg_partner_users membership.
-      { id: "lfg-site-management", label: "Basil LFG Sites", icon: <MapPin size={16} />, href: "/workspaces/lfg" },
+      { id: "lfg-site-management", label: "LFG Connect", icon: <MapPin size={16} />, href: "/workspaces/lfg" },
     ],
   },
 ];

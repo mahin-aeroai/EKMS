@@ -1,5 +1,5 @@
 /**
- * The Basil LFG Partner Portal's own subdomain. Single source of truth for
+ * The LFG Connect partner portal's own subdomain. Single source of truth for
  * this hostname -- imported by both the edge middleware
  * (supabase-middleware.ts, which rewrites bare paths on this host to the
  * physical /lfg/* files) and the LFG layout (which uses it to decide

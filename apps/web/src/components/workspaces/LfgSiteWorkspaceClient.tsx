@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { MapPin, Pencil, ShieldAlert, Lock } from "lucide-react";
+import { MapPin, Pencil, ShieldAlert, Lock, Upload, Eye, Trash2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -10,23 +10,28 @@ import { Dialog } from "@/components/ui/Dialog";
 import { Tabs, type TabItem } from "@/components/ui/Tabs";
 import { Timeline, type TimelineEntry } from "@/components/ui/Timeline";
 import { useToast } from "@/components/ui/Notifications";
-import { useUserRole, canWrite } from "@/lib/UserRoleContext";
+import { useUserRole, canWrite, canDelete } from "@/lib/UserRoleContext";
 import { supabase } from "@/lib/supabase";
 import { LFG_STATUSES, lfgStatusLabel, lfgStatusBadge, formatInr } from "@/lib/lfgStatus";
 
 // Site 360 -- the tabbed view every part of the spec (New Site through
-// Deactivation) ultimately links back to. Survey and Production are real,
-// working tabs here (there's no dedicated later task for either). Shipment,
-// Installation, and Documents are deliberately light stubs -- Courier/AWB
-// tracking (task #18), the Installation module (task #17), and Document
-// management (task #21) each replace their stub with the real thing; the
-// operational lfg_installations row IS shown read-only here in the
-// meantime since it's already fetched and there's no reason to hide data
-// that exists. Financials is gated client-side to admin/editor as a UX
-// nicety on top of the REAL boundary, which is that
+// Deactivation) ultimately links back to. Survey, Production, and
+// Installation are real, working tabs here. Shipment and Documents are
+// deliberately light stubs -- Courier/AWB tracking (task #18) and Document
+// management (task #21) each replace their stub with the real thing.
+// Financials is gated client-side to admin/editor as a UX nicety on top of
+// the REAL boundary, which is that
 // lfg_site_financials/lfg_installation_costs simply have no RLS grant to
 // lfg_partner at all -- a viewer or partner account would get back empty
-// data here regardless of what this component renders.
+// data here regardless of what this component renders. The Installation
+// tab (lfg_installations + lfg_installation_photos) is deliberately NOT
+// gated the same way -- both tables carry real RLS that already includes
+// the site's own partner (see supabase-lfg-site-management-schema.sql),
+// so `editable` there follows canWrite(role) same as Survey/Production,
+// not the admin/editor-only Financials gate. The Admin-only cost fields
+// for installation (installation_rate, scaffolding_rate/amount, total
+// installation cost, etc.) live on lfg_installation_costs and stay on the
+// Financials tab -- this tab only ever touches the operational columns.
 
 interface LfgSite {
   id: string;
@@ -101,6 +106,13 @@ interface InstallationRow {
   installation_remarks: string | null;
 }
 
+interface PhotoRow {
+  id: string;
+  kind: "before" | "after" | "completion";
+  relative_path: string;
+  uploaded_at: string;
+}
+
 interface ProductionRow {
   status: string;
   started_at: string | null;
@@ -152,6 +164,7 @@ export function LfgSiteWorkspaceClient({
   initialFinancials,
   initialInstallationCosts,
   initialInstallation,
+  initialInstallationPhotos,
   initialProduction,
   initialSurveys,
   initialAuditLog,
@@ -161,6 +174,7 @@ export function LfgSiteWorkspaceClient({
   initialFinancials: FinancialsRow | null;
   initialInstallationCosts: InstallationCostsRow | null;
   initialInstallation: InstallationRow | null;
+  initialInstallationPhotos: PhotoRow[];
   initialProduction: ProductionRow | null;
   initialSurveys: SurveyRow[];
   initialAuditLog: AuditLogRow[];
@@ -279,23 +293,15 @@ export function LfgSiteWorkspaceClient({
     {
       id: "installation",
       label: "Installation",
-      content: initialInstallation ? (
-        <div className="grid grid-cols-2 gap-4 rounded-lg border border-line bg-surface p-4 sm:grid-cols-3">
-          <Field label="Installation Required" value={initialInstallation.installation_required ? "Yes" : "No"} />
-          <Field label="Scaffolding Required" value={initialInstallation.scaffolding_required ? "Yes" : "No"} />
-          <Field label="Scaffolding Size" value={initialInstallation.scaffolding_size} />
-          <Field label="Installation Date" value={initialInstallation.installation_date} />
-          <Field label="Installation Team" value={initialInstallation.installation_team} />
-          <Field label="Status" value={initialInstallation.installation_status} />
-          <div className="col-span-2 sm:col-span-3">
-            <Field label="Remarks" value={initialInstallation.installation_remarks} />
-          </div>
-          <p className="col-span-2 text-xs text-ink-muted sm:col-span-3">
-            Full Installation module (scheduling, photo uploads, expense entry) is a dedicated task, coming next.
-          </p>
-        </div>
-      ) : (
-        <StubTab message="The Installation module is a dedicated task, coming next." />
+      content: (
+        <InstallationTab
+          siteId={site.id}
+          initial={initialInstallation}
+          initialPhotos={initialInstallationPhotos}
+          editable={editable}
+          canDeletePhotos={canDelete(role)}
+          onChanged={() => router.refresh()}
+        />
       ),
     },
     {
@@ -357,7 +363,7 @@ export function LfgSiteWorkspaceClient({
   return (
     <div>
       <Breadcrumbs
-        items={[{ label: "Home", href: "/" }, { label: "Basil LFG Sites", href: "/workspaces/lfg" }, { label: site.site_id }]}
+        items={[{ label: "Home", href: "/" }, { label: "LFG Connect", href: "/workspaces/lfg" }, { label: site.site_id }]}
       />
 
       <div className="mt-4 flex flex-col gap-4 border-b border-line pb-6 sm:flex-row sm:items-start sm:justify-between">
@@ -595,6 +601,308 @@ function ProductionTab({
         <Field label="Completed" value={initial?.completed_at ? new Date(initial.completed_at).toLocaleString() : null} />
       </div>
       <Field label="Notes" value={initial?.notes} />
+    </div>
+  );
+}
+
+const INSTALLATION_STATUSES = ["pending", "planned", "in_progress", "completed", "issue"] as const;
+const PHOTO_KINDS = [
+  { key: "before", label: "Before" },
+  { key: "after", label: "After" },
+  { key: "completion", label: "Completion" },
+] as const;
+
+// Operational Installation module -- editable lfg_installations fields
+// (installation_required/scaffolding_required/scaffolding_size/
+// installation_date/installation_team/installation_status/
+// installation_remarks) plus an lfg_installation_photos gallery/upload UI.
+// Deliberately separate from FinancialsTab: the Admin-only cost fields
+// (installation_rate, scaffolding_rate/amount, total installation cost)
+// live on lfg_installation_costs and are edited there, not here -- see
+// this file's header comment. `editable` here is canWrite(role), same gate
+// Survey/Production use, since lfg_installations/lfg_installation_photos
+// RLS already includes the site's own partner alongside admin/editor (this
+// staff workspace only ever runs as admin/editor/viewer, so partner access
+// itself happens through the separate lfgconnect.mmdi.in portal, not here).
+function InstallationTab({
+  siteId,
+  initial,
+  initialPhotos,
+  editable,
+  canDeletePhotos,
+  onChanged,
+}: {
+  siteId: string;
+  initial: InstallationRow | null;
+  initialPhotos: PhotoRow[];
+  editable: boolean;
+  canDeletePhotos: boolean;
+  onChanged: () => void;
+}) {
+  const { toast } = useToast();
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    installation_required: initial?.installation_required ?? true,
+    scaffolding_required: initial?.scaffolding_required ?? false,
+    scaffolding_size: initial?.scaffolding_size ?? "",
+    installation_date: initial?.installation_date ?? "",
+    installation_team: initial?.installation_team ?? "",
+    installation_status: initial?.installation_status ?? "pending",
+    installation_remarks: initial?.installation_remarks ?? "",
+  });
+  const [uploadingKind, setUploadingKind] = useState<string | null>(null);
+  const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  async function handleSave() {
+    setSaving(true);
+    const { error } = await supabase.from("lfg_installations").upsert(
+      {
+        site_id: siteId,
+        installation_required: form.installation_required,
+        scaffolding_required: form.scaffolding_required,
+        scaffolding_size: form.scaffolding_size.trim() || null,
+        installation_date: form.installation_date || null,
+        installation_team: form.installation_team.trim() || null,
+        installation_status: form.installation_status,
+        installation_remarks: form.installation_remarks.trim() || null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "site_id" }
+    );
+    setSaving(false);
+    if (error) {
+      toast("danger", `Couldn't save installation details: ${error.message}`);
+      return;
+    }
+    toast("success", "Installation details saved");
+    setEditing(false);
+    onChanged();
+  }
+
+  async function handleUpload(kind: "before" | "after" | "completion", file: File) {
+    setUploadingKind(kind);
+    try {
+      const uploadRes = await fetch(`/api/lfg/sites/${siteId}/installation-photos/upload-url`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind }),
+      });
+      const uploadData = await uploadRes.json();
+      if (!uploadRes.ok) {
+        toast("danger", uploadData.message || uploadData.error || "Couldn't get an upload link");
+        return;
+      }
+
+      const putRes = await fetch(uploadData.url, { method: "PUT", headers: { "Content-Type": "image/jpeg" }, body: file });
+      if (!putRes.ok) {
+        toast("danger", "Upload to storage failed");
+        return;
+      }
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      const { error: insertError } = await supabase.from("lfg_installation_photos").insert({
+        site_id: siteId,
+        kind,
+        relative_path: uploadData.relative_path,
+        uploaded_by: user?.id ?? null,
+      });
+      if (insertError) {
+        toast("danger", `Uploaded, but couldn't record it: ${insertError.message}`);
+        return;
+      }
+
+      toast("success", "Photo uploaded");
+      onChanged();
+    } finally {
+      setUploadingKind(null);
+    }
+  }
+
+  async function handleView(photoId: string) {
+    const res = await fetch(`/api/lfg/sites/${siteId}/installation-photos/${photoId}/signed-url`);
+    const data = await res.json();
+    if (!res.ok) {
+      toast("danger", data.message || data.error || "Couldn't open this photo");
+      return;
+    }
+    window.open(data.url, "_blank", "noopener,noreferrer");
+  }
+
+  async function handleDelete(photoId: string) {
+    const { error } = await supabase.from("lfg_installation_photos").delete().eq("id", photoId);
+    if (error) {
+      toast("danger", `Couldn't delete photo: ${error.message}`);
+      return;
+    }
+    toast("success", "Photo deleted");
+    onChanged();
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="rounded-lg border border-line bg-surface p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-ink">Installation Details</h3>
+          {editable && (
+            <Button size="sm" variant="secondary" onClick={() => setEditing((e) => !e)}>
+              <Pencil size={14} className="mr-1.5" />
+              {editing ? "Cancel" : "Edit"}
+            </Button>
+          )}
+        </div>
+
+        {editing ? (
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+            <label className="flex items-center gap-2 text-sm text-ink">
+              <input
+                type="checkbox"
+                checked={form.installation_required}
+                onChange={(e) => setForm((f) => ({ ...f, installation_required: e.target.checked }))}
+              />
+              Installation Required
+            </label>
+            <label className="flex items-center gap-2 text-sm text-ink">
+              <input
+                type="checkbox"
+                checked={form.scaffolding_required}
+                onChange={(e) => setForm((f) => ({ ...f, scaffolding_required: e.target.checked }))}
+              />
+              Scaffolding Required
+            </label>
+            <div className="flex flex-col gap-1">
+              <label className={labelClass}>Scaffolding Size</label>
+              <input
+                className={inputClass}
+                value={form.scaffolding_size}
+                onChange={(e) => setForm((f) => ({ ...f, scaffolding_size: e.target.value }))}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className={labelClass}>Installation Date</label>
+              <input
+                type="date"
+                className={inputClass}
+                value={form.installation_date}
+                onChange={(e) => setForm((f) => ({ ...f, installation_date: e.target.value }))}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className={labelClass}>Installation Team</label>
+              <input
+                className={inputClass}
+                value={form.installation_team}
+                onChange={(e) => setForm((f) => ({ ...f, installation_team: e.target.value }))}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className={labelClass}>Status</label>
+              <select
+                className={inputClass}
+                value={form.installation_status}
+                onChange={(e) => setForm((f) => ({ ...f, installation_status: e.target.value }))}
+              >
+                {INSTALLATION_STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {s.replace("_", " ")}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="col-span-2 flex flex-col gap-1 sm:col-span-3">
+              <label className={labelClass}>Remarks</label>
+              <textarea
+                rows={3}
+                className={inputClass}
+                value={form.installation_remarks}
+                onChange={(e) => setForm((f) => ({ ...f, installation_remarks: e.target.value }))}
+              />
+            </div>
+            <div className="col-span-2 sm:col-span-3">
+              <Button loading={saving} onClick={handleSave}>
+                Save Installation Details
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+            <Field label="Installation Required" value={form.installation_required ? "Yes" : "No"} />
+            <Field label="Scaffolding Required" value={form.scaffolding_required ? "Yes" : "No"} />
+            <Field label="Scaffolding Size" value={form.scaffolding_size} />
+            <Field label="Installation Date" value={form.installation_date} />
+            <Field label="Installation Team" value={form.installation_team} />
+            <Field label="Status" value={form.installation_status.replace("_", " ")} />
+            <div className="col-span-2 sm:col-span-3">
+              <Field label="Remarks" value={form.installation_remarks} />
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-lg border border-line bg-surface p-4">
+        <h3 className="mb-3 text-sm font-semibold text-ink">Installation Photos</h3>
+        <div className="flex flex-col gap-4">
+          {PHOTO_KINDS.map(({ key, label }) => {
+            const photos = initialPhotos.filter((p) => p.kind === key);
+            return (
+              <div key={key}>
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-xs font-medium text-ink-secondary">{label}</span>
+                  {editable && (
+                    <>
+                      <input
+                        ref={(el) => {
+                          fileInputs.current[key] = el;
+                        }}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) handleUpload(key, file);
+                          e.target.value = "";
+                        }}
+                      />
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        loading={uploadingKind === key}
+                        onClick={() => fileInputs.current[key]?.click()}
+                      >
+                        <Upload size={14} className="mr-1.5" />
+                        Upload
+                      </Button>
+                    </>
+                  )}
+                </div>
+                {photos.length === 0 ? (
+                  <p className="text-xs text-ink-muted">No {label.toLowerCase()} photos yet.</p>
+                ) : (
+                  <div className="flex flex-col gap-1.5">
+                    {photos.map((p) => (
+                      <div key={p.id} className="flex items-center justify-between rounded-md border border-line bg-surface-sunken px-3 py-1.5 text-xs">
+                        <span className="text-ink-secondary">{new Date(p.uploaded_at).toLocaleString()}</span>
+                        <div className="flex items-center gap-1">
+                          <Button size="sm" variant="ghost" onClick={() => handleView(p.id)} aria-label={`View ${label.toLowerCase()} photo`}>
+                            <Eye size={14} />
+                          </Button>
+                          {canDeletePhotos && (
+                            <Button size="sm" variant="ghost" onClick={() => handleDelete(p.id)} aria-label={`Delete ${label.toLowerCase()} photo`}>
+                              <Trash2 size={14} className="text-danger" />
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
