@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { MapPin, Search, Plus, LayoutDashboard, Users, Trash2, X, ArrowLeft, CalendarRange, FolderInput } from "lucide-react";
+import { MapPin, Search, Plus, LayoutDashboard, Users, Trash2, X, ArrowLeft, CalendarRange, FolderInput, Store as StoreIcon } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { StatCard } from "@/components/ui/Card";
@@ -48,6 +48,12 @@ interface LfgSiteListRow {
   width: number | null;
   height: number | null;
   bleed: number | null;
+  // Store entity (task #62-#71) -- the physical outlet this site belongs
+  // to, if it's been grouped into one (every site should have one going
+  // forward; see the STEP 21b backfill for pre-existing sites). Used only
+  // for the store filter chip and the "shares a store" indicator below --
+  // nothing else on this list reads it.
+  store_id: string | null;
   site_status: string;
   // Derived client-side from site_status (see the mapping in the fetch
   // effect below) -- its own field, not reusing site_status as a table
@@ -93,7 +99,16 @@ export default function LfgSiteListPage() {
   // Program are two independent, both-optional groupings.
   const [programIdFilter, setProgramIdFilter] = useState<string>("");
   const [programNameFilter, setProgramNameFilter] = useState<string>("");
+  // Stores page click-through (task #67/#68) -- same shape as
+  // programIdFilter/programNameFilter above, exact FK match via ?store_id=.
+  const [storeIdFilter, setStoreIdFilter] = useState<string>("");
+  const [storeNameFilter, setStoreNameFilter] = useState<string>("");
   const [rows, setRows] = useState<LfgSiteListRow[] | null>(null);
+  // How many OTHER sites currently on screen share each store_id -- a
+  // lightweight, page-scoped count (not a full-table aggregate) purely to
+  // drive the "shares a store with N other displays" indicator next to
+  // Store Name below; the full sibling list lives on Site 360 (task #70).
+  const [siblingCounts, setSiblingCounts] = useState<Record<string, number>>({});
   const [totalCount, setTotalCount] = useState<number | null>(null);
   // Data-completeness audit (task #59) -- some records are missing City,
   // ASM details, or SFO/Apple ID (the field Apple keys every site off,
@@ -201,7 +216,9 @@ export default function LfgSiteListPage() {
     const format = params.get("format");
     const programId = params.get("program_id");
     const programName = params.get("program_name");
-    if (q || format || programId) {
+    const storeId = params.get("store_id");
+    const storeName = params.get("store_name");
+    if (q || format || programId || storeId) {
       window.history.replaceState(null, "", "/workspaces/lfg");
       if (q) {
         // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -214,59 +231,111 @@ export default function LfgSiteListPage() {
         setProgramIdFilter(programId);
         setProgramNameFilter(programName ?? "");
       }
+      if (storeId) {
+        setStoreIdFilter(storeId);
+        setStoreNameFilter(storeName ?? "");
+      }
     }
   }, []);
 
   useEffect(() => {
     const handle = setTimeout(() => {
-      let q = supabase
-        .from("lfg_sites")
-        .select(
-          "id, site_id, outlet_name, format, sfo_id, city, region, material, mat_code, width, height, bleed, site_status, number_of_sites, asm_name, partner_id, lfg_partners(name)"
-        )
-        // Default sort: SFO/Apple ID ascending, not the internal LFG code --
-        // see this file's header comment. nullsFirst: false so rows without
-        // an SFO ID yet (brand-new sites) sort to the end, not the top.
-        .order("sfo_id", { ascending: true, nullsFirst: false })
-        // A format- or program-filtered view is meant to show the WHOLE
-        // group -- e.g. "active" alone totals 791 sites across all formats,
-        // so a single chain (or a single season's wave) can easily hold
-        // hundreds -- while the default unfiltered browse still caps at the
-        // most recent 100, same as before.
-        .limit(formatFilter || programIdFilter || gapsOnly ? 5000 : 100);
+      // Screen cap removed (task #69: "cant see all details on a
+      // screen"). A single `.limit(5000)` looks like it would do that, but
+      // doesn't: PostgREST enforces its own server-side row cap
+      // (db-max-rows, 1000 by default) that overrides any client-supplied
+      // `.limit()` above it -- exactly the class of bug the fetchAllRows
+      // helper's own header comment documents (it once hid customers past
+      // "Unicorn Infosolutions" from the Estimate Builder, and undercounted
+      // several dashboards). So this pages past that cap explicitly via
+      // .range(), same as fetchAllRows, rather than reusing that helper
+      // directly -- this loop also needs to surface a fetch error via
+      // toast, which fetchAllRows' plain-array return can't carry.
+      (async () => {
+        const pageSize = 1000;
+        const all: Omit<LfgSiteListRow, "active">[] = [];
+        let hadError = false;
 
-      if (statusFilter) q = q.eq("site_status", statusFilter);
-      // Exact match, not the fuzzy `.or()` ilike below -- this is what makes
-      // a Format Dashboard click land on strictly that format's sites.
-      if (formatFilter) q = q.eq("format", formatFilter);
-      if (programIdFilter) q = q.eq("program_id", programIdFilter);
-      // "Data Gaps" stat card toggle (task #59) -- jumps straight to the
-      // records missing City, ASM name, or SFO/Apple ID, same three fields
-      // the missingCount audit query above counts.
-      if (gapsOnly) q = q.or("city.is.null,asm_name.is.null,sfo_id.is.null");
+        for (let from = 0; ; from += pageSize) {
+          let q = supabase
+            .from("lfg_sites")
+            .select(
+              "id, site_id, outlet_name, format, sfo_id, city, region, material, mat_code, width, height, bleed, store_id, site_status, number_of_sites, asm_name, partner_id, lfg_partners(name)"
+            )
+            // Default sort: SFO/Apple ID ascending, not the internal LFG
+            // code -- see this file's header comment. nullsFirst: false so
+            // rows without an SFO ID yet (brand-new sites) sort to the end.
+            .order("sfo_id", { ascending: true, nullsFirst: false })
+            .range(from, from + pageSize - 1);
 
-      const trimmed = query.trim();
-      if (trimmed) {
-        q = q.or(
-          `site_id.ilike.%${trimmed}%,outlet_name.ilike.%${trimmed}%,sfo_id.ilike.%${trimmed}%,format.ilike.%${trimmed}%,city.ilike.%${trimmed}%,asm_name.ilike.%${trimmed}%`
-        );
-      }
+          if (statusFilter) q = q.eq("site_status", statusFilter);
+          // Exact match, not the fuzzy `.or()` ilike below -- this is what
+          // makes a Format Dashboard click land on strictly that format's
+          // sites.
+          if (formatFilter) q = q.eq("format", formatFilter);
+          if (programIdFilter) q = q.eq("program_id", programIdFilter);
+          if (storeIdFilter) q = q.eq("store_id", storeIdFilter);
+          // "Data Gaps" stat card toggle (task #59) -- jumps straight to
+          // the records missing City, ASM name, or SFO/Apple ID, same
+          // three fields the missingCount audit query above counts.
+          if (gapsOnly) q = q.or("city.is.null,asm_name.is.null,sfo_id.is.null");
 
-      q.then(({ data, error }) => {
-        if (error) {
+          const trimmed = query.trim();
+          if (trimmed) {
+            q = q.or(
+              `site_id.ilike.%${trimmed}%,outlet_name.ilike.%${trimmed}%,sfo_id.ilike.%${trimmed}%,format.ilike.%${trimmed}%,city.ilike.%${trimmed}%,asm_name.ilike.%${trimmed}%`
+            );
+          }
+
+          const { data, error } = await q;
+          if (error) {
+            hadError = true;
+            break;
+          }
+          if (!data || data.length === 0) break;
+          all.push(...(data as unknown as Omit<LfgSiteListRow, "active">[]));
+          if (data.length < pageSize) break;
+        }
+
+        if (hadError) {
           toast("danger", "Couldn't load LFG sites from Supabase");
           return;
         }
-        const withActive = ((data as unknown as Omit<LfgSiteListRow, "active">[]) ?? []).map((r) => ({
-          ...r,
-          active: r.site_status === "active",
-        }));
-        setRows(withActive);
-      });
+        setRows(all.map((r) => ({ ...r, active: r.site_status === "active" })));
+      })();
     }, 250);
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, statusFilter, formatFilter, programIdFilter, gapsOnly]);
+  }, [query, statusFilter, formatFilter, programIdFilter, storeIdFilter, gapsOnly]);
+
+  // Page-scoped sibling counts for the "shares a store" indicator (see
+  // siblingCounts' own declaration above) -- recomputed whenever the
+  // visible row set changes, scoped to just the store_ids on screen so
+  // this never grows into a full-table scan.
+  useEffect(() => {
+    if (!rows || rows.length === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSiblingCounts({});
+      return;
+    }
+    const storeIds = Array.from(new Set(rows.map((r) => r.store_id).filter((id): id is string => !!id)));
+    if (storeIds.length === 0) {
+      setSiblingCounts({});
+      return;
+    }
+    supabase
+      .from("lfg_sites")
+      .select("store_id")
+      .in("store_id", storeIds)
+      .then(({ data }) => {
+        const counts: Record<string, number> = {};
+        for (const row of (data as { store_id: string | null }[]) ?? []) {
+          if (!row.store_id) continue;
+          counts[row.store_id] = (counts[row.store_id] ?? 0) + 1;
+        }
+        setSiblingCounts(counts);
+      });
+  }, [rows]);
 
   const COLUMNS: TableColumn<SelectableRow>[] = [
     ...(editable
@@ -274,6 +343,21 @@ export default function LfgSiteListPage() {
           {
             key: "selected",
             header: "",
+            // "Select all shown" (task #69) -- checks/unchecks every row
+            // currently loaded (up to the paginated fetch above, i.e. the
+            // WHOLE result set now that the old 100-row cap is gone, not
+            // just one page of it), so "add all sites to a program" is a
+            // single click plus the header checkbox rather than clicking
+            // every row.
+            headerRender: () => (
+              <input
+                type="checkbox"
+                checked={rows !== null && rows.length > 0 && rows.every((r) => selectedIds.has(r.id))}
+                onChange={(e) => setSelectedIds(e.target.checked ? new Set((rows ?? []).map((r) => r.id)) : new Set())}
+                aria-label="Select all shown"
+                className="h-4 w-4 rounded border-line-strong"
+              />
+            ),
             render: (r) => (
               <input
                 type="checkbox"
@@ -289,7 +373,31 @@ export default function LfgSiteListPage() {
       : []),
     { key: "site_id", header: "LFG Code", sortable: true },
     { key: "sfo_id", header: "SFO / Apple ID", sortable: true, render: (r) => r.sfo_id ?? "—" },
-    { key: "outlet_name", header: "Store Name", sortable: true },
+    {
+      key: "outlet_name",
+      header: "Store Name",
+      sortable: true,
+      render: (r) => {
+        const siblings = r.store_id ? (siblingCounts[r.store_id] ?? 0) : 0;
+        if (siblings <= 1) return r.outlet_name;
+        return (
+          <span className="flex items-center gap-1.5">
+            {r.outlet_name}
+            <button
+              type="button"
+              title={`${siblings} displays share this store`}
+              onClick={(e) => {
+                e.stopPropagation();
+                router.push(`/workspaces/lfg?store_id=${encodeURIComponent(r.store_id!)}&store_name=${encodeURIComponent(r.outlet_name)}`);
+              }}
+              className="rounded-full"
+            >
+              <Badge status="info">{siblings} displays</Badge>
+            </button>
+          </span>
+        );
+      },
+    },
     {
       key: "active",
       header: "Active",
@@ -366,6 +474,9 @@ export default function LfgSiteListPage() {
           <Button variant="secondary" onClick={() => router.push("/workspaces/lfg/programs")}>
             <CalendarRange size={15} className="mr-1.5" /> Programs
           </Button>
+          <Button variant="secondary" onClick={() => router.push("/workspaces/lfg/stores")}>
+            <StoreIcon size={15} className="mr-1.5" /> Stores
+          </Button>
           <Button variant="secondary" onClick={() => router.push("/workspaces/lfg/partners")}>
             <Users size={15} className="mr-1.5" /> Partners
           </Button>
@@ -393,7 +504,9 @@ export default function LfgSiteListPage() {
           label="Showing"
           value={rows === null ? "…" : String(rows.length)}
           trend="flat"
-          trendLabel={query.trim() || statusFilter || formatFilter || programIdFilter || gapsOnly ? "Filtered" : "Most recent 100"}
+          trendLabel={
+            query.trim() || statusFilter || formatFilter || programIdFilter || storeIdFilter || gapsOnly ? "Filtered" : "All sites"
+          }
         />
         <StatCard
           label="Needs Attention"
@@ -403,19 +516,24 @@ export default function LfgSiteListPage() {
         />
       </div>
 
-      {(formatFilter || programIdFilter) && (
+      {(formatFilter || programIdFilter || storeIdFilter) && (
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          {/* Landing here is always a Format Dashboard or Programs
-              click-through (see the ?format=/?program_id= seeding effect
-              above) -- an explicit way back, not just the generic header
-              "Dashboard"/"Programs" button, since that's easy to miss when
-              you arrived expecting to land back where you came from. */}
+          {/* Landing here is always a Format Dashboard, Programs, or Stores
+              click-through (see the ?format=/?program_id=/?store_id=
+              seeding effect above) -- an explicit way back, not just the
+              generic header "Dashboard"/"Programs"/"Stores" button, since
+              that's easy to miss when you arrived expecting to land back
+              where you came from. */}
           <Button
             size="sm"
             variant="secondary"
-            onClick={() => router.push(formatFilter ? "/workspaces/lfg/dashboard" : "/workspaces/lfg/programs")}
+            onClick={() =>
+              router.push(
+                formatFilter ? "/workspaces/lfg/dashboard" : programIdFilter ? "/workspaces/lfg/programs" : "/workspaces/lfg/stores"
+              )
+            }
           >
-            <ArrowLeft size={14} className="mr-1.5" /> Back to {formatFilter ? "Dashboard" : "Programs"}
+            <ArrowLeft size={14} className="mr-1.5" /> Back to {formatFilter ? "Dashboard" : programIdFilter ? "Programs" : "Stores"}
           </Button>
           {formatFilter && (
             <span className="inline-flex items-center gap-1.5 rounded-full border border-primary bg-primary-tint px-3 py-1 text-xs font-medium text-primary">
@@ -439,6 +557,22 @@ export default function LfgSiteListPage() {
                 onClick={() => {
                   setProgramIdFilter("");
                   setProgramNameFilter("");
+                }}
+                className="rounded-full p-0.5 hover:bg-primary/10"
+              >
+                <X size={12} />
+              </button>
+            </span>
+          )}
+          {storeIdFilter && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-primary bg-primary-tint px-3 py-1 text-xs font-medium text-primary">
+              Store: {storeNameFilter || storeIdFilter}
+              <button
+                type="button"
+                aria-label="Clear store filter"
+                onClick={() => {
+                  setStoreIdFilter("");
+                  setStoreNameFilter("");
                 }}
                 className="rounded-full p-0.5 hover:bg-primary/10"
               >

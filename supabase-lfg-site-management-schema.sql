@@ -266,6 +266,58 @@ create policy lfg_programs_write_staff on public.lfg_programs
   with check (public.user_role() in ('admin', 'editor'));
 
 -- ============================================================
+-- STEP 6c — lfg_stores (a physical outlet/location -- one Apple/SFO ID --
+-- that can host more than one lfg_sites row, e.g. an outlet with a window
+-- display AND an in-store display are two *sites* at the same *store*).
+--
+-- Deliberately additive, not a migration: every store-level field this
+-- table carries (outlet_name, format, sfo_id, city, region, address,
+-- partner_id, ASM contacts, escalation email) already lives on lfg_sites
+-- and stays there completely unchanged -- nothing is dropped or moved off
+-- lfg_sites, and no existing RLS policy on lfg_sites or any of its many
+-- child tables (surveys, production, installation, documents, ...) needs
+-- to change, since every one of them still joins through
+-- lfg_sites.partner_id exactly as before. lfg_stores is the new,
+-- going-forward canonical record for "this is one physical outlet"; new
+-- site rows (STEP 7 below) get their store-level fields *copied* onto the
+-- site row from the store they belong to at creation time, so every
+-- existing query/screen keeps working against lfg_sites unchanged. See
+-- lfg_sites.store_id (added just after the lfg_sites table below) for the
+-- link, and the STEP 21b backfill (bottom of this file) for how existing
+-- sites are grouped into stores by SFO ID.
+-- ============================================================
+
+create table if not exists public.lfg_stores (
+  id uuid primary key default gen_random_uuid(),
+
+  -- Nullable + partial-unique (not a bare unique column) because plenty of
+  -- legacy/in-flight sites have no SFO ID yet -- same nullability lfg_sites
+  -- itself has always allowed for this field.
+  sfo_id text,
+  store_name text not null,
+  format text,
+  city text,
+  region text,
+  store_address text,
+  partner_id uuid references public.lfg_partners(id),
+  asm_name text,
+  asm_mobile text,
+  asm_email text,
+  escalation_email text,
+
+  created_at timestamptz not null default now(),
+  created_by uuid references auth.users(id),
+  updated_at timestamptz not null default now(),
+  updated_by uuid references auth.users(id)
+);
+
+create index if not exists lfg_stores_partner_idx on public.lfg_stores(partner_id);
+create unique index if not exists lfg_stores_sfo_id_key
+  on public.lfg_stores(sfo_id) where sfo_id is not null and sfo_id <> '';
+
+alter table public.lfg_stores enable row level security;
+
+-- ============================================================
 -- STEP 7 — lfg_sites (the unified Site Master)
 -- ============================================================
 
@@ -406,6 +458,13 @@ alter table public.lfg_sites add column if not exists site_verified_at timestamp
 alter table public.lfg_sites add column if not exists site_verified_by uuid references auth.users(id);
 alter table public.lfg_sites add column if not exists program_id uuid references public.lfg_programs(id);
 create index if not exists lfg_sites_program_id_idx on public.lfg_sites(program_id);
+
+-- Retrofits store_id (Store entity / "multiple displays, one outlet" --
+-- see STEP 6c above) onto a database that already ran this file before
+-- lfg_stores existed. Nullable: a site created before this feature, or
+-- never assigned a store, still works exactly as before.
+alter table public.lfg_sites add column if not exists store_id uuid references public.lfg_stores(id);
+create index if not exists lfg_sites_store_id_idx on public.lfg_sites(store_id);
 
 -- Opportunistic backfill of bleed from apple_lfg_sites.bleed_mm for sites
 -- already matched to a legacy apple_lfg_sites row -- same guarded
@@ -905,6 +964,64 @@ create policy lfg_partner_users_write_staff on public.lfg_partner_users
   for all to authenticated
   using (public.user_role() in ('admin', 'editor'))
   with check (public.user_role() in ('admin', 'editor'));
+
+-- ---- lfg_stores: staff full; partner scoped to their own stores ---------
+-- Same shape as lfg_sites' own policies below (staff = admin/editor role
+-- or the is_mmdi_staff() flag; partner = row-scoped by partner_id via
+-- lfg_partner_id()) -- kept identical on purpose so a store and its sites
+-- are always visible/editable together for the same account.
+drop policy if exists lfg_stores_select on public.lfg_stores;
+drop policy if exists lfg_stores_insert on public.lfg_stores;
+drop policy if exists lfg_stores_update on public.lfg_stores;
+drop policy if exists lfg_stores_delete_staff on public.lfg_stores;
+
+create policy lfg_stores_select on public.lfg_stores
+  for select to authenticated
+  using (public.is_mmdi_staff() or partner_id = public.lfg_partner_id());
+
+create policy lfg_stores_insert on public.lfg_stores
+  for insert to authenticated
+  with check (
+    public.user_role() in ('admin', 'editor')
+    or (public.is_lfg_partner_user() and partner_id = public.lfg_partner_id())
+  );
+
+create policy lfg_stores_update on public.lfg_stores
+  for update to authenticated
+  using (public.user_role() in ('admin', 'editor') or partner_id = public.lfg_partner_id())
+  with check (public.user_role() in ('admin', 'editor') or partner_id = public.lfg_partner_id());
+
+create policy lfg_stores_delete_staff on public.lfg_stores
+  for delete to authenticated
+  using (public.user_role() = 'admin');
+
+-- Mirrors lfg_sites_guard_partner_update() below: row-ownership at the RLS
+-- level lets a partner update their own store, but reassigning a store to
+-- a different partner (or renaming it out from under sites that already
+-- reference it) is a staff-only action.
+create or replace function public.lfg_stores_guard_partner_update()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if public.is_lfg_partner_user() and not public.is_mmdi_staff() then
+    if new.partner_id is distinct from old.partner_id
+       or new.store_name is distinct from old.store_name
+       or new.sfo_id is distinct from old.sfo_id
+    then
+      raise exception 'Partners cannot change store ownership, store name, or SFO ID — contact MMDI.';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists lfg_stores_guard_partner_update_trigger on public.lfg_stores;
+create trigger lfg_stores_guard_partner_update_trigger
+  before update on public.lfg_stores
+  for each row execute function public.lfg_stores_guard_partner_update();
 
 -- ---- lfg_sites: staff full; partner scoped to their own sites -----------
 drop policy if exists lfg_sites_select on public.lfg_sites;
@@ -1480,6 +1597,86 @@ begin
       coalesce(a.scaffolding ilike 'yes%', a.scaffolding_amount > 0, false),
       a.scaffolding_size::text, a.installation_team
     );
+  end loop;
+end;
+$$;
+
+-- ============================================================
+-- STEP 21b — Store entity backfill: group existing lfg_sites rows into
+-- lfg_stores by SFO ID (Store entity feature -- "multiple displays at one
+-- outlet" -- see STEP 6c above). One lfg_stores row per distinct
+-- non-null/non-empty sfo_id, seeded from a representative site sharing
+-- that SFO ID; sites with no SFO ID each get their own dedicated 1:1
+-- store, since there's no other reliable key to group them on.
+--
+-- Idempotent and purely additive:
+--   * The grouped insert below only considers an sfo_id with no existing
+--     lfg_stores row yet (NOT EXISTS) -- the partial unique index from
+--     STEP 6c backstops this too, but the check keeps a re-run a clean
+--     no-op instead of a caught conflict.
+--   * Every lfg_sites.store_id assignment is `where store_id is null`, so
+--     a site a human has since manually re-pointed at a different store
+--     is never overwritten by re-running this file.
+--   * Nothing on lfg_sites itself is touched besides store_id -- every
+--     other column, and every RLS policy on lfg_sites or any child table,
+--     is completely unaffected.
+--
+-- NOTE on partner_id: sites sharing one SFO ID are expected to share one
+-- partner (same physical outlet, same installation partner) -- this
+-- matches what the duplicate-records investigation found for the legacy
+-- backfill duplicates. On the rare group where partner_id genuinely
+-- differs across rows, the representative row's value is used for the
+-- store (grouping/display purposes only); lfg_sites.partner_id remains
+-- the sole RLS-authoritative value per site regardless, so this never
+-- changes what any partner can see.
+-- ============================================================
+
+insert into public.lfg_stores (
+  sfo_id, store_name, format, city, region, store_address,
+  partner_id, asm_name, asm_mobile, asm_email, escalation_email
+)
+select distinct on (grp.sfo_id)
+  grp.sfo_id, grp.outlet_name, grp.format, grp.city, grp.region, grp.store_address,
+  grp.partner_id, grp.asm_name, grp.asm_mobile, grp.asm_email, grp.escalation_email
+from public.lfg_sites grp
+where grp.sfo_id is not null and grp.sfo_id <> ''
+  and not exists (
+    select 1 from public.lfg_stores st where st.sfo_id = grp.sfo_id
+  )
+order by grp.sfo_id, grp.created_at asc;
+
+update public.lfg_sites s
+set store_id = st.id
+from public.lfg_stores st
+where s.store_id is null
+  and s.sfo_id is not null and s.sfo_id <> ''
+  and st.sfo_id = s.sfo_id;
+
+-- Sites with no SFO ID: one dedicated 1:1 store each. Looped (rather than
+-- a single INSERT ... SELECT) so each new store's freshly-generated id
+-- can be written straight back onto its one site in the same pass.
+do $$
+declare
+  r record;
+  v_store_id uuid;
+begin
+  for r in
+    select id, outlet_name, format, city, region, store_address,
+           partner_id, asm_name, asm_mobile, asm_email, escalation_email
+    from public.lfg_sites
+    where store_id is null
+      and (sfo_id is null or sfo_id = '')
+  loop
+    insert into public.lfg_stores (
+      store_name, format, city, region, store_address,
+      partner_id, asm_name, asm_mobile, asm_email, escalation_email
+    ) values (
+      r.outlet_name, r.format, r.city, r.region, r.store_address,
+      r.partner_id, r.asm_name, r.asm_mobile, r.asm_email, r.escalation_email
+    )
+    returning id into v_store_id;
+
+    update public.lfg_sites set store_id = v_store_id where id = r.id;
   end loop;
 end;
 $$;

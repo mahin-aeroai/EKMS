@@ -79,29 +79,50 @@ export default function LfgPartnerSitesPage() {
   useEffect(() => {
     if (!identity) return;
     const handle = setTimeout(() => {
-      let q = supabase
-        .from("lfg_sites")
-        .select(
-          "id, site_id, outlet_name, sfo_id, city, region, material, mat_code, width, height, bleed, active, format, site_status, number_of_sites, lfg_partners(name)"
-        )
-        .order("sfo_id", { ascending: true, nullsFirst: false })
-        .limit(identity.isStaff ? 5000 : 200);
-      if (!identity.isStaff) q = q.eq("partner_id", identity.partnerId);
+      // Screen cap removed (task #69, same fix as the staff Site Master --
+      // see its own fetch effect for the full explanation): a single
+      // `.limit()` above 1000 is silently overridden by PostgREST's own
+      // server-side row cap, so this pages past it explicitly via .range()
+      // instead of trusting `.limit(identity.isStaff ? 5000 : 200)` to
+      // actually return that many rows.
+      (async () => {
+        const pageSize = 1000;
+        const all: PartnerSiteRow[] = [];
+        let hadError = false;
 
-      if (statusFilter) q = q.eq("site_status", statusFilter);
+        for (let from = 0; ; from += pageSize) {
+          let q = supabase
+            .from("lfg_sites")
+            .select(
+              "id, site_id, outlet_name, sfo_id, city, region, material, mat_code, width, height, bleed, active, format, site_status, number_of_sites, lfg_partners(name)"
+            )
+            .order("sfo_id", { ascending: true, nullsFirst: false })
+            .range(from, from + pageSize - 1);
+          if (!identity.isStaff) q = q.eq("partner_id", identity.partnerId);
 
-      const trimmed = query.trim();
-      if (trimmed) {
-        q = q.or(`site_id.ilike.%${trimmed}%,outlet_name.ilike.%${trimmed}%,sfo_id.ilike.%${trimmed}%,city.ilike.%${trimmed}%`);
-      }
+          if (statusFilter) q = q.eq("site_status", statusFilter);
 
-      q.then(({ data, error }) => {
-        if (error) {
+          const trimmed = query.trim();
+          if (trimmed) {
+            q = q.or(`site_id.ilike.%${trimmed}%,outlet_name.ilike.%${trimmed}%,sfo_id.ilike.%${trimmed}%,city.ilike.%${trimmed}%`);
+          }
+
+          const { data, error } = await q;
+          if (error) {
+            hadError = true;
+            break;
+          }
+          if (!data || data.length === 0) break;
+          all.push(...((data as unknown as PartnerSiteRow[]) ?? []));
+          if (data.length < pageSize) break;
+        }
+
+        if (hadError) {
           toast("danger", "Couldn't load your sites from Supabase");
           return;
         }
-        setRows((data as unknown as PartnerSiteRow[]) ?? []);
-      });
+        setRows(all);
+      })();
     }, 250);
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -10,6 +10,7 @@ import { Tabs, type TabItem } from "@/components/ui/Tabs";
 import { Timeline, type TimelineEntry } from "@/components/ui/Timeline";
 import { useToast } from "@/components/ui/Notifications";
 import { useLfgUser } from "@/lib/LfgUserContext";
+import { useLfgHost, lfgHref } from "@/lib/lfg-links";
 import { formatDecimal } from "@/lib/lfg-units";
 import { supabase } from "@/lib/supabase";
 import {
@@ -28,6 +29,7 @@ import {
   InstallationTab,
   DocumentsTab,
   partnerOf,
+  OtherDisplaysPanel,
 } from "@/components/workspaces/LfgSiteWorkspaceClient";
 import { LFG_STATUSES, lfgStatusLabel, lfgStatusBadge } from "@/lib/lfgStatus";
 
@@ -101,6 +103,7 @@ export function LfgPartnerSiteClient({
   const programEntry = Array.isArray(site.lfg_programs) ? site.lfg_programs[0] : site.lfg_programs;
   const programName = programEntry?.name;
   const partner = partnerOf(site);
+  const onLfgHost = useLfgHost();
 
   const [statusHistory] = useState(initialStatusHistory);
   const [showStatusDialog, setShowStatusDialog] = useState(false);
@@ -232,6 +235,7 @@ export function LfgPartnerSiteClient({
               <Field label="Remarks" value={site.remarks} />
             </div>
           </div>
+          <OtherDisplaysPanel site={site} hrefFor={(id) => lfgHref(`/sites/${id}`, onLfgHost)} />
           {/* Status was previously its own tab -- folded in here (task
               #55), mirroring the same change in the staff Site 360. */}
           <div className="flex items-center justify-between rounded-lg border border-line bg-surface p-4">

@@ -25,7 +25,7 @@ export default async function LfgPartnerSiteDetailPage({ params }: { params: Pro
   const { data: site, error: siteError } = await supabase
     .from("lfg_sites")
     .select(
-      "id, site_id, outlet_name, format, sfo_id, city, region, store_address, material, mat_code, number_of_sites, width, height, bleed, sqft, asm_name, asm_mobile, asm_email, escalation_email, remarks, site_status, creative_received_at, site_verified_at, site_reference_picture_path, partner_id, program_id, lfg_partners(id, name), lfg_programs(id, name)"
+      "id, site_id, outlet_name, format, sfo_id, city, region, store_address, material, mat_code, number_of_sites, width, height, bleed, sqft, asm_name, asm_mobile, asm_email, escalation_email, remarks, site_status, creative_received_at, site_verified_at, site_reference_picture_path, partner_id, store_id, program_id, lfg_partners(id, name), lfg_programs(id, name)"
     )
     .eq("id", siteId)
     .maybeSingle();

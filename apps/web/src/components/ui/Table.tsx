@@ -14,6 +14,12 @@ export interface TableColumn<T> {
    * regardless of content length -- most columns don't need this, only
    * ones that otherwise wrap awkwardly (e.g. a long Material name). */
   width?: string;
+  /** Optional custom header cell content, replacing the plain `header`
+   * string -- for things like a "select all shown" checkbox in a
+   * selection column's header (task #69). Takes priority over the
+   * sortable-button/plain-text rendering below when present; a column
+   * using this should leave `sortable` unset. */
+  headerRender?: () => React.ReactNode;
 }
 
 interface TableProps<T extends { id: string }> {
@@ -71,7 +77,9 @@ export function Table<T extends { id: string }>({
                 className="px-4 py-2.5"
                 style={col.width ? { width: col.width, minWidth: col.width } : undefined}
               >
-                {col.sortable ? (
+                {col.headerRender ? (
+                  col.headerRender()
+                ) : col.sortable ? (
                   <button
                     onClick={() => toggleSort(col.key)}
                     className="flex items-center gap-1 hover:text-ink"

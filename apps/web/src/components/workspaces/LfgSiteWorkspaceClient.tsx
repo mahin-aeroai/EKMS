@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { MapPin, Pencil, FileText, Lock, Upload, Eye, Trash2, Truck, ArrowLeft } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
@@ -74,6 +74,12 @@ export interface LfgSite {
   site_verified_at: string | null;
   site_reference_picture_path: string | null;
   partner_id: string | null;
+  // Store entity (task #62-#71) -- the physical outlet this site belongs
+  // to. Nullable: sites created before this feature (and not yet through
+  // the STEP 21b backfill) may not have one. Drives the "Other Displays at
+  // This Store" panel below (task #70) -- nothing else on this page reads
+  // it.
+  store_id: string | null;
   // Seasonal wave this site belongs to (Spring Refresh 2025, ...) -- see
   // lfg_programs. Nullable: a site can exist unassigned to any wave yet.
   program_id: string | null;
@@ -252,6 +258,81 @@ export function Field({ label, value }: { label: string; value: string | number 
     <div>
       <div className="text-xs text-ink-muted">{label}</div>
       <div className="text-sm text-ink">{value === null || value === undefined || value === "" ? "—" : value}</div>
+    </div>
+  );
+}
+
+interface SiblingSiteRow {
+  id: string;
+  site_id: string;
+  outlet_name: string;
+  material: string | null;
+  site_status: string;
+}
+
+// "Other Displays at This Store" (task #70) -- lightweight sibling list
+// for a site whose store_id is shared with more than one lfg_sites row
+// (see lfg_stores, STEP 6c in the schema). Fetched client-side rather than
+// passed down as a server-fetched prop, same reasoning as ShipmentTab's
+// per-shipment events: most site visits won't have siblings at all, so
+// there's no point making every Site 360 page load pay for a join that's
+// usually empty. Exported (like partnerOf/Field above) so
+// LfgPartnerSiteClient.tsx renders the identical panel rather than a
+// forked copy -- `hrefFor` is the only thing that differs between the two
+// hosts (staff vs. the partner portal's /lfg-prefixed or subdomain
+// routing), so that's the only thing passed in.
+export function OtherDisplaysPanel({ site, hrefFor }: { site: LfgSite; hrefFor: (siteId: string) => string }) {
+  const router = useRouter();
+  const [siblings, setSiblings] = useState<SiblingSiteRow[] | null>(null);
+
+  useEffect(() => {
+    if (!site.store_id) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSiblings([]);
+      return;
+    }
+    let cancelled = false;
+    supabase
+      .from("lfg_sites")
+      .select("id, site_id, outlet_name, material, site_status")
+      .eq("store_id", site.store_id)
+      .neq("id", site.id)
+      .order("site_id")
+      .then(({ data }) => {
+        if (!cancelled) setSiblings((data as SiblingSiteRow[]) ?? []);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [site.store_id, site.id]);
+
+  if (!site.store_id || siblings === null || siblings.length === 0) return null;
+
+  return (
+    <div className="rounded-lg border border-line bg-surface p-4">
+      <h3 className="mb-3 text-sm font-semibold text-ink">
+        Other Displays at This Store <span className="text-ink-muted">({siblings.length})</span>
+      </h3>
+      <ul className="flex flex-col gap-2">
+        {siblings.map((s) => (
+          <li key={s.id}>
+            <button
+              type="button"
+              onClick={() => router.push(hrefFor(s.id))}
+              className="flex w-full items-center justify-between gap-3 rounded-md border border-line px-3 py-2 text-left text-sm hover:bg-surface-sunken"
+            >
+              <span className="truncate">
+                <span className="font-medium text-ink">{s.site_id}</span>
+                <span className="ml-2 text-ink-secondary">
+                  {s.outlet_name}
+                  {s.material ? ` · ${s.material}` : ""}
+                </span>
+              </span>
+              <Badge status={lfgStatusBadge(s.site_status)}>{lfgStatusLabel(s.site_status)}</Badge>
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -481,6 +562,7 @@ export function LfgSiteWorkspaceClient({
               <Field label="Remarks" value={site.remarks} />
             </div>
           </div>
+          <OtherDisplaysPanel site={site} hrefFor={(id) => `/workspaces/lfg/sites/${id}`} />
           {/* Status was previously its own tab -- folded in here (task
               #55) since it was really just one more fact about the site,
               not enough content on its own to earn a whole tab amid an

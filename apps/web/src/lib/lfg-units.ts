@@ -11,7 +11,7 @@
 // inline math so the rounding rule (0 decimals, always) can't drift
 // between the two screens that use it.
 
-const MM_PER_INCH = 25.4;
+export const MM_PER_INCH = 25.4;
 
 /** Convert an inches measurement to whole millimetres (0 decimals). Null/
  * undefined in, "—" out -- never show "0mm" for a value that's actually
@@ -19,6 +19,26 @@ const MM_PER_INCH = 25.4;
 export function formatMm(inches: number | null | undefined): string {
   if (inches === null || inches === undefined || Number.isNaN(inches)) return "—";
   return `${Math.round(inches * MM_PER_INCH)}`;
+}
+
+/** Round a raw number to at most 2 decimals -- the numeric counterpart of
+ * formatDecimal() below, for values that stay numbers (form state, DB
+ * writes) rather than becoming display strings. */
+export function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+/** New Site form UOM toggle (task: "size give UOM mm / Inch") -- lfg_sites
+ * .width/.height are always stored in inches regardless of which unit the
+ * user entered in, so these convert at the form boundary only: mm ->
+ * inches right before submit, inches -> mm (and back) when the toggle
+ * itself is switched, so the physical size stays constant across a unit
+ * switch rather than being reinterpreted. */
+export function mmToInches(mm: number): number {
+  return round2(mm / MM_PER_INCH);
+}
+export function inchesToMm(inches: number): number {
+  return round2(inches * MM_PER_INCH);
 }
 
 /** Round any numeric field to at most 2 decimal places for display --
