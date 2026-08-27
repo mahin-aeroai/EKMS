@@ -11,23 +11,29 @@ import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows, DONUT_COLOR } from "@/lib/dashboard-queries";
-import { LFG_PIPELINE_STAGES, LFG_PIPELINE_STAGE_BADGE, lfgPipelineStageOf, lfgProgramPriorityRank, type LfgPipelineStageKey } from "@/lib/lfgStatus";
+import { LFG_PIPELINE_STAGES, LFG_PIPELINE_STAGE_BADGE, lfgPipelineStageOf, lfgFormatPriorityRank, type LfgPipelineStageKey } from "@/lib/lfgStatus";
 
-// Program Dashboard -- "understand which sites are getting installed,
-// printed, shipped, active, inactive" grouped by program/chain (APP, APR,
+// Format Dashboard -- "understand which sites are getting installed,
+// printed, shipped, active, inactive" grouped by format/chain (APP, APR,
 // Mono AAR, Multi AAR, Croma, Reliance, Vijay Sales, Pai International,
 // WC, etc.). Groups are whatever distinct values actually exist in
-// lfg_sites.program -- deliberately not a hardcoded list, since that
+// lfg_sites.format -- deliberately not a hardcoded list, since that
 // column is free text carried straight through from the Store Master /
 // apple_lfg_sites imports and new chains get added there over time, not
 // here. The priority order and stage order below ARE hardcoded, exactly as
-// given: programs sort by LFG_PROGRAM_PRIORITY (then alphabetically for
+// given: formats sort by LFG_FORMAT_PRIORITY (then alphabetically for
 // anything not on that list); every LFG_STATUSES value maps to exactly one
-// of LFG_PIPELINE_STAGES (see lfgStatus.ts), so every program's 10 stage
+// of LFG_PIPELINE_STAGES (see lfgStatus.ts), so every format's 10 stage
 // counts always add up to its own total, and every total adds up to the
 // grand total -- nothing silently dropped into an "other" bucket.
 //
-// One donut per program, not one shared chart -- each program's card shows
+// Named "Format Dashboard" (was "Program Dashboard") -- renamed once the
+// seasonal-wave lfg_programs concept ("Program": Spring Refresh 2025, Fall
+// Refresh 2025/26, ...) was introduced, so this page's own grouping
+// (retail chain/format) doesn't collide with that name. See lfgStatus.ts's
+// LFG_FORMAT_PRIORITY header comment and the schema's lfg_programs table.
+//
+// One donut per format, not one shared chart -- each format's card shows
 // only ITS OWN breakdown, so a small chain's chart isn't dwarfed by a big
 // one the way a single combined chart would.
 //
@@ -36,16 +42,16 @@ import { LFG_PIPELINE_STAGES, LFG_PIPELINE_STAGE_BADGE, lfgPipelineStageOf, lfgP
 // header comment on why this silently truncated other dashboards before).
 
 interface SiteStageRow {
-  program: string | null;
+  format: string | null;
   site_status: string;
   creative_received_at: string | null;
 }
 
 type StageCounts = Record<LfgPipelineStageKey, number>;
 
-interface ProgramGroup {
+interface FormatGroup {
   id: string;
-  program: string;
+  format: string;
   total: number;
   counts: StageCounts;
 }
@@ -53,10 +59,10 @@ interface ProgramGroup {
 interface DashboardData {
   totalCount: number;
   overallCounts: StageCounts;
-  programGroups: ProgramGroup[];
+  formatGroups: FormatGroup[];
 }
 
-type ProgramTableRow = ProgramGroup & StageCounts;
+type FormatTableRow = FormatGroup & StageCounts;
 
 function emptyCounts(): StageCounts {
   return {
@@ -75,43 +81,44 @@ function emptyCounts(): StageCounts {
 
 async function loadDashboard(): Promise<DashboardData> {
   const rows = await fetchAllRows<SiteStageRow>((from, to) =>
-    supabase.from("lfg_sites").select("program, site_status, creative_received_at").range(from, to)
+    supabase.from("lfg_sites").select("format, site_status, creative_received_at").range(from, to)
   );
 
   const overallCounts = emptyCounts();
-  const byProgram = new Map<string, ProgramGroup>();
+  const byFormat = new Map<string, FormatGroup>();
 
   for (const r of rows) {
-    const program = r.program?.trim() || "Unspecified";
+    const format = r.format?.trim() || "Unspecified";
     const stage = lfgPipelineStageOf(r.site_status, r.creative_received_at);
     overallCounts[stage] += 1;
 
-    let group = byProgram.get(program);
+    let group = byFormat.get(format);
     if (!group) {
-      group = { id: program, program, total: 0, counts: emptyCounts() };
-      byProgram.set(program, group);
+      group = { id: format, format, total: 0, counts: emptyCounts() };
+      byFormat.set(format, group);
     }
     group.total += 1;
     group.counts[stage] += 1;
   }
 
-  const programGroups = [...byProgram.values()].sort((a, b) => {
-    const rankDiff = lfgProgramPriorityRank(a.program) - lfgProgramPriorityRank(b.program);
-    return rankDiff !== 0 ? rankDiff : a.program.localeCompare(b.program);
+  const formatGroups = [...byFormat.values()].sort((a, b) => {
+    const rankDiff = lfgFormatPriorityRank(a.format) - lfgFormatPriorityRank(b.format);
+    return rankDiff !== 0 ? rankDiff : a.format.localeCompare(b.format);
   });
 
-  return { totalCount: rows.length, overallCounts, programGroups };
+  return { totalCount: rows.length, overallCounts, formatGroups };
 }
 
 /** Same destination the numeric table's row click and each donut card's
- * click use -- a NEW `?program=` param, distinct from the Site Master
- * list's existing `?q=` free-text seeding, so this is a strict exact-match
- * filter to only that program's sites rather than a fuzzy search. */
-function programHref(program: string): string {
-  return `/workspaces/lfg?program=${encodeURIComponent(program)}`;
+ * click use -- a `?format=` param, distinct from the Site Master list's
+ * existing `?q=` free-text seeding (and from the separate `?program_id=`
+ * seasonal-Program filter, task #45), so this is a strict exact-match
+ * filter to only that format's sites rather than a fuzzy search. */
+function formatHref(format: string): string {
+  return `/workspaces/lfg?format=${encodeURIComponent(format)}`;
 }
 
-function ProgramCard({ group, onOpen }: { group: ProgramGroup; onOpen: (program: string) => void }) {
+function FormatCard({ group, onOpen }: { group: FormatGroup; onOpen: (format: string) => void }) {
   const donutData = LFG_PIPELINE_STAGES.filter((s) => group.counts[s.key] > 0).map((s) => ({
     label: s.label,
     value: group.counts[s.key],
@@ -121,11 +128,11 @@ function ProgramCard({ group, onOpen }: { group: ProgramGroup; onOpen: (program:
   return (
     <button
       type="button"
-      onClick={() => onOpen(group.program)}
+      onClick={() => onOpen(group.format)}
       className="rounded-lg border border-line bg-surface p-4 text-left transition-colors hover:border-primary hover:bg-surface-sunken"
     >
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-ink">{group.program}</h3>
+        <h3 className="text-sm font-semibold text-ink">{group.format}</h3>
         <span className="text-xs text-ink-muted">{group.total} sites</span>
       </div>
       {donutData.length === 0 ? (
@@ -142,8 +149,8 @@ export default function LfgDashboardPage() {
   const { toast } = useToast();
   const [data, setData] = useState<DashboardData | null>(null);
 
-  function openProgram(program: string) {
-    router.push(programHref(program));
+  function openFormat(format: string) {
+    router.push(formatHref(format));
   }
 
   // Flattens each group's `counts` onto the row itself (active, printing,
@@ -151,12 +158,12 @@ export default function LfgDashboardPage() {
   // TableColumn with a distinct, real `keyof` key -- rather than 10 columns
   // all keyed "counts" with a render() override, which would give the
   // underlying <Table>'s th/td elements duplicate React keys.
-  const programTableRows: ProgramTableRow[] = (data?.programGroups ?? []).map((g) => ({ ...g, ...g.counts }));
+  const formatTableRows: FormatTableRow[] = (data?.formatGroups ?? []).map((g) => ({ ...g, ...g.counts }));
 
-  const PROGRAM_TABLE_COLUMNS: TableColumn<ProgramTableRow>[] = [
-    { key: "program", header: "Program / Chain", sortable: true },
+  const FORMAT_TABLE_COLUMNS: TableColumn<FormatTableRow>[] = [
+    { key: "format", header: "Format / Chain", sortable: true },
     { key: "total", header: "Total", sortable: true },
-    ...LFG_PIPELINE_STAGES.map((s) => ({ key: s.key, header: s.label, sortable: true }) as TableColumn<ProgramTableRow>),
+    ...LFG_PIPELINE_STAGES.map((s) => ({ key: s.key, header: s.label, sortable: true }) as TableColumn<FormatTableRow>),
   ];
 
   useEffect(() => {
@@ -176,9 +183,9 @@ export default function LfgDashboardPage() {
             <LayoutDashboard size={22} />
           </span>
           <div>
-            <h1 className="text-xl font-semibold text-ink">Program Dashboard</h1>
+            <h1 className="text-xl font-semibold text-ink">Format Dashboard</h1>
             <p className="mt-0.5 text-sm text-ink-secondary">
-              One chart per program/chain, each showing where its own sites sit in the pipeline.
+              One chart per format/chain, each showing where its own sites sit in the pipeline.
             </p>
           </div>
         </div>
@@ -194,20 +201,20 @@ export default function LfgDashboardPage() {
         ))}
       </div>
 
-      <h2 className="mb-3 text-sm font-semibold text-ink">By program / chain</h2>
+      <h2 className="mb-3 text-sm font-semibold text-ink">By format / chain</h2>
       {data === null ? (
         <p className="py-6 text-center text-sm text-ink-muted">Loading…</p>
-      ) : data.programGroups.length === 0 ? (
+      ) : data.formatGroups.length === 0 ? (
         <p className="py-6 text-center text-sm text-ink-muted">No sites yet.</p>
       ) : (
         <>
-          <p className="mb-3 text-xs text-ink-muted">Click a program&apos;s row or chart to see only that program&apos;s sites.</p>
+          <p className="mb-3 text-xs text-ink-muted">Click a format&apos;s row or chart to see only that format&apos;s sites.</p>
           <div className="mb-6">
-            <Table columns={PROGRAM_TABLE_COLUMNS} rows={programTableRows} onRowClick={(r) => openProgram(r.program)} />
+            <Table columns={FORMAT_TABLE_COLUMNS} rows={formatTableRows} onRowClick={(r) => openFormat(r.format)} />
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {data.programGroups.map((g) => (
-              <ProgramCard key={g.program} group={g} onOpen={openProgram} />
+            {data.formatGroups.map((g) => (
+              <FormatCard key={g.format} group={g} onOpen={openFormat} />
             ))}
           </div>
         </>

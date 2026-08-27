@@ -48,14 +48,20 @@ export interface LfgSite {
   id: string;
   site_id: string;
   outlet_name: string;
-  program: string | null;
+  // Retail chain/format (APP, APR, Croma, ...) -- was "program" before the
+  // seasonal lfg_programs concept (below) took that name; see the schema's
+  // lfg_sites.format column comment.
+  format: string | null;
   sfo_id: string | null;
   city: string | null;
+  region: string | null;
   store_address: string | null;
   material: string | null;
+  mat_code: string | null;
   number_of_sites: number;
   width: number | null;
   height: number | null;
+  bleed: number | null;
   sqft: number | null;
   asm_name: string | null;
   asm_mobile: string | null;
@@ -64,8 +70,13 @@ export interface LfgSite {
   remarks: string | null;
   site_status: string;
   creative_received_at: string | null;
+  site_verified_at: string | null;
   site_reference_picture_path: string | null;
   partner_id: string | null;
+  // Seasonal wave this site belongs to (Spring Refresh 2025, ...) -- see
+  // lfg_programs. Nullable: a site can exist unassigned to any wave yet.
+  program_id: string | null;
+  lfg_programs: { id: string; name: string } | { id: string; name: string }[] | null;
   lfg_partners: { id: string; name: string } | { id: string; name: string }[] | null;
 }
 
@@ -197,6 +208,11 @@ function partnerOf(site: LfgSite) {
   return p ?? null;
 }
 
+function programOf(site: LfgSite) {
+  const p = Array.isArray(site.lfg_programs) ? site.lfg_programs[0] : site.lfg_programs;
+  return p ?? null;
+}
+
 // Hands this site's identity fields off to the (separate, pre-existing)
 // Installation Report tool via query params -- see
 // InstallationReportClient.tsx's own prefill effect for the receiving end
@@ -205,12 +221,19 @@ function partnerOf(site: LfgSite) {
 // Opened in a new tab (task #36) rather than routed to in-place, since
 // it's a genuinely separate tool with its own unrelated workflow -- this
 // keeps the Site 360 tab where the user came from.
+//
+// The outgoing param is still named "program" -- that's the Installation
+// Report tool's OWN field name (installation_report_stores.program, a
+// genuinely different, unrelated concept -- see that file's prefill effect
+// header comment), not this app's lfg_sites.format. Only the *source*
+// value read here changed (site.format, was site.program) when lfg_sites'
+// column was renamed (task #39) -- the receiving param name is untouched.
 function installationReportHref(site: LfgSite): string {
   const params = new URLSearchParams();
   if (site.outlet_name) params.set("store", site.outlet_name);
   if (site.store_address) params.set("address", site.store_address);
   if (site.sfo_id) params.set("sfo", site.sfo_id);
-  if (site.program) params.set("program", site.program);
+  if (site.format) params.set("program", site.format);
   if (site.asm_name) params.set("asm", site.asm_name);
   if (site.asm_mobile) params.set("asmContact", site.asm_mobile);
   return `/workspaces/installation-report?${params.toString()}`;
@@ -259,6 +282,7 @@ export function LfgSiteWorkspaceClient({
   const role = useUserRole();
   const editable = canWrite(role);
   const partner = partnerOf(site);
+  const program = programOf(site);
 
   const [statusHistory] = useState(initialStatusHistory);
   const [showStatusDialog, setShowStatusDialog] = useState(false);
@@ -429,13 +453,17 @@ export function LfgSiteWorkspaceClient({
           <div className="grid grid-cols-2 gap-4 rounded-lg border border-line bg-surface p-4 sm:grid-cols-3">
             <Field label="Site ID" value={site.site_id} />
             <Field label="Outlet Name" value={site.outlet_name} />
-            <Field label="Program" value={site.program} />
+            <Field label="Format" value={site.format} />
+            <Field label="Program (Season)" value={program?.name} />
             <Field label="SFO ID" value={site.sfo_id} />
             <Field label="City" value={site.city} />
+            <Field label="Region" value={site.region} />
             <Field label="Material" value={site.material} />
+            <Field label="Mat Code" value={site.mat_code} />
             <Field label="Number of Sites" value={site.number_of_sites} />
             <Field label="Width" value={site.width} />
             <Field label="Height" value={site.height} />
+            <Field label="Bleed" value={site.bleed} />
             <Field label="SQFT" value={site.sqft} />
             <Field label="Partner" value={partner?.name} />
             <Field label="ASM Name" value={site.asm_name} />
@@ -496,6 +524,7 @@ export function LfgSiteWorkspaceClient({
           siteId={site.id}
           initialSurveys={initialSurveys}
           creativeReceivedAt={site.creative_received_at}
+          siteVerifiedAt={site.site_verified_at}
           editable={editable}
           onChanged={() => router.refresh()}
         />
@@ -606,7 +635,7 @@ export function LfgSiteWorkspaceClient({
               <Badge status={lfgStatusBadge(site.site_status)}>{lfgStatusLabel(site.site_status)}</Badge>
             </div>
             <p className="mt-0.5 text-sm text-ink-secondary">
-              {site.site_id} · {site.program ?? "No program"} · {site.city ?? "No city"} {partner ? `· ${partner.name}` : ""}
+              {site.site_id} · {site.format ?? "No format"} · {site.city ?? "No city"} {partner ? `· ${partner.name}` : ""}
             </p>
           </div>
         </div>
@@ -693,6 +722,7 @@ export function SurveyTab({
   siteId,
   initialSurveys,
   creativeReceivedAt,
+  siteVerifiedAt,
   editable,
   canApprove = editable,
   onChanged,
@@ -700,6 +730,7 @@ export function SurveyTab({
   siteId: string;
   initialSurveys: SurveyRow[];
   creativeReceivedAt: string | null;
+  siteVerifiedAt: string | null;
   editable: boolean;
   // Separate from `editable` because lfg_site_surveys' own RLS splits
   // these: lfg_site_surveys_insert (logging a new survey, same as
@@ -717,7 +748,47 @@ export function SurveyTab({
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savingCreative, setSavingCreative] = useState(false);
+  const [savingVerified, setSavingVerified] = useState(false);
   const [form, setForm] = useState({ survey_date: "", measured_width: "", measured_height: "", measurements_remarks: "" });
+
+  // Site Verified (task #47) -- confirms the physical outlet/site itself
+  // has been checked and is good to proceed. A site-level milestone, same
+  // pattern as Creative Receipt just below (mark/undo, timestamp + actor
+  // on lfg_sites), positioned first since it's the earlier real-world step
+  // -- verifying the site normally comes before/alongside the survey visit
+  // that measures it for creative/production.
+  async function handleMarkSiteVerified() {
+    setSavingVerified(true);
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const { error } = await supabase
+      .from("lfg_sites")
+      .update({ site_verified_at: new Date().toISOString(), site_verified_by: user?.id ?? null })
+      .eq("id", siteId);
+    setSavingVerified(false);
+    if (error) {
+      toast("danger", `Couldn't mark site verified: ${error.message}`);
+      return;
+    }
+    toast("success", "Site marked verified");
+    onChanged();
+  }
+
+  async function handleUndoSiteVerified() {
+    setSavingVerified(true);
+    const { error } = await supabase
+      .from("lfg_sites")
+      .update({ site_verified_at: null, site_verified_by: null })
+      .eq("id", siteId);
+    setSavingVerified(false);
+    if (error) {
+      toast("danger", `Couldn't undo: ${error.message}`);
+      return;
+    }
+    toast("success", "Site verification undone");
+    onChanged();
+  }
 
   // Creative receipt (the client's artwork/design file for this site) --
   // a site-level milestone, not per-survey, which is why it lives on
@@ -795,6 +866,25 @@ export function SurveyTab({
 
   return (
     <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between rounded-lg border border-line bg-surface p-4">
+        <div>
+          <span className="text-xs text-ink-muted">Site Verified</span>
+          <div className="text-sm text-ink">
+            {siteVerifiedAt ? `Verified ${new Date(siteVerifiedAt).toLocaleString()}` : "Not yet verified"}
+          </div>
+        </div>
+        {editable &&
+          (siteVerifiedAt ? (
+            <Button size="sm" variant="secondary" loading={savingVerified} onClick={handleUndoSiteVerified}>
+              Undo
+            </Button>
+          ) : (
+            <Button size="sm" loading={savingVerified} onClick={handleMarkSiteVerified}>
+              Mark Verified
+            </Button>
+          ))}
+      </div>
+
       <div className="flex items-center justify-between rounded-lg border border-line bg-surface p-4">
         <div>
           <span className="text-xs text-ink-muted">Creative Receipt</span>

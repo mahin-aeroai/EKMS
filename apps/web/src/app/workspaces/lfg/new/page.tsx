@@ -33,29 +33,39 @@ interface PartnerOption {
   name: string;
 }
 
+interface ProgramOption {
+  id: string;
+  name: string;
+}
+
 export default function NewLfgSitePage() {
   const router = useRouter();
   const { toast } = useToast();
   const [partners, setPartners] = useState<PartnerOption[]>([]);
+  const [programs, setPrograms] = useState<ProgramOption[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [form, setForm] = useState({
     outlet_name: "",
-    program: "",
+    format: "",
     sfo_id: "",
     city: "",
+    region: "",
     store_address: "",
     material: "",
+    mat_code: "",
     number_of_sites: "1",
     width: "",
     height: "",
+    bleed: "",
     sqft: "",
     asm_name: "",
     asm_mobile: "",
     asm_email: "",
     escalation_email: "",
     partner_id: "",
+    program_id: "",
     remarks: "",
   });
 
@@ -66,6 +76,16 @@ export default function NewLfgSitePage() {
       .eq("active", true)
       .order("name")
       .then(({ data }) => setPartners((data as PartnerOption[]) ?? []));
+    // lfg_programs (seasonal waves, e.g. "Spring Refresh 2025") -- task
+    // #39-49. Optional at intake, same as Partner -- a site can be created
+    // before it's assigned to a wave, and moved/reassigned later via the
+    // Site Master's bulk "Move to Program" action (task #46) or here.
+    supabase
+      .from("lfg_programs")
+      .select("id, name")
+      .eq("active", true)
+      .order("name")
+      .then(({ data }) => setPrograms((data as ProgramOption[]) ?? []));
   }, []);
 
   function set<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
@@ -86,20 +106,24 @@ export default function NewLfgSitePage() {
       .from("lfg_sites")
       .insert({
         outlet_name: form.outlet_name.trim(),
-        program: form.program.trim() || null,
+        format: form.format.trim() || null,
         sfo_id: form.sfo_id.trim() || null,
         city: form.city.trim() || null,
+        region: form.region.trim() || null,
         store_address: form.store_address.trim() || null,
         material: form.material.trim() || null,
+        mat_code: form.mat_code.trim() || null,
         number_of_sites: Number(form.number_of_sites) || 1,
         width: form.width ? Number(form.width) : null,
         height: form.height ? Number(form.height) : null,
+        bleed: form.bleed ? Number(form.bleed) : null,
         sqft: form.sqft ? Number(form.sqft) : null,
         asm_name: form.asm_name.trim() || null,
         asm_mobile: form.asm_mobile.trim() || null,
         asm_email: form.asm_email.trim() || null,
         escalation_email: form.escalation_email.trim() || null,
         partner_id: form.partner_id || null,
+        program_id: form.program_id || null,
         remarks: form.remarks.trim() || null,
       })
       .select("id")
@@ -142,10 +166,24 @@ export default function NewLfgSitePage() {
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label className={labelClass} htmlFor="program">
-              Program
+            <label className={labelClass} htmlFor="format">
+              Format
             </label>
-            <input id="program" className={inputClass} value={form.program} onChange={(e) => set("program", e.target.value)} placeholder="e.g. Croma, Vijay Sales" />
+            <input id="format" className={inputClass} value={form.format} onChange={(e) => set("format", e.target.value)} placeholder="e.g. Croma, Vijay Sales" />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className={labelClass} htmlFor="program_id">
+              Program (Season)
+            </label>
+            <select id="program_id" className={inputClass} value={form.program_id} onChange={(e) => set("program_id", e.target.value)}>
+              <option value="">— Unassigned —</option>
+              {programs.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -163,10 +201,24 @@ export default function NewLfgSitePage() {
           </div>
 
           <div className="flex flex-col gap-1.5">
+            <label className={labelClass} htmlFor="region">
+              Region
+            </label>
+            <input id="region" className={inputClass} value={form.region} onChange={(e) => set("region", e.target.value)} />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
             <label className={labelClass} htmlFor="material">
               Material
             </label>
             <input id="material" className={inputClass} value={form.material} onChange={(e) => set("material", e.target.value)} />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className={labelClass} htmlFor="mat_code">
+              Mat Code
+            </label>
+            <input id="mat_code" className={inputClass} value={form.mat_code} onChange={(e) => set("mat_code", e.target.value)} />
           </div>
 
           <div className="flex flex-col gap-1.5 sm:col-span-2">
@@ -222,6 +274,13 @@ export default function NewLfgSitePage() {
               Height
             </label>
             <input id="height" type="number" step="0.01" className={inputClass} value={form.height} onChange={(e) => set("height", e.target.value)} />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className={labelClass} htmlFor="bleed">
+              Bleed
+            </label>
+            <input id="bleed" type="number" step="0.01" className={inputClass} value={form.bleed} onChange={(e) => set("bleed", e.target.value)} />
           </div>
 
           <div className="flex flex-col gap-1.5">

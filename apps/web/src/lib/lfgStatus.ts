@@ -213,19 +213,25 @@ export function lfgPipelineStageOf(status: string, creativeReceivedAt?: string |
 }
 
 /**
- * The priority order given for the Program Dashboard's program/chain
+ * The priority order given for the Program Dashboard's format/chain
  * groups -- everything else follows, alphabetically. Matched
  * case-insensitively and by substring in both directions (so "Reliance"
- * matches a program value of "Reliance Digital" or vice versa) since
- * `lfg_sites.program` is free text carried through from two different
+ * matches a format value of "Reliance Digital" or vice versa) since
+ * `lfg_sites.format` is free text carried through from two different
  * legacy imports, not a controlled vocabulary.
+ *
+ * Named LFG_FORMAT_PRIORITY/lfgFormatPriorityRank() -- was
+ * LFG_PROGRAM_PRIORITY/lfgProgramPriorityRank() before the retail
+ * chain/format field was renamed away from "program" to avoid clashing
+ * with the separate, seasonal-wave lfg_programs concept (Spring Refresh
+ * 2025, etc. -- see lfg_programs in the schema).
  */
-export const LFG_PROGRAM_PRIORITY = ["app", "apr", "mono aar", "multi aar", "croma", "reliance", "vijay sales", "pai international"];
+export const LFG_FORMAT_PRIORITY = ["app", "apr", "mono aar", "multi aar", "croma", "reliance", "vijay sales", "pai international"];
 
-export function lfgProgramPriorityRank(program: string): number {
-  const p = program.trim().toLowerCase();
-  const idx = LFG_PROGRAM_PRIORITY.findIndex((keyword) => p.includes(keyword) || keyword.includes(p));
-  return idx === -1 ? LFG_PROGRAM_PRIORITY.length : idx;
+export function lfgFormatPriorityRank(format: string): number {
+  const f = format.trim().toLowerCase();
+  const idx = LFG_FORMAT_PRIORITY.findIndex((keyword) => f.includes(keyword) || keyword.includes(f));
+  return idx === -1 ? LFG_FORMAT_PRIORITY.length : idx;
 }
 
 /** ₹ with Indian digit grouping — lfg_site_financials/lfg_installation_costs

@@ -73,6 +73,11 @@ export function LfgPartnerSiteClient({
   const router = useRouter();
   const { toast } = useToast();
   const editable = true;
+  // Read-only display for the partner -- moving a site between seasonal
+  // Programs is a staff-only bulk operation (task #46, admin/editor
+  // gated), so this surface just shows the site's current one.
+  const programEntry = Array.isArray(site.lfg_programs) ? site.lfg_programs[0] : site.lfg_programs;
+  const programName = programEntry?.name;
 
   const [statusHistory] = useState(initialStatusHistory);
   const [showStatusDialog, setShowStatusDialog] = useState(false);
@@ -182,13 +187,17 @@ export function LfgPartnerSiteClient({
           <div className="grid grid-cols-2 gap-4 rounded-lg border border-line bg-surface p-4 sm:grid-cols-3">
             <Field label="Site ID" value={site.site_id} />
             <Field label="Outlet Name" value={site.outlet_name} />
-            <Field label="Program" value={site.program} />
+            <Field label="Format" value={site.format} />
+            <Field label="Program (Season)" value={programName} />
             <Field label="SFO ID" value={site.sfo_id} />
             <Field label="City" value={site.city} />
+            <Field label="Region" value={site.region} />
             <Field label="Material" value={site.material} />
+            <Field label="Mat Code" value={site.mat_code} />
             <Field label="Number of Sites" value={site.number_of_sites} />
             <Field label="Width" value={site.width} />
             <Field label="Height" value={site.height} />
+            <Field label="Bleed" value={site.bleed} />
             <Field label="SQFT" value={site.sqft} />
             <Field label="ASM Name" value={site.asm_name} />
             <Field label="ASM Mobile" value={site.asm_mobile} />
@@ -245,6 +254,7 @@ export function LfgPartnerSiteClient({
           siteId={site.id}
           initialSurveys={initialSurveys}
           creativeReceivedAt={site.creative_received_at}
+          siteVerifiedAt={site.site_verified_at}
           editable={editable}
           canApprove={false}
           onChanged={() => router.refresh()}
@@ -302,7 +312,7 @@ export function LfgPartnerSiteClient({
             <Badge status={lfgStatusBadge(site.site_status)}>{lfgStatusLabel(site.site_status)}</Badge>
           </div>
           <p className="mt-0.5 text-sm text-ink-secondary">
-            {site.site_id} · {site.program ?? "No program"} · {site.city ?? "No city"}
+            {site.site_id} · {site.format ?? "No format"} · {site.city ?? "No city"}
           </p>
         </div>
       </div>

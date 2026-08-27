@@ -42,7 +42,7 @@ export default async function LfgSiteDetailPage({ params }: { params: Promise<{ 
 
   const { data: site, error: siteError } = await supabase
     .from("lfg_sites")
-    .select("*, lfg_partners(id, name)")
+    .select("*, lfg_partners(id, name), lfg_programs(id, name)")
     .eq("id", siteId)
     .maybeSingle();
 

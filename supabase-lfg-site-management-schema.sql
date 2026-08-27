@@ -222,6 +222,34 @@ as $$
 $$;
 
 -- ============================================================
+-- STEP 6b — lfg_programs (seasonal waves: "Spring Refresh 2025",
+-- "Fall Refresh 2025/26", etc. -- task #39-49). Distinct from the
+-- lfg_sites.format column (the retail chain an outlet belongs to).
+-- ============================================================
+
+create table if not exists public.lfg_programs (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  active boolean not null default true,
+  notes text,
+  created_at timestamptz not null default now(),
+  created_by uuid references auth.users(id)
+);
+
+alter table public.lfg_programs enable row level security;
+
+drop policy if exists lfg_programs_select on public.lfg_programs;
+create policy lfg_programs_select on public.lfg_programs
+  for select to authenticated
+  using (true);
+
+drop policy if exists lfg_programs_write_staff on public.lfg_programs;
+create policy lfg_programs_write_staff on public.lfg_programs
+  for all to authenticated
+  using (public.user_role() in ('admin', 'editor'))
+  with check (public.user_role() in ('admin', 'editor'));
+
+-- ============================================================
 -- STEP 7 — lfg_sites (the unified Site Master)
 -- ============================================================
 
@@ -232,14 +260,25 @@ create table if not exists public.lfg_sites (
   site_id text not null unique default ('LFG-' || lpad(nextval('public.lfg_site_no_seq')::text, 6, '0')),
 
   outlet_name text not null,
-  program text,
+  -- Retail chain/format this outlet belongs to (APP, APR, Mono AAR, Croma,
+  -- Reliance, Vijay Sales, ...). Was named "program" before the seasonal
+  -- lfg_programs table (STEP 6b above) was introduced -- renamed to avoid
+  -- clashing with that genuinely different "program" concept. See the
+  -- idempotent rename block just after this table for already-live DBs.
+  format text,
   sfo_id text,
   city text,
+  region text,
   store_address text,
   material text,
+  -- Distinct from `material` above -- a short internal code identifying the
+  -- exact print/material spec (e.g. from the client's own material master),
+  -- shown alongside material/size on the Site Master per task #39-44.
+  mat_code text,
   number_of_sites integer not null default 1,
   width numeric,
   height numeric,
+  bleed numeric,
   sqft numeric,
   asm_name text,
   asm_mobile text,
@@ -260,6 +299,18 @@ create table if not exists public.lfg_sites (
   -- not received yet; non-null = received, at that timestamp.
   creative_received_at timestamptz,
   creative_received_by uuid references auth.users(id),
+
+  -- Site Verified milestone (task #47) -- confirms the physical outlet/site
+  -- itself has been checked and is good to proceed, distinct from survey
+  -- completion/approval below. Null = not verified yet.
+  site_verified_at timestamptz,
+  site_verified_by uuid references auth.users(id),
+
+  -- Seasonal wave this site currently belongs to (Spring Refresh 2025, Fall
+  -- Refresh 2025/26, ...) -- see lfg_programs, STEP 6b above. Nullable: a
+  -- site can exist before being assigned to a wave. Kept separate from
+  -- `format` above, which is the retail chain, not a time-boxed campaign.
+  program_id uuid references public.lfg_programs(id),
 
   site_status text not null default 'new' check (site_status in (
     'new', 'survey_pending', 'survey_completed', 'survey_approved',
@@ -294,7 +345,7 @@ create table if not exists public.lfg_sites (
 create index if not exists lfg_sites_partner_idx on public.lfg_sites(partner_id);
 create index if not exists lfg_sites_status_idx on public.lfg_sites(site_status);
 create index if not exists lfg_sites_sfo_id_idx on public.lfg_sites(sfo_id);
-create index if not exists lfg_sites_program_idx on public.lfg_sites(program);
+create index if not exists lfg_sites_format_idx on public.lfg_sites(format);
 
 -- Retrofits creative_received_at/creative_received_by onto a database that
 -- already ran this file before that pair of columns existed --
@@ -303,6 +354,61 @@ create index if not exists lfg_sites_program_idx on public.lfg_sites(program);
 alter table public.lfg_sites add column if not exists creative_received_at timestamptz;
 alter table public.lfg_sites add column if not exists creative_received_by uuid references auth.users(id);
 create index if not exists lfg_sites_city_idx on public.lfg_sites(city);
+
+-- Retrofits the "program" -> "format" rename (task #39) onto a database
+-- that already ran this file with the old column name. Renaming preserves
+-- all existing data (unlike drop+add). No-op on a fresh install, where the
+-- table above was already created with `format` directly.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'lfg_sites' and column_name = 'program'
+  ) and not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'lfg_sites' and column_name = 'format'
+  ) then
+    alter table public.lfg_sites rename column program to format;
+  end if;
+end $$;
+
+do $$
+begin
+  if exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'lfg_sites_program_idx')
+     and not exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'lfg_sites_format_idx') then
+    alter index public.lfg_sites_program_idx rename to lfg_sites_format_idx;
+  end if;
+end $$;
+
+-- Retrofits region/mat_code/bleed/site_verified_at/site_verified_by/
+-- program_id (tasks #40-#41) onto a database that already ran this file
+-- before these columns existed.
+alter table public.lfg_sites add column if not exists region text;
+alter table public.lfg_sites add column if not exists mat_code text;
+alter table public.lfg_sites add column if not exists bleed numeric;
+alter table public.lfg_sites add column if not exists site_verified_at timestamptz;
+alter table public.lfg_sites add column if not exists site_verified_by uuid references auth.users(id);
+alter table public.lfg_sites add column if not exists program_id uuid references public.lfg_programs(id);
+create index if not exists lfg_sites_program_id_idx on public.lfg_sites(program_id);
+
+-- Opportunistic backfill of bleed from apple_lfg_sites.bleed_mm for sites
+-- already matched to a legacy apple_lfg_sites row -- same guarded
+-- "skip if apple_lfg_sites doesn't exist" pattern as the STEP 21 backfill
+-- below. Only fills rows that don't already have a bleed value, and only
+-- runs if the legacy table (and the bleed_mm column on it) is present.
+do $$
+begin
+  if exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'apple_lfg_sites')
+     and exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'apple_lfg_sites' and column_name = 'bleed_mm')
+  then
+    update public.lfg_sites s
+    set bleed = a.bleed_mm
+    from public.apple_lfg_sites a
+    where s.legacy_apple_lfg_site_ref = a.id::text
+      and s.bleed is null
+      and a.bleed_mm is not null;
+  end if;
+end $$;
 
 -- ============================================================
 -- STEP 8 — lfg_site_status_history (append-only, one row per status change)
@@ -826,10 +932,10 @@ begin
   if public.is_lfg_partner_user() and not public.is_mmdi_staff() then
     if new.partner_id is distinct from old.partner_id
        or new.outlet_name is distinct from old.outlet_name
-       or new.program is distinct from old.program
+       or new.format is distinct from old.format
        or new.sfo_id is distinct from old.sfo_id
     then
-      raise exception 'Partners cannot change site ownership, outlet name, program, or SFO ID — contact MMDI.';
+      raise exception 'Partners cannot change site ownership, outlet name, format, or SFO ID — contact MMDI.';
     end if;
   end if;
   return new;
@@ -1159,7 +1265,7 @@ create policy lfg_deactivation_requests_update_staff on public.lfg_deactivation_
 -- ============================================================
 
 insert into public.lfg_sites (
-  outlet_name, program, sfo_id, store_address, number_of_sites,
+  outlet_name, format, sfo_id, store_address, number_of_sites,
   material, asm_name, asm_mobile, legacy_installation_report_store_id
 )
 select
@@ -1305,7 +1411,7 @@ begin
     end;
 
     insert into public.lfg_sites (
-      outlet_name, program, sfo_id, city, store_address, material,
+      outlet_name, format, sfo_id, city, store_address, material, bleed,
       number_of_sites, width, height, sqft,
       site_status, remarks,
       legacy_installation_report_store_id, legacy_apple_lfg_site_ref,
@@ -1313,7 +1419,7 @@ begin
     ) values (
       coalesce(a.store_name, 'Unknown outlet — apple_lfg_sites #' || a.id::text),
       coalesce(a.program, a.sheet_name),
-      a.apple_store_id, a.city, a.address, a.material,
+      a.apple_store_id, a.city, a.address, a.material, a.bleed_mm,
       coalesce(a.no_of_sites, 1),
       coalesce(a.width_inches, round(a.width_mm / 25.4, 2)),
       coalesce(a.height_inches, round(a.height_mm / 25.4, 2)),

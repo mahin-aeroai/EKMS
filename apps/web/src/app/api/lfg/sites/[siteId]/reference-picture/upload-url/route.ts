@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
 // lfg_sites_update RLS (staff full; partner scoped to their own sites) does
 // NOT restrict site_reference_picture_path -- see
 // lfg_sites_guard_partner_update() in the schema, which only blocks
-// partner_id/outlet_name/program/sfo_id -- so a partner may set their own
+// partner_id/outlet_name/format/sfo_id -- so a partner may set their own
 // site's picture too. This route replicates that same condition before
 // presigning, for the same reason installation-photos/upload-url does:
 // presigning first and letting the later `update` silently no-op under RLS
