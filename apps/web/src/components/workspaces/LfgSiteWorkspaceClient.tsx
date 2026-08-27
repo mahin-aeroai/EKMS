@@ -44,7 +44,7 @@ import {
 // installation cost, etc.) live on lfg_installation_costs and stay on the
 // Financials tab -- this tab only ever touches the operational columns.
 
-interface LfgSite {
+export interface LfgSite {
   id: string;
   site_id: string;
   outlet_name: string;
@@ -69,7 +69,7 @@ interface LfgSite {
   lfg_partners: { id: string; name: string } | { id: string; name: string }[] | null;
 }
 
-interface StatusHistoryRow {
+export interface StatusHistoryRow {
   id: string;
   changed_at: string;
   previous_status: string | null;
@@ -109,7 +109,7 @@ interface InstallationCostsRow {
   total_installation_cost: number | null;
 }
 
-interface InstallationRow {
+export interface InstallationRow {
   installation_required: boolean;
   scaffolding_required: boolean;
   scaffolding_size: string | null;
@@ -119,14 +119,14 @@ interface InstallationRow {
   installation_remarks: string | null;
 }
 
-interface PhotoRow {
+export interface PhotoRow {
   id: string;
   kind: "before" | "after" | "completion";
   relative_path: string;
   uploaded_at: string;
 }
 
-interface DocumentRow {
+export interface DocumentRow {
   id: string;
   category: "reference" | "survey" | "installation" | "other";
   file_name: string;
@@ -139,14 +139,14 @@ interface DocumentRow {
   uploaded_at: string;
 }
 
-interface ProductionRow {
+export interface ProductionRow {
   status: string;
   started_at: string | null;
   completed_at: string | null;
   notes: string | null;
 }
 
-interface SurveyRow {
+export interface SurveyRow {
   id: string;
   survey_date: string | null;
   measured_width: number | null;
@@ -157,7 +157,7 @@ interface SurveyRow {
   approved_at: string | null;
 }
 
-interface ShipmentRow {
+export interface ShipmentRow {
   id: string;
   courier: string | null;
   awb_number: string | null;
@@ -220,7 +220,7 @@ const inputClass =
   "rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none";
 const labelClass = "text-xs font-medium text-ink-secondary";
 
-function Field({ label, value }: { label: string; value: string | number | null | undefined }) {
+export function Field({ label, value }: { label: string; value: string | number | null | undefined }) {
   return (
     <div>
       <div className="text-xs text-ink-muted">{label}</div>
@@ -689,17 +689,28 @@ export function LfgSiteWorkspaceClient({
   );
 }
 
-function SurveyTab({
+export function SurveyTab({
   siteId,
   initialSurveys,
   creativeReceivedAt,
   editable,
+  canApprove = editable,
   onChanged,
 }: {
   siteId: string;
   initialSurveys: SurveyRow[];
   creativeReceivedAt: string | null;
   editable: boolean;
+  // Separate from `editable` because lfg_site_surveys' own RLS splits
+  // these: lfg_site_surveys_insert (logging a new survey, same as
+  // creative-received on lfg_sites via lfg_sites_update) grants the
+  // site's own partner too, but lfg_site_surveys_update_staff (approving
+  // one) is admin/editor ONLY -- no partner clause at all. Defaults to
+  // `editable` so every existing staff call site (where editable already
+  // meant admin/editor) is unchanged; LfgPartnerSiteClient passes
+  // editable={true}, canApprove={false} to log surveys without exposing
+  // an Approve button RLS would just reject.
+  canApprove?: boolean;
   onChanged: () => void;
 }) {
   const { toast } = useToast();
@@ -859,7 +870,7 @@ function SurveyTab({
               </div>
               <div className="flex items-center gap-2">
                 <Badge status={s.status === "approved" ? "success" : s.status === "completed" ? "info" : "neutral"}>{s.status}</Badge>
-                {editable && s.status === "completed" && (
+                {canApprove && s.status === "completed" && (
                   <Button size="sm" variant="secondary" onClick={() => handleApprove(s.id)}>
                     Approve
                   </Button>
@@ -873,7 +884,7 @@ function SurveyTab({
   );
 }
 
-function ProductionTab({
+export function ProductionTab({
   siteId,
   initial,
   editable,
@@ -938,7 +949,7 @@ function ProductionTab({
 // gate. lfg_shipment_events (the per-shipment timeline) is fetched
 // client-side per-shipment on expand rather than up front in page.tsx,
 // since a site can have many shipments and most won't be open at once.
-function ShipmentTab({
+export function ShipmentTab({
   siteId,
   initialShipments,
   editable,
@@ -1444,7 +1455,7 @@ const PHOTO_KINDS = [
 // RLS already includes the site's own partner alongside admin/editor (this
 // staff workspace only ever runs as admin/editor/viewer, so partner access
 // itself happens through the separate lfgconnect.mmdi.in portal, not here).
-function InstallationTab({
+export function InstallationTab({
   siteId,
   initial,
   initialPhotos,
@@ -1786,7 +1797,7 @@ function formatFileSize(bytes: number | null): string {
 // Same presign-then-PUT-then-record pattern as InstallationTab's photo
 // upload, just with a real file picker (any type) instead of a fixed
 // image/jpeg, and grouped by category instead of a flat list.
-function DocumentsTab({
+export function DocumentsTab({
   siteId,
   initialDocuments,
   editable,

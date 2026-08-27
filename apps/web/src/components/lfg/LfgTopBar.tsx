@@ -9,9 +9,11 @@ import { useLfgHost, lfgHref } from "@/lib/lfg-links";
 
 // Bare, /lfg-less paths -- lfgHref() below adds the /lfg prefix back on
 // hosts where the middleware doesn't rewrite it for us. Just "Sites" for
-// now: the Site Master / Site 360 view (task #16) is what actually fills
-// this portal in -- see PROJECT_STATUS.md-style task list. Add
-// Documents/Account/etc. here as those land, mirroring PortalTopBar's NAV.
+// now -- the Site Master / Site 360 view (task #19) is LfgPartnerSitesPage
+// (src/app/lfg/(app)/page.tsx) + LfgPartnerSiteClient.tsx, which reuse the
+// same Survey/Production/Shipment/Installation/Documents tab components as
+// the staff workspace. Add more entries here (Account/etc.) as those land,
+// mirroring PortalTopBar's NAV.
 const NAV = [{ href: "/", label: "Sites", icon: MapPin }];
 
 export function LfgTopBar({
