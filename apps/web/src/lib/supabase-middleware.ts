@@ -1,8 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { PORTAL_HOST } from "./portal-host";
+import { LFG_HOST } from "./lfg-host";
 
-const PUBLIC_PATHS = ["/login", "/portal/login"];
+const PUBLIC_PATHS = ["/login", "/portal/login", "/lfg/login"];
 
 function isPublicPath(pathname: string) {
   return (
@@ -23,6 +24,18 @@ function isPublicPath(pathname: string) {
  */
 function isPortalPath(pathname: string) {
   return pathname.startsWith("/portal");
+}
+
+/**
+ * The Basil LFG Partner Portal (/lfg/*) -- same "completely separate,
+ * invite-only surface" treatment as the customer portal above, for
+ * lfg_partner accounts (external Basil/Apple LFG installation partners)
+ * instead of portal_users (customer companies). See
+ * supabase-lfg-site-management-schema.sql's header comment for why this
+ * exists as its own role/table set rather than reusing 'portal'.
+ */
+function isLfgPath(pathname: string) {
+  return pathname.startsWith("/lfg");
 }
 
 // PORTAL_HOST (imported above, from ./portal-host) is the Customer
@@ -83,35 +96,47 @@ export async function updateSession(request: NextRequest) {
 
   const hostname = request.nextUrl.hostname;
   const onPortalHost = hostname === PORTAL_HOST;
+  const onLfgHost = hostname === LFG_HOST;
   // The exact path this request came in on -- used for anything the user
   // will actually SEE (redirect targets, the ?redirectTo= param). Never
   // reassigned, unlike `pathname` below.
   const incomingPathname = request.nextUrl.pathname;
 
-  // Canonicalize: an old app.mmdi.in/portal/* link now belongs at
-  // portal.mmdi.in/* (prefix dropped). Redirect rather than silently
-  // keep serving the old path, so there's exactly one canonical URL
-  // going forward. Runs before any auth check -- an unauthenticated hit
-  // here still lands on the right host before the login redirect below
-  // ever has to run.
+  // Canonicalize: an old app.mmdi.in/portal/* (or /lfg/*) link now belongs
+  // at portal.mmdi.in/* (or portal.lfg.mmdi.in/*) with the prefix dropped.
+  // Redirect rather than silently keep serving the old path, so there's
+  // exactly one canonical URL going forward. Runs before any auth check --
+  // an unauthenticated hit here still lands on the right host before the
+  // login redirect below ever has to run.
   if (hostname === LEGACY_APP_HOST && isPortalPath(incomingPathname)) {
     const target = new URL(request.url);
     target.hostname = PORTAL_HOST;
     target.pathname = incomingPathname.slice("/portal".length) || "/";
     return NextResponse.redirect(target, 308);
   }
+  if (hostname === LEGACY_APP_HOST && isLfgPath(incomingPathname)) {
+    const target = new URL(request.url);
+    target.hostname = LFG_HOST;
+    target.pathname = incomingPathname.slice("/lfg".length) || "/";
+    return NextResponse.redirect(target, 308);
+  }
 
-  // portal.mmdi.in serves the exact same pages that live under /portal/*
-  // in the app's file tree, just without that prefix showing in the URL.
-  // `pathname` becomes the REWRITTEN, /portal-prefixed path from here on --
-  // every check below (isPublicPath, isPortalPath, the profile-role
-  // redirect) reasons about this one, so the same logic works unchanged
-  // whether the effective path came from app.mmdi.in/portal/x directly or
-  // from portal.mmdi.in/x being rewritten to it.
+  // portal.mmdi.in / portal.lfg.mmdi.in serve the exact same pages that
+  // live under /portal/* / /lfg/* in the app's file tree, just without
+  // that prefix showing in the URL. `pathname` becomes the REWRITTEN,
+  // prefixed path from here on -- every check below (isPublicPath,
+  // isPortalPath/isLfgPath, the profile-role redirect) reasons about this
+  // one, so the same logic works unchanged whether the effective path
+  // came from app.mmdi.in/portal/x (or /lfg/x) directly, or from the
+  // subdomain being rewritten to it.
   let pathname = incomingPathname;
   let rewriteTarget: URL | null = null;
   if (onPortalHost && !isPortalPath(pathname)) {
     pathname = "/portal" + (pathname === "/" ? "" : pathname);
+    rewriteTarget = new URL(request.url);
+    rewriteTarget.pathname = pathname;
+  } else if (onLfgHost && !isLfgPath(pathname)) {
+    pathname = "/lfg" + (pathname === "/" ? "" : pathname);
     rewriteTarget = new URL(request.url);
     rewriteTarget.pathname = pathname;
   }
@@ -142,11 +167,21 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const portalPath = isPortalPath(pathname);
+  const lfgPath = isLfgPath(pathname);
   // The clean, host-appropriate login path a redirect should actually send
-  // the browser to -- "/login" on the subdomain (rewritten internally to
-  // /portal/login), "/portal/login" everywhere else (app.mmdi.in preview
-  // access, ekms.vercel.app, any Vercel preview deployment).
-  const loginPath = portalPath ? (onPortalHost ? "/login" : "/portal/login") : "/login";
+  // the browser to -- "/login" on the relevant subdomain (rewritten
+  // internally to /portal/login or /lfg/login), the /portal- or /lfg-
+  // prefixed path everywhere else (app.mmdi.in preview access,
+  // ekms.vercel.app, any Vercel preview deployment).
+  const loginPath = portalPath
+    ? onPortalHost
+      ? "/login"
+      : "/portal/login"
+    : lfgPath
+      ? onLfgHost
+        ? "/login"
+        : "/lfg/login"
+      : "/login";
 
   if (!user && !isPublicPath(pathname)) {
     const loginUrl = request.nextUrl.clone();
@@ -185,6 +220,20 @@ export async function updateSession(request: NextRequest) {
       // Portal (customer) accounts are never given an authenticator to
       // enroll (see below) — skip the MFA round trip entirely for them
       // rather than making it and finding out it never applies.
+    } else if (profile?.role === "lfg_partner") {
+      // Same treatment as the portal branch above, for LFG partner
+      // accounts: keep them inside /lfg/* and nowhere else (this also
+      // covers a partner wandering onto /portal/* — !lfgPath is true
+      // there too, so they bounce back to their own home exactly like a
+      // portal account bouncing off an internal URL).
+      if (!lfgPath) {
+        const lfgHome = request.nextUrl.clone();
+        lfgHome.pathname = onLfgHost ? "/" : "/lfg";
+        lfgHome.search = "";
+        return NextResponse.redirect(lfgHome);
+      }
+      // LFG partner accounts are never given an authenticator to enroll
+      // either — skip the MFA round trip for the same reason as portal.
     } else {
       // A user can be signed in at the password-only level (aal1) but have
       // a verified authenticator app enrolled on their account, which
