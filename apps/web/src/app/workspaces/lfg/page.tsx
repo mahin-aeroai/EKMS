@@ -14,6 +14,7 @@ import { useUserRole, canDelete, canWrite } from "@/lib/UserRoleContext";
 import { supabase } from "@/lib/supabase";
 import { LFG_STATUSES, lfgStatusLabel, lfgStatusBadge } from "@/lib/lfgStatus";
 import { formatMm, formatSizeInches, formatDecimal } from "@/lib/lfg-units";
+import { useLfgDistinctValues } from "@/lib/useLfgDistinctValues";
 
 // Site Master list — the entry point to the LFG Connect program's Site 360
 // view. Deliberately a client component doing direct supabase.from()
@@ -103,6 +104,13 @@ export default function LfgSiteListPage() {
   // programIdFilter/programNameFilter above, exact FK match via ?store_id=.
   const [storeIdFilter, setStoreIdFilter] = useState<string>("");
   const [storeNameFilter, setStoreNameFilter] = useState<string>("");
+  // On-screen Format picker -- previously formatFilter could only be set
+  // via the Format Dashboard's ?format= click-through, with no way to
+  // choose one directly from this screen. Added so a whole retail chain's
+  // sites can be filtered down to, selected all at once (the header
+  // checkbox, task #69), and bulk "Move to Program"'d in one visit here,
+  // rather than needing a trip through the Dashboard first.
+  const formatOptions = useLfgDistinctValues("format");
   const [rows, setRows] = useState<LfgSiteListRow[] | null>(null);
   // How many OTHER sites currently on screen share each store_id -- a
   // lightweight, page-scoped count (not a full-table aggregate) purely to
@@ -609,6 +617,18 @@ export default function LfgSiteListPage() {
             className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-ink-muted"
           />
         </div>
+        <select
+          value={formatFilter}
+          onChange={(e) => setFormatFilter(e.target.value)}
+          className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
+        >
+          <option value="">All formats</option>
+          {formatOptions.map((f) => (
+            <option key={f} value={f}>
+              {f}
+            </option>
+          ))}
+        </select>
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
