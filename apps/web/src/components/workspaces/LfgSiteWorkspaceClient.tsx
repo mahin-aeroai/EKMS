@@ -11,6 +11,7 @@ import { Tabs, type TabItem } from "@/components/ui/Tabs";
 import { Timeline, type TimelineEntry } from "@/components/ui/Timeline";
 import { useToast } from "@/components/ui/Notifications";
 import { useUserRole, canWrite, canDelete } from "@/lib/UserRoleContext";
+import { formatDecimal } from "@/lib/lfg-units";
 import { supabase } from "@/lib/supabase";
 import {
   LFG_STATUSES,
@@ -464,10 +465,10 @@ export function LfgSiteWorkspaceClient({
             <Field label="Material" value={site.material} />
             <Field label="Mat Code" value={site.mat_code} />
             <Field label="Number of Sites" value={site.number_of_sites} />
-            <Field label="Width" value={site.width} />
-            <Field label="Height" value={site.height} />
-            <Field label="Bleed" value={site.bleed} />
-            <Field label="SQFT" value={site.sqft} />
+            <Field label="Width" value={formatDecimal(site.width)} />
+            <Field label="Height" value={formatDecimal(site.height)} />
+            <Field label="Bleed" value={formatDecimal(site.bleed)} />
+            <Field label="SQFT" value={formatDecimal(site.sqft)} />
             <Field label="Partner" value={partner?.name} />
             <Field label="ASM Name" value={site.asm_name} />
             <Field label="ASM Mobile" value={site.asm_mobile} />
@@ -970,7 +971,7 @@ export function SurveyTab({
               <div>
                 <span className="font-medium text-ink">{s.survey_date ?? "No date"}</span>
                 <span className="ml-2 text-ink-secondary">
-                  {s.measured_width ?? "—"} × {s.measured_height ?? "—"}
+                  {formatDecimal(s.measured_width)} × {formatDecimal(s.measured_height)}
                 </span>
                 {s.measurements_remarks && <p className="mt-0.5 text-xs text-ink-muted">{s.measurements_remarks}</p>}
               </div>

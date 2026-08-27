@@ -10,6 +10,7 @@ import { Tabs, type TabItem } from "@/components/ui/Tabs";
 import { Timeline, type TimelineEntry } from "@/components/ui/Timeline";
 import { useToast } from "@/components/ui/Notifications";
 import { useLfgUser } from "@/lib/LfgUserContext";
+import { formatDecimal } from "@/lib/lfg-units";
 import { supabase } from "@/lib/supabase";
 import {
   type LfgSite,
@@ -217,10 +218,10 @@ export function LfgPartnerSiteClient({
             <Field label="Material" value={site.material} />
             <Field label="Mat Code" value={site.mat_code} />
             <Field label="Number of Sites" value={site.number_of_sites} />
-            <Field label="Width" value={site.width} />
-            <Field label="Height" value={site.height} />
-            <Field label="Bleed" value={site.bleed} />
-            <Field label="SQFT" value={site.sqft} />
+            <Field label="Width" value={formatDecimal(site.width)} />
+            <Field label="Height" value={formatDecimal(site.height)} />
+            <Field label="Bleed" value={formatDecimal(site.bleed)} />
+            <Field label="SQFT" value={formatDecimal(site.sqft)} />
             <Field label="ASM Name" value={site.asm_name} />
             <Field label="ASM Mobile" value={site.asm_mobile} />
             <Field label="ASM Email" value={site.asm_email} />

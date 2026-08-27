@@ -13,7 +13,7 @@ import { useToast } from "@/components/ui/Notifications";
 import { useUserRole, canDelete, canWrite } from "@/lib/UserRoleContext";
 import { supabase } from "@/lib/supabase";
 import { LFG_STATUSES, lfgStatusLabel, lfgStatusBadge } from "@/lib/lfgStatus";
-import { formatMm, formatSizeInches } from "@/lib/lfg-units";
+import { formatMm, formatSizeInches, formatDecimal } from "@/lib/lfg-units";
 
 // Site Master list — the entry point to the LFG Connect program's Site 360
 // view. Deliberately a client component doing direct supabase.from()
@@ -64,10 +64,6 @@ interface LfgSiteListRow {
 function partnerName(row: LfgSiteListRow): string {
   const p = Array.isArray(row.lfg_partners) ? row.lfg_partners[0] : row.lfg_partners;
   return p?.name ?? "—";
-}
-
-function formatNum(n: number | null): string {
-  return n === null || n === undefined ? "—" : String(n);
 }
 
 interface ProgramOption {
@@ -314,7 +310,7 @@ export default function LfgSiteListPage() {
     { key: "height", header: "Height (mm)", sortable: true, render: (r) => formatMm(r.height) },
     { key: "lfg_partners", header: "Size (in)", render: (r) => formatSizeInches(r.width, r.height) },
     { key: "number_of_sites", header: "Qty", sortable: true },
-    { key: "bleed", header: "Bleed", sortable: true, render: (r) => formatNum(r.bleed) },
+    { key: "bleed", header: "Bleed", sortable: true, render: (r) => formatDecimal(r.bleed) },
     {
       key: "site_status",
       header: "Status",

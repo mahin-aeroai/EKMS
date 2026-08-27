@@ -11,7 +11,7 @@ import { useLfgUser } from "@/lib/LfgUserContext";
 import { useLfgHost, lfgHref } from "@/lib/lfg-links";
 import { supabase } from "@/lib/supabase";
 import { LFG_STATUSES, lfgStatusLabel, lfgStatusBadge } from "@/lib/lfgStatus";
-import { formatMm, formatSizeInches } from "@/lib/lfg-units";
+import { formatMm, formatSizeInches, formatDecimal } from "@/lib/lfg-units";
 
 // Real LFG partner Site Master (task #19) -- replaces the earlier
 // placeholder home. Same debounced search + status filter shape as the
@@ -56,10 +56,6 @@ interface PartnerSiteRow {
 function partnerName(row: PartnerSiteRow): string {
   const p = Array.isArray(row.lfg_partners) ? row.lfg_partners[0] : row.lfg_partners;
   return p?.name ?? "—";
-}
-
-function formatNum(n: number | null): string {
-  return n === null || n === undefined ? "—" : String(n);
 }
 
 export default function LfgPartnerSitesPage() {
@@ -130,7 +126,7 @@ export default function LfgPartnerSitesPage() {
     { key: "height", header: "Height (mm)", sortable: true, render: (r) => formatMm(r.height) },
     { key: "id", header: "Size (in)", render: (r) => formatSizeInches(r.width, r.height) },
     { key: "number_of_sites", header: "Qty", sortable: true },
-    { key: "bleed", header: "Bleed", sortable: true, render: (r) => formatNum(r.bleed) },
+    { key: "bleed", header: "Bleed", sortable: true, render: (r) => formatDecimal(r.bleed) },
     {
       key: "site_status",
       header: "Status",
