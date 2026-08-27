@@ -13,6 +13,7 @@ import { useToast } from "@/components/ui/Notifications";
 import { useUserRole, canDelete, canWrite } from "@/lib/UserRoleContext";
 import { supabase } from "@/lib/supabase";
 import { LFG_STATUSES, lfgStatusLabel, lfgStatusBadge } from "@/lib/lfgStatus";
+import { formatMm, formatSizeInches } from "@/lib/lfg-units";
 
 // Site Master list — the entry point to the LFG Connect program's Site 360
 // view. Deliberately a client component doing direct supabase.from()
@@ -98,6 +99,15 @@ export default function LfgSiteListPage() {
   const [programNameFilter, setProgramNameFilter] = useState<string>("");
   const [rows, setRows] = useState<LfgSiteListRow[] | null>(null);
   const [totalCount, setTotalCount] = useState<number | null>(null);
+  // Data-completeness audit (task #59) -- some records are missing City,
+  // ASM details, or SFO/Apple ID (the field Apple keys every site off,
+  // per this file's header comment on default sort). This is a live exact
+  // count across ALL sites, not just the currently-loaded page of rows, so
+  // it stays accurate under any search/filter. Clicking the card jumps
+  // straight to those records via the same free-text search the box above
+  // already supports.
+  const [missingCount, setMissingCount] = useState<number | null>(null);
+  const [gapsOnly, setGapsOnly] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<LfgSiteListRow | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -166,6 +176,11 @@ export default function LfgSiteListPage() {
       .select("*", { count: "exact", head: true })
       .then(({ count }) => setTotalCount(count ?? 0));
     supabase
+      .from("lfg_sites")
+      .select("*", { count: "exact", head: true })
+      .or("city.is.null,asm_name.is.null,sfo_id.is.null")
+      .then(({ count }) => setMissingCount(count ?? 0));
+    supabase
       .from("lfg_programs")
       .select("id, name")
       .eq("active", true)
@@ -222,13 +237,17 @@ export default function LfgSiteListPage() {
         // so a single chain (or a single season's wave) can easily hold
         // hundreds -- while the default unfiltered browse still caps at the
         // most recent 100, same as before.
-        .limit(formatFilter || programIdFilter ? 5000 : 100);
+        .limit(formatFilter || programIdFilter || gapsOnly ? 5000 : 100);
 
       if (statusFilter) q = q.eq("site_status", statusFilter);
       // Exact match, not the fuzzy `.or()` ilike below -- this is what makes
       // a Format Dashboard click land on strictly that format's sites.
       if (formatFilter) q = q.eq("format", formatFilter);
       if (programIdFilter) q = q.eq("program_id", programIdFilter);
+      // "Data Gaps" stat card toggle (task #59) -- jumps straight to the
+      // records missing City, ASM name, or SFO/Apple ID, same three fields
+      // the missingCount audit query above counts.
+      if (gapsOnly) q = q.or("city.is.null,asm_name.is.null,sfo_id.is.null");
 
       const trimmed = query.trim();
       if (trimmed) {
@@ -251,7 +270,7 @@ export default function LfgSiteListPage() {
     }, 250);
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, statusFilter, formatFilter, programIdFilter]);
+  }, [query, statusFilter, formatFilter, programIdFilter, gapsOnly]);
 
   const COLUMNS: TableColumn<SelectableRow>[] = [
     ...(editable
@@ -275,26 +294,27 @@ export default function LfgSiteListPage() {
     { key: "site_id", header: "LFG Code", sortable: true },
     { key: "sfo_id", header: "SFO / Apple ID", sortable: true, render: (r) => r.sfo_id ?? "—" },
     { key: "outlet_name", header: "Store Name", sortable: true },
-    { key: "city", header: "City", sortable: true, render: (r) => r.city ?? "—" },
-    { key: "region", header: "Region", sortable: true, render: (r) => r.region ?? "—" },
-    { key: "material", header: "Material", sortable: true, render: (r) => r.material ?? "—" },
-    { key: "mat_code", header: "Mat Code", sortable: true, render: (r) => r.mat_code ?? "—" },
-    { key: "width", header: "Width", sortable: true, render: (r) => formatNum(r.width) },
-    { key: "height", header: "Height", sortable: true, render: (r) => formatNum(r.height) },
-    { key: "number_of_sites", header: "Qty", sortable: true },
-    { key: "bleed", header: "Bleed", sortable: true, render: (r) => formatNum(r.bleed) },
     {
       key: "active",
       header: "Active",
       sortable: true,
       render: (r) => <Badge status={r.active ? "success" : "neutral"}>{r.active ? "Yes" : "No"}</Badge>,
     },
+    { key: "city", header: "City", sortable: true, render: (r) => r.city ?? "—" },
+    { key: "region", header: "Region", sortable: true, render: (r) => r.region ?? "—" },
     {
       key: "format",
       header: "Format",
       sortable: true,
       render: (r) => r.format ?? "—",
     },
+    { key: "material", header: "Material", sortable: true, width: "12rem", render: (r) => r.material ?? "—" },
+    { key: "mat_code", header: "Mat Code", sortable: true, render: (r) => r.mat_code ?? "—" },
+    { key: "width", header: "Width (mm)", sortable: true, render: (r) => formatMm(r.width) },
+    { key: "height", header: "Height (mm)", sortable: true, render: (r) => formatMm(r.height) },
+    { key: "lfg_partners", header: "Size (in)", render: (r) => formatSizeInches(r.width, r.height) },
+    { key: "number_of_sites", header: "Qty", sortable: true },
+    { key: "bleed", header: "Bleed", sortable: true, render: (r) => formatNum(r.bleed) },
     {
       key: "site_status",
       header: "Status",
@@ -359,13 +379,25 @@ export default function LfgSiteListPage() {
         </div>
       </div>
 
-      <div className="my-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="my-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Total Sites" value={totalCount === null ? "…" : String(totalCount)} trend="flat" trendLabel="Live count" />
+        <button
+          type="button"
+          onClick={() => setGapsOnly((v) => !v)}
+          className="text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-lg"
+        >
+          <StatCard
+            label="Data Gaps"
+            value={missingCount === null ? "…" : String(missingCount)}
+            trend={missingCount ? "down" : "flat"}
+            trendLabel={gapsOnly ? "Showing only these — click to clear" : "Missing City / ASM / SFO ID — click to view"}
+          />
+        </button>
         <StatCard
           label="Showing"
           value={rows === null ? "…" : String(rows.length)}
           trend="flat"
-          trendLabel={query.trim() || statusFilter || formatFilter || programIdFilter ? "Filtered" : "Most recent 100"}
+          trendLabel={query.trim() || statusFilter || formatFilter || programIdFilter || gapsOnly ? "Filtered" : "Most recent 100"}
         />
         <StatCard
           label="Needs Attention"
@@ -418,6 +450,22 @@ export default function LfgSiteListPage() {
               </button>
             </span>
           )}
+        </div>
+      )}
+
+      {gapsOnly && (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-primary bg-primary-tint px-3 py-1 text-xs font-medium text-primary">
+            Data Gaps: missing City / ASM / SFO ID
+            <button
+              type="button"
+              aria-label="Clear data gaps filter"
+              onClick={() => setGapsOnly(false)}
+              className="rounded-full p-0.5 hover:bg-primary/10"
+            >
+              <X size={12} />
+            </button>
+          </span>
         </div>
       )}
 

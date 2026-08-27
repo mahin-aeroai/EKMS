@@ -2,7 +2,7 @@
 
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { MapPin, Pencil, FileText, Lock, Upload, Eye, Trash2, Truck } from "lucide-react";
+import { MapPin, Pencil, FileText, Lock, Upload, Eye, Trash2, Truck, ArrowLeft } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -203,7 +203,10 @@ interface AuditLogRow {
   entity_id: string;
 }
 
-function partnerOf(site: LfgSite) {
+// Exported so LfgPartnerSiteClient (task #58's Installation Team
+// auto-fill needs the site's Partner name there too) can reuse the exact
+// same array-or-object normalization instead of re-deriving it inline.
+export function partnerOf(site: LfgSite) {
   const p = Array.isArray(site.lfg_partners) ? site.lfg_partners[0] : site.lfg_partners;
   return p ?? null;
 }
@@ -477,14 +480,10 @@ export function LfgSiteWorkspaceClient({
               <Field label="Remarks" value={site.remarks} />
             </div>
           </div>
-        </div>
-      ),
-    },
-    {
-      id: "status",
-      label: "Status",
-      content: (
-        <div className="flex flex-col gap-4">
+          {/* Status was previously its own tab -- folded in here (task
+              #55) since it was really just one more fact about the site,
+              not enough content on its own to earn a whole tab amid an
+              already-long tab bar. */}
           <div className="flex items-center justify-between rounded-lg border border-line bg-surface p-4">
             <div className="flex items-center gap-3">
               <span className="text-xs text-ink-muted">Current status</span>
@@ -497,7 +496,7 @@ export function LfgSiteWorkspaceClient({
             )}
           </div>
           <div className="rounded-lg border border-line bg-surface p-4">
-            <h3 className="mb-3 text-sm font-semibold text-ink">History</h3>
+            <h3 className="mb-3 text-sm font-semibold text-ink">Status History</h3>
             {statusHistory.length === 0 ? (
               <p className="text-sm text-ink-muted">No status changes recorded yet.</p>
             ) : (
@@ -551,6 +550,7 @@ export function LfgSiteWorkspaceClient({
           editable={editable}
           canDeletePhotos={canDelete(role)}
           onChanged={() => router.refresh()}
+          partnerName={partner?.name}
         />
       ),
     },
@@ -623,6 +623,14 @@ export function LfgSiteWorkspaceClient({
       <Breadcrumbs
         items={[{ label: "Home", href: "/" }, { label: "LFG Connect", href: "/workspaces/lfg" }, { label: site.site_id }]}
       />
+
+      {/* Site 360 can be reached from several places (Site Master, Format
+          Dashboard, Programs) -- router.back() returns to whichever one
+          actually got you here, rather than a single hardcoded href
+          (task #56). */}
+      <Button variant="ghost" size="sm" className="mt-3" onClick={() => router.back()}>
+        <ArrowLeft size={14} className="mr-1.5" /> Back
+      </Button>
 
       <div className="mt-4 flex flex-col gap-4 border-b border-line pb-6 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-4">
@@ -892,16 +900,24 @@ export function SurveyTab({
             {creativeReceivedAt ? `Received ${new Date(creativeReceivedAt).toLocaleString()}` : "Not yet received"}
           </div>
         </div>
-        {editable &&
-          (creativeReceivedAt ? (
-            <Button size="sm" variant="secondary" loading={savingCreative} onClick={handleUndoCreativeReceived}>
-              Undo
-            </Button>
-          ) : (
-            <Button size="sm" loading={savingCreative} onClick={handleMarkCreativeReceived}>
-              Mark Received
-            </Button>
-          ))}
+        {/* Was two separate mark/undo buttons -- collapsed into one
+            dropdown (task #57), same two underlying handlers either way
+            since nothing about the mark/undo logic itself needed to
+            change, just how it's triggered. */}
+        {editable && (
+          <select
+            value={creativeReceivedAt ? "received" : "awaiting"}
+            disabled={savingCreative}
+            onChange={(e) => {
+              if (e.target.value === "received" && !creativeReceivedAt) void handleMarkCreativeReceived();
+              if (e.target.value === "awaiting" && creativeReceivedAt) void handleUndoCreativeReceived();
+            }}
+            className="rounded-md border border-line-strong bg-surface px-3 py-1.5 text-sm text-ink focus:border-primary focus:outline-none"
+          >
+            <option value="awaiting">Awaiting</option>
+            <option value="received">Received</option>
+          </select>
+        )}
       </div>
 
       {editable && (
@@ -1552,6 +1568,7 @@ export function InstallationTab({
   editable,
   canDeletePhotos,
   onChanged,
+  partnerName,
 }: {
   siteId: string;
   initial: InstallationRow | null;
@@ -1559,6 +1576,14 @@ export function InstallationTab({
   editable: boolean;
   canDeletePhotos: boolean;
   onChanged: () => void;
+  // Site's assigned Partner (lfg_sites.partner_id -> lfg_partners.name) --
+  // Installation Team was a free-text field entirely separate from Partner,
+  // which the user pointed out are "the same" for how this program
+  // actually runs (the partner company IS the installation team). Rather
+  // than remove the field, default it to the Partner name so it's
+  // pre-filled and still editable for the rare case a site's on-ground
+  // installer differs from its assigned Partner (task #58).
+  partnerName?: string | null;
 }) {
   const { toast } = useToast();
   const [editing, setEditing] = useState(false);
@@ -1568,7 +1593,7 @@ export function InstallationTab({
     scaffolding_required: initial?.scaffolding_required ?? false,
     scaffolding_size: initial?.scaffolding_size ?? "",
     installation_date: initial?.installation_date ?? "",
-    installation_team: initial?.installation_team ?? "",
+    installation_team: initial?.installation_team ?? partnerName ?? "",
     installation_status: initial?.installation_status ?? "pending",
     installation_remarks: initial?.installation_remarks ?? "",
   });
@@ -1715,6 +1740,7 @@ export function InstallationTab({
               <input
                 className={inputClass}
                 value={form.installation_team}
+                placeholder={partnerName ?? undefined}
                 onChange={(e) => setForm((f) => ({ ...f, installation_team: e.target.value }))}
               />
             </div>

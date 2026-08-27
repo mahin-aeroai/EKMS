@@ -9,6 +9,11 @@ export interface TableColumn<T> {
   header: string;
   render?: (row: T) => React.ReactNode;
   sortable?: boolean;
+  /** Optional fixed/minimum column width, e.g. "12rem" or "180px". Applied
+   * to both the header and body cells via inline style so it survives
+   * regardless of content length -- most columns don't need this, only
+   * ones that otherwise wrap awkwardly (e.g. a long Material name). */
+  width?: string;
 }
 
 interface TableProps<T extends { id: string }> {
@@ -61,7 +66,11 @@ export function Table<T extends { id: string }>({
         <thead className="sticky top-0 bg-surface-sunken text-xs font-semibold uppercase tracking-wide text-ink-secondary">
           <tr>
             {columns.map((col) => (
-              <th key={String(col.key)} className="px-4 py-2.5">
+              <th
+                key={String(col.key)}
+                className="px-4 py-2.5"
+                style={col.width ? { width: col.width, minWidth: col.width } : undefined}
+              >
                 {col.sortable ? (
                   <button
                     onClick={() => toggleSort(col.key)}
@@ -93,7 +102,11 @@ export function Table<T extends { id: string }>({
               )}
             >
               {columns.map((col) => (
-                <td key={String(col.key)} className="px-4">
+                <td
+                  key={String(col.key)}
+                  className="px-4"
+                  style={col.width ? { width: col.width, minWidth: col.width } : undefined}
+                >
                   {col.render ? col.render(row) : String(row[col.key])}
                 </td>
               ))}

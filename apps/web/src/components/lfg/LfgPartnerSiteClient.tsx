@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Upload, Eye } from "lucide-react";
+import { Upload, Eye, ArrowLeft } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
@@ -26,6 +26,7 @@ import {
   ShipmentTab,
   InstallationTab,
   DocumentsTab,
+  partnerOf,
 } from "@/components/workspaces/LfgSiteWorkspaceClient";
 import { LFG_STATUSES, lfgStatusLabel, lfgStatusBadge } from "@/lib/lfgStatus";
 
@@ -98,6 +99,7 @@ export function LfgPartnerSiteClient({
   // gated), so this surface just shows the site's current one.
   const programEntry = Array.isArray(site.lfg_programs) ? site.lfg_programs[0] : site.lfg_programs;
   const programName = programEntry?.name;
+  const partner = partnerOf(site);
 
   const [statusHistory] = useState(initialStatusHistory);
   const [showStatusDialog, setShowStatusDialog] = useState(false);
@@ -229,14 +231,8 @@ export function LfgPartnerSiteClient({
               <Field label="Remarks" value={site.remarks} />
             </div>
           </div>
-        </div>
-      ),
-    },
-    {
-      id: "status",
-      label: "Status",
-      content: (
-        <div className="flex flex-col gap-4">
+          {/* Status was previously its own tab -- folded in here (task
+              #55), mirroring the same change in the staff Site 360. */}
           <div className="flex items-center justify-between rounded-lg border border-line bg-surface p-4">
             <div className="flex items-center gap-3">
               <span className="text-xs text-ink-muted">Current status</span>
@@ -247,7 +243,7 @@ export function LfgPartnerSiteClient({
             </Button>
           </div>
           <div className="rounded-lg border border-line bg-surface p-4">
-            <h3 className="mb-3 text-sm font-semibold text-ink">History</h3>
+            <h3 className="mb-3 text-sm font-semibold text-ink">Status History</h3>
             {statusHistory.length === 0 ? (
               <p className="text-sm text-ink-muted">No status changes recorded yet.</p>
             ) : (
@@ -306,6 +302,7 @@ export function LfgPartnerSiteClient({
           editable={editable}
           canDeletePhotos={canDelete}
           onChanged={() => router.refresh()}
+          partnerName={partner?.name}
         />
       ),
     },
@@ -326,6 +323,12 @@ export function LfgPartnerSiteClient({
 
   return (
     <div>
+      {/* Landing here is always from the partner "Your Sites" / "All
+          Sites" list -- router.back() returns there (task #56). */}
+      <Button variant="ghost" size="sm" className="mb-3" onClick={() => router.back()}>
+        <ArrowLeft size={14} className="mr-1.5" /> Back
+      </Button>
+
       <div className="flex flex-col gap-4 border-b border-line pb-6 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <div className="flex flex-wrap items-center gap-2">

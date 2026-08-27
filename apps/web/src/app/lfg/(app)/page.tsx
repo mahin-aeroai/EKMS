@@ -11,6 +11,7 @@ import { useLfgUser } from "@/lib/LfgUserContext";
 import { useLfgHost, lfgHref } from "@/lib/lfg-links";
 import { supabase } from "@/lib/supabase";
 import { LFG_STATUSES, lfgStatusLabel, lfgStatusBadge } from "@/lib/lfgStatus";
+import { formatMm, formatSizeInches } from "@/lib/lfg-units";
 
 // Real LFG partner Site Master (task #19) -- replaces the earlier
 // placeholder home. Same debounced search + status filter shape as the
@@ -45,6 +46,8 @@ interface PartnerSiteRow {
   width: number | null;
   height: number | null;
   bleed: number | null;
+  active: boolean;
+  format: string | null;
   site_status: string;
   number_of_sites: number;
   lfg_partners: { name: string } | { name: string }[] | null;
@@ -83,7 +86,7 @@ export default function LfgPartnerSitesPage() {
       let q = supabase
         .from("lfg_sites")
         .select(
-          "id, site_id, outlet_name, sfo_id, city, region, material, mat_code, width, height, bleed, site_status, number_of_sites, lfg_partners(name)"
+          "id, site_id, outlet_name, sfo_id, city, region, material, mat_code, width, height, bleed, active, format, site_status, number_of_sites, lfg_partners(name)"
         )
         .order("sfo_id", { ascending: true, nullsFirst: false })
         .limit(identity.isStaff ? 5000 : 200);
@@ -112,12 +115,20 @@ export default function LfgPartnerSitesPage() {
     { key: "site_id", header: "Site ID", sortable: true },
     { key: "sfo_id", header: "SFO / Apple ID", sortable: true, render: (r) => r.sfo_id ?? "—" },
     { key: "outlet_name", header: "Store Name", sortable: true },
+    {
+      key: "active",
+      header: "Active",
+      sortable: true,
+      render: (r) => <Badge status={r.active ? "success" : "neutral"}>{r.active ? "Yes" : "No"}</Badge>,
+    },
     { key: "city", header: "City", sortable: true, render: (r) => r.city ?? "—" },
     { key: "region", header: "Region", sortable: true, render: (r) => r.region ?? "—" },
-    { key: "material", header: "Material", sortable: true, render: (r) => r.material ?? "—" },
+    { key: "format", header: "Format", sortable: true, render: (r) => r.format ?? "—" },
+    { key: "material", header: "Material", sortable: true, width: "12rem", render: (r) => r.material ?? "—" },
     { key: "mat_code", header: "Mat Code", sortable: true, render: (r) => r.mat_code ?? "—" },
-    { key: "width", header: "Width", sortable: true, render: (r) => formatNum(r.width) },
-    { key: "height", header: "Height", sortable: true, render: (r) => formatNum(r.height) },
+    { key: "width", header: "Width (mm)", sortable: true, render: (r) => formatMm(r.width) },
+    { key: "height", header: "Height (mm)", sortable: true, render: (r) => formatMm(r.height) },
+    { key: "id", header: "Size (in)", render: (r) => formatSizeInches(r.width, r.height) },
     { key: "number_of_sites", header: "Qty", sortable: true },
     { key: "bleed", header: "Bleed", sortable: true, render: (r) => formatNum(r.bleed) },
     {
