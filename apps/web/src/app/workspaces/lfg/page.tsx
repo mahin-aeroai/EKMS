@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { MapPin, Search, Plus, LayoutDashboard, Trash2, X } from "lucide-react";
+import { MapPin, Search, Plus, LayoutDashboard, Users, Trash2, X } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { StatCard } from "@/components/ui/Card";
@@ -206,6 +206,9 @@ export default function LfgSiteListPage() {
         <div className="flex items-center gap-2">
           <Button variant="secondary" onClick={() => router.push("/workspaces/lfg/dashboard")}>
             <LayoutDashboard size={15} className="mr-1.5" /> Dashboard
+          </Button>
+          <Button variant="secondary" onClick={() => router.push("/workspaces/lfg/partners")}>
+            <Users size={15} className="mr-1.5" /> Partners
           </Button>
           <Button onClick={() => router.push("/workspaces/lfg/new")}>
             <Plus size={15} className="mr-1.5" /> New Site
