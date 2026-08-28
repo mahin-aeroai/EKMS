@@ -10,6 +10,7 @@ import { supabase } from "@/lib/supabase";
 import { lfgStatusLabel, lfgStatusBadge } from "@/lib/lfgStatus";
 import { formatSizeMm } from "@/lib/lfg-units";
 import { formatPlaceholderColor, isLightColor } from "@/lib/lfg-format-colors";
+import { LfgBenchmarkStrip } from "./LfgBenchmarkStrip";
 import { INSTALLATION_STATUSES } from "./LfgSiteWorkspaceClient";
 
 // Site Cards (task #76) -- a photo-forward, one-card-per-site alternative
@@ -54,6 +55,9 @@ export interface LfgSiteCardRow {
   // Cards, where every site already gets its own full card, per-card
   // ordinals read better than a single shared count.
   store_id: string | null;
+  // Feeds the benchmark checklist (LfgBenchmarkStrip) -- see
+  // lfgBenchmarkStatus()'s own header comment in lfgStatus.ts.
+  creative_received_at: string | null;
 }
 
 // Groups the (already filtered) row set by store_id and numbers each
@@ -493,6 +497,14 @@ function SiteCard({
           <Field label="Material" value={row.material} />
           <Field label="Size (mm)" value={formatSizeMm(row.width, row.height) === "—" ? null : formatSizeMm(row.width, row.height)} />
           <Field label="Installation by" value={partner} muted={!partner} fallback="Unassigned" />
+        </div>
+
+        {/* Six-checkpoint benchmark checklist -- crossed stages, at a
+            glance, for this site. Same LfgBenchmarkStrip the Status Sheet
+            renders, so a site's crossed stages read identically everywhere
+            it's shown. */}
+        <div className="mt-3.5">
+          <LfgBenchmarkStrip status={row.site_status} creativeReceivedAt={row.creative_received_at} />
         </div>
 
         <div className="my-4 h-px bg-line" />

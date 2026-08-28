@@ -96,6 +96,10 @@ interface LfgSiteListRow {
   // same already-filtered row set.
   store_address: string | null;
   site_reference_picture_path: string | null;
+  // Also Cards-only (the benchmark checklist, LfgBenchmarkStrip) -- see
+  // lfgBenchmarkStatus()'s own header comment in lfgStatus.ts for why
+  // Creative Received needs this alongside site_status.
+  creative_received_at: string | null;
 }
 
 function partnerName(row: LfgSiteListRow): string {
@@ -334,7 +338,7 @@ export default function LfgSiteListPage() {
           let q = supabase
             .from("lfg_sites")
             .select(
-              "id, site_id, outlet_name, format, sfo_id, city, region, material, mat_code, width, height, bleed, store_id, site_status, number_of_sites, asm_name, partner_id, lfg_partners(name), store_address, site_reference_picture_path"
+              "id, site_id, outlet_name, format, sfo_id, city, region, material, mat_code, width, height, bleed, store_id, site_status, number_of_sites, asm_name, partner_id, lfg_partners(name), store_address, site_reference_picture_path, creative_received_at"
             )
             // Default sort: SFO/Apple ID ascending, not the internal LFG
             // code -- see this file's header comment. nullsFirst: false so

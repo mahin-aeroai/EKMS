@@ -252,6 +252,68 @@ export function lfgTrackingPercent(status: string): number {
 }
 
 /**
+ * Six fixed "benchmark" checkpoints (task: "we have benchmark statuses...
+ * we should display all of on each site... so we will know the stages
+ * that are crossed") -- coarser than the full 18-value LFG_STATUSES
+ * lifecycle or the 10 Program Dashboard pipeline stages
+ * (LFG_PIPELINE_STAGES): just six milestones, always shown together as a
+ * checklist (crossed / not yet), not a continuous bar -- the Site Cards
+ * tracking bar this same idea could have resembled was explicitly removed
+ * per earlier feedback ("remove the bar"), so this is deliberately a row
+ * of discrete labeled checkpoints instead.
+ *
+ * `throughStatus` is the LAST LFG_STATUSES value that still counts as "at"
+ * that checkpoint -- a site crosses it once its own status sits at or past
+ * that point in LFG_STATUSES' own fixed order (that array's own comment:
+ * "single source of truth for its order"). Creative Received is the one
+ * exception: it also counts as crossed the moment creativeReceivedAt is
+ * set, even while the site is still sitting in New/Survey -- same split
+ * lfgPipelineStageOf() already makes for the same reason (creative can
+ * arrive before a site formally leaves the survey stage).
+ *
+ * Same simplification LFG_STATUS_TRACKING_PERCENT's own comment already
+ * accepts for on_hold/issue_attention_required/deactivation_requested/
+ * deactivated: they're flags/end-states a site can reach from any real
+ * stage, but LFG_STATUSES still places them at the very end of its
+ * lifecycle array, so a site sitting in any of them shows every checkpoint
+ * as crossed here -- not always literally true (a site can go on_hold
+ * early), but reconstructing the real answer would mean reading each
+ * site's full lfg_site_status_history, not just its current row, which
+ * every surface this renders on (Status Sheet, Site Cards) fetches many
+ * sites at once and can't afford per-site.
+ */
+export interface LfgBenchmark {
+  key: string;
+  label: string;
+  throughStatus: LfgStatus;
+}
+
+export const LFG_BENCHMARKS: LfgBenchmark[] = [
+  { key: "survey_completed", label: "Site Survey Completed", throughStatus: "survey_completed" },
+  { key: "creative_received", label: "Creative Received (New)", throughStatus: "production_pending" },
+  { key: "in_production", label: "In Production", throughStatus: "in_production" },
+  { key: "shipped", label: "Shipped", throughStatus: "dispatched" },
+  { key: "delivered", label: "Delivered", throughStatus: "delivered" },
+  { key: "installed", label: "Installed", throughStatus: "installation_completed" },
+];
+
+export interface LfgBenchmarkState {
+  key: string;
+  label: string;
+  crossed: boolean;
+}
+
+export function lfgBenchmarkStatus(status: string, creativeReceivedAt?: string | null): LfgBenchmarkState[] {
+  const rank = LFG_STATUSES.indexOf(status as LfgStatus);
+  return LFG_BENCHMARKS.map((b) => {
+    if (b.key === "creative_received" && creativeReceivedAt) {
+      return { key: b.key, label: b.label, crossed: true };
+    }
+    return { key: b.key, label: b.label, crossed: rank >= LFG_STATUSES.indexOf(b.throughStatus) };
+  });
+}
+
+/**
  * The priority order given for the Program Dashboard's format/chain
  * groups -- everything else follows, alphabetically. Matched
  * case-insensitively and by substring in both directions (so "Reliance"

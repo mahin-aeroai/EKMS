@@ -11,7 +11,10 @@ import { useUserRole, canWrite } from "@/lib/UserRoleContext";
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/dashboard-queries";
 import { timeAgo } from "@/lib/timeAgo";
+import { formatSizeMm } from "@/lib/lfg-units";
+import { useLfgDistinctValues } from "@/lib/useLfgDistinctValues";
 import { LFG_STATUSES, lfgStatusLabel, lfgStatusBadge, lfgFormatPriorityRank, type LfgStatus } from "@/lib/lfgStatus";
+import { LfgBenchmarkStrip } from "@/components/workspaces/LfgBenchmarkStrip";
 
 // Status Sheet (task: "make an update/editing page like excel sheet to
 // update all kind of statuses") -- a dedicated, fast bulk status-review
@@ -24,13 +27,24 @@ import { LFG_STATUSES, lfgStatusLabel, lfgStatusBadge, lfgFormatPriorityRank, ty
 // Deliberately only THREE columns (Site / Current Status / Update) so the
 // whole sheet fits one screen width with no left-right scroll ("no
 // scrolling left to right... use multiple row per site within cell if
-// required") -- the Site cell wraps its identifying details onto a second
-// line inside the cell rather than spreading them into more columns.
+// required") -- the Site cell packs its identifying details (LFG code,
+// SFO ID, Format, City, Size in mm, Material, Installation Partner), the
+// "Site X of N" ordinal badge for a multi-display store (same yellowish-
+// green #D7F26D pill Site Cards uses), and the six-checkpoint benchmark
+// strip (LfgBenchmarkStrip -- Site Survey Completed / Creative Received
+// (New) / In Production / Shipped / Delivered / Installed, so it's
+// obvious at a glance which stages a site has already crossed) onto
+// multiple lines inside the cell, rather than spreading any of it into
+// more columns.
 // Grouped strictly by PROGRAM (season) with a clear section header per
 // program, current season first -- same "most recently created Program =
 // current season" convention as the Programs page and the Programs
 // summary card (lfg_programs.active is never actually toggled by
 // anything, see those files' own header comments), not grouped by format.
+// Format / City / Installation Partner are filters ABOVE the sheet
+// instead (server-side exact match, same pattern the Site Master's own
+// ?format= filter uses), on top of the free-text search and the
+// Program/status filters already there.
 //
 // The "stylish swap button": each row's Update cell is a single button
 // that opens a compact colored-pill picker of all 18 LFG_STATUSES
@@ -50,6 +64,13 @@ interface StatusSheetRow {
   site_status: string;
   program_id: string | null;
   updated_at: string;
+  width: number | null;
+  height: number | null;
+  material: string | null;
+  store_id: string | null;
+  partner_id: string | null;
+  creative_received_at: string | null;
+  lfg_partners: { name: string } | { name: string }[] | null;
 }
 
 interface ProgramOption {
@@ -58,7 +79,17 @@ interface ProgramOption {
   created_at: string;
 }
 
+interface PartnerOption {
+  id: string;
+  name: string;
+}
+
 const NO_PROGRAM_KEY = "__none__";
+
+function partnerName(row: StatusSheetRow): string | null {
+  const p = Array.isArray(row.lfg_partners) ? row.lfg_partners[0] : row.lfg_partners;
+  return p?.name ?? null;
+}
 
 function compareSfoId(a: string | null, b: string | null): number {
   if (a === b) return 0;
@@ -76,6 +107,30 @@ function sortRows(rows: StatusSheetRow[]): StatusSheetRow[] {
   );
 }
 
+// Same "store has more than one display" numbering Site Cards uses
+// (LfgSiteCardGrid.tsx's siteOrdinals) -- kept as its own small local copy
+// rather than a shared import since it's a two-line reduction with no
+// other logic worth centralizing; computed over the full filtered `rows`
+// set so the "N" total stays accurate regardless of which program group a
+// particular site's row happens to render under.
+function siteOrdinals(rows: StatusSheetRow[]): Record<string, { index: number; total: number }> {
+  const byStore = new Map<string, string[]>();
+  for (const r of rows) {
+    if (!r.store_id) continue;
+    const list = byStore.get(r.store_id) ?? [];
+    list.push(r.id);
+    byStore.set(r.store_id, list);
+  }
+  const map: Record<string, { index: number; total: number }> = {};
+  for (const ids of byStore.values()) {
+    if (ids.length < 2) continue;
+    ids.forEach((id, i) => {
+      map[id] = { index: i + 1, total: ids.length };
+    });
+  }
+  return map;
+}
+
 export default function LfgStatusSheetPage() {
   const router = useRouter();
   const role = useUserRole();
@@ -84,9 +139,21 @@ export default function LfgStatusSheetPage() {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [programFilter, setProgramFilter] = useState<string>(""); // "" = all programs
+  const [formatFilter, setFormatFilter] = useState<string>("");
+  const [cityFilter, setCityFilter] = useState<string>("");
+  const [partnerFilter, setPartnerFilter] = useState<string>(""); // partner_id, "" = all partners
   const [rows, setRows] = useState<StatusSheetRow[] | null>(null);
   const [programs, setPrograms] = useState<ProgramOption[]>([]);
+  const [partners, setPartners] = useState<PartnerOption[]>([]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
+  // Format/City options: distinct values already typed into lfg_sites
+  // (same hook the Site Master's New Site form uses). Partner options come
+  // from lfg_partners directly (a real master table, unlike format/city)
+  // so the dropdown always lists every partner on file, not just ones with
+  // a site already assigned.
+  const formatOptions = useLfgDistinctValues("format");
+  const cityOptions = useLfgDistinctValues("city");
 
   useEffect(() => {
     supabase
@@ -94,6 +161,11 @@ export default function LfgStatusSheetPage() {
       .select("id, name, created_at")
       .order("created_at", { ascending: false })
       .then(({ data }) => setPrograms((data as ProgramOption[]) ?? []));
+    supabase
+      .from("lfg_partners")
+      .select("id, name")
+      .order("name")
+      .then(({ data }) => setPartners((data as PartnerOption[]) ?? []));
   }, []);
 
   useEffect(() => {
@@ -102,19 +174,26 @@ export default function LfgStatusSheetPage() {
       fetchAllRows<StatusSheetRow>((from, to) => {
         let q = supabase
           .from("lfg_sites")
-          .select("id, site_id, outlet_name, format, sfo_id, city, site_status, program_id, updated_at")
+          .select(
+            "id, site_id, outlet_name, format, sfo_id, city, site_status, program_id, updated_at, width, height, material, store_id, partner_id, creative_received_at, lfg_partners(name)"
+          )
           .range(from, to);
         if (statusFilter) q = q.eq("site_status", statusFilter);
+        if (formatFilter) q = q.eq("format", formatFilter);
+        if (cityFilter) q = q.eq("city", cityFilter);
+        if (partnerFilter) q = q.eq("partner_id", partnerFilter);
         if (trimmed) {
           q = q.or(
             `site_id.ilike.%${trimmed}%,outlet_name.ilike.%${trimmed}%,sfo_id.ilike.%${trimmed}%,format.ilike.%${trimmed}%,city.ilike.%${trimmed}%`
           );
         }
         return q;
-      }).then((data) => setRows(sortRows(data)));
+      }).then((data) => setRows(sortRows(data as unknown as StatusSheetRow[])));
     }, 250);
     return () => clearTimeout(handle);
-  }, [query, statusFilter]);
+  }, [query, statusFilter, formatFilter, cityFilter, partnerFilter]);
+
+  const ordinals = useMemo(() => siteOrdinals(rows ?? []), [rows]);
 
   function handleStatusChanged(id: string, newStatus: string) {
     setRows((prev) => (prev ? prev.map((r) => (r.id === id ? { ...r, site_status: newStatus, updated_at: new Date().toISOString() } : r)) : prev));
@@ -208,6 +287,42 @@ export default function LfgStatusSheetPage() {
               ))}
             </select>
           )}
+          <select
+            value={formatFilter}
+            onChange={(e) => setFormatFilter(e.target.value)}
+            className="h-9 rounded-md border border-line-strong bg-surface px-2.5 text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            <option value="">All Formats</option>
+            {formatOptions.map((f) => (
+              <option key={f} value={f}>
+                {f}
+              </option>
+            ))}
+          </select>
+          <select
+            value={cityFilter}
+            onChange={(e) => setCityFilter(e.target.value)}
+            className="h-9 rounded-md border border-line-strong bg-surface px-2.5 text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            <option value="">All Cities</option>
+            {cityOptions.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+          <select
+            value={partnerFilter}
+            onChange={(e) => setPartnerFilter(e.target.value)}
+            className="h-9 rounded-md border border-line-strong bg-surface px-2.5 text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            <option value="">All Installation Partners</option>
+            {partners.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
         </div>
 
         {/* Quick status filter -- every value from LFG_STATUSES as a small
@@ -265,9 +380,9 @@ export default function LfgStatusSheetPage() {
                   <div className="overflow-x-hidden">
                     <table className="w-full table-fixed border-collapse text-sm">
                       <colgroup>
-                        <col style={{ width: "46%" }} />
-                        <col style={{ width: "24%" }} />
-                        <col style={{ width: "30%" }} />
+                        <col style={{ width: "54%" }} />
+                        <col style={{ width: "20%" }} />
+                        <col style={{ width: "26%" }} />
                       </colgroup>
                       <thead>
                         <tr className="border-b border-line text-left text-[11px] font-semibold uppercase tracking-wide text-ink-muted">
@@ -282,9 +397,22 @@ export default function LfgStatusSheetPage() {
                             <td className="px-4 py-2.5 align-top">
                               <div className="flex items-start justify-between gap-2">
                                 <div className="min-w-0">
-                                  <div className="truncate font-semibold text-ink">{row.outlet_name}</div>
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    <span className="truncate font-semibold text-ink">{row.outlet_name}</span>
+                                    {ordinals[row.id] && (
+                                      <span className="shrink-0 rounded-full bg-[#D7F26D] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#1E252B]">
+                                        Site {ordinals[row.id]!.index} of {ordinals[row.id]!.total}
+                                      </span>
+                                    )}
+                                  </div>
                                   <div className="mt-0.5 truncate text-xs text-ink-secondary">
                                     {row.site_id} · SFO {row.sfo_id ?? "—"} · {row.format ?? "—"} · {row.city ?? "—"}
+                                  </div>
+                                  <div className="mt-0.5 truncate text-xs text-ink-secondary">
+                                    {formatSizeMm(row.width, row.height)} · {row.material ?? "—"} · {partnerName(row) ?? "Unassigned"}
+                                  </div>
+                                  <div className="mt-1.5">
+                                    <LfgBenchmarkStrip status={row.site_status} creativeReceivedAt={row.creative_received_at} />
                                   </div>
                                 </div>
                                 <button
