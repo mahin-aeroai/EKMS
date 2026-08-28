@@ -390,20 +390,20 @@ export default function LfgStatusSheetPage() {
           than the shared tab-strip nav: a plain "Back to Site Master"
           pill, a bigger icon tile, and the whole block enclosed in its own
           rounded card. */}
-      <div className="mt-4 rounded-2xl border border-line bg-surface p-6 shadow-1">
-        <div className="flex items-center gap-1.5 text-sm text-ink-secondary">
-          <Home size={14} />
+      <div className="mt-4 rounded-2xl border border-line bg-surface p-4 shadow-1">
+        <div className="flex items-center gap-1.5 text-xs text-ink-secondary">
+          <Home size={12} />
           <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "LFG Connect", href: "/workspaces/lfg" }, { label: "Status Sheet" }]} />
         </div>
 
-        <div className="mt-4 flex flex-col gap-4 border-b border-line pb-6 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex items-start gap-4">
-            <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-primary-tint text-primary">
-              <ArrowLeftRight size={28} />
+        <div className="mt-3 flex flex-col gap-3 border-b border-line pb-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex items-start gap-3">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-tint text-primary">
+              <ArrowLeftRight size={20} />
             </span>
             <div>
-              <h1 className="text-2xl font-bold text-ink">Status Sheet</h1>
-              <p className="mt-1 max-w-xl text-sm text-ink-secondary">
+              <h1 className="text-lg font-bold text-ink">Status Sheet</h1>
+              <p className="mt-0.5 max-w-xl text-xs text-ink-secondary">
                 One row per site, scoped to a Program at a time — click Swap Status to move a site to its next stage
                 without opening Site 360.
                 {!editable && " You have view-only access; ask an admin/editor to change a status."}
@@ -413,9 +413,9 @@ export default function LfgStatusSheetPage() {
           <button
             type="button"
             onClick={() => router.push("/workspaces/lfg")}
-            className="inline-flex shrink-0 items-center gap-2 rounded-full border-2 border-primary bg-surface px-4 py-2.5 text-sm font-semibold text-primary transition-colors hover:bg-primary-tint"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-full border-2 border-primary bg-surface px-3 py-1.5 text-xs font-semibold text-primary transition-colors hover:bg-primary-tint"
           >
-            <ArrowLeft size={16} /> Back to Site Master
+            <ArrowLeft size={13} /> Back to Site Master
           </button>
         </div>
 
@@ -429,21 +429,21 @@ export default function LfgStatusSheetPage() {
             ones) go inactive once their season ends and simply aren't part
             of the next Program's site list -- this banner is what makes
             that visible instead of implicit. */}
-        <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
+        <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs">
           <span className="text-ink-secondary">Showing</span>
           <span className="font-semibold text-ink">
             {rows === null ? "…" : rows.length} site{rows?.length === 1 ? "" : "s"}
           </span>
           <span className="text-ink-secondary">for</span>
           {programFilter ? (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-primary-tint px-2.5 py-1 text-xs font-semibold text-primary">
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary-tint px-2 py-0.5 text-[11px] font-semibold text-primary">
               {selectedProgram?.name ?? "…"}
               {programFilter === currentProgramId && (
-                <span className="rounded-full bg-primary px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-on-brand">Current</span>
+                <span className="rounded-full bg-primary px-1 py-0.5 text-[8px] uppercase tracking-wide text-on-brand">Current</span>
               )}
             </span>
           ) : (
-            <span className="inline-flex items-center rounded-full bg-surface-sunken px-2.5 py-1 text-xs font-semibold text-ink-secondary">
+            <span className="inline-flex items-center rounded-full bg-surface-sunken px-2 py-0.5 text-[11px] font-semibold text-ink-secondary">
               All Programs
             </span>
           )}
@@ -454,30 +454,30 @@ export default function LfgStatusSheetPage() {
             <button
               type="button"
               onClick={() => setProgramFilter("")}
-              className="text-xs font-medium text-ink-muted underline-offset-2 hover:text-ink hover:underline"
+              className="text-[11px] font-medium text-ink-muted underline-offset-2 hover:text-ink hover:underline"
             >
               View all programs
             </button>
           )}
         </div>
 
-        <div className="mt-5 flex flex-wrap items-center gap-2.5">
-          <div className="relative min-w-[16rem] flex-1">
-            <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-muted" />
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className="relative min-w-[14rem] flex-1">
+            <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder='Search Outlet, SFO ID, Format, or City — e.g. "Croma"'
-              className="h-12 w-full rounded-xl border border-line-strong bg-surface pl-10 pr-9 text-sm text-ink placeholder:text-ink-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              className="h-9 w-full rounded-lg border border-line-strong bg-surface pl-8 pr-8 text-xs text-ink placeholder:text-ink-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             />
             {query && (
               <button
                 type="button"
                 aria-label="Clear search"
                 onClick={() => setQuery("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2 rounded p-0.5 text-ink-muted hover:bg-surface-sunken"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-ink-muted hover:bg-surface-sunken"
               >
-                <X size={14} />
+                <X size={12} />
               </button>
             )}
           </div>
@@ -512,9 +512,9 @@ export default function LfgStatusSheetPage() {
           </IconSelect>
         </div>
 
-        <div className="mt-5">
-          <p className="mb-2 text-sm font-medium text-ink-secondary">Filter by Status</p>
-          <div className="flex flex-wrap gap-2">
+        <div className="mt-3">
+          <p className="mb-1.5 text-xs font-medium text-ink-secondary">Filter by Status</p>
+          <div className="flex flex-wrap gap-1.5">
             <StatusChip
               icon={LayoutGrid}
               label="All Statuses"
@@ -543,7 +543,7 @@ export default function LfgStatusSheetPage() {
             <button
               type="button"
               onClick={clearAllFilters}
-              className="mt-3 text-xs font-medium text-ink-muted underline-offset-2 hover:text-ink hover:underline"
+              className="mt-2 text-[11px] font-medium text-ink-muted underline-offset-2 hover:text-ink hover:underline"
             >
               Clear all filters
             </button>
@@ -664,16 +664,16 @@ function IconSelect({
 }) {
   return (
     <div className="relative">
-      <Icon size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-muted" />
+      <Icon size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted" />
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="h-12 appearance-none rounded-xl border border-line-strong bg-surface py-2 pl-10 pr-8 text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        className="h-9 appearance-none rounded-lg border border-line-strong bg-surface py-1.5 pl-8 pr-7 text-xs text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
       >
         <option value="">{placeholder}</option>
         {children}
       </select>
-      <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-ink-muted" />
+      <ChevronDown size={12} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-muted" />
     </div>
   );
 }
@@ -699,14 +699,14 @@ function StatusChip({
     <button
       type="button"
       onClick={onClick}
-      className={`flex items-center gap-2 rounded-xl border px-3.5 py-2.5 text-sm font-medium transition-colors ${
+      className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
         active ? "border-primary bg-primary-tint text-primary" : "border-line-strong bg-surface text-ink hover:bg-surface-sunken"
       }`}
     >
-      <Icon size={16} className={active ? "text-primary" : "text-ink-muted"} />
+      <Icon size={13} className={active ? "text-primary" : "text-ink-muted"} />
       {label}
       <span
-        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+        className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
           active ? "bg-primary text-on-brand" : "bg-surface-sunken text-ink-secondary"
         }`}
       >
@@ -748,16 +748,16 @@ function MoreStatusChip({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className={`flex items-center gap-2 rounded-xl border px-3.5 py-2.5 text-sm font-medium transition-colors ${
+        className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
           activeInMore || open ? "border-primary bg-primary-tint text-primary" : "border-line-strong bg-surface text-ink hover:bg-surface-sunken"
         }`}
       >
-        <MoreHorizontal size={16} className={activeInMore || open ? "text-primary" : "text-ink-muted"} />
+        <MoreHorizontal size={13} className={activeInMore || open ? "text-primary" : "text-ink-muted"} />
         More
-        <ChevronDown size={14} className={`transition-transform ${open ? "rotate-180" : ""}`} />
+        <ChevronDown size={12} className={`transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
       {open && (
-        <div className="absolute left-0 z-40 mt-1.5 w-64 rounded-xl border border-line bg-surface-overlay p-1.5 shadow-3">
+        <div className="absolute left-0 z-40 mt-1.5 w-56 rounded-lg border border-line bg-surface-overlay p-1 shadow-3">
           {statuses.map((s) => (
             <button
               key={s}
@@ -766,12 +766,12 @@ function MoreStatusChip({
                 onSelect(s);
                 setOpen(false);
               }}
-              className={`flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-sm hover:bg-surface-sunken ${
+              className={`flex w-full items-center justify-between rounded-md px-2 py-1 text-left text-xs hover:bg-surface-sunken ${
                 statusFilter === s ? "font-semibold text-primary" : "text-ink"
               }`}
             >
               {lfgStatusLabel(s)}
-              <span className="rounded-full bg-surface-sunken px-2 py-0.5 text-[11px] text-ink-secondary">{statusCounts[s] ?? 0}</span>
+              <span className="rounded-full bg-surface-sunken px-1.5 py-0.5 text-[10px] text-ink-secondary">{statusCounts[s] ?? 0}</span>
             </button>
           ))}
         </div>
