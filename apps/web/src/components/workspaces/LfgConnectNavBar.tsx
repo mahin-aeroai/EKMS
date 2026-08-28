@@ -2,6 +2,7 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import {
+  MapPin,
   LayoutDashboard,
   CalendarRange,
   Store as StoreIcon,
@@ -21,13 +22,19 @@ import {
 // button -- one component, one look, everywhere in the module.
 //
 // Active tab is derived from the real route via usePathname() rather than
-// a prop each page has to remember to pass -- Site Master itself is
-// "/workspaces/lfg" exactly (not a prefix match, or every sub-route would
-// also light up Dashboard... no, Site Master, since it's the shortest
-// path); every other tab matches by prefix so a page like
+// a prop each page has to remember to pass. Site Master itself IS one of
+// the tabs (was missing entirely before, which is why the whole strip sat
+// colorless/nothing-active while browsing Site Master -- the reference
+// mockup's active-tile treatment, bg-primary-tint + blue text + a blue
+// underline, only ever shows up once some tab actually matches the
+// route). Site Master's own href ("/workspaces/lfg") is a PREFIX of
+// every other tab's href, so it alone gets `exact: true` and an
+// exact-pathname check -- otherwise it would light up on every sub-page
+// too. Every other tab still matches by prefix so a page like
 // /workspaces/lfg/sites/[id] (Site 360, which does NOT get this nav bar --
 // see its own header) never accidentally lights one up if it ever did.
-const TABS: { label: string; href: string; icon: LucideIcon }[] = [
+const TABS: { label: string; href: string; icon: LucideIcon; exact?: boolean }[] = [
+  { label: "Site Master", href: "/workspaces/lfg", icon: MapPin, exact: true },
   { label: "Dashboard", href: "/workspaces/lfg/dashboard", icon: LayoutDashboard },
   { label: "Programs", href: "/workspaces/lfg/programs", icon: CalendarRange },
   { label: "Stores", href: "/workspaces/lfg/stores", icon: StoreIcon },
@@ -43,7 +50,7 @@ export function LfgConnectNavBar() {
   return (
     <div className="flex items-center gap-0.5 rounded-xl border border-line bg-surface-sunken/60 p-1">
       {TABS.map((tab) => {
-        const active = pathname === tab.href || pathname?.startsWith(tab.href + "/");
+        const active = tab.exact ? pathname === tab.href : pathname === tab.href || pathname?.startsWith(tab.href + "/");
         const Icon = tab.icon;
         return (
           <button
