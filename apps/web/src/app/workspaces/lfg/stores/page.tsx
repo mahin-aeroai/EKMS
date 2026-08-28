@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Search, Store as StoreIcon, ArrowLeft, Plus } from "lucide-react";
+import { Search, Store as StoreIcon, Plus } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge, type BadgeStatus } from "@/components/ui/Badge";
 import { StatCard } from "@/components/ui/Card";
@@ -10,6 +10,7 @@ import { Table, type TableColumn } from "@/components/ui/Table";
 import { Button } from "@/components/ui/Button";
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/dashboard-queries";
+import { LfgConnectHeader } from "@/components/workspaces/LfgConnectHeader";
 
 // Stores (task #62-#71's "Store entity" -- an outlet/location that can
 // host more than one lfg_sites row, e.g. a window display AND an in-store
@@ -147,29 +148,18 @@ export default function LfgStoresPage() {
     <div>
       <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "LFG Connect", href: "/workspaces/lfg" }, { label: "Stores" }]} />
 
-      <div className="mt-4 flex flex-col gap-4 border-b border-line pb-6 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-start gap-4">
-          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary-tint text-primary">
-            <StoreIcon size={22} />
-          </span>
-          <div>
-            <h1 className="text-xl font-semibold text-ink">Stores</h1>
-            <p className="mt-0.5 text-sm text-ink-secondary">
-              One row per physical outlet -- open one to see every display (site) placed there. A store with more than
-              one display got there either from the SFO ID grouping backfill or from &quot;Add Display to Existing
-              Store&quot; on the New Site form.
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" onClick={() => router.push("/workspaces/lfg")}>
-            <ArrowLeft size={15} className="mr-1.5" /> Site Master
-          </Button>
+      <LfgConnectHeader
+        icon={StoreIcon}
+        section="Stores"
+        subtitle={
+          'One row per physical outlet — open one to see every display (site) placed there. A store with more than one display got there either from the SFO ID grouping backfill or from "Add Display to Existing Store" on the New Site form.'
+        }
+        action={
           <Button onClick={() => router.push("/workspaces/lfg/new")}>
             <Plus size={15} className="mr-1.5" /> New Site
           </Button>
-        </div>
-      </div>
+        }
+      />
 
       <div className="my-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard label="Total Stores" value={loading ? "…" : String(tableRows.length)} trend="flat" trendLabel="All outlets" />

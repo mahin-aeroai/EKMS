@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarRange, ArrowLeft, Plus } from "lucide-react";
+import { CalendarRange, Plus } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -11,6 +11,7 @@ import { useUserRole, canWrite } from "@/lib/UserRoleContext";
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/dashboard-queries";
 import { LFG_PIPELINE_STAGES, LFG_PIPELINE_STAGE_BADGE, lfgPipelineStageOf, type LfgPipelineStageKey } from "@/lib/lfgStatus";
+import { LfgConnectHeader } from "@/components/workspaces/LfgConnectHeader";
 
 // Programs (seasonal waves: "Spring Refresh 2025", "Fall Refresh 2025/26",
 // etc.) -- task #39-49. Distinct from the Format Dashboard, which groups by
@@ -170,30 +171,18 @@ export default function LfgProgramsPage() {
     <div>
       <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "LFG Connect", href: "/workspaces/lfg" }, { label: "Programs" }]} />
 
-      <div className="mt-4 flex flex-col gap-4 border-b border-line pb-6 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-start gap-4">
-          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary-tint text-primary">
-            <CalendarRange size={22} />
-          </span>
-          <div>
-            <h1 className="text-xl font-semibold text-ink">Programs</h1>
-            <p className="mt-0.5 text-sm text-ink-secondary">
-              Seasonal waves (Spring Refresh 2025, Fall Refresh 2025/26, ...) -- create one here, then move sites into
-              it from the Site Master.
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" onClick={() => router.push("/workspaces/lfg")}>
-            <ArrowLeft size={15} className="mr-1.5" /> Site Master
-          </Button>
-          {editable && (
+      <LfgConnectHeader
+        icon={CalendarRange}
+        section="Programs"
+        subtitle="Seasonal waves (Spring Refresh 2025, Fall Refresh 2025/26, ...) — create one here, then move sites into it from the Site Master."
+        action={
+          editable && (
             <Button onClick={() => setShowNewForm((v) => !v)}>
               <Plus size={15} className="mr-1.5" /> New Program
             </Button>
-          )}
-        </div>
-      </div>
+          )
+        }
+      />
 
       {showNewForm && (
         <form onSubmit={handleCreate} className="mt-4 flex flex-col gap-2 rounded-md border border-line bg-surface-sunken p-3">

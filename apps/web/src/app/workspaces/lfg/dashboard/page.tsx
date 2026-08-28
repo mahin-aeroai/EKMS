@@ -2,16 +2,16 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { LayoutDashboard, ArrowLeft } from "lucide-react";
+import { LayoutDashboard } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { StatCard } from "@/components/ui/Card";
 import { DonutChart } from "@/components/ui/Charts";
 import { Table, type TableColumn } from "@/components/ui/Table";
-import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows, DONUT_COLOR } from "@/lib/dashboard-queries";
 import { LFG_PIPELINE_STAGES, LFG_PIPELINE_STAGE_BADGE, lfgPipelineStageOf, lfgFormatPriorityRank, type LfgPipelineStageKey } from "@/lib/lfgStatus";
+import { LfgConnectHeader } from "@/components/workspaces/LfgConnectHeader";
 
 // Format Dashboard -- "understand which sites are getting installed,
 // printed, shipped, active, inactive" grouped by format/chain (APP, APR,
@@ -177,22 +177,11 @@ export default function LfgDashboardPage() {
     <div>
       <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "LFG Connect", href: "/workspaces/lfg" }, { label: "Dashboard" }]} />
 
-      <div className="mt-4 flex flex-col gap-4 border-b border-line pb-6 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-start gap-4">
-          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary-tint text-primary">
-            <LayoutDashboard size={22} />
-          </span>
-          <div>
-            <h1 className="text-xl font-semibold text-ink">Format Dashboard</h1>
-            <p className="mt-0.5 text-sm text-ink-secondary">
-              One chart per format/chain, each showing where its own sites sit in the pipeline.
-            </p>
-          </div>
-        </div>
-        <Button variant="secondary" onClick={() => router.push("/workspaces/lfg")}>
-          <ArrowLeft size={15} className="mr-1.5" /> Site Master
-        </Button>
-      </div>
+      <LfgConnectHeader
+        icon={LayoutDashboard}
+        section="Dashboard"
+        subtitle="One chart per format/chain, each showing where its own sites sit in the pipeline."
+      />
 
       <div className="my-6 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
         <StatCard label="Total Sites" value={data ? String(data.totalCount) : "…"} trend="flat" trendLabel="Live count" />

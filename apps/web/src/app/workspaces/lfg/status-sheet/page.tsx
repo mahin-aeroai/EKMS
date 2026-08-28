@@ -2,10 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ArrowLeftRight, Check, ChevronDown, ExternalLink, Search, X } from "lucide-react";
+import { ArrowLeftRight, Check, ChevronDown, ExternalLink, Search, X } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Notifications";
 import { useUserRole, canWrite } from "@/lib/UserRoleContext";
 import { supabase } from "@/lib/supabase";
@@ -15,6 +14,7 @@ import { formatSizeMm } from "@/lib/lfg-units";
 import { useLfgDistinctValues } from "@/lib/useLfgDistinctValues";
 import { LFG_STATUSES, lfgStatusLabel, lfgStatusBadge, lfgFormatPriorityRank, type LfgStatus } from "@/lib/lfgStatus";
 import { LfgBenchmarkStrip } from "@/components/workspaces/LfgBenchmarkStrip";
+import { LfgConnectHeader } from "@/components/workspaces/LfgConnectHeader";
 
 // Status Sheet (task: "make an update/editing page like excel sheet to
 // update all kind of statuses") -- a dedicated, fast bulk status-review
@@ -234,23 +234,11 @@ export default function LfgStatusSheetPage() {
     <div>
       <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "LFG Connect", href: "/workspaces/lfg" }, { label: "Status Sheet" }]} />
 
-      <div className="mt-4 flex flex-col gap-4 border-b border-line pb-6 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-start gap-4">
-          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary-tint text-primary">
-            <ArrowLeftRight size={20} />
-          </span>
-          <div>
-            <h1 className="text-xl font-semibold text-ink">Status Sheet</h1>
-            <p className="mt-0.5 text-sm text-ink-secondary">
-              Every site, grouped by Program, one row each -- click Swap Status to move a site to its next stage
-              without opening Site 360. {!editable && "You have view-only access; ask an admin/editor to change a status."}
-            </p>
-          </div>
-        </div>
-        <Button variant="secondary" onClick={() => router.push("/workspaces/lfg")}>
-          <ArrowLeft size={15} className="mr-1.5" /> Back to Site Master
-        </Button>
-      </div>
+      <LfgConnectHeader
+        icon={ArrowLeftRight}
+        section="Status Sheet"
+        subtitle={`Every site, grouped by Program, one row each — click Swap Status to move a site to its next stage without opening Site 360.${!editable ? " You have view-only access; ask an admin/editor to change a status." : ""}`}
+      />
 
       <div className="my-4 flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">

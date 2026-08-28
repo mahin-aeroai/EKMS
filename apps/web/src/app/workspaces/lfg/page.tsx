@@ -6,18 +6,18 @@ import {
   MapPin,
   Search,
   Plus,
-  LayoutDashboard,
-  Users,
   Trash2,
   X,
   ArrowLeft,
-  ArrowLeftRight,
-  FileClock,
-  CalendarRange,
   FolderInput,
-  Store as StoreIcon,
   LayoutGrid,
   List as ListIcon,
+  SlidersHorizontal,
+  Building2,
+  AlertTriangle,
+  Eye,
+  ShieldAlert,
+  type LucideIcon,
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
@@ -32,6 +32,63 @@ import { formatMm, formatSizeInches, formatDecimal } from "@/lib/lfg-units";
 import { useLfgDistinctValues } from "@/lib/useLfgDistinctValues";
 import { LfgSiteCardGrid } from "@/components/workspaces/LfgSiteCardGrid";
 import { LfgProgramSummaryCard } from "@/components/workspaces/LfgProgramSummaryCard";
+import { LfgConnectHeader } from "@/components/workspaces/LfgConnectHeader";
+
+// Stat-strip pill (task: header/menu redesign) -- a colored circular icon
+// badge + value/label pair, used for the four summary stats (Total Sites/
+// Data Gaps/Showing/Need Attention) inside the bordered stat card below,
+// matching the reference mockup's treatment. Module-scope (not a nested
+// function component) so it isn't redefined every render; onClick makes
+// the Data Gaps pill double as the existing gapsOnly toggle, same
+// behavior the old plain-text stat line had.
+const STAT_TONE_CLASSES: Record<"primary" | "warning" | "success" | "danger", string> = {
+  primary: "bg-primary-tint text-primary",
+  warning: "bg-warning-tint text-warning",
+  success: "bg-success-tint text-success",
+  danger: "bg-danger-tint text-danger",
+};
+function StatPill({
+  icon: Icon,
+  tone,
+  label,
+  value,
+  onClick,
+  active,
+  title,
+}: {
+  icon: LucideIcon;
+  tone: "primary" | "warning" | "success" | "danger";
+  label: string;
+  value: string;
+  onClick?: () => void;
+  active?: boolean;
+  title?: string;
+}) {
+  const content = (
+    <span className="flex items-center gap-2.5">
+      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${STAT_TONE_CLASSES[tone]}`}>
+        <Icon size={16} />
+      </span>
+      <span className="flex flex-col items-start leading-tight">
+        <span className={`text-sm font-semibold ${active ? "text-primary" : "text-ink"}`}>{value}</span>
+        <span className="text-[11px] text-ink-secondary">{label}</span>
+      </span>
+    </span>
+  );
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        title={title}
+        className="rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      >
+        {content}
+      </button>
+    );
+  }
+  return content;
+}
 
 // Site Master list — the entry point to the LFG Connect program's Site 360
 // view. Deliberately a client component doing direct supabase.from()
@@ -191,6 +248,15 @@ export default function LfgSiteListPage() {
   // already supports.
   const [missingCount, setMissingCount] = useState<number | null>(null);
   const [gapsOnly, setGapsOnly] = useState(false);
+  // Filters panel (header/menu redesign) -- the Format/Status selects and
+  // the List/Cards view toggle now live behind this collapsible "Filters"
+  // button instead of always sitting on screen, matching the reference
+  // mockup's clean collapsed stat-strip. Starts closed only when nothing
+  // is actively filtered, so a Format Dashboard/Programs/Stores
+  // click-through (which sets formatFilter/statusFilter etc. on mount)
+  // still lands with its filter visibly applied rather than hidden behind
+  // a closed panel.
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<LfgSiteListRow | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -532,74 +598,120 @@ export default function LfgSiteListPage() {
     <div>
       <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "LFG Connect" }]} />
 
-      <div className="mt-4 flex flex-col gap-4 border-b border-line pb-6 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-start gap-4">
-          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary-tint text-primary">
-            <MapPin size={22} />
-          </span>
-          <div>
-            <h1 className="text-xl font-semibold text-ink">LFG Connect</h1>
-            <p className="mt-0.5 text-sm text-ink-secondary">
-              Site Master for the Basil (Apple) LFG program — search or browse every site, then open its Site 360
-              view. Sorted by SFO / Apple ID.
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" onClick={() => router.push("/workspaces/lfg/dashboard")}>
-            <LayoutDashboard size={15} className="mr-1.5" /> Dashboard
-          </Button>
-          <Button variant="secondary" onClick={() => router.push("/workspaces/lfg/programs")}>
-            <CalendarRange size={15} className="mr-1.5" /> Programs
-          </Button>
-          <Button variant="secondary" onClick={() => router.push("/workspaces/lfg/stores")}>
-            <StoreIcon size={15} className="mr-1.5" /> Stores
-          </Button>
-          <Button variant="secondary" onClick={() => router.push("/workspaces/lfg/status-sheet")}>
-            <ArrowLeftRight size={15} className="mr-1.5" /> Status Sheet
-          </Button>
-          <Button variant="secondary" onClick={() => router.push("/workspaces/lfg/activity")}>
-            <FileClock size={15} className="mr-1.5" /> Activity Log
-          </Button>
-          <Button variant="secondary" onClick={() => router.push("/workspaces/lfg/partners")}>
-            <Users size={15} className="mr-1.5" /> Partners
-          </Button>
+      <LfgConnectHeader
+        icon={MapPin}
+        section="Site Master"
+        subtitle="Search or browse every site for the Basil (Apple) LFG program, then open its Site 360 view. Sorted by SFO / Apple ID."
+        action={
           <Button onClick={() => router.push("/workspaces/lfg/new")}>
             <Plus size={15} className="mr-1.5" /> New Site
           </Button>
-        </div>
-      </div>
+        }
+      />
 
-      {/* A slim summary strip rather than four full-size KPI cards -- with
-          Cards view now the default landing surface, this real estate
-          belongs to the sites themselves; these counts stay one glance
-          away instead of pushing the actual review surface further down
-          the page. */}
-      <div className="my-4 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs text-ink-secondary">
-        <span>
-          <span className="font-semibold text-ink">{totalCount === null ? "…" : totalCount}</span> total sites
-        </span>
-        <span className="text-line">·</span>
-        <button
-          type="button"
-          onClick={() => setGapsOnly((v) => !v)}
-          className={`rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${gapsOnly ? "font-semibold text-primary" : "hover:text-ink"}`}
-          title="Missing City / ASM / SFO ID — click to view"
-        >
-          <span className="font-semibold">{missingCount === null ? "…" : missingCount}</span> data gaps
-        </button>
-        <span className="text-line">·</span>
-        <span>
-          showing <span className="font-semibold text-ink">{rows === null ? "…" : rows.length}</span>
-          {query.trim() || statusFilter || formatFilter || programIdFilter || storeIdFilter || gapsOnly ? " (filtered)" : ""}
-        </span>
-        <span className="text-line">·</span>
-        <span>
-          <span className="font-semibold text-danger">
-            {rows === null ? "…" : rows.filter((r) => r.site_status === "issue_attention_required").length}
-          </span>{" "}
-          need attention
-        </span>
+      {/* Bordered stat-strip card (header/menu redesign) -- replaces the old
+          plain-text stat line. Four colored icon-badge stats (Total Sites/
+          Data Gaps/Showing/Need Attention -- same underlying counts as
+          before) separated by vertical dividers, the search box, and a
+          "Filters" toggle that reveals the Format/Status selects + List/
+          Cards view toggle below, all inside one card -- matching the
+          reference mockup. */}
+      <div className="my-4 rounded-xl border border-line bg-surface p-4">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+          <StatPill icon={Building2} tone="primary" label="Total Sites" value={totalCount === null ? "…" : String(totalCount)} />
+          <div className="hidden h-9 w-px bg-line sm:block" />
+          <StatPill
+            icon={AlertTriangle}
+            tone="warning"
+            label="Data Gaps"
+            value={missingCount === null ? "…" : String(missingCount)}
+            onClick={() => setGapsOnly((v) => !v)}
+            active={gapsOnly}
+            title="Missing City / ASM / SFO ID — click to view"
+          />
+          <div className="hidden h-9 w-px bg-line sm:block" />
+          <StatPill
+            icon={Eye}
+            tone="success"
+            label={`Showing${query.trim() || statusFilter || formatFilter || programIdFilter || storeIdFilter || gapsOnly ? " (filtered)" : ""}`}
+            value={rows === null ? "…" : String(rows.length)}
+          />
+          <div className="hidden h-9 w-px bg-line sm:block" />
+          <StatPill
+            icon={ShieldAlert}
+            tone="danger"
+            label="Need Attention"
+            value={rows === null ? "…" : String(rows.filter((r) => r.site_status === "issue_attention_required").length)}
+          />
+
+          <div className="ml-auto flex flex-1 items-center gap-2 sm:flex-none sm:min-w-[22rem]">
+            <div className="flex flex-1 items-center gap-2 rounded-md border border-line-strong bg-surface-sunken/50 px-3 py-2">
+              <Search size={16} className="text-ink-muted" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder='Search Site ID, Outlet, SFO ID, Format, City, or ASM — e.g. "Croma" or "LFG-000012"'
+                className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-ink-muted"
+              />
+            </div>
+            <Button variant="secondary" onClick={() => setFiltersOpen((v) => !v)} aria-pressed={filtersOpen}>
+              <SlidersHorizontal size={15} className="mr-1.5" /> Filters
+            </Button>
+          </div>
+        </div>
+
+        {filtersOpen && (
+          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-4">
+            <select
+              value={formatFilter}
+              onChange={(e) => setFormatFilter(e.target.value)}
+              className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
+            >
+              <option value="">All formats</option>
+              {formatOptions.map((f) => (
+                <option key={f} value={f}>
+                  {f}
+                </option>
+              ))}
+            </select>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
+            >
+              <option value="">All statuses</option>
+              {LFG_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {lfgStatusLabel(s)}
+                </option>
+              ))}
+            </select>
+            <div className="flex shrink-0 items-center gap-1 rounded-md border border-line-strong bg-surface p-1">
+              <button
+                type="button"
+                onClick={() => setView("list")}
+                aria-pressed={view === "list"}
+                title="List view"
+                className={`flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  view === "list" ? "bg-primary text-on-brand" : "text-ink-secondary hover:bg-surface-sunken"
+                }`}
+              >
+                <ListIcon size={14} /> List
+              </button>
+              <button
+                type="button"
+                onClick={() => setView("cards")}
+                aria-pressed={view === "cards"}
+                title="Card view"
+                className={`flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  view === "cards" ? "bg-primary text-on-brand" : "text-ink-secondary hover:bg-surface-sunken"
+                }`}
+              >
+                <LayoutGrid size={14} /> Cards
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <LfgProgramSummaryCard />
@@ -686,66 +798,6 @@ export default function LfgSiteListPage() {
           </span>
         </div>
       )}
-
-      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center">
-        <div className="flex flex-1 items-center gap-2 rounded-md border border-line-strong bg-surface px-3 py-2">
-          <Search size={16} className="text-ink-muted" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder='Search Site ID, Outlet, SFO ID, Format, City, or ASM — e.g. "Croma" or "LFG-000012"'
-            className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-ink-muted"
-          />
-        </div>
-        <select
-          value={formatFilter}
-          onChange={(e) => setFormatFilter(e.target.value)}
-          className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
-        >
-          <option value="">All formats</option>
-          {formatOptions.map((f) => (
-            <option key={f} value={f}>
-              {f}
-            </option>
-          ))}
-        </select>
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
-        >
-          <option value="">All statuses</option>
-          {LFG_STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {lfgStatusLabel(s)}
-            </option>
-          ))}
-        </select>
-        <div className="flex shrink-0 items-center gap-1 rounded-md border border-line-strong bg-surface p-1">
-          <button
-            type="button"
-            onClick={() => setView("list")}
-            aria-pressed={view === "list"}
-            title="List view"
-            className={`flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium transition-colors ${
-              view === "list" ? "bg-primary text-on-brand" : "text-ink-secondary hover:bg-surface-sunken"
-            }`}
-          >
-            <ListIcon size={14} /> List
-          </button>
-          <button
-            type="button"
-            onClick={() => setView("cards")}
-            aria-pressed={view === "cards"}
-            title="Card view"
-            className={`flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium transition-colors ${
-              view === "cards" ? "bg-primary text-on-brand" : "text-ink-secondary hover:bg-surface-sunken"
-            }`}
-          >
-            <LayoutGrid size={14} /> Cards
-          </button>
-        </div>
-      </div>
 
       {view === "list" && editable && selectedIds.size > 0 && (
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary bg-primary-tint px-4 py-2.5">

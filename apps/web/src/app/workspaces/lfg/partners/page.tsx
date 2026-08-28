@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
-import { Users, ArrowLeft, Plus, Mail, Check, Clock, Trash2, ShieldCheck } from "lucide-react";
+import { Users, Plus, Mail, Check, Clock, Trash2, ShieldCheck } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { supabase } from "@/lib/supabase";
 import { useUserRole, canWrite } from "@/lib/UserRoleContext";
+import { LfgConnectHeader } from "@/components/workspaces/LfgConnectHeader";
 
 // LFG Partners -- staff-side management of installation-partner accounts
 // (lfg_partners) and their portal logins (lfg_partner_invited_emails/
@@ -49,7 +49,6 @@ async function authHeaders() {
 }
 
 export default function LfgPartnersPage() {
-  const router = useRouter();
   const role = useUserRole();
   const editable = canWrite(role);
 
@@ -91,23 +90,11 @@ export default function LfgPartnersPage() {
     <div>
       <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "LFG Connect", href: "/workspaces/lfg" }, { label: "Partners" }]} />
 
-      <div className="mt-4 flex flex-col gap-4 border-b border-line pb-6 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-start gap-4">
-          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary-tint text-primary">
-            <Users size={22} />
-          </span>
-          <div>
-            <h1 className="text-xl font-semibold text-ink">LFG Partners</h1>
-            <p className="mt-0.5 text-sm text-ink-secondary">
-              Installation-partner accounts and their portal logins — invite a partner to sign in and manage the sites
-              assigned to them.
-            </p>
-          </div>
-        </div>
-        <Button variant="secondary" onClick={() => router.push("/workspaces/lfg")}>
-          <ArrowLeft size={15} className="mr-1.5" /> Site Master
-        </Button>
-      </div>
+      <LfgConnectHeader
+        icon={Users}
+        section="Partners"
+        subtitle="Installation-partner accounts and their portal logins — invite a partner to sign in and manage the sites assigned to them."
+      />
 
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
         <div className="flex flex-col gap-3">

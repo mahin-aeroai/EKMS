@@ -2,13 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ExternalLink, FileClock, RefreshCw, Search } from "lucide-react";
+import { ExternalLink, FileClock, RefreshCw, Search } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
-import { Button } from "@/components/ui/Button";
 import { useUserRole, canWrite } from "@/lib/UserRoleContext";
 import { supabase } from "@/lib/supabase";
 import { timeAgo } from "@/lib/timeAgo";
 import { lfgStatusLabel } from "@/lib/lfgStatus";
+import { LfgConnectHeader } from "@/components/workspaces/LfgConnectHeader";
 
 // Activity Log -- its own page (task: "the log takes away the beauty of
 // the page, place it somewhere it belongs to"), split out of the LFG
@@ -269,20 +269,11 @@ export default function LfgActivityLogPage() {
     <div>
       <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "LFG Connect", href: "/workspaces/lfg" }, { label: "Activity Log" }]} />
 
-      <div className="mt-4 flex flex-col gap-4 border-b border-line pb-6 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-start gap-4">
-          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary-tint text-primary">
-            <FileClock size={20} />
-          </span>
-          <div>
-            <h1 className="text-xl font-semibold text-ink">Activity Log</h1>
-            <p className="mt-0.5 text-sm text-ink-secondary">Who did what, and exactly what changed -- every insert, update, and upload logged across LFG Connect.</p>
-          </div>
-        </div>
-        <Button variant="secondary" onClick={() => router.push("/workspaces/lfg")}>
-          <ArrowLeft size={15} className="mr-1.5" /> Back to Site Master
-        </Button>
-      </div>
+      <LfgConnectHeader
+        icon={FileClock}
+        section="Activity Log"
+        subtitle="Who did what, and exactly what changed — every insert, update, and upload logged across LFG Connect."
+      />
 
       <div className="my-4 flex flex-wrap items-center gap-2">
         <div className="relative w-full max-w-sm">
