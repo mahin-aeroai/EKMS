@@ -10,28 +10,38 @@ import { formatPlaceholderColor, isLightColor } from "@/lib/lfg-format-colors";
 // Site Master landing page right below the sites stat line -- distinct
 // from the dedicated Programs page (workspaces/lfg/programs), which shows
 // every season as a table; this is the always-visible, at-a-glance
-// version of ONE season at a time: per FORMAT (APP, APR, Mono AAR, ... in
-// LFG_FORMAT_PRIORITY's own order), how many of that season's sites are
-// Active, Printed, Shipped, Delivered, and Installed, plus total sites
-// and stores. A row of colored tiles (task feedback: "not like just a
-// table") rather than a plain table -- each tile's color is the exact
-// same per-format color the Site Cards' reference-picture placeholder
-// uses (formatPlaceholderColor, shared via @/lib/lfg-format-colors), so a
-// format reads as the same color in both places.
+// version of ONE season (or the whole inventory) at a time: per FORMAT
+// (APP, APR, Mono AAR, ... in LFG_FORMAT_PRIORITY's own order), how many
+// sites are Active, Printed, Shipped, Delivered, and Installed, plus
+// total sites and stores. A row of colored tiles (task feedback: "not
+// like just a table") rather than a plain table -- each tile's color is
+// the exact same per-format color the Site Cards' reference-picture
+// placeholder uses (formatPlaceholderColor, shared via
+// @/lib/lfg-format-colors), so a format reads as the same color in both
+// places.
 //
-// Which season it shows is picked with the "Season" dropdown in the
-// header -- defaults to the most recently created Program (there's no
-// other "active season" flag to go by: lfg_programs.active defaults to
-// true for every row and nothing ever exposes a way to change it), but
-// task feedback ("current season is fixed ... let me pick a different
-// one") asked for the ability to switch it, e.g. to check an OLDER
-// season's final numbers without leaving Site Master. Deliberately its
-// own small self-contained fetch (not the page's own filtered `rows`,
-// which follows the search/format/status filters above, not the season)
-// -- a site that belongs to a season other than the one selected here but
-// happens to already be site_status = 'active' must NOT count, or a
-// long-since-active site from a past wave would look like part of
-// whichever season is currently selected.
+// The "Season" dropdown in the header is a CONTROLLED input -- its value
+// is the Site Master page's own programIdFilter, and picking a season
+// here calls back up to set that filter, exactly like clicking a Program
+// card on the dedicated Programs page does. Task feedback: "that
+// selection has no meaning ... it should be all sites or filtered fall
+// 2026 or any other program and it should be filtered" -- an earlier
+// version kept its own separate "which season" state that only changed
+// this card's own tiles, so switching it did nothing to the Total
+// Sites/Showing counts or the site list right below. Now the dropdown
+// and this card's tiles, the top stat strip, and the table/cards below
+// all agree on the same filter, and the usual "Program: <name>" chip +
+// clear button (rendered by the page itself once programIdFilter is set)
+// works the same way here as it does for a Programs-page click-through.
+// "" means All Sites -- no program filter, matching the page's own
+// unfiltered default.
+//
+// Deliberately its own small self-contained fetch for the per-format
+// breakdown (not the page's own filtered `rows`, which additionally
+// follows the search/status/format filters up top) -- this card only
+// ever cares about the Season selection, not the rest of the page's
+// filters, so a Format Dashboard click-through landing on this page with
+// ?format= set doesn't also narrow these tiles to one format.
 
 interface ProgramOption {
   id: string;
@@ -56,25 +66,27 @@ const SECONDARY_STAGES = [
   { key: "installation", label: "Installed" },
 ] as const;
 
-export function LfgProgramSummaryCard() {
-  // null = still loading, or there are no Programs at all yet.
+interface LfgProgramSummaryCardProps {
+  // "" = All Sites (no program filter).
+  selectedProgramId: string;
+  onSelectProgram: (id: string, name: string) => void;
+}
+
+export function LfgProgramSummaryCard({ selectedProgramId, onSelectProgram }: LfgProgramSummaryCardProps) {
   const [programs, setPrograms] = useState<ProgramOption[] | null>(null);
-  const [selectedProgramId, setSelectedProgramId] = useState<string | null>(null);
   const [siteRows, setSiteRows] = useState<SiteFormatRow[] | null>(null);
 
   useEffect(() => {
+    // Newest first, purely to order the dropdown with the most recent
+    // season at the top -- no other meaning attaches to the ordering
+    // (lfg_programs.active defaults to true for every row and nothing
+    // ever exposes a way to change it, so it can't be used to tell
+    // current from past).
     supabase
       .from("lfg_programs")
       .select("id, name")
       .order("created_at", { ascending: false })
-      .then(({ data }) => {
-        const list = (data as ProgramOption[] | null) ?? [];
-        setPrograms(list);
-        // Default to the most recently created Program (index 0) the
-        // first time the list loads; don't stomp a season the person has
-        // already picked if this effect ever re-ran.
-        setSelectedProgramId((prev) => prev ?? list[0]?.id ?? null);
-      });
+      .then(({ data }) => setPrograms((data as ProgramOption[] | null) ?? []));
 
     fetchAllRows<SiteFormatRow>((from, to) =>
       supabase.from("lfg_sites").select("program_id, format, site_status, creative_received_at, store_id").range(from, to)
@@ -82,24 +94,23 @@ export function LfgProgramSummaryCard() {
   }, []);
 
   if (programs === null || siteRows === null) return null;
-  if (programs.length === 0 || selectedProgramId === null) return null; // no Program created yet -- nothing to summarize
 
-  const selectedProgram = programs.find((p) => p.id === selectedProgramId) ?? programs[0];
+  const scopedRows = selectedProgramId ? siteRows.filter((r) => r.program_id === selectedProgramId) : siteRows;
+  const selectedProgramName = selectedProgramId ? (programs.find((p) => p.id === selectedProgramId)?.name ?? "") : "All Sites";
 
   const byFormat = new Map<string, Record<string, number>>();
   // Total Sites/Stores per format (task: "in that card i want no of
   // stores and no of sites too" -- an all-zero tile, before this, read as
-  // "this format has no sites in the season at all" when really it just
-  // meant nothing had reached Active/Printed/Shipped/Delivered/Installed
-  // yet, e.g. right after a bulk Move to Program before anyone's touched
-  // status). Stores counted as distinct store_id, plus one per site with
-  // no store_id yet (each of those is its own not-yet-backfilled "store"
-  // -- same convention LfgSiteCardGrid's siteOrdinals uses).
+  // "this format has no sites at all" when really it just meant nothing
+  // had reached Active/Printed/Shipped/Delivered/Installed yet, e.g.
+  // right after a bulk Move to Program before anyone's touched status).
+  // Stores counted as distinct store_id, plus one per site with no
+  // store_id yet (each of those is its own not-yet-backfilled "store" --
+  // same convention LfgSiteCardGrid's siteOrdinals uses).
   const siteCountByFormat = new Map<string, number>();
   const storeIdsByFormat = new Map<string, Set<string>>();
   const noStoreIdCountByFormat = new Map<string, number>();
-  for (const r of siteRows) {
-    if (r.program_id !== selectedProgram.id) continue; // only the selected season's sites
+  for (const r of scopedRows) {
     const format = r.format?.trim() || "Unassigned";
     const stage = lfgPipelineStageOf(r.site_status, r.creative_received_at);
     const counts = byFormat.get(format) ?? {};
@@ -131,10 +142,15 @@ export function LfgProgramSummaryCard() {
         <label className="inline-flex items-center gap-2">
           <span className="text-[10px] font-bold uppercase tracking-wide text-ink-muted">Season</span>
           <select
-            value={selectedProgram.id}
-            onChange={(e) => setSelectedProgramId(e.target.value)}
+            value={selectedProgramId}
+            onChange={(e) => {
+              const id = e.target.value;
+              const name = id ? (programs.find((p) => p.id === id)?.name ?? "") : "";
+              onSelectProgram(id, name);
+            }}
             className="rounded bg-[#D7F26D] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-[#1E252B] outline-none"
           >
+            <option value="">All Sites</option>
             {programs.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
@@ -144,7 +160,9 @@ export function LfgProgramSummaryCard() {
         </label>
       </div>
       {formats.length === 0 ? (
-        <p className="text-sm text-ink-muted">No sites have been moved into {selectedProgram.name} yet.</p>
+        <p className="text-sm text-ink-muted">
+          {selectedProgramId ? `No sites have been moved into ${selectedProgramName} yet.` : "No sites yet."}
+        </p>
       ) : (
         <div className="flex gap-3 overflow-x-auto pb-1">
           {formats.map((format) => {
@@ -158,11 +176,11 @@ export function LfgProgramSummaryCard() {
                 <p className="truncate text-[10px] font-bold uppercase tracking-wide" style={{ color: fg, opacity: 0.85 }}>
                   {format}
                 </p>
-                {/* Total Sites/Stores for the season, regardless of pipeline
-                    stage -- see the header comment above this component for
-                    why this matters: without it, a tile where nothing has
-                    reached Active yet reads as "no sites in this format at
-                    all", not "N sites, none started". */}
+                {/* Total Sites/Stores for the current selection, regardless
+                    of pipeline stage -- see the header comment above this
+                    component for why this matters: without it, a tile
+                    where nothing has reached Active yet reads as "no sites
+                    in this format at all", not "N sites, none started". */}
                 <p className="mt-1 truncate text-[11px] font-semibold" style={{ color: fg, opacity: 0.9 }}>
                   {siteCount} site{siteCount === 1 ? "" : "s"} · {storeCount} store{storeCount === 1 ? "" : "s"}
                 </p>

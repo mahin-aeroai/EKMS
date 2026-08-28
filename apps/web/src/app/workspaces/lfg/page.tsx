@@ -778,7 +778,13 @@ export default function LfgSiteListPage() {
           </div>
         </div>
 
-      <LfgProgramSummaryCard />
+      <LfgProgramSummaryCard
+        selectedProgramId={programIdFilter}
+        onSelectProgram={(id, name) => {
+          setProgramIdFilter(id);
+          setProgramNameFilter(name);
+        }}
+      />
 
       {(formatFilter || programIdFilter || storeIdFilter) && (
         <div className="mb-3 flex flex-wrap items-center gap-2">
