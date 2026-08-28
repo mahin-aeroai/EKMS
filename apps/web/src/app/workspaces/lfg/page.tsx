@@ -26,8 +26,8 @@ import { Dialog } from "@/components/ui/Dialog";
 import { useToast } from "@/components/ui/Notifications";
 import { useUserRole, canDelete, canWrite } from "@/lib/UserRoleContext";
 import { supabase } from "@/lib/supabase";
-import { LFG_STATUSES, lfgStatusLabel, lfgStatusBadge, lfgFormatPriorityRank } from "@/lib/lfgStatus";
-import { formatMm, formatSizeInches, formatDecimal } from "@/lib/lfg-units";
+import { LFG_STATUSES, lfgStatusLabel, lfgFormatPriorityRank } from "@/lib/lfgStatus";
+import { formatMm } from "@/lib/lfg-units";
 import { useLfgDistinctValues } from "@/lib/useLfgDistinctValues";
 import { LfgSiteCardGrid } from "@/components/workspaces/LfgSiteCardGrid";
 import { LfgProgramSummaryCard } from "@/components/workspaces/LfgProgramSummaryCard";
@@ -590,12 +590,19 @@ export default function LfgSiteListPage() {
         ]
       : []),
     { key: "site_id", header: "LFG Code", sortable: true, width: "4.5rem" },
+    {
+      key: "format",
+      header: "Format",
+      sortable: true,
+      width: "4rem",
+      render: (r) => r.format ?? "—",
+    },
     { key: "sfo_id", header: "SFO / Apple ID", sortable: true, width: "5.5rem", render: (r) => r.sfo_id ?? "—" },
     {
       key: "outlet_name",
       header: "Store Name",
       sortable: true,
-      width: "11rem",
+      width: "12rem",
       render: (r) => {
         const siblings = r.store_id ? (siblingCounts[r.store_id] ?? 0) : 0;
         if (siblings <= 1) return r.outlet_name;
@@ -617,39 +624,12 @@ export default function LfgSiteListPage() {
         );
       },
     },
-    {
-      key: "active",
-      header: "Active",
-      sortable: true,
-      width: "3.5rem",
-      render: (r) => <Badge status={r.active ? "success" : "neutral"}>{r.active ? "Yes" : "No"}</Badge>,
-    },
-    { key: "city", header: "City", sortable: true, width: "5.5rem", render: (r) => r.city ?? "—" },
-    { key: "state", header: "State", sortable: true, width: "5.5rem", render: (r) => r.state ?? "—" },
-    { key: "region", header: "Region", sortable: true, width: "4rem", render: (r) => r.region ?? "—" },
-    {
-      key: "format",
-      header: "Format",
-      sortable: true,
-      width: "3.75rem",
-      render: (r) => r.format ?? "—",
-    },
-    { key: "material", header: "Material", sortable: true, width: "7rem", render: (r) => r.material ?? "—" },
-    { key: "mat_code", header: "Mat Code", sortable: true, width: "4.5rem", render: (r) => r.mat_code ?? "—" },
-    { key: "width", header: "Width (mm)", sortable: true, width: "4.5rem", render: (r) => formatMm(r.width) },
-    { key: "height", header: "Height (mm)", sortable: true, width: "4.5rem", render: (r) => formatMm(r.height) },
-    { key: "lfg_partners", header: "Size (in)", width: "5rem", render: (r) => formatSizeInches(r.width, r.height) },
-    { key: "number_of_sites", header: "Qty", sortable: true, width: "2.75rem" },
-    { key: "bleed", header: "Bleed", sortable: true, width: "3.5rem", render: (r) => formatDecimal(r.bleed) },
-    {
-      key: "site_status",
-      header: "Status",
-      sortable: true,
-      width: "6.5rem",
-      render: (r) => <Badge status={lfgStatusBadge(r.site_status)}>{lfgStatusLabel(r.site_status)}</Badge>,
-    },
-    { key: "asm_name", header: "ASM", sortable: true, width: "5rem", render: (r) => r.asm_name ?? "—" },
-    { key: "partner_id", header: "Partner", width: "5.5rem", render: (r) => partnerName(r) },
+    { key: "city", header: "City", sortable: true, width: "6rem", render: (r) => r.city ?? "—" },
+    { key: "material", header: "Material", sortable: true, width: "8rem", render: (r) => r.material ?? "—" },
+    { key: "width", header: "Width (mm)", sortable: true, width: "5rem", render: (r) => formatMm(r.width) },
+    { key: "height", header: "Height (mm)", sortable: true, width: "5rem", render: (r) => formatMm(r.height) },
+    { key: "number_of_sites", header: "Qty", sortable: true, width: "3rem" },
+    { key: "partner_id", header: "Partner", width: "6rem", render: (r) => partnerName(r) },
     ...(canDelete(role)
       ? [
           {
