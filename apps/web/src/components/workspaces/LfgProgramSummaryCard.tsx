@@ -6,24 +6,30 @@ import { fetchAllRows } from "@/lib/dashboard-queries";
 import { lfgFormatPriorityRank, lfgPipelineStageOf } from "@/lib/lfgStatus";
 import { formatPlaceholderColor, isLightColor } from "@/lib/lfg-format-colors";
 
-// A single wide "how's the program actually going" summary, shown on the
-// Site Master landing page right below the sites stat line -- distinct
-// from the dedicated Programs page (workspaces/lfg/programs), which is a
-// season-by-season drill-down; this is the always-visible, at-a-glance
-// version: which season is current, and per FORMAT (APP, APR, Mono AAR,
-// ... in LFG_FORMAT_PRIORITY's own order), how many sites are Active,
-// Printed, Shipped, Delivered, and Installed. A row of colored tiles
-// (task feedback: "not like just a table") rather than a plain table --
-// each tile's color is the exact same per-format color the Site Cards'
-// reference-picture placeholder uses (formatPlaceholderColor, shared via
-// @/lib/lfg-format-colors), so a format reads as the same color in both
-// places. Deliberately its own small self-contained fetch (all sites,
-// unfiltered by whatever the table above is currently searching/
-// filtering) rather than reusing the page's own filtered `rows`, since
-// this summary is meant to always reflect the whole program regardless
-// of what's being searched right now.
+// A single wide "how's the CURRENT program actually going" summary, shown
+// on the Site Master landing page right below the sites stat line --
+// distinct from the dedicated Programs page (workspaces/lfg/programs),
+// which shows every season; this is the always-visible, at-a-glance
+// version of just the current one: per FORMAT (APP, APR, Mono AAR, ... in
+// LFG_FORMAT_PRIORITY's own order), how many of THIS SEASON'S sites are
+// Active, Printed, Shipped, Delivered, and Installed. A row of colored
+// tiles (task feedback: "not like just a table") rather than a plain
+// table -- each tile's color is the exact same per-format color the Site
+// Cards' reference-picture placeholder uses (formatPlaceholderColor,
+// shared via @/lib/lfg-format-colors), so a format reads as the same
+// color in both places.
+//
+// Scoped to program_id = the current season's Program id -- a site that
+// belongs to an OLDER season (or no season at all) but happens to already
+// be site_status = 'active' must NOT count here just because it's active
+// in general; it was showing every site in the whole database regardless
+// of season, which made e.g. long-since-active Croma/Reliance sites from
+// a past wave look like they were part of the current one. Deliberately
+// its own small self-contained fetch (not the page's own filtered `rows`,
+// which follows the search/format/status filters above, not the season).
 
 interface SiteFormatRow {
+  program_id: string | null;
   format: string | null;
   site_status: string;
   creative_received_at: string | null;
@@ -40,7 +46,8 @@ const SECONDARY_STAGES = [
 ] as const;
 
 export function LfgProgramSummaryCard() {
-  const [currentProgramName, setCurrentProgramName] = useState<string | null>(null);
+  // undefined = still loading; null = there is no Program at all yet.
+  const [currentProgram, setCurrentProgram] = useState<{ id: string; name: string } | null | undefined>(undefined);
   const [siteRows, setSiteRows] = useState<SiteFormatRow[] | null>(null);
 
   useEffect(() => {
@@ -50,27 +57,33 @@ export function LfgProgramSummaryCard() {
     // used to tell current from past.
     supabase
       .from("lfg_programs")
-      .select("name")
+      .select("id, name")
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle()
-      .then(({ data }) => setCurrentProgramName((data as { name: string } | null)?.name ?? null));
+      .then(({ data }) => {
+        setCurrentProgram((data as { id: string; name: string } | null) ?? null);
+      });
 
     fetchAllRows<SiteFormatRow>((from, to) =>
-      supabase.from("lfg_sites").select("format, site_status, creative_received_at").range(from, to)
+      supabase.from("lfg_sites").select("program_id, format, site_status, creative_received_at").range(from, to)
     ).then(setSiteRows);
   }, []);
 
-  if (siteRows === null || siteRows.length === 0) return null;
+  if (currentProgram === undefined || siteRows === null) return null;
+  if (currentProgram === null) return null; // no Program created yet -- nothing to summarize
 
   const byFormat = new Map<string, Record<string, number>>();
   for (const r of siteRows) {
+    if (r.program_id !== currentProgram.id) continue; // only this season's sites
     const format = r.format?.trim() || "Unassigned";
     const stage = lfgPipelineStageOf(r.site_status, r.creative_received_at);
     const counts = byFormat.get(format) ?? {};
     counts[stage] = (counts[stage] ?? 0) + 1;
     byFormat.set(format, counts);
   }
+
+  if (byFormat.size === 0) return null; // current season has no sites moved into it yet
 
   const formats = Array.from(byFormat.keys()).sort(
     (a, b) => lfgFormatPriorityRank(a) - lfgFormatPriorityRank(b) || a.localeCompare(b)
@@ -80,11 +93,9 @@ export function LfgProgramSummaryCard() {
     <div className="mb-6 rounded-2xl bg-surface-sunken p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-sm font-semibold text-ink">Programs</h2>
-        {currentProgramName && (
-          <span className="inline-flex items-center rounded bg-[#D7F26D] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-[#1E252B]">
-            Current season · {currentProgramName}
-          </span>
-        )}
+        <span className="inline-flex items-center rounded bg-[#D7F26D] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-[#1E252B]">
+          Current season · {currentProgram.name}
+        </span>
       </div>
       <div className="flex gap-3 overflow-x-auto pb-1">
         {formats.map((format) => {
