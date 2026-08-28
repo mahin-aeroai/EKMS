@@ -8,10 +8,11 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
-import { StepperNav, ComingSoonPane, type StepperStep } from "./StepperNav";
+import { StepperNav, type StepperStep } from "./StepperNav";
 import { UploadStep } from "./UploadStep";
 import { ExtractionStep } from "./ExtractionStep";
 import { ReviewStep } from "./ReviewStep";
+import { PreviewStep } from "./PreviewStep";
 import { DetailsStep } from "./DetailsStep";
 import { MeasurementStep } from "./MeasurementStep";
 import { PhotosStep } from "./PhotosStep";
@@ -29,15 +30,15 @@ import {
   type SiteSurveyReportRow,
 } from "@/lib/siteSurveyReport/types";
 
-// Milestone 4 adds the PDF-extraction path: Upload PDF -> AI Extraction ->
-// Review are now real (see UploadStep/ExtractionStep/ReviewStep.tsx),
-// completing the flow milestone 3 left as "coming soon". Preview still
-// isn't built (milestone 5). A manually-created report still lands on
-// Complete Details (nothing upstream applies to it); a PDF-sourced report
-// now lands on Upload PDF if it has no source PDF yet, on AI Extraction if
-// it has one but hasn't been reviewed yet, or on Review once extraction has
-// run -- decided once, right after the report loads (see the
-// initialStepRef effect), not re-decided on every render so a person's own
+// Milestone 5 adds Preview -- builds the exact PDF Generate would produce
+// (see buildPdfBlob, shared by both) and renders it inline, without
+// downloading or touching status/generated_at -- completing every step in
+// the stepper. A manually-created report still lands on Complete Details
+// (nothing upstream applies to it); a PDF-sourced report lands on Upload
+// PDF if it has no source PDF yet, on AI Extraction if it has one but
+// hasn't been reviewed yet, or on Review once extraction has run --
+// decided once, right after the report loads (see the initialStepRef
+// effect), not re-decided on every render so a person's own
 // step navigation is never fought.
 
 const STATUS_BADGE: Record<SiteSurveyReportRow["status"], "neutral" | "info" | "warning" | "success"> = {
@@ -57,6 +58,9 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
   const [step, setStep] = useState<StepId>("details");
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [buildingPreview, setBuildingPreview] = useState(false);
+  const previewUrlRef = useRef<string | null>(null);
   const [uploadingSourcePdf, setUploadingSourcePdf] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [extractionError, setExtractionError] = useState<string | null>(null);
@@ -281,23 +285,30 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
     return results.filter((p): p is SurveyPhotoInput => p !== null);
   }
 
+  // Shared by both Preview (just renders the blob, changes nothing) and
+  // Generate (downloads it and marks the report generated) -- so the two
+  // are always visually identical, built from the exact same data.
+  async function buildPdfBlob(current: SiteSurveyReportRow): Promise<Blob> {
+    const photoInputs = await fetchPhotoInputs();
+    return buildSiteSurveyReportPdf({
+      storeName: current.store_name,
+      address: current.address,
+      sfoId: current.sfo_id,
+      program: current.program,
+      surveyDate: current.survey_date ?? "",
+      surveyorName: current.surveyor_name,
+      formData: current.form_data,
+      measurement: current.measurement,
+      photos: photoInputs,
+    });
+  }
+
   async function handleGenerate() {
     if (!report) return;
     setGenerating(true);
     try {
       await persist(report, { silent: true });
-      const photoInputs = await fetchPhotoInputs();
-      const blob = await buildSiteSurveyReportPdf({
-        storeName: report.store_name,
-        address: report.address,
-        sfoId: report.sfo_id,
-        program: report.program,
-        surveyDate: report.survey_date ?? "",
-        surveyorName: report.surveyor_name,
-        formData: report.form_data,
-        measurement: report.measurement,
-        photos: photoInputs,
-      });
+      const blob = await buildPdfBlob(report);
       downloadBlob(blob, `${(report.store_name || "site-survey-report").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.pdf`);
 
       const generated_at = new Date().toISOString();
@@ -312,6 +323,28 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
       setGenerating(false);
     }
   }
+
+  async function handlePreview() {
+    if (!report) return;
+    setBuildingPreview(true);
+    try {
+      const blob = await buildPdfBlob(report);
+      const url = URL.createObjectURL(blob);
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = url;
+      setPreviewUrl(url);
+    } catch {
+      toast("danger", "Couldn't build the preview");
+    } finally {
+      setBuildingPreview(false);
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    };
+  }, []);
 
   if (!report) {
     return <p className="py-10 text-center text-sm text-ink-muted">Loading report…</p>;
@@ -337,7 +370,7 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
     { id: "details", label: "Complete Details", complete: detailsComplete },
     { id: "photos", label: "Photos", complete: photos.length > 0 },
     { id: "measurements", label: "Measurements", complete: measurementsComplete },
-    { id: "preview", label: "Preview", disabled: true },
+    { id: "preview", label: "Preview", complete: Boolean(previewUrl) },
     { id: "generate", label: "Generate", complete: report.status === "generated" },
   ];
 
@@ -420,12 +453,7 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
         )}
         {step === "photos" && <PhotosStep reportId={reportId} photos={photos} onReload={reloadPhotos} />}
         {step === "measurements" && <MeasurementStep measurement={report.measurement} onChange={updateMeasurement} />}
-        {step === "preview" && (
-          <ComingSoonPane
-            title="Preview — coming soon"
-            note="An in-app preview lands in a later update. Use Generate to download the PDF directly for now."
-          />
-        )}
+        {step === "preview" && <PreviewStep previewUrl={previewUrl} building={buildingPreview} onBuild={handlePreview} />}
         {step === "generate" && (
           <div className="flex flex-col items-center gap-3 rounded-lg border border-line py-16 text-center">
             <ClipboardCheck size={28} className="text-primary" />
