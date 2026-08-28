@@ -7,8 +7,9 @@ import { Badge, type BadgeStatus } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
-import { lfgStatusLabel, lfgStatusBadge, LFG_FORMAT_PRIORITY } from "@/lib/lfgStatus";
+import { lfgStatusLabel, lfgStatusBadge } from "@/lib/lfgStatus";
 import { formatSizeMm } from "@/lib/lfg-units";
+import { formatPlaceholderColor, isLightColor } from "@/lib/lfg-format-colors";
 import { INSTALLATION_STATUSES } from "./LfgSiteWorkspaceClient";
 
 // Site Cards (task #76) -- a photo-forward, one-card-per-site alternative
@@ -74,47 +75,10 @@ const STATUS_TEXT_CLASS: Record<BadgeStatus, string> = {
   neutral: "text-ink-secondary",
 };
 
-// Solid, single-tone color per store FORMAT (lfg_sites.format is free
-// text carried through from two legacy imports -- see LFG_FORMAT_PRIORITY's
-// own comment in lfgStatus.ts, not a controlled vocabulary) -- painted
-// behind the reference-picture placeholder when a site has no photo on
-// file yet. Flat colors only, never a gradient. Trimmed down from the
-// second brand board's full 12 swatches to just its contrast colors --
-// the pale greys and the warm near-black brown read as washed-out/muddy
-// on a card, so only the genuinely saturated blue-grey-to-navy tones
-// stay. Known formats (APR, Mono AAR, Croma, ...) get a fixed color from
-// this list in LFG_FORMAT_PRIORITY's own order; anything else still gets
-// a real color (deterministic per format string, via a simple hash)
-// rather than falling back to grey.
-const FORMAT_COLOR_PALETTE = [
-  "#8A9BA8", // S2.07.58
-  "#5E6D76", // T5.06.44
-  "#1B2C60", // T9.26.21
-  "#726F76", // YN.02.45
-  "#46697E", // S2.13.39
-  "#1E252B", // T3.04.12
-];
-
-function formatPlaceholderColor(format: string | null): string {
-  if (!format) return "#726F76"; // no format on file -- the palette's own neutral tone
-  const f = format.trim().toLowerCase();
-  const idx = LFG_FORMAT_PRIORITY.findIndex((keyword) => f.includes(keyword) || keyword.includes(f));
-  if (idx !== -1) return FORMAT_COLOR_PALETTE[idx % FORMAT_COLOR_PALETTE.length];
-  let hash = 0;
-  for (let i = 0; i < format.length; i++) hash = (hash * 31 + format.charCodeAt(i)) >>> 0;
-  return FORMAT_COLOR_PALETTE[hash % FORMAT_COLOR_PALETTE.length];
-}
-
-// The palette above runs from near-white (QN.02.82) to near-black
-// (C9.06.21) -- the placeholder's centered signboard icon is drawn in a
-// fixed stroke color, so it needs to flip from dark to white depending on
-// how light the chosen swatch is, or it disappears on the paler ones.
-function isLightColor(hex: string): boolean {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return (r * 299 + g * 587 + b * 114) / 1000 > 180;
-}
+// Format placeholder colors (formatPlaceholderColor/isLightColor) now live
+// in @/lib/lfg-format-colors -- shared with LfgProgramSummaryCard.tsx so
+// both surfaces paint the same format the same color, one definition
+// instead of two that could drift.
 
 // lfg_installations.installation_status vocabulary (INSTALLATION_STATUSES,
 // imported from LfgSiteWorkspaceClient.tsx so this can't drift from the
