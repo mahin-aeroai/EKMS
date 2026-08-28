@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { useRouter } from "next/navigation";
 import { MapPin, FileText, ExternalLink, X } from "lucide-react";
 import { Badge, type BadgeStatus } from "@/components/ui/Badge";
@@ -46,6 +46,40 @@ export interface LfgSiteCardRow {
   site_reference_picture_path: string | null;
   asm_name: string | null;
   lfg_partners: { name: string } | { name: string }[] | null;
+  // Store entity (task #62-#71) -- same field the table view's "shares a
+  // store" indicator keys off (page.tsx's siblingCounts). Used here to
+  // number each card "Site X of N" when a store has more than one display
+  // (e.g. one outlet with two differently-sized Mono AAR panels) -- on the
+  // table this shows as an "N displays" badge next to the store name; on
+  // Cards, where every site already gets its own full card, per-card
+  // ordinals read better than a single shared count.
+  store_id: string | null;
+}
+
+// Groups the (already filtered) row set by store_id and numbers each
+// member "1 of N", "2 of N", ... in the order they appear in `rows` --
+// stores with only one site on file get no entry (nothing to number).
+// Deliberately computed from the currently-loaded/filtered `rows`, not a
+// separate full-table query -- the table's sibling-count badge already
+// does that full lookup for the same store_ids when the table view is
+// active; duplicating it here for a value that's cosmetic on Cards isn't
+// worth another round trip.
+function siteOrdinals(rows: LfgSiteCardRow[]): Record<string, { index: number; total: number }> {
+  const byStore = new Map<string, string[]>();
+  for (const r of rows) {
+    if (!r.store_id) continue;
+    const list = byStore.get(r.store_id) ?? [];
+    list.push(r.id);
+    byStore.set(r.store_id, list);
+  }
+  const map: Record<string, { index: number; total: number }> = {};
+  for (const ids of byStore.values()) {
+    if (ids.length < 2) continue;
+    ids.forEach((id, i) => {
+      map[id] = { index: i + 1, total: ids.length };
+    });
+  }
+  return map;
 }
 
 function partnerName(row: LfgSiteCardRow): string | null {
@@ -137,6 +171,7 @@ export function LfgSiteCardGrid({ rows }: { rows: LfgSiteCardRow[] }) {
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const visible = rows.slice(0, visibleCount);
   const idsKey = visible.map((r) => r.id).join(",");
+  const ordinals = useMemo(() => siteOrdinals(rows), [rows]);
 
   const [awbBySite, setAwbBySite] = useState<Record<string, string>>({});
   const [surveyDocBySite, setSurveyDocBySite] = useState<Record<string, DocRef>>({});
@@ -251,6 +286,7 @@ export function LfgSiteCardGrid({ rows }: { rows: LfgSiteCardRow[] }) {
             surveyDoc={surveyDocBySite[row.id] ?? null}
             installReportDoc={installReportDocBySite[row.id] ?? null}
             installationStatus={installStatusBySite[row.id] ?? "pending"}
+            ordinal={ordinals[row.id] ?? null}
             onPreview={setPreview}
           />
         ))}
@@ -313,6 +349,7 @@ function SiteCard({
   surveyDoc,
   installReportDoc,
   installationStatus,
+  ordinal,
   onPreview,
 }: {
   row: LfgSiteCardRow;
@@ -320,6 +357,7 @@ function SiteCard({
   surveyDoc: DocRef | null;
   installReportDoc: DocRef | null;
   installationStatus: string;
+  ordinal: { index: number; total: number } | null;
   onPreview: (p: PreviewState) => void;
 }) {
   const router = useRouter();
@@ -434,6 +472,19 @@ function SiteCard({
           <MapPin size={13} className="shrink-0" />
           <span className="truncate">{address || "—"}</span>
         </div>
+
+        {/* This store has more than one display on file (same pattern as
+            the table view's "N displays" badge, siblingCounts in page.tsx)
+            -- numbered per card so it's clear which of the store's displays
+            this particular card is, e.g. two differently-sized panels at
+            the same outlet. Same yellowish-green (#D7F26D) as the Programs
+            summary card's "Current season" pill, the flashy accent color
+            established for this app. */}
+        {ordinal && (
+          <span className="mt-2 inline-flex w-fit items-center rounded-full bg-[#D7F26D] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-[#1E252B]">
+            Site {ordinal.index} of {ordinal.total}
+          </span>
+        )}
 
         <div className="my-4 h-px bg-line" />
 
