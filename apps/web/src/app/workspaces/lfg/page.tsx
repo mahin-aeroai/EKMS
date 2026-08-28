@@ -338,50 +338,104 @@ export default function LfgSiteListPage() {
       .then(({ data }) => setPrograms((data as ProgramOption[]) ?? []));
   }, []);
 
-  // Seeds the search box from ?q=... (fuzzy free-text) or the page from
-  // ?format=... (the Format Dashboard's row/chart click hands off an
-  // EXACT format name this way -- distinct from ?q=, which only ever
-  // ilike-matches, so a format click always lands on strictly that
-  // format's sites, not a superset that happens to fuzzy-match its name).
-  // Read via window.location directly rather than useSearchParams -- this
-  // page is fully client-rendered already, so this avoids the
+  // Seeds every filter from the URL on mount -- ?q= (fuzzy free-text),
+  // ?format=/?status=/?program_id=/?store_id= (exact matches, the Format
+  // Dashboard/Programs/Stores click-throughs use these), ?gaps=1, and
+  // ?view=. Read via window.location directly rather than useSearchParams
+  // -- this page is fully client-rendered already, so this avoids the
   // Suspense-boundary requirement useSearchParams imposes on
   // statically-generated pages for no benefit here, same as
-  // workspaces/ai-copilot/page.tsx. Runs once on mount, then strips the
-  // param via replaceState so refreshing doesn't re-seed it.
+  // workspaces/ai-copilot/page.tsx.
+  //
+  // Task: "went to pen and edit and coming back then again i need to
+  // filter whole stuff... keep the same filter when i come back." Every
+  // filter used to live in plain useState with nothing writing it back to
+  // the URL (this effect used to strip ?format=/?program_id=/etc. down to
+  // a bare "/workspaces/lfg" right after reading them once), so clicking
+  // into a site and then Back landed on a blank, unfiltered Site Master no
+  // matter what was selected before. Now this effect only SEEDS state from
+  // whatever's in the URL at mount, and the sync effect right below keeps
+  // the URL itself updated as filters change -- so the URL a click into
+  // Site 360 leaves in browser history already has every filter on it, and
+  // Back restores exactly that.
+  const [hydratedFromUrl, setHydratedFromUrl] = useState(false);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const q = params.get("q");
     const format = params.get("format");
+    const status = params.get("status");
     const programId = params.get("program_id");
     const programName = params.get("program_name");
     const storeId = params.get("store_id");
     const storeName = params.get("store_name");
-    if (q || format || programId || storeId) {
-      window.history.replaceState(null, "", "/workspaces/lfg");
-      if (q) {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setQuery(q);
-      }
-      if (format) {
-        setFormatFilter(format);
-      }
-      if (programId) {
-        setProgramIdFilter(programId);
-        setProgramNameFilter(programName ?? "");
-        // Cards is already the page's own default (see the `view` state
-        // above); this just makes it explicit for a Program click-through
-        // too, in case that default ever changes back to List for a plain
-        // visit while a "review this wave's sites" visit should still land
-        // on Cards.
-        setView("cards");
-      }
-      if (storeId) {
-        setStoreIdFilter(storeId);
-        setStoreNameFilter(storeName ?? "");
-      }
+    const gaps = params.get("gaps");
+    const viewParam = params.get("view");
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (q) setQuery(q);
+    if (format) setFormatFilter(format);
+    if (status) setStatusFilter(status);
+    if (gaps === "1") setGapsOnly(true);
+    if (programId) {
+      setProgramIdFilter(programId);
+      setProgramNameFilter(programName ?? "");
     }
+    if (storeId) {
+      setStoreIdFilter(storeId);
+      setStoreNameFilter(storeName ?? "");
+    }
+    if (viewParam === "list" || viewParam === "cards") {
+      setView(viewParam);
+    } else if (programId) {
+      // Cards is already the page's own default (see the `view` state
+      // above); this just makes it explicit for a Program click-through
+      // too, in case that default ever changes back to List for a plain
+      // visit while a "review this wave's sites" visit should still land
+      // on Cards.
+      setView("cards");
+    }
+    setHydratedFromUrl(true);
   }, []);
+
+  // Keeps the URL in sync with every filter + the view toggle, debounced
+  // same as the row fetch below -- see the mount effect's own comment
+  // above for why. Gated on hydratedFromUrl so this doesn't fire (and
+  // stomp a URL someone landed on, e.g. a Format Dashboard click-through)
+  // before the mount effect above has had a chance to read it first.
+  useEffect(() => {
+    if (!hydratedFromUrl) return;
+    const handle = setTimeout(() => {
+      const params = new URLSearchParams();
+      const trimmed = query.trim();
+      if (trimmed) params.set("q", trimmed);
+      if (formatFilter) params.set("format", formatFilter);
+      if (statusFilter) params.set("status", statusFilter);
+      if (gapsOnly) params.set("gaps", "1");
+      if (programIdFilter) {
+        params.set("program_id", programIdFilter);
+        if (programNameFilter) params.set("program_name", programNameFilter);
+      }
+      if (storeIdFilter) {
+        params.set("store_id", storeIdFilter);
+        if (storeNameFilter) params.set("store_name", storeNameFilter);
+      }
+      if (view !== "cards") params.set("view", view);
+      const qs = params.toString();
+      router.replace(qs ? `/workspaces/lfg?${qs}` : "/workspaces/lfg", { scroll: false });
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [
+    hydratedFromUrl,
+    query,
+    formatFilter,
+    statusFilter,
+    gapsOnly,
+    programIdFilter,
+    programNameFilter,
+    storeIdFilter,
+    storeNameFilter,
+    view,
+    router,
+  ]);
 
   useEffect(() => {
     const handle = setTimeout(() => {
