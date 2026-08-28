@@ -11,7 +11,7 @@ import { Timeline, type TimelineEntry } from "@/components/ui/Timeline";
 import { useToast } from "@/components/ui/Notifications";
 import { useLfgUser } from "@/lib/LfgUserContext";
 import { useLfgHost, lfgHref } from "@/lib/lfg-links";
-import { formatDecimal } from "@/lib/lfg-units";
+import { formatDecimal, formatMm } from "@/lib/lfg-units";
 import { supabase } from "@/lib/supabase";
 import {
   type LfgSite,
@@ -221,8 +221,10 @@ export function LfgPartnerSiteClient({
             <Field label="Material" value={site.material} />
             <Field label="Mat Code" value={site.mat_code} />
             <Field label="Number of Sites" value={site.number_of_sites} />
-            <Field label="Width" value={formatDecimal(site.width)} />
-            <Field label="Height" value={formatDecimal(site.height)} />
+            {/* Same mm-not-inches fix as the staff Site 360 view
+                (LfgSiteWorkspaceClient.tsx) -- see that file's comment. */}
+            <Field label="Width (mm)" value={formatMm(site.width)} />
+            <Field label="Height (mm)" value={formatMm(site.height)} />
             <Field label="Bleed" value={formatDecimal(site.bleed)} />
             <Field label="SQFT" value={formatDecimal(site.sqft)} />
             <Field label="ASM Name" value={site.asm_name} />

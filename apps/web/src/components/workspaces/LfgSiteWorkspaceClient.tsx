@@ -11,7 +11,7 @@ import { Tabs, type TabItem } from "@/components/ui/Tabs";
 import { Timeline, type TimelineEntry } from "@/components/ui/Timeline";
 import { useToast } from "@/components/ui/Notifications";
 import { useUserRole, canWrite, canDelete } from "@/lib/UserRoleContext";
-import { formatDecimal, round2 } from "@/lib/lfg-units";
+import { formatDecimal, formatMm, round2 } from "@/lib/lfg-units";
 import { useLfgDistinctValues } from "@/lib/useLfgDistinctValues";
 import { supabase } from "@/lib/supabase";
 import {
@@ -612,8 +612,15 @@ function SiteInfoCard({
           <Field label="Material" value={site.material} />
           <Field label="Mat Code" value={site.mat_code} />
           <Field label="Number of Sites" value={site.number_of_sites} />
-          <Field label="Width" value={formatDecimal(site.width)} />
-          <Field label="Height" value={formatDecimal(site.height)} />
+          {/* lfg_sites.width/height are stored in inches (see
+              lfg-units.ts's own header comment); shown here as whole
+              millimetres, no decimals -- installers and print vendors
+              think in mm, and a bare "118.94"/"44.06" with no unit at all
+              read as flatly wrong. Site Master's table already does this
+              (Width (mm)/Height (mm)); this card was the one screen still
+              showing the raw inches figure unlabeled. */}
+          <Field label="Width (mm)" value={formatMm(site.width)} />
+          <Field label="Height (mm)" value={formatMm(site.height)} />
           <Field label="Bleed" value={formatDecimal(site.bleed)} />
           <Field label="SQFT" value={formatDecimal(site.sqft)} />
           <Field label="Partner" value={partner?.name} />
