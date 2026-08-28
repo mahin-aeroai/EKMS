@@ -25,7 +25,41 @@ const LINKS = [
   { href: "/policies/cancellation-refunds", label: "Cancellation & Refunds" },
 ];
 
-export function PortalPolicyFooter({ onPortalHost }: { onPortalHost: boolean }) {
+export function PortalPolicyFooter({
+  onPortalHost,
+  compact = false,
+}: {
+  onPortalHost: boolean;
+  // The full black band below reads fine as a real page footer under a
+  // full page of content (the portal app shell, the policy pages
+  // themselves) -- but the same heavy block looked bolted-on directly
+  // beneath /login's small centered card, with mostly empty page around
+  // both. `compact` is that one different context: same links (the actual
+  // Razorpay-review requirement -- discoverable, not any particular
+  // color), same company line, styled to sit quietly under a login card
+  // instead of reading as its own separate site section.
+  compact?: boolean;
+}) {
+  if (compact) {
+    return (
+      <footer className="mx-auto mt-6 flex w-full max-w-sm flex-col items-center gap-2 px-4">
+        <nav className="flex flex-wrap items-center justify-center gap-x-1 gap-y-1">
+          {LINKS.map((l, i) => (
+            <span key={l.href} className="flex items-center">
+              {i > 0 && <span className="mx-2 text-ink-muted">·</span>}
+              <Link href={portalHref(l.href, onPortalHost)} className="text-[11px] text-ink-muted transition-colors hover:text-ink-secondary">
+                {l.label}
+              </Link>
+            </span>
+          ))}
+        </nav>
+        <div className="text-center text-[11px] leading-relaxed text-ink-muted">
+          {MMDI_COMPANY.legalName} · GSTIN {MMDI_COMPANY.gstin}
+        </div>
+      </footer>
+    );
+  }
+
   return (
     <footer className="mx-auto mb-6 mt-6 flex max-w-4xl flex-col items-center gap-4 rounded-lg bg-black px-4 py-8 sm:px-6">
       <nav className="flex flex-wrap items-center justify-center gap-x-1 gap-y-2">

@@ -349,7 +349,7 @@ function PortalLoginForm() {
         )}
       </div>
       </div>
-      <PortalPolicyFooter onPortalHost={onPortalHost} />
+      <PortalPolicyFooter onPortalHost={onPortalHost} compact />
     </div>
   );
 }
