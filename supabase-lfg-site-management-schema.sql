@@ -336,6 +336,7 @@ create table if not exists public.lfg_sites (
   format text,
   sfo_id text,
   city text,
+  state text,
   region text,
   store_address text,
   material text,
@@ -450,7 +451,12 @@ end $$;
 
 -- Retrofits region/mat_code/bleed/site_verified_at/site_verified_by/
 -- program_id (tasks #40-#41) onto a database that already ran this file
--- before these columns existed.
+-- before these columns existed. state (task: "check this list with SFO ID
+-- and update... State, Region...") was retrofitted later, same pattern --
+-- see supabase-lfg-permanent-sites-refresh-migration.sql, which both adds
+-- this column and backfills it (and Region/MAT Code/ASM/partner) from the
+-- "LFG 2026 Permanent Sites" workbook.
+alter table public.lfg_sites add column if not exists state text;
 alter table public.lfg_sites add column if not exists region text;
 alter table public.lfg_sites add column if not exists mat_code text;
 alter table public.lfg_sites add column if not exists bleed numeric;

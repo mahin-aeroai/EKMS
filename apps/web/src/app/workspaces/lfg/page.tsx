@@ -124,6 +124,7 @@ interface LfgSiteListRow {
   format: string | null;
   sfo_id: string | null;
   city: string | null;
+  state: string | null;
   region: string | null;
   material: string | null;
   mat_code: string | null;
@@ -404,7 +405,7 @@ export default function LfgSiteListPage() {
           let q = supabase
             .from("lfg_sites")
             .select(
-              "id, site_id, outlet_name, format, sfo_id, city, region, material, mat_code, width, height, bleed, store_id, site_status, number_of_sites, asm_name, partner_id, lfg_partners(name), store_address, site_reference_picture_path, creative_received_at"
+              "id, site_id, outlet_name, format, sfo_id, city, state, region, material, mat_code, width, height, bleed, store_id, site_status, number_of_sites, asm_name, partner_id, lfg_partners(name), store_address, site_reference_picture_path, creative_received_at"
             )
             // Default sort: SFO/Apple ID ascending, not the internal LFG
             // code -- see this file's header comment. nullsFirst: false so
@@ -549,6 +550,7 @@ export default function LfgSiteListPage() {
       render: (r) => <Badge status={r.active ? "success" : "neutral"}>{r.active ? "Yes" : "No"}</Badge>,
     },
     { key: "city", header: "City", sortable: true, render: (r) => r.city ?? "—" },
+    { key: "state", header: "State", sortable: true, render: (r) => r.state ?? "—" },
     { key: "region", header: "Region", sortable: true, render: (r) => r.region ?? "—" },
     {
       key: "format",
