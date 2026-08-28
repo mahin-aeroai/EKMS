@@ -25,7 +25,7 @@ import { Dialog } from "@/components/ui/Dialog";
 import { useToast } from "@/components/ui/Notifications";
 import { useUserRole, canDelete, canWrite } from "@/lib/UserRoleContext";
 import { supabase } from "@/lib/supabase";
-import { LFG_STATUSES, lfgStatusLabel, lfgStatusBadge } from "@/lib/lfgStatus";
+import { LFG_STATUSES, lfgStatusLabel, lfgStatusBadge, lfgFormatPriorityRank } from "@/lib/lfgStatus";
 import { formatMm, formatSizeInches, formatDecimal } from "@/lib/lfg-units";
 import { useLfgDistinctValues } from "@/lib/useLfgDistinctValues";
 import { LfgSiteCardGrid } from "@/components/workspaces/LfgSiteCardGrid";
@@ -43,14 +43,21 @@ import { LfgProgramSummaryCard } from "@/components/workspaces/LfgProgramSummary
 // not needing them for a list view, not a security boundary (that
 // boundary is the RLS grant itself, see the schema's header comment).
 //
-// Default sort is by sfo_id (SFO/Apple ID) ascending, NOT by site_id (the
-// internal LFG-000123 code) -- explicit per task #39-44: the SFO/Apple ID
-// is the one both sides (MMDI and Apple/the partner) actually key off, so
-// browsing the master list in that order is the useful default; the LFG
-// code remains visible as its own column/link target, just not the sort
-// key. Region/Mat Code/Width/Height/Qty/Bleed/Active are shown directly on
-// the list (not just on Site 360) per the same request, alongside the
-// existing Store Name/City/Format/Material columns.
+// Default sort groups by FORMAT first, in the same fixed priority order
+// used everywhere else in LFG Connect (APP, APR, Mono AAR, ... --
+// LFG_FORMAT_PRIORITY/lfgFormatPriorityRank in lfgStatus.ts, the same
+// ordering the Programs summary tiles use), then by sfo_id (SFO/Apple ID)
+// ascending within each format -- NOT by site_id (the internal LFG-000123
+// code): the SFO/Apple ID is the one both sides (MMDI and Apple/the
+// partner) actually key off, so browsing the master list in that order is
+// the useful default; the LFG code remains visible as its own column/link
+// target, just not the sort key. The server-side `.order("sfo_id", ...)`
+// on the paginated fetch below only keeps each page's own rows in a stable
+// order while paging past PostgREST's row cap -- the actual default
+// grouping is the client-side sort applied to the assembled full result,
+// see sortSiteRows() below. Region/Mat Code/Width/Height/Qty/Bleed/Active
+// are shown directly on the list (not just on Site 360) per the same
+// request, alongside the existing Store Name/City/Format/Material columns.
 interface LfgSiteListRow {
   id: string;
   site_id: string;
@@ -92,6 +99,26 @@ interface LfgSiteListRow {
 function partnerName(row: LfgSiteListRow): string {
   const p = Array.isArray(row.lfg_partners) ? row.lfg_partners[0] : row.lfg_partners;
   return p?.name ?? "—";
+}
+
+// Default list ordering: group by format in LFG_FORMAT_PRIORITY's own
+// order (APP, APR, Mono AAR, ...), then by SFO/Apple ID ascending within
+// each format, with no-SFO-ID-yet rows sorted to the end of their format
+// group rather than the top (an empty/null sfo_id would otherwise sort
+// first). See this file's header comment.
+function compareSfoId(a: string | null, b: string | null): number {
+  if (a === b) return 0;
+  if (!a) return 1;
+  if (!b) return -1;
+  return a.localeCompare(b);
+}
+function sortSiteRows<T extends { format: string | null; sfo_id: string | null }>(rows: T[]): T[] {
+  return [...rows].sort(
+    (a, b) =>
+      lfgFormatPriorityRank(a.format ?? "") - lfgFormatPriorityRank(b.format ?? "") ||
+      (a.format ?? "").localeCompare(b.format ?? "") ||
+      compareSfoId(a.sfo_id, b.sfo_id)
+  );
 }
 
 interface ProgramOption {
@@ -346,7 +373,7 @@ export default function LfgSiteListPage() {
           toast("danger", "Couldn't load LFG sites from Supabase");
           return;
         }
-        setRows(all.map((r) => ({ ...r, active: r.site_status === "active" })));
+        setRows(sortSiteRows(all.map((r) => ({ ...r, active: r.site_status === "active" }))));
       })();
     }, 250);
     return () => clearTimeout(handle);
