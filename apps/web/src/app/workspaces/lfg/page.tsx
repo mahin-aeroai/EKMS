@@ -11,6 +11,7 @@ import {
   Trash2,
   X,
   ArrowLeft,
+  ArrowLeftRight,
   CalendarRange,
   FolderInput,
   Store as StoreIcon,
@@ -548,6 +549,9 @@ export default function LfgSiteListPage() {
           </Button>
           <Button variant="secondary" onClick={() => router.push("/workspaces/lfg/stores")}>
             <StoreIcon size={15} className="mr-1.5" /> Stores
+          </Button>
+          <Button variant="secondary" onClick={() => router.push("/workspaces/lfg/status-sheet")}>
+            <ArrowLeftRight size={15} className="mr-1.5" /> Status Sheet
           </Button>
           <Button variant="secondary" onClick={() => router.push("/workspaces/lfg/partners")}>
             <Users size={15} className="mr-1.5" /> Partners
