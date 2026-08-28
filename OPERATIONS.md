@@ -191,7 +191,21 @@ setup, in order:
    Supabase dashboard, both under **Authentication**:
    - **URL Configuration → Redirect URLs**: add
      `https://portal.mmdi.in/login`. Without this, Supabase silently
-     refuses to send people to the invite link's real destination.
+     refuses to send people to the invite link's real destination — the
+     invite email still arrives and looks fine, but clicking it lands on
+     a bare, generic sign-in form (no "set your password" step, no
+     account to sign into yet) instead of the portal's own set-password
+     screen, because the fallback redirect drops the one-time invite
+     token along with the wrong destination. Confirmed happening in
+     production (2026-08-28): a Portal invite to a test address landed on
+     `ekms.vercel.app/login` instead of `portal.mmdi.in/login`, stuck with
+     no password prompt, until this entry was added.
+     **Add the identical entry for LFG Connect too** —
+     `https://lfgconnect.mmdi.in/login` — same setting, same failure mode,
+     for partner invites (`/api/lfg/partners/[partnerId]/create-login`)
+     instead of customer ones. Both were missed when each subdomain was
+     first set up; check both are present any time an invite link doesn't
+     behave.
    - **Emails → SMTP Settings**: point it at a real mail sender —
      Supabase's own built-in mailer is heavily rate-limited (a handful of
      emails/hour) and not meant for actual customer invites. Sender
