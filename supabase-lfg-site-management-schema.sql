@@ -1121,10 +1121,19 @@ create trigger lfg_sites_guard_partner_update_trigger
 -- a Program, if a Site Survey document is already on file and the site
 -- is still sitting at 'new'/'survey_pending' -- see
 -- supabase-lfg-workflow-automation-migration.sql's header comment (rule
--- 1) for the full reasoning. Never regresses a site already further
--- along, and deliberately leaves creative_received_at untouched -- the
--- rest of the app already reads that as "awaiting creative" without
--- needing a distinct status value for it.
+-- 1) for the full reasoning.
+--
+-- Also resets a site's per-cycle progress (site_status,
+-- creative_received_at/by) when it's moved into a DIFFERENT program from
+-- the one it was previously in -- see
+-- supabase-lfg-program-reassignment-status-reset-migration.sql's header
+-- comment for the full story. Sites like Croma/Reliance/Vijay Sales
+-- aren't permanent placements: a site is freshly re-selected into each
+-- new Program, and without this, its Status Sheet/Site Cards would show
+-- checkmarks (Creative Received, Installed, ...) left over from whatever
+-- Program it was last used for, even though nothing has happened yet for
+-- the new one. A site's FIRST-ever program assignment (old.program_id is
+-- null) is a no-op for this reset -- there's nothing stale to clear.
 create or replace function public.lfg_sites_program_mapping_defaults()
 returns trigger
 language plpgsql
@@ -1133,6 +1142,12 @@ set search_path = public
 as $$
 begin
   if new.program_id is distinct from old.program_id and new.program_id is not null then
+    if old.program_id is not null then
+      new.site_status := 'new';
+      new.creative_received_at := null;
+      new.creative_received_by := null;
+    end if;
+
     if new.site_status in ('new', 'survey_pending') then
       if exists (
         select 1 from public.lfg_site_documents d
