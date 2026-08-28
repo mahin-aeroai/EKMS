@@ -20,12 +20,19 @@ import { LfgConnectHeader } from "@/components/workspaces/LfgConnectHeader";
 // lfg_sites.program_id in the schema), tracked through the same pipeline
 // stages every other view of lfg_sites uses (LFG_PIPELINE_STAGES).
 //
-// Create + a card per Program, sized and grouped by recency (task #85 -- a
-// plain table read fine as a list, but buried the one thing a returning
-// visitor actually wants: "where does the CURRENT wave stand, stage by
-// stage" behind a wall of columns). The most recently created Program is
-// the "current" one, rendered big and first; every earlier one groups
-// into a smaller "Previous Programs" row below.
+// Create + a card per Program (task #85 -- a plain table read fine as a
+// list, but buried the one thing a returning visitor actually wants:
+// "where does the CURRENT wave stand, stage by stage" behind a wall of
+// columns). Every card renders at the same size, newest first -- task
+// feedback ("check this disparity!" on a screenshot where a
+// freshly-created, still-empty "Spring 2026" rendered as a big
+// tinted "Current Season" card while "Fall 2026", the one actually
+// holding 259 real sites, was demoted to a small card in a "Previous
+// Programs" row below it): the size difference read as "this one
+// matters, that one doesn't" regardless of which one actually had any
+// sites in it. The newest Program still gets a small "Current Season"
+// tag next to its name so it's still identifiable at a glance -- just
+// not a different card size to notice it by.
 //
 // Deliberately NOT grouped by lfg_programs.active -- that column defaults
 // to true for every row (supabase-lfg-site-management-schema.sql) and
@@ -100,8 +107,9 @@ export default function LfgProgramsPage() {
   const [error, setError] = useState<string | null>(null);
 
   async function loadPrograms() {
-    // Newest first -- the current/previous split below just takes the
-    // first row as "current", so this ordering IS that logic.
+    // Newest first -- the grid below renders every card the same size, but
+    // still tags whichever one is first (index 0) as "Current Season", so
+    // this ordering IS that logic.
     const { data } = await supabase.from("lfg_programs").select("*").order("created_at", { ascending: false });
     setProgramRows((data as ProgramRow[]) ?? []);
   }
@@ -161,12 +169,6 @@ export default function LfgProgramsPage() {
 
   const unassignedCount = loading ? 0 : siteRows!.filter((r) => r.program_id === null).length;
 
-  // `groups` is already newest-first (loadPrograms orders by created_at
-  // desc) -- the single newest Program is "current" (the big card); every
-  // other one is "previous" (the smaller grid below).
-  const currentGroup = groups[0] ?? null;
-  const previousGroups = groups.slice(1);
-
   return (
     <div>
       <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "LFG Connect", href: "/workspaces/lfg" }, { label: "Programs" }]} />
@@ -218,22 +220,11 @@ export default function LfgProgramsPage() {
               </p>
             )}
 
-            {currentGroup && (
-              <div className="flex flex-col gap-4">
-                <ProgramCard group={currentGroup} size="lg" onClick={() => openProgram(currentGroup.id, currentGroup.name)} />
-              </div>
-            )}
-
-            {previousGroups.length > 0 && (
-              <div className="mt-8">
-                <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-muted">Previous Programs</h2>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {previousGroups.map((g) => (
-                    <ProgramCard key={g.id} group={g} size="sm" onClick={() => openProgram(g.id, g.name)} />
-                  ))}
-                </div>
-              </div>
-            )}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {groups.map((g, i) => (
+                <ProgramCard key={g.id} group={g} current={i === 0} onClick={() => openProgram(g.id, g.name)} />
+              ))}
+            </div>
           </>
         )}
       </div>
@@ -241,57 +232,16 @@ export default function LfgProgramsPage() {
   );
 }
 
-function ProgramCard({ group, size, onClick }: { group: ProgramGroup; size: "lg" | "sm"; onClick: () => void }) {
+function ProgramCard({ group, current, onClick }: { group: ProgramGroup; current: boolean; onClick: () => void }) {
   // Only the stages that actually have sites in them render a pill -- an
   // empty "0 Printing" pill on every card would bury the ones that matter
   // (this is exactly the "some in production, some in transit, some
   // installed" implementation-status view the table's columns buried).
   const stages = CARD_STAGES.filter((s) => group.counts[s.key] > 0);
 
-  // The "lg" card is the one current-season Program -- deliberately not
-  // just a bigger version of the same plain card (a font-size difference
-  // alone read as barely-there): a tinted, thicker-bordered card with its
-  // own "Current Season" eyebrow, so which one is current is obvious at a
-  // glance, not something you have to compare sizes to notice.
-  if (size === "lg") {
-    return (
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={onClick}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") onClick();
-        }}
-        className="cursor-pointer rounded-2xl border-2 border-primary bg-primary-tint p-8 shadow-2 transition-shadow hover:shadow-3"
-      >
-        <p className="mb-2 text-xs font-bold uppercase tracking-widest text-primary">Current Season</p>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <h3 className="text-3xl font-extrabold text-ink">{group.name}</h3>
-            <Badge status={group.active ? "success" : "neutral"}>{group.active ? "Active" : "Inactive"}</Badge>
-          </div>
-          <span className="text-base font-semibold text-ink-secondary">
-            {group.total} site{group.total === 1 ? "" : "s"}
-          </span>
-        </div>
-
-        {group.notes && <p className="mt-2 text-sm text-ink-secondary">{group.notes}</p>}
-
-        {stages.length === 0 ? (
-          <p className="mt-5 text-sm text-ink-muted">No sites in this Program yet.</p>
-        ) : (
-          <div className="mt-5 flex flex-wrap gap-2">
-            {stages.map((s) => (
-              <Badge key={s.key} status={LFG_PIPELINE_STAGE_BADGE[s.key]}>
-                {group.counts[s.key]} {s.label}
-              </Badge>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  }
-
+  // Every card renders the same size/style regardless of `current` (see
+  // this file's header comment) -- `current` only adds a small badge next
+  // to the name, not a different card size or tint.
   return (
     <div
       role="button"
@@ -303,14 +253,17 @@ function ProgramCard({ group, size, onClick }: { group: ProgramGroup; size: "lg"
       className="cursor-pointer rounded-xl border border-line bg-surface p-4 shadow-1 transition-shadow hover:shadow-2"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
           <h3 className="text-sm font-semibold text-ink">{group.name}</h3>
           <Badge status={group.active ? "success" : "neutral"}>{group.active ? "Active" : "Inactive"}</Badge>
+          {current && <Badge status="info">Current Season</Badge>}
         </div>
         <span className="text-xs text-ink-muted">
           {group.total} site{group.total === 1 ? "" : "s"}
         </span>
       </div>
+
+      {group.notes && <p className="mt-2 text-xs text-ink-secondary">{group.notes}</p>}
 
       {stages.length === 0 ? (
         <p className="mt-3 text-xs text-ink-muted">No sites in this Program yet.</p>
