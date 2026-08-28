@@ -550,7 +550,20 @@ function SiteInfoCard({
       ]);
       if (storeError || siblingsError) {
         setSaving(false);
-        toast("danger", `Couldn't save: ${(storeError ?? siblingsError)?.message}`);
+        const err = storeError ?? siblingsError;
+        // lfg_stores.sfo_id is unique (where set) -- same constraint the
+        // New Site "new store" path already gives a friendly message for
+        // (new/page.tsx). Surfacing Postgres's raw "duplicate key value
+        // violates unique constraint..." here isn't useful on its own: it
+        // doesn't say which OTHER store already has this SFO ID, so
+        // there's nothing actionable in the message itself -- name the
+        // real cause instead.
+        toast(
+          "danger",
+          err?.code === "23505"
+            ? `This SFO ID is already used by another store -- check the Stores list for the duplicate before saving.`
+            : `Couldn't save: ${err?.message}`
+        );
         return;
       }
       const { error: siteError } = await supabase.from("lfg_sites").update(siteOnlyFields).eq("id", site.id);
