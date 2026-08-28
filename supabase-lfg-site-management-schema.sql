@@ -878,9 +878,18 @@ $$;
 DO $$
 DECLARE
   t text;
+  -- Includes lfg_site_documents/lfg_site_surveys (uploads -- Site Survey,
+  -- Installation Report, the structured survey form) and
+  -- lfg_installation_photos/lfg_issues/lfg_deactivation_requests, so an
+  -- upload or a flagged issue shows up in the audit log the same as any
+  -- other change -- see supabase-lfg-audit-log-expand-migration.sql for
+  -- the standalone idempotent version of this same change, for databases
+  -- that already ran an earlier version of this file.
   audited_tables text[] := ARRAY[
     'lfg_sites', 'lfg_site_financials', 'lfg_installations', 'lfg_installation_costs',
-    'lfg_shipments', 'lfg_production', 'lfg_partners'
+    'lfg_shipments', 'lfg_production', 'lfg_partners',
+    'lfg_site_documents', 'lfg_site_surveys', 'lfg_installation_photos',
+    'lfg_issues', 'lfg_deactivation_requests'
   ];
 BEGIN
   FOREACH t IN ARRAY audited_tables LOOP
