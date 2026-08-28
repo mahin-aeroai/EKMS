@@ -147,6 +147,18 @@ export type FieldSourceKey = (typeof FIELD_SOURCE_KEYS)[number];
 export type FieldSource = "ai" | "user" | "";
 export type FieldSources = Partial<Record<FieldSourceKey, FieldSource>>;
 
+// One AI extraction run's page-level findings (see
+// /api/site-survey-reports/[reportId]/extract) -- which fields it flagged
+// for a closer look, and which PDF pages likely hold which category of
+// photo. Persisted (site_survey_reports.extraction_meta, added by
+// supabase-site-survey-reports-extraction-meta-migration.sql) so the
+// Review step's banner and page-picker survive a reload, not just the
+// session that ran extraction.
+export interface ExtractionMeta {
+  flagged: string[];
+  pageHints: { page: number; likelyCategory: PhotoCategory; note: string }[];
+}
+
 // site_survey_reports -- one row per report.
 export interface SiteSurveyReportRow {
   id: string;
@@ -162,6 +174,7 @@ export interface SiteSurveyReportRow {
   form_data: SiteSurveyFormData;
   measurement: SiteSurveyMeasurement;
   field_sources: FieldSources;
+  extraction_meta: ExtractionMeta | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -189,6 +202,7 @@ export function emptyReportDefaults(source: ReportSource): NewSiteSurveyReport {
     form_data: emptyFormData(),
     measurement: emptyMeasurement(),
     field_sources: {},
+    extraction_meta: null,
     generated_at: null,
   };
 }

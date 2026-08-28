@@ -9,6 +9,9 @@ import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
 import { StepperNav, ComingSoonPane, type StepperStep } from "./StepperNav";
+import { UploadStep } from "./UploadStep";
+import { ExtractionStep } from "./ExtractionStep";
+import { ReviewStep } from "./ReviewStep";
 import { DetailsStep } from "./DetailsStep";
 import { MeasurementStep } from "./MeasurementStep";
 import { PhotosStep } from "./PhotosStep";
@@ -19,24 +22,23 @@ import {
   emptyFormData,
   emptyMeasurement,
   type FieldSourceKey,
+  type PhotoCategory,
   type SiteSurveyFormData,
   type SiteSurveyMeasurement,
   type SiteSurveyPhotoRow,
   type SiteSurveyReportRow,
 } from "@/lib/siteSurveyReport/types";
 
-// Milestone 3 adds Photos (real R2 upload + the measurement red-box
-// annotation tool, see PhotosStep.tsx) to milestone 2's shell. Upload PDF /
-// AI Extraction / Review aren't built yet (milestone 4) and Preview isn't
-// built yet (milestone 5), so those three steps still render a
-// ComingSoonPane; Complete Details, Photos, Measurements, and Generate are
-// all fully real against Supabase + R2 + client-side PDF export -- Generate
-// now embeds every uploaded photo (and the measurement photo's annotation)
-// into the exported PDF instead of leaving placeholder slots. A
-// manually-created report already lands on Complete Details (nothing
-// upstream applies to it); a PDF-sourced report also lands there for now,
-// since extraction doesn't exist yet -- once milestone 4 ships, the
-// initial step for source==='pdf' reports will change to "upload".
+// Milestone 4 adds the PDF-extraction path: Upload PDF -> AI Extraction ->
+// Review are now real (see UploadStep/ExtractionStep/ReviewStep.tsx),
+// completing the flow milestone 3 left as "coming soon". Preview still
+// isn't built (milestone 5). A manually-created report still lands on
+// Complete Details (nothing upstream applies to it); a PDF-sourced report
+// now lands on Upload PDF if it has no source PDF yet, on AI Extraction if
+// it has one but hasn't been reviewed yet, or on Review once extraction has
+// run -- decided once, right after the report loads (see the
+// initialStepRef effect), not re-decided on every render so a person's own
+// step navigation is never fought.
 
 const STATUS_BADGE: Record<SiteSurveyReportRow["status"], "neutral" | "info" | "warning" | "success"> = {
   draft: "neutral",
@@ -55,7 +57,14 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
   const [step, setStep] = useState<StepId>("details");
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [uploadingSourcePdf, setUploadingSourcePdf] = useState(false);
+  const [extracting, setExtracting] = useState(false);
+  const [extractionError, setExtractionError] = useState<string | null>(null);
+  const [hasRunExtraction, setHasRunExtraction] = useState(false);
+  const [flagged, setFlagged] = useState<string[]>([]);
+  const [pageHints, setPageHints] = useState<{ page: number; likelyCategory: PhotoCategory; note: string }[]>([]);
   const loadedRef = useRef(false);
+  const initialStepChosenRef = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function reloadPhotos() {
@@ -83,7 +92,12 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
           form_data: { ...emptyFormData(), ...(data.form_data ?? {}) },
           measurement: { ...emptyMeasurement(), ...(data.measurement ?? {}) },
           field_sources: data.field_sources ?? {},
+          extraction_meta: data.extraction_meta ?? null,
         });
+        if (data.extraction_meta) {
+          setFlagged(data.extraction_meta.flagged ?? []);
+          setPageHints(data.extraction_meta.pageHints ?? []);
+        }
         loadedRef.current = true;
       });
     reloadPhotos();
@@ -105,6 +119,99 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [report]);
+
+  // Chooses the right landing step exactly once, right after the report
+  // first loads -- never again, so a person's own navigation afterward is
+  // never overridden by this effect re-running.
+  useEffect(() => {
+    if (!report || initialStepChosenRef.current) return;
+    initialStepChosenRef.current = true;
+    if (report.source !== "pdf") return; // manual reports already default to "details"
+    // Any status past "draft" means extraction has run at least once in an
+    // earlier session -- this flag only starts false because it's derived
+    // client state, not persisted; it must still reflect reality on load.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (report.status !== "draft") setHasRunExtraction(true);
+    if (!report.source_pdf_relative_path) {
+      setStep("upload");
+    } else if (report.status === "draft" || report.status === "extracting") {
+      setStep("extraction");
+    } else {
+      setStep("review");
+    }
+  }, [report]);
+
+  async function handleSourcePdfUpload(file: File) {
+    setUploadingSourcePdf(true);
+    try {
+      const uploadRes = await fetch(`/api/site-survey-reports/${reportId}/source-pdf/upload-url`, { method: "POST" });
+      const uploadData = await uploadRes.json();
+      if (!uploadRes.ok) {
+        toast("danger", uploadData.message || uploadData.error || "Couldn't get an upload link");
+        return;
+      }
+      const putRes = await fetch(uploadData.url, { method: "PUT", headers: { "Content-Type": "application/pdf" }, body: file });
+      if (!putRes.ok) {
+        toast("danger", "Upload to storage failed");
+        return;
+      }
+      const { error } = await supabase
+        .from("site_survey_reports")
+        .update({ source_pdf_relative_path: uploadData.relative_path })
+        .eq("id", reportId);
+      if (error) {
+        toast("danger", `Uploaded, but couldn't record it: ${error.message}`);
+        return;
+      }
+      setReport((prev) => (prev ? { ...prev, source_pdf_relative_path: uploadData.relative_path } : prev));
+      toast("success", "PDF uploaded");
+    } catch {
+      toast("danger", "Couldn't upload that PDF");
+    } finally {
+      setUploadingSourcePdf(false);
+    }
+  }
+
+  async function handleRunExtraction() {
+    if (!report?.source_pdf_relative_path) return;
+    setExtracting(true);
+    setExtractionError(null);
+    try {
+      const res = await fetch(`/api/site-survey-reports/${reportId}/extract`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        setExtractionError(data.message || data.error || "Extraction failed");
+        return;
+      }
+      setReport((prev) =>
+        prev
+          ? {
+              ...prev,
+              store_name: data.report.store_name,
+              address: data.report.address,
+              sfo_id: data.report.sfo_id,
+              program: data.report.program,
+              survey_date: data.report.survey_date,
+              surveyor_name: data.report.surveyor_name,
+              form_data: { ...emptyFormData(), ...data.report.form_data },
+              measurement: { ...emptyMeasurement(), ...data.report.measurement },
+              field_sources: data.report.field_sources,
+              extraction_meta: data.report.extraction_meta,
+              status: data.report.status,
+            }
+          : prev
+      );
+      setFlagged(data.flagged ?? []);
+      setPageHints(data.pageHints ?? []);
+      setHasRunExtraction(true);
+      toast("success", "Extraction complete — review the results below");
+      setStep("review");
+    } catch {
+      setExtractionError("Couldn't reach the extraction service");
+    } finally {
+      setExtracting(false);
+    }
+  }
 
   async function persist(current: SiteSurveyReportRow, opts?: { silent?: boolean }) {
     setSaving(true);
@@ -222,10 +329,11 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
   const detailsComplete = Boolean(report.store_name && report.sfo_id && report.surveyor_name);
   const measurementsComplete = report.measurement.visualWidthMm != null && report.measurement.visualHeightMm != null;
 
+  const isPdfSourced = report.source === "pdf";
   const STEPS: StepperStep[] = [
-    { id: "upload", label: "Upload PDF", disabled: true },
-    { id: "extraction", label: "AI Extraction", disabled: true },
-    { id: "review", label: "Review", disabled: true },
+    { id: "upload", label: "Upload PDF", disabled: !isPdfSourced, complete: Boolean(report.source_pdf_relative_path) },
+    { id: "extraction", label: "AI Extraction", disabled: !isPdfSourced || !report.source_pdf_relative_path, complete: hasRunExtraction },
+    { id: "review", label: "Review", disabled: !isPdfSourced || !hasRunExtraction, complete: report.status !== "review_required" && hasRunExtraction },
     { id: "details", label: "Complete Details", complete: detailsComplete },
     { id: "photos", label: "Photos", complete: photos.length > 0 },
     { id: "measurements", label: "Measurements", complete: measurementsComplete },
@@ -269,16 +377,36 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
 
       <div className="mt-6">
         {step === "upload" && (
-          <ComingSoonPane
-            title="Upload PDF — coming soon"
-            note="Uploading an existing filled-in Site Survey PDF for AI extraction lands in a later update. For now, use Complete Details to fill the report in by hand."
+          <UploadStep
+            sourcePdfName={report.source_pdf_relative_path}
+            uploading={uploadingSourcePdf}
+            onUpload={handleSourcePdfUpload}
+            onContinue={() => setStep("extraction")}
           />
         )}
         {step === "extraction" && (
-          <ComingSoonPane title="AI Extraction — coming soon" note="Automatic field extraction from an uploaded PDF lands in a later update." />
+          <ExtractionStep
+            canRun={Boolean(report.source_pdf_relative_path)}
+            running={extracting}
+            error={extractionError}
+            hasRunBefore={hasRunExtraction}
+            onRun={handleRunExtraction}
+          />
         )}
         {step === "review" && (
-          <ComingSoonPane title="Review — coming soon" note="Reviewing AI-extracted fields lands alongside AI Extraction in a later update." />
+          <ReviewStep
+            reportId={reportId}
+            header={header}
+            onHeaderChange={updateHeader}
+            formData={report.form_data}
+            onFormDataChange={updateFormData}
+            fieldSources={report.field_sources}
+            onTouched={onTouched}
+            flagged={flagged}
+            pageHints={pageHints}
+            photos={photos}
+            onPhotoAdded={reloadPhotos}
+          />
         )}
         {step === "details" && (
           <DetailsStep
