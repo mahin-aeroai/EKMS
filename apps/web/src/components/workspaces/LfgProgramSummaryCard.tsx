@@ -33,6 +33,7 @@ interface SiteFormatRow {
   format: string | null;
   site_status: string;
   creative_received_at: string | null;
+  store_id: string | null;
 }
 
 // The four secondary stages shown per tile, below the headline Active
@@ -66,7 +67,7 @@ export function LfgProgramSummaryCard() {
       });
 
     fetchAllRows<SiteFormatRow>((from, to) =>
-      supabase.from("lfg_sites").select("program_id, format, site_status, creative_received_at").range(from, to)
+      supabase.from("lfg_sites").select("program_id, format, site_status, creative_received_at, store_id").range(from, to)
     ).then(setSiteRows);
   }, []);
 
@@ -74,6 +75,17 @@ export function LfgProgramSummaryCard() {
   if (currentProgram === null) return null; // no Program created yet -- nothing to summarize
 
   const byFormat = new Map<string, Record<string, number>>();
+  // Total Sites/Stores per format (task: "in that card i want no of
+  // stores and no of sites too" -- an all-zero tile, before this, read as
+  // "this format has no sites in the season at all" when really it just
+  // meant nothing had reached Active/Printed/Shipped/Delivered/Installed
+  // yet, e.g. right after a bulk Move to Program before anyone's touched
+  // status). Stores counted as distinct store_id, plus one per site with
+  // no store_id yet (each of those is its own not-yet-backfilled "store"
+  // -- same convention LfgSiteCardGrid's siteOrdinals uses).
+  const siteCountByFormat = new Map<string, number>();
+  const storeIdsByFormat = new Map<string, Set<string>>();
+  const noStoreIdCountByFormat = new Map<string, number>();
   for (const r of siteRows) {
     if (r.program_id !== currentProgram.id) continue; // only this season's sites
     const format = r.format?.trim() || "Unassigned";
@@ -81,6 +93,19 @@ export function LfgProgramSummaryCard() {
     const counts = byFormat.get(format) ?? {};
     counts[stage] = (counts[stage] ?? 0) + 1;
     byFormat.set(format, counts);
+
+    siteCountByFormat.set(format, (siteCountByFormat.get(format) ?? 0) + 1);
+    if (r.store_id) {
+      const ids = storeIdsByFormat.get(format) ?? new Set<string>();
+      ids.add(r.store_id);
+      storeIdsByFormat.set(format, ids);
+    } else {
+      noStoreIdCountByFormat.set(format, (noStoreIdCountByFormat.get(format) ?? 0) + 1);
+    }
+  }
+  const storeCountByFormat = new Map<string, number>();
+  for (const format of siteCountByFormat.keys()) {
+    storeCountByFormat.set(format, (storeIdsByFormat.get(format)?.size ?? 0) + (noStoreIdCountByFormat.get(format) ?? 0));
   }
 
   if (byFormat.size === 0) return null; // current season has no sites moved into it yet
@@ -100,12 +125,22 @@ export function LfgProgramSummaryCard() {
       <div className="flex gap-3 overflow-x-auto pb-1">
         {formats.map((format) => {
           const counts = byFormat.get(format)!;
+          const siteCount = siteCountByFormat.get(format) ?? 0;
+          const storeCount = storeCountByFormat.get(format) ?? 0;
           const bg = formatPlaceholderColor(format);
           const fg = isLightColor(bg) ? "#1E252B" : "#FFFFFF";
           return (
             <div key={format} className="w-[168px] shrink-0 rounded-2xl p-4" style={{ background: bg }}>
               <p className="truncate text-[10px] font-bold uppercase tracking-wide" style={{ color: fg, opacity: 0.85 }}>
                 {format}
+              </p>
+              {/* Total Sites/Stores for the season, regardless of pipeline
+                  stage -- see the header comment above this component's
+                  data-prep block for why this matters: without it, a tile
+                  where nothing has reached Active yet reads as "no sites
+                  in this format at all", not "N sites, none started". */}
+              <p className="mt-1 truncate text-[11px] font-semibold" style={{ color: fg, opacity: 0.9 }}>
+                {siteCount} site{siteCount === 1 ? "" : "s"} · {storeCount} store{storeCount === 1 ? "" : "s"}
               </p>
               <p className="mt-1.5 text-3xl font-extrabold leading-none" style={{ color: fg }}>
                 {counts.active ?? 0}

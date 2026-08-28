@@ -12,7 +12,6 @@ import {
   FolderInput,
   LayoutGrid,
   List as ListIcon,
-  SlidersHorizontal,
   Building2,
   AlertTriangle,
   Eye,
@@ -249,15 +248,10 @@ export default function LfgSiteListPage() {
   // already supports.
   const [missingCount, setMissingCount] = useState<number | null>(null);
   const [gapsOnly, setGapsOnly] = useState(false);
-  // Filters panel (header/menu redesign) -- the Format/Status selects and
-  // the List/Cards view toggle now live behind this collapsible "Filters"
-  // button instead of always sitting on screen, matching the reference
-  // mockup's clean collapsed stat-strip. Starts closed only when nothing
-  // is actively filtered, so a Format Dashboard/Programs/Stores
-  // click-through (which sets formatFilter/statusFilter etc. on mount)
-  // still lands with its filter visibly applied rather than hidden behind
-  // a closed panel.
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  // Filters panel (Format/Status selects + List/Cards toggle) -- task:
+  // "keep the filter active all time without collapse." Used to live
+  // behind a collapsible "Filters" toggle, defaulting closed; now always
+  // rendered, no toggle/state needed.
   const [deleteTarget, setDeleteTarget] = useState<LfgSiteListRow | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -686,10 +680,11 @@ export default function LfgSiteListPage() {
       {/* Bordered stat-strip card (header/menu redesign) -- replaces the old
           plain-text stat line. Four colored icon-badge stats (Total Sites/
           Data Gaps/Showing/Need Attention -- same underlying counts as
-          before) separated by vertical dividers, the search box, and a
-          "Filters" toggle that reveals the Format/Status selects + List/
-          Cards view toggle below, all inside one card -- matching the
-          reference mockup. */}
+          before) separated by vertical dividers, the search box, and the
+          Format/Status selects + List/Cards view toggle below, always
+          visible (task: "keep the filter active all time without
+          collapse" -- previously behind a collapsible "Filters" button),
+          all inside one card. */}
       <div className="my-4 rounded-xl border border-line bg-surface p-4">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
           <StatPill icon={Building2} tone="primary" label="Total Sites" value={totalCount === null ? "…" : String(totalCount)} />
@@ -728,14 +723,10 @@ export default function LfgSiteListPage() {
                 className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-ink-muted"
               />
             </div>
-            <Button variant="secondary" onClick={() => setFiltersOpen((v) => !v)} aria-pressed={filtersOpen}>
-              <SlidersHorizontal size={15} className="mr-1.5" /> Filters
-            </Button>
           </div>
         </div>
 
-        {filtersOpen && (
-          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-4">
+        <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-4">
             <select
               value={formatFilter}
               onChange={(e) => setFormatFilter(e.target.value)}
@@ -785,8 +776,7 @@ export default function LfgSiteListPage() {
               </button>
             </div>
           </div>
-        )}
-      </div>
+        </div>
 
       <LfgProgramSummaryCard />
 
