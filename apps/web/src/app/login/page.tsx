@@ -5,6 +5,15 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Lock, ShieldCheck } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
+import { LFG_HOST } from "@/lib/lfg-host";
+
+// Cross-surface only -- see lfg/login/page.tsx's mirrored switcher, which
+// links back here via APP_HOST. Hardcoded to production the same way the
+// LFG partner invite email's own redirectTo is (create-login/route.ts):
+// this page is also reachable from ekms.vercel.app/a preview deployment,
+// where lfgconnect.mmdi.in wouldn't correspond to that environment's data
+// either way, so there's no "smarter" target to compute here.
+const LFG_LOGIN_URL = `https://${LFG_HOST}/login`;
 
 type Mode = "sign-in" | "set-password";
 
@@ -305,6 +314,11 @@ function LoginForm() {
   }
 
   const isInvite = mode === "set-password";
+  // Only shown on the plain landing state -- switching "who am I" mid a
+  // deep sub-flow (MFA code entry, password reset, an invite/recovery
+  // link) doesn't make sense and risks discarding it; same gating the
+  // existing "New accounts start as read-only" caption below already uses.
+  const showAudienceSwitcher = !isInvite && !mfaPending && !checkingSession && !showForgotPassword && authView === "sign-in";
 
   let heading: string;
   if (isInvite) {
@@ -320,7 +334,18 @@ function LoginForm() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-surface-sunken px-4">
+    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-surface-sunken px-4">
+      {showAudienceSwitcher && (
+        <div className="flex items-center gap-1 rounded-full border border-line-strong bg-surface p-1 text-xs font-medium shadow-sm">
+          <span className="rounded-full bg-primary px-4 py-1.5 text-on-brand">MMDI Employee</span>
+          <a
+            href={LFG_LOGIN_URL}
+            className="rounded-full px-4 py-1.5 text-ink-secondary transition-colors hover:bg-surface-sunken hover:text-ink"
+          >
+            LFG Connect Partner
+          </a>
+        </div>
+      )}
       <div className="w-full max-w-sm rounded-lg border border-line bg-surface p-8 shadow-sm">
         <div className="mb-6 flex flex-col items-center gap-2 text-center">
           <span className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-on-brand">

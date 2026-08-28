@@ -5,6 +5,13 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
 import { LFG_HOST } from "@/lib/lfg-host";
+import { APP_HOST } from "@/lib/app-host";
+
+// Mirror of the switcher on the main staff login page (src/app/login/
+// page.tsx), which links here the same way -- see that file's own comment
+// on why this is hardcoded to production rather than computed from the
+// current host.
+const APP_LOGIN_URL = `https://${APP_HOST}/login`;
 
 type Mode = "sign-in" | "set-password";
 
@@ -140,9 +147,24 @@ function LfgLoginForm() {
   }
 
   const isInvite = mode === "set-password";
+  // Same reasoning as the mirrored switcher on the main staff login page --
+  // hidden mid a deep sub-flow (a set-password/recovery link, the forgot-
+  // password form) so switching audience never risks discarding it.
+  const showAudienceSwitcher = !isInvite && !showForgotPassword;
 
   return (
-    <div data-theme="lfg" className="flex min-h-screen items-center justify-center bg-surface-sunken px-4">
+    <div data-theme="lfg" className="flex min-h-screen flex-col items-center justify-center gap-4 bg-surface-sunken px-4">
+      {showAudienceSwitcher && (
+        <div className="flex items-center gap-1 rounded-full border border-line-strong bg-surface p-1 text-xs font-medium shadow-sm">
+          <a
+            href={APP_LOGIN_URL}
+            className="rounded-full px-4 py-1.5 text-ink-secondary transition-colors hover:bg-surface-sunken hover:text-ink"
+          >
+            MMDI Employee
+          </a>
+          <span className="rounded-full bg-primary px-4 py-1.5 text-on-brand">LFG Connect Partner</span>
+        </div>
+      )}
       <div className="w-full max-w-sm rounded-lg border border-line bg-surface p-8 shadow-sm">
         <div className="mb-6 flex flex-col items-center gap-2 text-center">
           {/* eslint-disable-next-line @next/next/no-img-element -- small static local asset, same as LfgTopBar */}
