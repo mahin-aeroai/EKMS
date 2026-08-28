@@ -42,6 +42,7 @@ import {
   Ship,
   Store,
   MapPin,
+  ClipboardCheck,
 } from "lucide-react";
 import { Sidebar, type SidebarSection } from "@/components/ui/Sidebar";
 import { TopNav } from "@/components/ui/TopNav";
@@ -158,6 +159,14 @@ export const NAV: SidebarSection[] = [
     title: "Tools",
     items: [
       { id: "site-surveys", label: "Site Surveys", icon: <FileText size={16} />, href: "/workspaces/site-surveys" },
+      // Deliberately a distinct id/label/icon/route from "site-surveys"
+      // just above -- that one is a read-only listing of survey PDFs
+      // uploaded out-of-band by a script; this is the in-app CREATOR (AI
+      // extraction from an uploaded PDF, or a manual form, generating a
+      // matching PDF). Different tools, similar names -- worth the
+      // clipboard-vs-file icon distinction so they don't blur together in
+      // the sidebar.
+      { id: "site-survey-report", label: "Site Survey Reports", icon: <ClipboardCheck size={16} />, href: "/workspaces/site-survey-report" },
       { id: "sign-estimator", label: "Sign Estimator", icon: <Ruler size={16} />, href: "/workspaces/sign-estimator" },
       { id: "installation-report", label: "Installation Report", icon: <Camera size={16} />, href: "/workspaces/installation-report" },
       { id: "cut-file-tool", label: "Cut File Tool", icon: <Scissors size={16} />, href: "/workspaces/cut-file-tool" },
