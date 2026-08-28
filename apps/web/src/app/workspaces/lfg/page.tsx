@@ -309,11 +309,29 @@ export default function LfgSiteListPage() {
     if (!deleteTarget) return;
     setDeleting(true);
     const { error } = await supabase.from("lfg_sites").delete().eq("id", deleteTarget.id);
-    setDeleting(false);
     if (error) {
+      setDeleting(false);
       toast("danger", `Couldn't delete ${deleteTarget.site_id}: ${error.message}`);
       return;
     }
+    // Clean up the store row too if this was its last remaining site --
+    // left orphaned otherwise, it keeps holding its SFO ID/name forever,
+    // which then blocks any OTHER store from ever claiming that same SFO
+    // ID (lfg_stores.sfo_id is unique where set) -- the exact bug behind
+    // "duplicate key value violates unique constraint lfg_stores_sfo_id_key"
+    // on an unrelated site's save. Best-effort: the site itself is already
+    // deleted either way, so a failure here isn't surfaced as if the whole
+    // delete failed.
+    if (deleteTarget.store_id) {
+      const { count } = await supabase
+        .from("lfg_sites")
+        .select("id", { count: "exact", head: true })
+        .eq("store_id", deleteTarget.store_id);
+      if (!count) {
+        await supabase.from("lfg_stores").delete().eq("id", deleteTarget.store_id);
+      }
+    }
+    setDeleting(false);
     toast("success", `${deleteTarget.site_id} deleted`);
     setRows((prev) => prev?.filter((r) => r.id !== deleteTarget.id) ?? prev);
     setTotalCount((prev) => (prev === null ? prev : prev - 1));

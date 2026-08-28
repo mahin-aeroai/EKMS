@@ -888,11 +888,24 @@ export function LfgSiteWorkspaceClient({
   async function handleDeleteSite() {
     setDeleting(true);
     const { error } = await supabase.from("lfg_sites").delete().eq("id", site.id);
-    setDeleting(false);
     if (error) {
+      setDeleting(false);
       toast("danger", `Couldn't delete this site: ${error.message}`);
       return;
     }
+    // Same orphaned-store cleanup as Site Master's own delete (page.tsx) --
+    // see that one's comment for the full reasoning. Best-effort, doesn't
+    // block the redirect below on failure.
+    if (site.store_id) {
+      const { count } = await supabase
+        .from("lfg_sites")
+        .select("id", { count: "exact", head: true })
+        .eq("store_id", site.store_id);
+      if (!count) {
+        await supabase.from("lfg_stores").delete().eq("id", site.store_id);
+      }
+    }
+    setDeleting(false);
     toast("success", `${site.site_id} deleted`);
     router.push("/workspaces/lfg");
   }
