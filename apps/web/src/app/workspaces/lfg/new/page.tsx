@@ -313,9 +313,16 @@ export default function NewLfgSitePage() {
         escalation_email: form.escalation_email.trim() || null,
       };
 
+      // lfg_stores' own column is store_name, not outlet_name (that's
+      // lfg_sites' column, which storeFields is shaped for -- it also
+      // feeds the lfg_sites insert below via `...storeFields`). Insert
+      // the same values under the one column lfg_stores actually has,
+      // rather than reusing storeFields verbatim -- that fails with
+      // "Could not find the 'outlet_name' column of 'lfg_stores'".
+      const { outlet_name: newStoreOutletName, ...storeFieldsForLfgStores } = storeFields;
       const { data: newStore, error: storeError } = await supabase
         .from("lfg_stores")
-        .insert(storeFields)
+        .insert({ ...storeFieldsForLfgStores, store_name: newStoreOutletName })
         .select("id")
         .single();
 

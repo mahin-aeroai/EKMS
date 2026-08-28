@@ -523,6 +523,14 @@ function SiteInfoCard({
       asm_email: form.asm_email.trim() || null,
       escalation_email: form.escalation_email.trim() || null,
     };
+    // lfg_stores' own column is store_name, not outlet_name (that's
+    // lfg_sites' column) -- storeFields above stays shaped for lfg_sites
+    // (used for the siblings update below, and matches SiteInfoForm), this
+    // is the same values renamed to the one column lfg_stores actually
+    // has. Without this, the lfg_stores update below fails with "Could
+    // not find the 'outlet_name' column of 'lfg_stores'".
+    const { outlet_name: storeOutletName, ...storeFieldsForLfgStores } = storeFields;
+    const lfgStoresFields = { ...storeFieldsForLfgStores, store_name: storeOutletName };
     const siteOnlyFields = {
       material: form.material.trim() || null,
       mat_code: form.mat_code.trim() || null,
@@ -537,7 +545,7 @@ function SiteInfoCard({
 
     if (site.store_id) {
       const [{ error: storeError }, { error: siblingsError }] = await Promise.all([
-        supabase.from("lfg_stores").update(storeFields).eq("id", site.store_id),
+        supabase.from("lfg_stores").update(lfgStoresFields).eq("id", site.store_id),
         supabase.from("lfg_sites").update(storeFields).eq("store_id", site.store_id),
       ]);
       if (storeError || siblingsError) {
