@@ -29,6 +29,7 @@ import { LFG_STATUSES, lfgStatusLabel, lfgStatusBadge } from "@/lib/lfgStatus";
 import { formatMm, formatSizeInches, formatDecimal } from "@/lib/lfg-units";
 import { useLfgDistinctValues } from "@/lib/useLfgDistinctValues";
 import { LfgSiteCardGrid } from "@/components/workspaces/LfgSiteCardGrid";
+import { LfgProgramSummaryCard } from "@/components/workspaces/LfgProgramSummaryCard";
 
 // Site Master list — the entry point to the LFG Connect program's Site 360
 // view. Deliberately a client component doing direct supabase.from()
@@ -561,6 +562,8 @@ export default function LfgSiteListPage() {
           need attention
         </span>
       </div>
+
+      <LfgProgramSummaryCard />
 
       {(formatFilter || programIdFilter || storeIdFilter) && (
         <div className="mb-3 flex flex-wrap items-center gap-2">

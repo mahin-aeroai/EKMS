@@ -78,33 +78,25 @@ const STATUS_TEXT_CLASS: Record<BadgeStatus, string> = {
 // text carried through from two legacy imports -- see LFG_FORMAT_PRIORITY's
 // own comment in lfgStatus.ts, not a controlled vocabulary) -- painted
 // behind the reference-picture placeholder when a site has no photo on
-// file yet. Flat colors only, never a gradient. The palette itself is the
-// second approved brand board's own 12 swatches (icy blue-grey through
-// slate to near-black navy/charcoal) -- the first board's palette read as
-// too washed-out/samey once on real cards (several were near-white), so
-// this one trades that for a genuinely distinct light-to-dark spread.
-// Known formats (APR, Mono AAR, Croma, ...) get a fixed color from this
-// list in LFG_FORMAT_PRIORITY's own order (8 formats, so each gets its
-// own swatch with 4 left over); anything else still gets a real color
-// (deterministic per format string, via a simple hash) rather than
-// falling back to grey.
+// file yet. Flat colors only, never a gradient. Trimmed down from the
+// second brand board's full 12 swatches to just its contrast colors --
+// the pale greys and the warm near-black brown read as washed-out/muddy
+// on a card, so only the genuinely saturated blue-grey-to-navy tones
+// stay. Known formats (APR, Mono AAR, Croma, ...) get a fixed color from
+// this list in LFG_FORMAT_PRIORITY's own order; anything else still gets
+// a real color (deterministic per format string, via a simple hash)
+// rather than falling back to grey.
 const FORMAT_COLOR_PALETTE = [
-  "#E4EAEC", // QN.02.82
   "#8A9BA8", // S2.07.58
-  "#D9D3C7", // E0.03.72
-  "#C9D6D7", // Q5.04.72
   "#5E6D76", // T5.06.44
-  "#C6CAD0", // CN.00.70
-  "#A7BFB8", // N1.06.61
   "#1B2C60", // T9.26.21
   "#726F76", // YN.02.45
   "#46697E", // S2.13.39
   "#1E252B", // T3.04.12
-  "#2A211D", // C9.06.21
 ];
 
 function formatPlaceholderColor(format: string | null): string {
-  if (!format) return "#A7BFB8"; // no format on file -- the palette's own neutral tone
+  if (!format) return "#726F76"; // no format on file -- the palette's own neutral tone
   const f = format.trim().toLowerCase();
   const idx = LFG_FORMAT_PRIORITY.findIndex((keyword) => f.includes(keyword) || keyword.includes(f));
   if (idx !== -1) return FORMAT_COLOR_PALETTE[idx % FORMAT_COLOR_PALETTE.length];
@@ -286,7 +278,7 @@ export function LfgSiteCardGrid({ rows }: { rows: LfgSiteCardRow[] }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {visible.map((row) => (
           <SiteCard
             key={row.id}
