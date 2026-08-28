@@ -78,30 +78,33 @@ const STATUS_TEXT_CLASS: Record<BadgeStatus, string> = {
 // text carried through from two legacy imports -- see LFG_FORMAT_PRIORITY's
 // own comment in lfgStatus.ts, not a controlled vocabulary) -- painted
 // behind the reference-picture placeholder when a site has no photo on
-// file yet, instead of a flat grey gradient. Known formats (APR, Mono
-// AAR, Croma, ...) get a fixed, memorable color from this palette in
-// LFG_FORMAT_PRIORITY's own order; anything else still gets a real color
-// (deterministic per format string, via a simple hash) rather than
-// falling back to grey.
-const FORMAT_COLOR_PALETTE = [
-  "#2563EB", // app -- blue
-  "#7C3AED", // apr -- violet
-  "#0891B2", // mono aar -- cyan
-  "#059669", // multi aar -- emerald
-  "#DC2626", // croma -- red
-  "#EA580C", // reliance -- orange
-  "#CA8A04", // vijay sales -- amber
-  "#DB2777", // pai international -- pink
-];
+// file yet. Flat colors only, never a gradient. The palette itself is the
+// approved brand board's own swatches (blush/taupe/slate-blue/navy), not
+// a generic bright/"flashy" set -- known formats (APR, Mono AAR, Croma,
+// ...) get a fixed color from this list in LFG_FORMAT_PRIORITY's own
+// order; anything else still gets a real color (deterministic per format
+// string, via a simple hash) rather than falling back to grey.
+const FORMAT_COLOR_PALETTE = ["#FFF9F9", "#EED8D1", "#F0E7E1", "#CEC5C1", "#8C98B0", "#1F2947"];
 
 function formatPlaceholderColor(format: string | null): string {
-  if (!format) return "#475569"; // slate -- no format on file
+  if (!format) return "#CEC5C1"; // no format on file -- the palette's own neutral tone
   const f = format.trim().toLowerCase();
   const idx = LFG_FORMAT_PRIORITY.findIndex((keyword) => f.includes(keyword) || keyword.includes(f));
   if (idx !== -1) return FORMAT_COLOR_PALETTE[idx % FORMAT_COLOR_PALETTE.length];
   let hash = 0;
   for (let i = 0; i < format.length; i++) hash = (hash * 31 + format.charCodeAt(i)) >>> 0;
   return FORMAT_COLOR_PALETTE[hash % FORMAT_COLOR_PALETTE.length];
+}
+
+// The palette above runs from near-white (#FFF9F9) to navy (#1F2947) --
+// the placeholder's centered signboard icon is drawn in a fixed stroke
+// color, so it needs to flip from dark to white depending on how light
+// the chosen swatch is, or it disappears on the paler ones.
+function isLightColor(hex: string): boolean {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return (r * 299 + g * 587 + b * 114) / 1000 > 180;
 }
 
 // lfg_installations.installation_status vocabulary (INSTALLATION_STATUSES,
@@ -398,6 +401,8 @@ function SiteCard({
   const statusBadge = lfgStatusBadge(row.site_status);
   const partner = partnerName(row);
   const address = [row.city && row.region ? `${row.city}, ${row.region}` : row.city, row.store_address].filter(Boolean).join(" -- ");
+  const placeholderColor = formatPlaceholderColor(row.format);
+  const iconStroke = isLightColor(placeholderColor) ? "#1F2947" : "#fff";
 
   return (
     <div
@@ -407,11 +412,15 @@ function SiteCard({
       onKeyDown={(e) => {
         if (e.key === "Enter") router.push(`/workspaces/lfg/sites/${row.id}`);
       }}
-      className="flex cursor-pointer flex-col overflow-hidden rounded-[20px] border border-line bg-surface shadow-2 transition-shadow hover:shadow-3"
+      className="flex cursor-pointer flex-col rounded-[20px] border border-line bg-surface p-3 shadow-2 transition-shadow hover:shadow-3"
     >
+      {/* The photo/placeholder sits inset within the card's own white
+          padding, with its own fully rounded corners on every side --
+          reads as a framed photo rather than a color block bleeding to
+          the card's edges. Flat colors only throughout; no gradients. */}
       <div
-        className="relative h-[180px] w-full shrink-0 overflow-hidden"
-        style={!pictureUrl ? { background: formatPlaceholderColor(row.format) } : undefined}
+        className="relative h-[180px] w-full shrink-0 overflow-hidden rounded-2xl"
+        style={!pictureUrl ? { background: placeholderColor } : undefined}
       >
         {pictureUrl ? (
           // eslint-disable-next-line @next/next/no-img-element -- short-lived signed R2 URL
@@ -422,21 +431,16 @@ function SiteCard({
             height="64"
             viewBox="0 0 64 64"
             fill="none"
-            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 opacity-20"
+            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 opacity-25"
             aria-hidden
           >
-            <rect x="8" y="10" width="48" height="28" rx="3" stroke="#fff" strokeWidth="2" />
-            <line x1="32" y1="38" x2="32" y2="54" stroke="#fff" strokeWidth="2" />
-            <line x1="20" y1="54" x2="44" y2="54" stroke="#fff" strokeWidth="2" />
-            <line x1="14" y1="18" x2="50" y2="18" stroke="#fff" strokeWidth="1.5" opacity="0.6" />
-            <line x1="14" y1="26" x2="42" y2="26" stroke="#fff" strokeWidth="1.5" opacity="0.6" />
+            <rect x="8" y="10" width="48" height="28" rx="3" stroke={iconStroke} strokeWidth="2" />
+            <line x1="32" y1="38" x2="32" y2="54" stroke={iconStroke} strokeWidth="2" />
+            <line x1="20" y1="54" x2="44" y2="54" stroke={iconStroke} strokeWidth="2" />
+            <line x1="14" y1="18" x2="50" y2="18" stroke={iconStroke} strokeWidth="1.5" opacity="0.6" />
+            <line x1="14" y1="26" x2="42" y2="26" stroke={iconStroke} strokeWidth="1.5" opacity="0.6" />
           </svg>
         )}
-        {/* A tiny soft white blend at the base of the photo/placeholder, as in
-            the approved mockup -- keeps the card's bottom edge feeling
-            finished rather than the image cutting off sharply into the
-            white body below. */}
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-white/85 to-transparent" />
         {row.format && (
           <span className="absolute left-3 top-3 rounded-full bg-black/55 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide text-white backdrop-blur">
             {row.format}
@@ -451,7 +455,7 @@ function SiteCard({
         </span>
       </div>
 
-      <div className="flex flex-col p-5">
+      <div className="flex flex-col px-2 pb-1 pt-4">
         <h3 className="truncate text-[17px] font-bold text-ink">{row.outlet_name}</h3>
         <div className="mt-1.5 flex items-center gap-1.5 overflow-hidden text-[13px] text-ink-secondary">
           <MapPin size={13} className="shrink-0" />

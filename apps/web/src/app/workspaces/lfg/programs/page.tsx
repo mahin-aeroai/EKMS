@@ -19,20 +19,32 @@ import { LFG_PIPELINE_STAGES, LFG_PIPELINE_STAGE_BADGE, lfgPipelineStageOf, type
 // lfg_sites.program_id in the schema), tracked through the same pipeline
 // stages every other view of lfg_sites uses (LFG_PIPELINE_STAGES).
 //
-// Create + a card per Program, sized and grouped by whether the Program
-// itself is still active (task #85 -- a plain table read fine as a list,
-// but buried the one thing a returning visitor actually wants: "where does
-// the CURRENT wave stand, stage by stage" behind a wall of columns). Click
-// a card to jump to the Site Master filtered to strictly that Program's
-// sites (?program_id=, distinct from the Format Dashboard's ?format=).
-// Moving sites INTO a Program is done from the Site Master itself (bulk
-// "Move to Program", task #46, admin/editor gated) -- not from this page.
+// Create + a card per Program, sized and grouped by recency (task #85 -- a
+// plain table read fine as a list, but buried the one thing a returning
+// visitor actually wants: "where does the CURRENT wave stand, stage by
+// stage" behind a wall of columns). The most recently created Program is
+// the "current" one, rendered big and first; every earlier one groups
+// into a smaller "Previous Programs" row below.
+//
+// Deliberately NOT grouped by lfg_programs.active -- that column defaults
+// to true for every row (supabase-lfg-site-management-schema.sql) and
+// nothing in this app ever exposes a way to flip it, so in practice every
+// Program is "active" and grouping on it never actually produced a
+// current-vs-previous split. created_at is real, populated data that
+// naturally reflects which wave is newest.
+//
+// Click a card to jump to the Site Master filtered to strictly that
+// Program's sites (?program_id=, distinct from the Format Dashboard's
+// ?format=). Moving sites INTO a Program is done from the Site Master
+// itself (bulk "Move to Program", task #46, admin/editor gated) -- not
+// from this page.
 
 interface ProgramRow {
   id: string;
   name: string;
   active: boolean;
   notes: string | null;
+  created_at: string;
 }
 
 interface SiteStageRow {
@@ -87,7 +99,9 @@ export default function LfgProgramsPage() {
   const [error, setError] = useState<string | null>(null);
 
   async function loadPrograms() {
-    const { data } = await supabase.from("lfg_programs").select("*").order("name");
+    // Newest first -- the current/previous split below just takes the
+    // first row as "current", so this ordering IS that logic.
+    const { data } = await supabase.from("lfg_programs").select("*").order("created_at", { ascending: false });
     setProgramRows((data as ProgramRow[]) ?? []);
   }
 
@@ -146,8 +160,11 @@ export default function LfgProgramsPage() {
 
   const unassignedCount = loading ? 0 : siteRows!.filter((r) => r.program_id === null).length;
 
-  const activeGroups = groups.filter((g) => g.active);
-  const inactiveGroups = groups.filter((g) => !g.active);
+  // `groups` is already newest-first (loadPrograms orders by created_at
+  // desc) -- the single newest Program is "current" (the big card); every
+  // other one is "previous" (the smaller grid below).
+  const currentGroup = groups[0] ?? null;
+  const previousGroups = groups.slice(1);
 
   return (
     <div>
@@ -212,19 +229,17 @@ export default function LfgProgramsPage() {
               </p>
             )}
 
-            {activeGroups.length > 0 && (
+            {currentGroup && (
               <div className="flex flex-col gap-4">
-                {activeGroups.map((g) => (
-                  <ProgramCard key={g.id} group={g} size="lg" onClick={() => openProgram(g.id, g.name)} />
-                ))}
+                <ProgramCard group={currentGroup} size="lg" onClick={() => openProgram(currentGroup.id, currentGroup.name)} />
               </div>
             )}
 
-            {inactiveGroups.length > 0 && (
+            {previousGroups.length > 0 && (
               <div className="mt-8">
                 <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-muted">Previous Programs</h2>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {inactiveGroups.map((g) => (
+                  {previousGroups.map((g) => (
                     <ProgramCard key={g.id} group={g} size="sm" onClick={() => openProgram(g.id, g.name)} />
                   ))}
                 </div>
