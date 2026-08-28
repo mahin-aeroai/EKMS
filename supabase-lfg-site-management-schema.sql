@@ -1064,6 +1064,16 @@ create policy lfg_sites_delete_staff on public.lfg_sites
   for delete to authenticated
   using (public.user_role() = 'admin');
 
+-- Also enforces the two status-change permission rules from
+-- supabase-lfg-audit-log-expand-migration.sql's sibling,
+-- supabase-lfg-workflow-automation-migration.sql (see that file's header
+-- comment for the full task reasoning): Creative Received is MMDI-only,
+-- and so are the production/shipping statuses (production_pending,
+-- in_production, ready_for_dispatch, dispatched, in_transit) --
+-- Delivered and every installation status stay open to both MMDI and the
+-- installation partner. Kept in sync with
+-- apps/web/src/lib/lfgStatus.ts's LFG_PARTNER_RESTRICTED_STATUSES, the
+-- UI-side mirror of this same list.
 create or replace function public.lfg_sites_guard_partner_update()
 returns trigger
 language plpgsql
@@ -1079,6 +1089,18 @@ begin
     then
       raise exception 'Partners cannot change site ownership, outlet name, format, or SFO ID — contact MMDI.';
     end if;
+
+    if new.creative_received_at is distinct from old.creative_received_at
+       or new.creative_received_by is distinct from old.creative_received_by
+    then
+      raise exception 'Only MMDI can mark Creative Received — contact MMDI.';
+    end if;
+
+    if new.site_status is distinct from old.site_status
+       and new.site_status in ('production_pending', 'in_production', 'ready_for_dispatch', 'dispatched', 'in_transit')
+    then
+      raise exception 'Only MMDI can set this status (%) — contact MMDI.', new.site_status;
+    end if;
   end if;
   return new;
 end;
@@ -1088,6 +1110,40 @@ drop trigger if exists lfg_sites_guard_partner_update_trigger on public.lfg_site
 create trigger lfg_sites_guard_partner_update_trigger
   before update on public.lfg_sites
   for each row execute function public.lfg_sites_guard_partner_update();
+
+-- Auto-advances a site to 'survey_completed' the moment it's mapped into
+-- a Program, if a Site Survey document is already on file and the site
+-- is still sitting at 'new'/'survey_pending' -- see
+-- supabase-lfg-workflow-automation-migration.sql's header comment (rule
+-- 1) for the full reasoning. Never regresses a site already further
+-- along, and deliberately leaves creative_received_at untouched -- the
+-- rest of the app already reads that as "awaiting creative" without
+-- needing a distinct status value for it.
+create or replace function public.lfg_sites_program_mapping_defaults()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.program_id is distinct from old.program_id and new.program_id is not null then
+    if new.site_status in ('new', 'survey_pending') then
+      if exists (
+        select 1 from public.lfg_site_documents d
+        where d.site_id = new.id and d.category = 'survey'
+      ) then
+        new.site_status := 'survey_completed';
+      end if;
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists lfg_sites_program_mapping_defaults_trigger on public.lfg_sites;
+create trigger lfg_sites_program_mapping_defaults_trigger
+  before update on public.lfg_sites
+  for each row execute function public.lfg_sites_program_mapping_defaults();
 
 -- The Site Status change action (spec: every change recorded with User,
 -- Date, Time, Previous Status, New Status, Remarks) is a single RPC

@@ -1176,6 +1176,7 @@ export function SurveyTab({
   siteVerifiedAt,
   editable,
   canApprove = editable,
+  canMarkCreative = editable,
   onChanged,
 }: {
   siteId: string;
@@ -1193,6 +1194,17 @@ export function SurveyTab({
   // editable={true}, canApprove={false} to log surveys without exposing
   // an Approve button RLS would just reject.
   canApprove?: boolean;
+  // Also separate from `editable` -- Creative Received is an MMDI-only
+  // milestone (task: "Creative received has to be updated by the users
+  // MMDI"), enforced for real at the DB level too
+  // (lfg_sites_guard_partner_update() in the schema now rejects a
+  // partner changing creative_received_at/_by, same pattern as the
+  // existing outlet-name/format/SFO-ID guard). This just keeps the
+  // control from appearing at all for a partner, rather than showing it
+  // and letting the write fail. Defaults to `editable` so staff call
+  // sites are unchanged; LfgPartnerSiteClient passes
+  // canMarkCreative={false}.
+  canMarkCreative?: boolean;
   onChanged: () => void;
 }) {
   const { toast } = useToast();
@@ -1347,7 +1359,7 @@ export function SurveyTab({
             dropdown (task #57), same two underlying handlers either way
             since nothing about the mark/undo logic itself needed to
             change, just how it's triggered. */}
-        {editable && (
+        {canMarkCreative ? (
           <select
             value={creativeReceivedAt ? "received" : "awaiting"}
             disabled={savingCreative}
@@ -1360,6 +1372,8 @@ export function SurveyTab({
             <option value="awaiting">Awaiting</option>
             <option value="received">Received</option>
           </select>
+        ) : (
+          editable && <span className="text-xs text-ink-muted">MMDI updates this</span>
         )}
       </div>
 

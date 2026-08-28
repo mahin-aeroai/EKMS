@@ -30,6 +30,31 @@ export const LFG_STATUSES = [
 
 export type LfgStatus = (typeof LFG_STATUSES)[number];
 
+/**
+ * Statuses only MMDI staff may set -- production and everything up
+ * through dispatch/transit ("In production after creative approval so
+ * MMDI will update that status too" / "Shipped will be updated by MMDI
+ * once printed and shipped"). Delivered and every installation status
+ * stay open to both MMDI and the installation partner, same as before,
+ * per the same task's "Delivered can be updated by I&S or MMDI" /
+ * "Installed: both 2 parties."
+ *
+ * This is the UI-side mirror of the REAL enforcement, the
+ * lfg_sites_guard_partner_update() trigger in
+ * supabase-lfg-site-management-schema.sql, which rejects a partner
+ * setting any of these regardless of what the UI shows -- keep the two
+ * lists in sync if either changes. Used to filter the partner-facing
+ * status picker (LfgPartnerSiteClient.tsx) so a partner never even sees
+ * an option the database would reject.
+ */
+export const LFG_PARTNER_RESTRICTED_STATUSES: readonly LfgStatus[] = [
+  "production_pending",
+  "in_production",
+  "ready_for_dispatch",
+  "dispatched",
+  "in_transit",
+];
+
 export const LFG_STATUS_LABEL: Record<LfgStatus, string> = {
   new: "New",
   survey_pending: "Survey Pending",

@@ -31,7 +31,7 @@ import {
   partnerOf,
   OtherDisplaysPanel,
 } from "@/components/workspaces/LfgSiteWorkspaceClient";
-import { LFG_STATUSES, lfgStatusLabel, lfgStatusBadge } from "@/lib/lfgStatus";
+import { LFG_STATUSES, LFG_PARTNER_RESTRICTED_STATUSES, lfgStatusLabel, lfgStatusBadge } from "@/lib/lfgStatus";
 
 // Partner-facing Site 360 -- reuses the exact same Survey/Production/
 // Shipment/Installation/Documents tab components as the staff workspace
@@ -278,6 +278,10 @@ export function LfgPartnerSiteClient({
           siteVerifiedAt={site.site_verified_at}
           editable={editable}
           canApprove={canApprove}
+          // Creative Received is MMDI-only -- a real partner never gets
+          // the control; a staff account reusing this component (isStaff)
+          // keeps it, same as editable already does elsewhere in this file.
+          canMarkCreative={isStaff && editable}
           onChanged={() => router.refresh()}
         />
       ),
@@ -364,7 +368,18 @@ export function LfgPartnerSiteClient({
             onChange={(e) => setNewStatus(e.target.value)}
             className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
           >
-            {LFG_STATUSES.map((s) => (
+            {/* Production/shipping statuses are MMDI-only (see
+                LFG_PARTNER_RESTRICTED_STATUSES) -- left out of a real
+                partner's own picker entirely, except when the site is
+                already sitting at one (so the dropdown can still show
+                its current value; the database itself would reject
+                trying to set any OTHER restricted status regardless of
+                what's shown here). A staff account reusing this same
+                component (isStaff -- see this file's own header comment)
+                still sees every status, same as the internal Site 360. */}
+            {LFG_STATUSES.filter(
+              (s) => isStaff || s === site.site_status || !LFG_PARTNER_RESTRICTED_STATUSES.includes(s)
+            ).map((s) => (
               <option key={s} value={s}>
                 {lfgStatusLabel(s)}
               </option>
