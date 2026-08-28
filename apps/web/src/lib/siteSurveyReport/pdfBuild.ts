@@ -11,14 +11,14 @@
 // tables -- so an exported report reads as "the same document, filled in
 // digitally" rather than a different-looking redesign.
 //
-// Photos: milestone 2 (this file's first version) ships with photo upload
-// not yet built (see MeasurementStep.tsx / DetailsStep.tsx siblings and the
-// plan's milestone list), so every photo section below is written to
-// gracefully render an empty placeholder slot when a page's photos array is
-// empty, rather than assuming photos always exist. `SurveyPhotoImage`
-// (bytes + caption + category) is the shape milestone 3 will start passing
-// in once real R2-uploaded photos exist; the drawing code already branches
-// on "have this photo" vs "don't" so no rework is needed then.
+// Photos: every photo section is written to gracefully render an empty
+// placeholder slot when a category has no matching photo yet (see
+// drawPhotoBox), rather than assuming photos always exist -- still true
+// now that milestone 3 (PhotosStep.tsx) uploads real ones, since any given
+// report can still be missing a category. `SurveyPhotoInput` takes raw
+// image bytes (fetched from R2 by the caller) rather than an already
+// -embedded PDFImage, since a PDFImage is only ever valid for the
+// PDFDocument that embedded it, and this file creates its own.
 
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFImage, type PDFPage } from "pdf-lib";
 import type { PhotoCategory, SiteSurveyFormData, SiteSurveyMeasurement } from "./types";
@@ -51,11 +51,26 @@ const PLACEHOLDER_BG = rgb(0.95, 0.95, 0.96);
 // Data shapes
 // ---------------------------------------------------------------------------
 
-export interface SurveyPhotoImage {
-  image: PDFImage;
+// Caller-facing shape: raw image bytes, not yet embedded in any
+// PDFDocument (a PDFImage is only ever valid for the document instance
+// that embedded it, and buildSiteSurveyReportPdf creates its own
+// PDFDocument internally -- see the entry point below).
+export interface SurveyPhotoInput {
+  bytes: Uint8Array;
+  /** "jpg" unless the source file was a PNG (site_survey_photos rows are always uploaded as JPEG -- see the upload-url route -- but PNG is supported for future extracted-from-PDF pages, which rasterize to PNG). */
+  format?: "jpg" | "png";
   category: PhotoCategory;
   caption: string | null;
   /** Fractional {x,y,w,h} red box, only ever present for the measurement photo. */
+  annotation: { x: number; y: number; w: number; h: number } | null;
+}
+
+// Internal shape once a photo's bytes have been embedded into this build's
+// PDFDocument -- what the drawing functions below actually consume.
+interface SurveyPhotoImage {
+  image: PDFImage;
+  category: PhotoCategory;
+  caption: string | null;
   annotation: { x: number; y: number; w: number; h: number } | null;
 }
 
@@ -68,7 +83,7 @@ export interface SiteSurveyReportPdfData {
   surveyorName: string;
   formData: SiteSurveyFormData;
   measurement: SiteSurveyMeasurement;
-  photos: SurveyPhotoImage[];
+  photos: SurveyPhotoInput[];
 }
 
 interface Ctx {
@@ -76,6 +91,7 @@ interface Ctx {
   font: PDFFont;
   bold: PDFFont;
   data: SiteSurveyReportPdfData;
+  photos: SurveyPhotoImage[];
   pageNumber: number;
 }
 
@@ -259,7 +275,7 @@ function drawCoverPage(ctx: Ctx) {
   page.drawRectangle({ x: 0, y: PAGE_HEIGHT - mm(30), width: PAGE_WIDTH, height: mm(30), color: DARKBAR });
   page.drawText("SITE SURVEY REPORT", { x: MARGIN, y: PAGE_HEIGHT - mm(19), size: 20, font: ctx.bold, color: WHITE });
 
-  const mainPhoto = data.photos.find((p) => p.category === "main_site");
+  const mainPhoto = ctx.photos.find((p) => p.category === "main_site");
   const photoTop = PAGE_HEIGHT - mm(30);
   const photoH = mm(120);
   drawPhotoBox(page, ctx, mainPhoto, "Main Site Photo", MARGIN, photoTop, contentWidth(), photoH);
@@ -379,7 +395,7 @@ const ORIENTATION_LABELS: Record<string, string> = {
 };
 
 function drawMainSitePhotoPages(ctx: Ctx) {
-  const photos = ctx.data.photos.filter((p) => p.category === "main_site");
+  const photos = ctx.photos.filter((p) => p.category === "main_site");
   const list = photos.length > 0 ? photos : [undefined];
   for (const photo of list) {
     const page = newPage(ctx, "Main Site Photo");
@@ -401,7 +417,7 @@ function drawOrientationPage(ctx: Ctx) {
   const boxW = (contentWidth() - gap * 2) / 3;
   const boxH = mm(85);
   categories.forEach((cat, i) => {
-    const photo = ctx.data.photos.find((p) => p.category === cat);
+    const photo = ctx.photos.find((p) => p.category === cat);
     const x = contentLeft() + i * (boxW + gap);
     drawPhotoBox(page, ctx, photo, ORIENTATION_LABELS[cat], x, y, boxW, boxH);
     const label = ORIENTATION_LABELS[cat];
@@ -459,7 +475,7 @@ function drawMeasurementPage(ctx: Ctx) {
   let y = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
   y = drawSectionBand(page, ctx, "Site Photo & Measurement", y);
 
-  const photo = ctx.data.photos.find((p) => p.category === "measurement");
+  const photo = ctx.photos.find((p) => p.category === "measurement");
   const halfW = (contentWidth() - mm(4)) / 2;
   const rowH = mm(85);
   drawPhotoBox(page, ctx, photo, "Site Measurement Photo", contentLeft(), y, halfW, rowH);
@@ -497,7 +513,21 @@ export async function buildSiteSurveyReportPdf(data: SiteSurveyReportPdfData): P
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const ctx: Ctx = { doc, font, bold, data, pageNumber: 0 };
+
+  // Every photo must be embedded into THIS PDFDocument before any drawing
+  // starts -- a PDFImage from a different document isn't valid here (see
+  // SurveyPhotoInput's header comment). Embedding is async; drawing isn't,
+  // so it all happens up front rather than per page.
+  const photos: SurveyPhotoImage[] = await Promise.all(
+    data.photos.map(async (p) => ({
+      image: p.format === "png" ? await doc.embedPng(p.bytes) : await doc.embedJpg(p.bytes),
+      category: p.category,
+      caption: p.caption,
+      annotation: p.annotation,
+    }))
+  );
+
+  const ctx: Ctx = { doc, font, bold, data, photos, pageNumber: 0 };
 
   drawCoverPage(ctx);
   drawDetailsPage(ctx);
@@ -506,7 +536,7 @@ export async function buildSiteSurveyReportPdf(data: SiteSurveyReportPdfData): P
   drawOrientationPage(ctx);
   drawMeasurementPage(ctx);
 
-  const otherPhotos = data.photos.filter((p) => p.category === "other");
+  const otherPhotos = ctx.photos.filter((p) => p.category === "other");
   if (otherPhotos.length > 0) {
     for (const photo of otherPhotos) {
       const page = newPage(ctx, "Additional Photo");

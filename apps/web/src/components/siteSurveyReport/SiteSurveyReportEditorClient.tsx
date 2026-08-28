@@ -11,8 +11,9 @@ import { supabase } from "@/lib/supabase";
 import { StepperNav, ComingSoonPane, type StepperStep } from "./StepperNav";
 import { DetailsStep } from "./DetailsStep";
 import { MeasurementStep } from "./MeasurementStep";
+import { PhotosStep } from "./PhotosStep";
 import type { ReportHeaderFields } from "./ReportFormFields";
-import { buildSiteSurveyReportPdf, downloadBlob } from "@/lib/siteSurveyReport/pdfBuild";
+import { buildSiteSurveyReportPdf, downloadBlob, type SurveyPhotoInput } from "@/lib/siteSurveyReport/pdfBuild";
 import {
   REPORT_STATUS_LABEL,
   emptyFormData,
@@ -20,14 +21,18 @@ import {
   type FieldSourceKey,
   type SiteSurveyFormData,
   type SiteSurveyMeasurement,
+  type SiteSurveyPhotoRow,
   type SiteSurveyReportRow,
 } from "@/lib/siteSurveyReport/types";
 
-// Milestone 2 scope: the full stepper shell. Upload PDF / AI Extraction /
-// Review / Photos aren't built yet (milestones 3-4) and Preview isn't
-// built yet (milestone 5), so those five steps render a ComingSoonPane
-// rather than pretending to work; Complete Details, Measurements, and
-// Generate are fully real against Supabase + client-side PDF export. A
+// Milestone 3 adds Photos (real R2 upload + the measurement red-box
+// annotation tool, see PhotosStep.tsx) to milestone 2's shell. Upload PDF /
+// AI Extraction / Review aren't built yet (milestone 4) and Preview isn't
+// built yet (milestone 5), so those three steps still render a
+// ComingSoonPane; Complete Details, Photos, Measurements, and Generate are
+// all fully real against Supabase + R2 + client-side PDF export -- Generate
+// now embeds every uploaded photo (and the measurement photo's annotation)
+// into the exported PDF instead of leaving placeholder slots. A
 // manually-created report already lands on Complete Details (nothing
 // upstream applies to it); a PDF-sourced report also lands there for now,
 // since extraction doesn't exist yet -- once milestone 4 ships, the
@@ -46,11 +51,21 @@ type StepId = "upload" | "extraction" | "review" | "details" | "photos" | "measu
 export function SiteSurveyReportEditorClient({ reportId }: { reportId: string }) {
   const { toast } = useToast();
   const [report, setReport] = useState<SiteSurveyReportRow | null>(null);
+  const [photos, setPhotos] = useState<SiteSurveyPhotoRow[]>([]);
   const [step, setStep] = useState<StepId>("details");
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
   const loadedRef = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function reloadPhotos() {
+    supabase
+      .from("site_survey_photos")
+      .select("*")
+      .eq("report_id", reportId)
+      .order("sort_order", { ascending: true })
+      .then(({ data }) => setPhotos((data as SiteSurveyPhotoRow[] | null) ?? []));
+  }
 
   useEffect(() => {
     supabase
@@ -71,6 +86,7 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
         });
         loadedRef.current = true;
       });
+    reloadPhotos();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reportId]);
 
@@ -132,11 +148,38 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
     setStep(next as StepId);
   }
 
+  async function fetchPhotoInputs(): Promise<SurveyPhotoInput[]> {
+    const results = await Promise.all(
+      photos.map(async (photo) => {
+        try {
+          const signedRes = await fetch(`/api/site-survey-reports/${reportId}/photos/${photo.id}/signed-url`);
+          const signedData = await signedRes.json();
+          if (!signedRes.ok || !signedData.url) return null;
+          const imageRes = await fetch(signedData.url);
+          if (!imageRes.ok) return null;
+          const bytes = new Uint8Array(await imageRes.arrayBuffer());
+          const input: SurveyPhotoInput = {
+            bytes,
+            format: "jpg",
+            category: photo.category,
+            caption: photo.caption,
+            annotation: photo.annotation,
+          };
+          return input;
+        } catch {
+          return null;
+        }
+      })
+    );
+    return results.filter((p): p is SurveyPhotoInput => p !== null);
+  }
+
   async function handleGenerate() {
     if (!report) return;
     setGenerating(true);
     try {
       await persist(report, { silent: true });
+      const photoInputs = await fetchPhotoInputs();
       const blob = await buildSiteSurveyReportPdf({
         storeName: report.store_name,
         address: report.address,
@@ -146,7 +189,7 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
         surveyorName: report.surveyor_name,
         formData: report.form_data,
         measurement: report.measurement,
-        photos: [], // real photos land in milestone 3
+        photos: photoInputs,
       });
       downloadBlob(blob, `${(report.store_name || "site-survey-report").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.pdf`);
 
@@ -184,7 +227,7 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
     { id: "extraction", label: "AI Extraction", disabled: true },
     { id: "review", label: "Review", disabled: true },
     { id: "details", label: "Complete Details", complete: detailsComplete },
-    { id: "photos", label: "Photos", disabled: true },
+    { id: "photos", label: "Photos", complete: photos.length > 0 },
     { id: "measurements", label: "Measurements", complete: measurementsComplete },
     { id: "preview", label: "Preview", disabled: true },
     { id: "generate", label: "Generate", complete: report.status === "generated" },
@@ -247,12 +290,7 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
             onTouched={onTouched}
           />
         )}
-        {step === "photos" && (
-          <ComingSoonPane
-            title="Photos — coming soon"
-            note="Uploading and organizing site photos (main site, orientation, measurement) lands in a later update. The exported PDF shows placeholder slots until then."
-          />
-        )}
+        {step === "photos" && <PhotosStep reportId={reportId} photos={photos} onReload={reloadPhotos} />}
         {step === "measurements" && <MeasurementStep measurement={report.measurement} onChange={updateMeasurement} />}
         {step === "preview" && (
           <ComingSoonPane
@@ -265,8 +303,8 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
             <ClipboardCheck size={28} className="text-primary" />
             <p className="text-sm font-medium text-ink">Generate the Site Survey Report PDF</p>
             <p className="max-w-md text-xs text-ink-muted">
-              Builds a PDF from the details and measurements entered so far. Photos will appear as placeholder slots until photo
-              upload is added in a later update.
+              Builds a PDF from the details, photos, and measurements entered so far. Categories with no photo yet show a
+              placeholder slot.
             </p>
             <Button onClick={handleGenerate} loading={generating} className="mt-2">
               <Download size={15} /> Generate &amp; Download PDF
