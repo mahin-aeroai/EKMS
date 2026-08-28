@@ -224,7 +224,24 @@ export async function updateSession(request: NextRequest) {
     if (profile?.role === "portal") {
       if (!portalPath) {
         const portalHome = request.nextUrl.clone();
-        portalHome.pathname = onPortalHost ? "/" : "/portal";
+        // Bug fixed here: this used to be `onPortalHost ? "/" : "/portal"`,
+        // keeping whatever host the request came in on. That's fine on
+        // app.mmdi.in/ekms.vercel.app/localhost, where /portal/* is a real
+        // standalone route -- but landing here while ON lfgconnect.mmdi.in
+        // (LFG_HOST) redirected to lfgconnect.mmdi.in/portal, which the
+        // rewrite step above immediately turns back into /lfg/portal, which
+        // is NOT a portal path either -- so this exact branch fired again,
+        // forever (a real infinite 307 loop, caught in a HAR from a portal
+        // account that ended up signed in on the LFG domain). A portal
+        // account has no home on the LFG domain at all, so send it to the
+        // real one instead of just swapping the path on whatever host it's
+        // currently on.
+        if (onLfgHost) {
+          portalHome.hostname = PORTAL_HOST;
+          portalHome.pathname = "/";
+        } else {
+          portalHome.pathname = onPortalHost ? "/" : "/portal";
+        }
         portalHome.search = "";
         return NextResponse.redirect(portalHome);
       }
@@ -239,7 +256,18 @@ export async function updateSession(request: NextRequest) {
       // portal account bouncing off an internal URL).
       if (!lfgPath) {
         const lfgHome = request.nextUrl.clone();
-        lfgHome.pathname = onLfgHost ? "/" : "/lfg";
+        // Mirror of the portal branch's fix above, same infinite-loop bug
+        // in the other direction: an lfg_partner account landing on
+        // portal.mmdi.in (PORTAL_HOST) must be sent to the real LFG_HOST,
+        // not just to "/lfg" on portal.mmdi.in (which that host's own
+        // rewrite immediately turns into /portal/lfg -- not an lfg path,
+        // so this branch would fire again forever).
+        if (onPortalHost) {
+          lfgHome.hostname = LFG_HOST;
+          lfgHome.pathname = "/";
+        } else {
+          lfgHome.pathname = onLfgHost ? "/" : "/lfg";
+        }
         lfgHome.search = "";
         return NextResponse.redirect(lfgHome);
       }
