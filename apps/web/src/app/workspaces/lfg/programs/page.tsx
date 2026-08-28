@@ -259,6 +259,50 @@ function ProgramCard({ group, size, onClick }: { group: ProgramGroup; size: "lg"
   // installed" implementation-status view the table's columns buried).
   const stages = CARD_STAGES.filter((s) => group.counts[s.key] > 0);
 
+  // The "lg" card is the one current-season Program -- deliberately not
+  // just a bigger version of the same plain card (a font-size difference
+  // alone read as barely-there): a tinted, thicker-bordered card with its
+  // own "Current Season" eyebrow, so which one is current is obvious at a
+  // glance, not something you have to compare sizes to notice.
+  if (size === "lg") {
+    return (
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onClick}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") onClick();
+        }}
+        className="cursor-pointer rounded-2xl border-2 border-primary bg-primary-tint p-8 shadow-2 transition-shadow hover:shadow-3"
+      >
+        <p className="mb-2 text-xs font-bold uppercase tracking-widest text-primary">Current Season</p>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <h3 className="text-3xl font-extrabold text-ink">{group.name}</h3>
+            <Badge status={group.active ? "success" : "neutral"}>{group.active ? "Active" : "Inactive"}</Badge>
+          </div>
+          <span className="text-base font-semibold text-ink-secondary">
+            {group.total} site{group.total === 1 ? "" : "s"}
+          </span>
+        </div>
+
+        {group.notes && <p className="mt-2 text-sm text-ink-secondary">{group.notes}</p>}
+
+        {stages.length === 0 ? (
+          <p className="mt-5 text-sm text-ink-muted">No sites in this Program yet.</p>
+        ) : (
+          <div className="mt-5 flex flex-wrap gap-2">
+            {stages.map((s) => (
+              <Badge key={s.key} status={LFG_PIPELINE_STAGE_BADGE[s.key]}>
+                {group.counts[s.key]} {s.label}
+              </Badge>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div
       role="button"
@@ -267,26 +311,22 @@ function ProgramCard({ group, size, onClick }: { group: ProgramGroup; size: "lg"
       onKeyDown={(e) => {
         if (e.key === "Enter") onClick();
       }}
-      className={`cursor-pointer rounded-xl border border-line bg-surface shadow-1 transition-shadow hover:shadow-2 ${
-        size === "lg" ? "p-6" : "p-4"
-      }`}
+      className="cursor-pointer rounded-xl border border-line bg-surface p-4 shadow-1 transition-shadow hover:shadow-2"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2.5">
-          <h3 className={size === "lg" ? "text-xl font-bold text-ink" : "text-sm font-semibold text-ink"}>{group.name}</h3>
+          <h3 className="text-sm font-semibold text-ink">{group.name}</h3>
           <Badge status={group.active ? "success" : "neutral"}>{group.active ? "Active" : "Inactive"}</Badge>
         </div>
-        <span className={size === "lg" ? "text-sm font-medium text-ink-secondary" : "text-xs text-ink-muted"}>
+        <span className="text-xs text-ink-muted">
           {group.total} site{group.total === 1 ? "" : "s"}
         </span>
       </div>
 
-      {group.notes && size === "lg" && <p className="mt-1 text-sm text-ink-secondary">{group.notes}</p>}
-
       {stages.length === 0 ? (
-        <p className={`text-ink-muted ${size === "lg" ? "mt-4 text-sm" : "mt-3 text-xs"}`}>No sites in this Program yet.</p>
+        <p className="mt-3 text-xs text-ink-muted">No sites in this Program yet.</p>
       ) : (
-        <div className={`flex flex-wrap gap-1.5 ${size === "lg" ? "mt-4" : "mt-3"}`}>
+        <div className="mt-3 flex flex-wrap gap-1.5">
           {stages.map((s) => (
             <Badge key={s.key} status={LFG_PIPELINE_STAGE_BADGE[s.key]}>
               {group.counts[s.key]} {s.label}
