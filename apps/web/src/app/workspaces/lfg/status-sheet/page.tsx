@@ -1,8 +1,32 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeftRight, Check, ChevronDown, ExternalLink, Search, X } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowLeftRight,
+  Check,
+  CheckCircle2,
+  CalendarClock,
+  CalendarRange,
+  Clock,
+  ExternalLink,
+  FileText,
+  Home,
+  LayoutGrid,
+  MapPin as MapPinIcon,
+  MoreHorizontal,
+  PlusCircle,
+  Search,
+  Send,
+  TrendingUp,
+  Truck,
+  Users as UsersIcon,
+  Wrench,
+  ChevronDown,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { useToast } from "@/components/ui/Notifications";
@@ -14,7 +38,28 @@ import { formatSizeMm } from "@/lib/lfg-units";
 import { useLfgDistinctValues } from "@/lib/useLfgDistinctValues";
 import { LFG_STATUSES, lfgStatusLabel, lfgStatusBadge, lfgFormatPriorityRank, type LfgStatus } from "@/lib/lfgStatus";
 import { LfgBenchmarkStrip } from "@/components/workspaces/LfgBenchmarkStrip";
-import { LfgConnectHeader } from "@/components/workspaces/LfgConnectHeader";
+
+// Status filter chips (task: "check this design for status page header and
+// implement") -- the reference mockup shows only 8 of the 18 LFG_STATUSES
+// as always-visible chips (the ones a reviewer swaps between most often
+// day-to-day), each with its own icon and a live count, plus an "All
+// Statuses" chip and a "More" dropdown for the rest -- not all 18 spelled
+// out flat (which is what this page used to do). Order matches the
+// reference exactly; MORE_STATUSES is just "everything else" in
+// LFG_STATUSES' own fixed order, so a status added to that enum later
+// still shows up in More automatically instead of silently vanishing.
+const PRIMARY_STATUS_CHIPS: { key: LfgStatus; icon: LucideIcon }[] = [
+  { key: "new", icon: PlusCircle },
+  { key: "survey_pending", icon: Clock },
+  { key: "in_production", icon: TrendingUp },
+  { key: "ready_for_dispatch", icon: Truck },
+  { key: "in_transit", icon: Send },
+  { key: "delivered", icon: CheckCircle2 },
+  { key: "installation_planned", icon: CalendarClock },
+  { key: "installation_in_progress", icon: Wrench },
+];
+const PRIMARY_STATUS_KEYS = new Set<string>(PRIMARY_STATUS_CHIPS.map((c) => c.key));
+const MORE_STATUSES: LfgStatus[] = LFG_STATUSES.filter((s) => !PRIMARY_STATUS_KEYS.has(s));
 
 // Status Sheet (task: "make an update/editing page like excel sheet to
 // update all kind of statuses") -- a dedicated, fast bulk status-review
@@ -146,6 +191,17 @@ export default function LfgStatusSheetPage() {
   const [programs, setPrograms] = useState<ProgramOption[]>([]);
   const [partners, setPartners] = useState<PartnerOption[]>([]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // Per-status counts for the status filter chips (task: match the
+  // reference design's "New 34 / Survey Pending 56 / ..." counts) --
+  // deliberately its OWN fetch, not derived from `rows` above: `rows`
+  // itself is already status-filtered (the main fetch effect below applies
+  // statusFilter), so once a chip is selected, every OTHER chip's count
+  // would go stale/zero if it were read from `rows`. This fetch omits
+  // statusFilter but keeps every other active filter (search/format/city/
+  // partner), so the counts reflect "how many sites match everything else
+  // I've filtered by", live, per LFG_STATUSES value -- __all__ is the
+  // total across every status for the "All Statuses" chip.
+  const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
 
   // Format/City options: distinct values already typed into lfg_sites
   // (same hook the Site Master's New Site form uses). Partner options come
@@ -193,6 +249,33 @@ export default function LfgStatusSheetPage() {
     return () => clearTimeout(handle);
   }, [query, statusFilter, formatFilter, cityFilter, partnerFilter]);
 
+  // statusCounts -- see its own declaration comment above for why this is
+  // a separate fetch from the one right above it (deliberately NOT
+  // filtered by statusFilter).
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      const trimmed = query.trim();
+      fetchAllRows<{ site_status: string }>((from, to) => {
+        let q = supabase.from("lfg_sites").select("site_status").range(from, to);
+        if (formatFilter) q = q.eq("format", formatFilter);
+        if (cityFilter) q = q.eq("city", cityFilter);
+        if (partnerFilter) q = q.eq("partner_id", partnerFilter);
+        if (trimmed) {
+          q = q.or(
+            `site_id.ilike.%${trimmed}%,outlet_name.ilike.%${trimmed}%,sfo_id.ilike.%${trimmed}%,format.ilike.%${trimmed}%,city.ilike.%${trimmed}%`
+          );
+        }
+        return q;
+      }).then((data) => {
+        const counts: Record<string, number> = {};
+        for (const r of data) counts[r.site_status] = (counts[r.site_status] ?? 0) + 1;
+        counts.__all__ = data.length;
+        setStatusCounts(counts);
+      });
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [query, formatFilter, cityFilter, partnerFilter]);
+
   const ordinals = useMemo(() => siteOrdinals(rows ?? []), [rows]);
 
   function handleStatusChanged(id: string, newStatus: string) {
@@ -206,6 +289,16 @@ export default function LfgStatusSheetPage() {
       else next.add(key);
       return next;
     });
+  }
+
+  const hasActiveFilter = !!(query.trim() || statusFilter || programFilter || formatFilter || cityFilter || partnerFilter);
+  function clearAllFilters() {
+    setQuery("");
+    setStatusFilter("");
+    setProgramFilter("");
+    setFormatFilter("");
+    setCityFilter("");
+    setPartnerFilter("");
   }
 
   // Program groups, current-season-first, "No Program" always last -- only
@@ -232,121 +325,139 @@ export default function LfgStatusSheetPage() {
 
   return (
     <div>
-      <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "LFG Connect", href: "/workspaces/lfg" }, { label: "Status Sheet" }]} />
+      {/* Header + filters live inside one bordered card, per the reference
+          mockup -- a deliberate departure from LfgConnectHeader/
+          LfgConnectNavBar (used on every other LFG Connect page) for this
+          page specifically, matching the supplied design exactly rather
+          than the shared tab-strip nav: a plain "Back to Site Master"
+          pill, a bigger icon tile, and the whole block enclosed in its own
+          rounded card. */}
+      <div className="mt-4 rounded-2xl border border-line bg-surface p-6 shadow-1">
+        <div className="flex items-center gap-1.5 text-sm text-ink-secondary">
+          <Home size={14} />
+          <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "LFG Connect", href: "/workspaces/lfg" }, { label: "Status Sheet" }]} />
+        </div>
 
-      <LfgConnectHeader
-        icon={ArrowLeftRight}
-        section="Status Sheet"
-        subtitle={`Every site, grouped by Program, one row each — click Swap Status to move a site to its next stage without opening Site 360.${!editable ? " You have view-only access; ask an admin/editor to change a status." : ""}`}
-      />
+        <div className="mt-4 flex flex-col gap-4 border-b border-line pb-6 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex items-start gap-4">
+            <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-primary-tint text-primary">
+              <ArrowLeftRight size={28} />
+            </span>
+            <div>
+              <h1 className="text-2xl font-bold text-ink">Status Sheet</h1>
+              <p className="mt-1 max-w-xl text-sm text-ink-secondary">
+                Every site, grouped by Program, one row each — click Swap Status to move a site to its next stage
+                without opening Site 360.
+                {!editable && " You have view-only access; ask an admin/editor to change a status."}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => router.push("/workspaces/lfg")}
+            className="inline-flex shrink-0 items-center gap-2 rounded-full border-2 border-primary bg-surface px-4 py-2.5 text-sm font-semibold text-primary transition-colors hover:bg-primary-tint"
+          >
+            <ArrowLeft size={16} /> Back to Site Master
+          </button>
+        </div>
 
-      <div className="my-4 flex flex-col gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative w-full max-w-sm">
-            <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted" />
+        <div className="mt-5 flex flex-wrap items-center gap-2.5">
+          <div className="relative min-w-[16rem] flex-1">
+            <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-muted" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder='Search Outlet, SFO ID, Format, or City -- e.g. "Croma"'
-              className="h-9 w-full rounded-md border border-line-strong bg-surface pl-9 pr-8 text-sm text-ink placeholder:text-ink-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              placeholder='Search Outlet, SFO ID, Format, or City — e.g. "Croma"'
+              className="h-12 w-full rounded-xl border border-line-strong bg-surface pl-10 pr-9 text-sm text-ink placeholder:text-ink-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             />
             {query && (
               <button
                 type="button"
                 aria-label="Clear search"
                 onClick={() => setQuery("")}
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-ink-muted hover:bg-surface-sunken"
+                className="absolute right-3 top-1/2 -translate-y-1/2 rounded p-0.5 text-ink-muted hover:bg-surface-sunken"
               >
                 <X size={14} />
               </button>
             )}
           </div>
           {programs.length > 1 && (
-            <select
-              value={programFilter}
-              onChange={(e) => setProgramFilter(e.target.value)}
-              className="h-9 rounded-md border border-line-strong bg-surface px-2.5 text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            >
-              <option value="">All Programs</option>
+            <IconSelect icon={CalendarRange} value={programFilter} onChange={setProgramFilter} placeholder="All Programs">
               {programs.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
                 </option>
               ))}
-            </select>
+            </IconSelect>
           )}
-          <select
-            value={formatFilter}
-            onChange={(e) => setFormatFilter(e.target.value)}
-            className="h-9 rounded-md border border-line-strong bg-surface px-2.5 text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          >
-            <option value="">All Formats</option>
+          <IconSelect icon={FileText} value={formatFilter} onChange={setFormatFilter} placeholder="All Formats">
             {formatOptions.map((f) => (
               <option key={f} value={f}>
                 {f}
               </option>
             ))}
-          </select>
-          <select
-            value={cityFilter}
-            onChange={(e) => setCityFilter(e.target.value)}
-            className="h-9 rounded-md border border-line-strong bg-surface px-2.5 text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          >
-            <option value="">All Cities</option>
+          </IconSelect>
+          <IconSelect icon={MapPinIcon} value={cityFilter} onChange={setCityFilter} placeholder="All Cities">
             {cityOptions.map((c) => (
               <option key={c} value={c}>
                 {c}
               </option>
             ))}
-          </select>
-          <select
-            value={partnerFilter}
-            onChange={(e) => setPartnerFilter(e.target.value)}
-            className="h-9 rounded-md border border-line-strong bg-surface px-2.5 text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          >
-            <option value="">All Installation Partners</option>
+          </IconSelect>
+          <IconSelect icon={UsersIcon} value={partnerFilter} onChange={setPartnerFilter} placeholder="All Installation Partners">
             {partners.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
               </option>
             ))}
-          </select>
+          </IconSelect>
         </div>
 
-        {/* Quick status filter -- every value from LFG_STATUSES as a small
-            toggle pill, wraps onto as many lines as it needs rather than
-            ever forcing horizontal scroll. */}
-        <div className="flex flex-wrap gap-1.5">
-          <button
-            type="button"
-            onClick={() => setStatusFilter("")}
-            className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors ${
-              statusFilter === "" ? "border-primary bg-primary-tint text-primary" : "border-line text-ink-secondary hover:bg-surface-sunken"
-            }`}
-          >
-            All Statuses
-          </button>
-          {LFG_STATUSES.map((s) => (
+        <div className="mt-5">
+          <p className="mb-2 text-sm font-medium text-ink-secondary">Filter by Status</p>
+          <div className="flex flex-wrap gap-2">
+            <StatusChip
+              icon={LayoutGrid}
+              label="All Statuses"
+              count={statusCounts.__all__ ?? null}
+              active={statusFilter === ""}
+              onClick={() => setStatusFilter("")}
+            />
+            {PRIMARY_STATUS_CHIPS.map(({ key, icon }) => (
+              <StatusChip
+                key={key}
+                icon={icon}
+                label={lfgStatusLabel(key)}
+                count={statusCounts[key] ?? 0}
+                active={statusFilter === key}
+                onClick={() => setStatusFilter((prev) => (prev === key ? "" : key))}
+              />
+            ))}
+            <MoreStatusChip
+              statuses={MORE_STATUSES}
+              statusCounts={statusCounts}
+              statusFilter={statusFilter}
+              onSelect={(s) => setStatusFilter((prev) => (prev === s ? "" : s))}
+            />
+          </div>
+          {hasActiveFilter && (
             <button
-              key={s}
               type="button"
-              onClick={() => setStatusFilter((prev) => (prev === s ? "" : s))}
-              className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors ${
-                statusFilter === s ? "border-primary bg-primary-tint text-primary" : "border-line text-ink-secondary hover:bg-surface-sunken"
-              }`}
+              onClick={clearAllFilters}
+              className="mt-3 text-xs font-medium text-ink-muted underline-offset-2 hover:text-ink hover:underline"
             >
-              {lfgStatusLabel(s)}
+              Clear all filters
             </button>
-          ))}
+          )}
         </div>
       </div>
 
       {rows === null ? (
-        <p className="py-10 text-center text-sm text-ink-muted">Loading sites…</p>
+        <p className="mt-6 py-10 text-center text-sm text-ink-muted">Loading sites…</p>
       ) : groups.length === 0 ? (
-        <p className="py-10 text-center text-sm text-ink-muted">No sites match your search.</p>
+        <p className="mt-6 py-10 text-center text-sm text-ink-muted">No sites match your search.</p>
       ) : (
-        <div className="flex flex-col gap-6 pb-10">
+        <div className="mt-6 flex flex-col gap-6 pb-10">
           {groups.map((group) => {
             const isCollapsed = collapsed.has(group.key);
             return (
@@ -429,6 +540,141 @@ export default function LfgStatusSheetPage() {
               </div>
             );
           })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// A filter <select> with a small leading icon inside the same rounded box
+// (Format/City/Installation Partner/Program), per the reference design --
+// a plain-HTML <select> still (same as every other filter in this app),
+// just with the icon absolutely positioned over its left padding.
+function IconSelect({
+  icon: Icon,
+  value,
+  onChange,
+  placeholder,
+  children,
+}: {
+  icon: LucideIcon;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="relative">
+      <Icon size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-muted" />
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-12 appearance-none rounded-xl border border-line-strong bg-surface py-2 pl-10 pr-8 text-sm text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      >
+        <option value="">{placeholder}</option>
+        {children}
+      </select>
+      <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-ink-muted" />
+    </div>
+  );
+}
+
+// One status filter chip -- icon + label + a live count pill, per the
+// reference design's "Filter by Status" row. See PRIMARY_STATUS_CHIPS'
+// own comment above for why only 8 statuses get one of these directly
+// (the rest live behind MoreStatusChip).
+function StatusChip({
+  icon: Icon,
+  label,
+  count,
+  active,
+  onClick,
+}: {
+  icon: LucideIcon;
+  label: string;
+  count: number | null;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex items-center gap-2 rounded-xl border px-3.5 py-2.5 text-sm font-medium transition-colors ${
+        active ? "border-primary bg-primary-tint text-primary" : "border-line-strong bg-surface text-ink hover:bg-surface-sunken"
+      }`}
+    >
+      <Icon size={16} className={active ? "text-primary" : "text-ink-muted"} />
+      {label}
+      <span
+        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+          active ? "bg-primary text-on-brand" : "bg-surface-sunken text-ink-secondary"
+        }`}
+      >
+        {count === null ? "…" : count}
+      </span>
+    </button>
+  );
+}
+
+// "More" -- a dropdown chip for the 10 LFG_STATUSES values that don't get
+// their own always-visible chip (MORE_STATUSES above), same click-outside-
+// to-close pattern as StatusSwapControl's own popover below.
+function MoreStatusChip({
+  statuses,
+  statusCounts,
+  statusFilter,
+  onSelect,
+}: {
+  statuses: LfgStatus[];
+  statusCounts: Record<string, number>;
+  statusFilter: string;
+  onSelect: (s: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const activeInMore = statuses.includes(statusFilter as LfgStatus);
+
+  useEffect(() => {
+    if (!open) return;
+    function onClick(e: MouseEvent) {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`flex items-center gap-2 rounded-xl border px-3.5 py-2.5 text-sm font-medium transition-colors ${
+          activeInMore || open ? "border-primary bg-primary-tint text-primary" : "border-line-strong bg-surface text-ink hover:bg-surface-sunken"
+        }`}
+      >
+        <MoreHorizontal size={16} className={activeInMore || open ? "text-primary" : "text-ink-muted"} />
+        More
+        <ChevronDown size={14} className={`transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="absolute left-0 z-40 mt-1.5 w-64 rounded-xl border border-line bg-surface-overlay p-1.5 shadow-3">
+          {statuses.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => {
+                onSelect(s);
+                setOpen(false);
+              }}
+              className={`flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-sm hover:bg-surface-sunken ${
+                statusFilter === s ? "font-semibold text-primary" : "text-ink"
+              }`}
+            >
+              {lfgStatusLabel(s)}
+              <span className="rounded-full bg-surface-sunken px-2 py-0.5 text-[11px] text-ink-secondary">{statusCounts[s] ?? 0}</span>
+            </button>
+          ))}
         </div>
       )}
     </div>
