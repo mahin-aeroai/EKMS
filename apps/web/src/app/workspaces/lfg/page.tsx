@@ -266,6 +266,12 @@ export default function LfgSiteListPage() {
       if (programId) {
         setProgramIdFilter(programId);
         setProgramNameFilter(programName ?? "");
+        // Opening a Program from the Programs page is a "review this
+        // wave's sites" visit, not a bulk-editing one -- Cards is the more
+        // useful default to land on here (List remains the default for a
+        // plain visit or a Format Dashboard/Stores click-through, where
+        // bulk select/Move-to-Program is more likely what's next).
+        setView("cards");
       }
       if (storeId) {
         setStoreIdFilter(storeId);
