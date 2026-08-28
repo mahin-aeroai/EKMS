@@ -1,25 +1,37 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, ClipboardCheck } from "lucide-react";
+import { ArrowLeft, ClipboardCheck, Download } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
+import { StepperNav, ComingSoonPane, type StepperStep } from "./StepperNav";
+import { DetailsStep } from "./DetailsStep";
+import { MeasurementStep } from "./MeasurementStep";
+import type { ReportHeaderFields } from "./ReportFormFields";
+import { buildSiteSurveyReportPdf, downloadBlob } from "@/lib/siteSurveyReport/pdfBuild";
 import {
   REPORT_STATUS_LABEL,
   emptyFormData,
   emptyMeasurement,
+  type FieldSourceKey,
+  type SiteSurveyFormData,
+  type SiteSurveyMeasurement,
   type SiteSurveyReportRow,
 } from "@/lib/siteSurveyReport/types";
 
-// Milestone 1 ("empty shell") scope: prove the create -> load -> edit ->
-// save loop works end to end against real Supabase rows, with just the
-// header identity fields every later step will build on top of. The full
-// stepper (Upload PDF -> AI Extraction -> Review -> Details -> Photos ->
-// Measurements -> Preview -> Generate) replaces this in the next
-// milestone -- see the plan file for the full sequence.
+// Milestone 2 scope: the full stepper shell. Upload PDF / AI Extraction /
+// Review / Photos aren't built yet (milestones 3-4) and Preview isn't
+// built yet (milestone 5), so those five steps render a ComingSoonPane
+// rather than pretending to work; Complete Details, Measurements, and
+// Generate are fully real against Supabase + client-side PDF export. A
+// manually-created report already lands on Complete Details (nothing
+// upstream applies to it); a PDF-sourced report also lands there for now,
+// since extraction doesn't exist yet -- once milestone 4 ships, the
+// initial step for source==='pdf' reports will change to "upload".
 
 const STATUS_BADGE: Record<SiteSurveyReportRow["status"], "neutral" | "info" | "warning" | "success"> = {
   draft: "neutral",
@@ -29,10 +41,16 @@ const STATUS_BADGE: Record<SiteSurveyReportRow["status"], "neutral" | "info" | "
   generated: "success",
 };
 
+type StepId = "upload" | "extraction" | "review" | "details" | "photos" | "measurements" | "preview" | "generate";
+
 export function SiteSurveyReportEditorClient({ reportId }: { reportId: string }) {
   const { toast } = useToast();
   const [report, setReport] = useState<SiteSurveyReportRow | null>(null);
+  const [step, setStep] = useState<StepId>("details");
   const [saving, setSaving] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const loadedRef = useRef(false);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     supabase
@@ -51,39 +69,126 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
           measurement: { ...emptyMeasurement(), ...(data.measurement ?? {}) },
           field_sources: data.field_sources ?? {},
         });
+        loadedRef.current = true;
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reportId]);
 
-  function updateField<K extends keyof SiteSurveyReportRow>(key: K, value: SiteSurveyReportRow[K]) {
-    setReport((prev) => (prev ? { ...prev, [key]: value } : prev));
-  }
+  // Debounced autosave: fires ~1.2s after the last edit, not on every
+  // keystroke. Skipped on the initial load (loadedRef only flips true once
+  // the fetch above resolves) and while an explicit save/generate is
+  // already in flight.
+  useEffect(() => {
+    if (!loadedRef.current || !report) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      void persist(report, { silent: true });
+    }, 1200);
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [report]);
 
-  async function handleSave() {
-    if (!report) return;
+  async function persist(current: SiteSurveyReportRow, opts?: { silent?: boolean }) {
     setSaving(true);
     const { error } = await supabase
       .from("site_survey_reports")
       .update({
-        store_name: report.store_name,
-        address: report.address,
-        sfo_id: report.sfo_id,
-        program: report.program,
-        survey_date: report.survey_date || null,
-        surveyor_name: report.surveyor_name,
+        store_name: current.store_name,
+        address: current.address,
+        sfo_id: current.sfo_id,
+        program: current.program,
+        survey_date: current.survey_date || null,
+        surveyor_name: current.surveyor_name,
+        form_data: current.form_data,
+        measurement: current.measurement,
+        field_sources: current.field_sources,
       })
       .eq("id", reportId);
     setSaving(false);
     if (error) {
-      toast("danger", "Couldn't save this report");
+      if (!opts?.silent) toast("danger", "Couldn't save this report");
       return;
     }
-    toast("success", "Saved");
+    if (!opts?.silent) toast("success", "Saved");
+  }
+
+  function updateHeader<K extends keyof ReportHeaderFields>(key: K, value: ReportHeaderFields[K]) {
+    setReport((prev) => (prev ? { ...prev, [key]: value } : prev));
+  }
+  function updateFormData<K extends keyof SiteSurveyFormData>(key: K, value: SiteSurveyFormData[K]) {
+    setReport((prev) => (prev ? { ...prev, form_data: { ...prev.form_data, [key]: value } } : prev));
+  }
+  function updateMeasurement<K extends keyof SiteSurveyMeasurement>(key: K, value: SiteSurveyMeasurement[K]) {
+    setReport((prev) => (prev ? { ...prev, measurement: { ...prev.measurement, [key]: value } } : prev));
+  }
+  function onTouched(key: FieldSourceKey) {
+    setReport((prev) => (prev ? { ...prev, field_sources: { ...prev.field_sources, [key]: "user" } } : prev));
+  }
+
+  async function handleStepChange(next: string) {
+    if (report) await persist(report, { silent: true });
+    setStep(next as StepId);
+  }
+
+  async function handleGenerate() {
+    if (!report) return;
+    setGenerating(true);
+    try {
+      await persist(report, { silent: true });
+      const blob = await buildSiteSurveyReportPdf({
+        storeName: report.store_name,
+        address: report.address,
+        sfoId: report.sfo_id,
+        program: report.program,
+        surveyDate: report.survey_date ?? "",
+        surveyorName: report.surveyor_name,
+        formData: report.form_data,
+        measurement: report.measurement,
+        photos: [], // real photos land in milestone 3
+      });
+      downloadBlob(blob, `${(report.store_name || "site-survey-report").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.pdf`);
+
+      const generated_at = new Date().toISOString();
+      const { error } = await supabase.from("site_survey_reports").update({ status: "generated", generated_at }).eq("id", reportId);
+      if (!error) {
+        setReport((prev) => (prev ? { ...prev, status: "generated", generated_at } : prev));
+      }
+      toast("success", "PDF generated and downloaded");
+    } catch {
+      toast("danger", "Couldn't generate the PDF");
+    } finally {
+      setGenerating(false);
+    }
   }
 
   if (!report) {
     return <p className="py-10 text-center text-sm text-ink-muted">Loading report…</p>;
   }
+
+  const header: ReportHeaderFields = {
+    store_name: report.store_name,
+    address: report.address,
+    sfo_id: report.sfo_id,
+    program: report.program,
+    survey_date: report.survey_date,
+    surveyor_name: report.surveyor_name,
+  };
+
+  const detailsComplete = Boolean(report.store_name && report.sfo_id && report.surveyor_name);
+  const measurementsComplete = report.measurement.visualWidthMm != null && report.measurement.visualHeightMm != null;
+
+  const STEPS: StepperStep[] = [
+    { id: "upload", label: "Upload PDF", disabled: true },
+    { id: "extraction", label: "AI Extraction", disabled: true },
+    { id: "review", label: "Review", disabled: true },
+    { id: "details", label: "Complete Details", complete: detailsComplete },
+    { id: "photos", label: "Photos", disabled: true },
+    { id: "measurements", label: "Measurements", complete: measurementsComplete },
+    { id: "preview", label: "Preview", disabled: true },
+    { id: "generate", label: "Generate", complete: report.status === "generated" },
+  ];
 
   return (
     <div>
@@ -100,6 +205,7 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-xl font-semibold text-ink">{report.store_name || "Untitled report"}</h1>
               <Badge status={STATUS_BADGE[report.status]}>{REPORT_STATUS_LABEL[report.status]}</Badge>
+              {saving && <span className="text-xs text-ink-muted">Saving…</span>}
             </div>
             <p className="mt-0.5 text-sm text-ink-secondary">
               {report.source === "pdf" ? "Created from an uploaded Site Survey PDF" : "Created manually"}
@@ -114,75 +220,69 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
         </Link>
       </div>
 
-      <div className="mt-6 rounded-lg border border-line bg-surface p-5">
-        <p className="mb-4 text-sm text-ink-secondary">
-          The full step-by-step report builder (AI extraction review, photos, measurements, preview, PDF export)
-          lands in the next update. For now, this saves the report&apos;s basic identity so the flow is already
-          real, not a mockup.
-        </p>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Site / Store Name">
-            <input
-              value={report.store_name}
-              onChange={(e) => updateField("store_name", e.target.value)}
-              className="w-full rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
-            />
-          </Field>
-          <Field label="SFO ID">
-            <input
-              value={report.sfo_id}
-              onChange={(e) => updateField("sfo_id", e.target.value)}
-              className="w-full rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
-            />
-          </Field>
-          <Field label="Address" className="sm:col-span-2">
-            <input
-              value={report.address}
-              onChange={(e) => updateField("address", e.target.value)}
-              className="w-full rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
-            />
-          </Field>
-          <Field label="Program">
-            <input
-              value={report.program}
-              onChange={(e) => updateField("program", e.target.value)}
-              className="w-full rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
-            />
-          </Field>
-          <Field label="Surveyor">
-            <input
-              value={report.surveyor_name}
-              onChange={(e) => updateField("surveyor_name", e.target.value)}
-              className="w-full rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
-            />
-          </Field>
-          <Field label="Survey Date">
-            <input
-              type="date"
-              value={report.survey_date ?? ""}
-              onChange={(e) => updateField("survey_date", e.target.value)}
-              className="w-full rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
-            />
-          </Field>
-        </div>
-        <button
-          type="button"
-          disabled={saving}
-          onClick={handleSave}
-          className="mt-5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-on-brand hover:opacity-90 disabled:opacity-50"
-        >
-          {saving ? "Saving…" : "Save"}
-        </button>
+      <div className="mt-4">
+        <StepperNav steps={STEPS} activeId={step} onSelect={handleStepChange} />
+      </div>
+
+      <div className="mt-6">
+        {step === "upload" && (
+          <ComingSoonPane
+            title="Upload PDF — coming soon"
+            note="Uploading an existing filled-in Site Survey PDF for AI extraction lands in a later update. For now, use Complete Details to fill the report in by hand."
+          />
+        )}
+        {step === "extraction" && (
+          <ComingSoonPane title="AI Extraction — coming soon" note="Automatic field extraction from an uploaded PDF lands in a later update." />
+        )}
+        {step === "review" && (
+          <ComingSoonPane title="Review — coming soon" note="Reviewing AI-extracted fields lands alongside AI Extraction in a later update." />
+        )}
+        {step === "details" && (
+          <DetailsStep
+            header={header}
+            onHeaderChange={updateHeader}
+            formData={report.form_data}
+            onFormDataChange={updateFormData}
+            fieldSources={report.field_sources}
+            onTouched={onTouched}
+          />
+        )}
+        {step === "photos" && (
+          <ComingSoonPane
+            title="Photos — coming soon"
+            note="Uploading and organizing site photos (main site, orientation, measurement) lands in a later update. The exported PDF shows placeholder slots until then."
+          />
+        )}
+        {step === "measurements" && <MeasurementStep measurement={report.measurement} onChange={updateMeasurement} />}
+        {step === "preview" && (
+          <ComingSoonPane
+            title="Preview — coming soon"
+            note="An in-app preview lands in a later update. Use Generate to download the PDF directly for now."
+          />
+        )}
+        {step === "generate" && (
+          <div className="flex flex-col items-center gap-3 rounded-lg border border-line py-16 text-center">
+            <ClipboardCheck size={28} className="text-primary" />
+            <p className="text-sm font-medium text-ink">Generate the Site Survey Report PDF</p>
+            <p className="max-w-md text-xs text-ink-muted">
+              Builds a PDF from the details and measurements entered so far. Photos will appear as placeholder slots until photo
+              upload is added in a later update.
+            </p>
+            <Button onClick={handleGenerate} loading={generating} className="mt-2">
+              <Download size={15} /> Generate &amp; Download PDF
+            </Button>
+            {report.generated_at && (
+              <p className="text-xs text-ink-muted">Last generated {new Date(report.generated_at).toLocaleString()}</p>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-6 flex justify-end border-t border-line pt-4">
+        <Button variant="secondary" onClick={() => persist(report)} loading={saving}>
+          Save
+        </Button>
       </div>
     </div>
-  );
-}
-
-function Field({ label, className, children }: { label: string; className?: string; children: React.ReactNode }) {
-  return (
-    <label className={`flex flex-col gap-1 ${className ?? ""}`}>
-      <span className="text-xs font-medium text-ink-secondary">{label}</span>
-      {children}
-    </label>
   );
 }
