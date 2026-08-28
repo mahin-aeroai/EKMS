@@ -5,13 +5,12 @@ import { useRouter } from "next/navigation";
 import { CalendarRange, ArrowLeft, Plus } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
-import { Table, type TableColumn } from "@/components/ui/Table";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Notifications";
 import { useUserRole, canWrite } from "@/lib/UserRoleContext";
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/dashboard-queries";
-import { LFG_PIPELINE_STAGES, lfgPipelineStageOf, type LfgPipelineStageKey } from "@/lib/lfgStatus";
+import { LFG_PIPELINE_STAGES, LFG_PIPELINE_STAGE_BADGE, lfgPipelineStageOf, type LfgPipelineStageKey } from "@/lib/lfgStatus";
 
 // Programs (seasonal waves: "Spring Refresh 2025", "Fall Refresh 2025/26",
 // etc.) -- task #39-49. Distinct from the Format Dashboard, which groups by
@@ -20,13 +19,14 @@ import { LFG_PIPELINE_STAGES, lfgPipelineStageOf, type LfgPipelineStageKey } fro
 // lfg_sites.program_id in the schema), tracked through the same pipeline
 // stages every other view of lfg_sites uses (LFG_PIPELINE_STAGES).
 //
-// Create + list, one row per Program with its own site count and per-stage
-// breakdown (same flattened-row trick as the Format Dashboard's table, so
-// every TableColumn gets a distinct real `keyof` key) -- click a row to
-// jump to the Site Master filtered to strictly that Program's sites
-// (?program_id=, distinct from the Format Dashboard's ?format=). Moving
-// sites INTO a Program is done from the Site Master itself (bulk "Move to
-// Program", task #46, admin/editor gated) -- not from this page.
+// Create + a card per Program, sized and grouped by whether the Program
+// itself is still active (task #85 -- a plain table read fine as a list,
+// but buried the one thing a returning visitor actually wants: "where does
+// the CURRENT wave stand, stage by stage" behind a wall of columns). Click
+// a card to jump to the Site Master filtered to strictly that Program's
+// sites (?program_id=, distinct from the Format Dashboard's ?format=).
+// Moving sites INTO a Program is done from the Site Master itself (bulk
+// "Move to Program", task #46, admin/editor gated) -- not from this page.
 
 interface ProgramRow {
   id: string;
@@ -48,18 +48,6 @@ interface ProgramGroup extends ProgramRow {
   counts: StageCounts;
 }
 
-// NOT `ProgramGroup & StageCounts` (the Format Dashboard table's pattern) --
-// StageCounts already has an "active" key (the pipeline stage) which
-// collides with ProgramRow's own "active" (whether the Program itself is
-// active/inactive), reducing the intersection to `never`. Renamed to
-// `programActive` here instead, kept distinct from the stage count.
-interface ProgramTableRow extends StageCounts {
-  id: string;
-  name: string;
-  programActive: boolean;
-  total: number;
-}
-
 function emptyCounts(): StageCounts {
   return {
     active: 0,
@@ -74,6 +62,15 @@ function emptyCounts(): StageCounts {
     issues: 0,
   };
 }
+
+// The pipeline stages actually worth a pill on a Program card -- "Active"/
+// "Inactive" here are a SITE's own activation stage (a completed journey),
+// which would read as confusing noise next to the Program's own Active/
+// Inactive badge already on the card header; the rest (Survey, Printing,
+// Shipping, Delivery, Schedule, Installation, Issues) is the "some in
+// production, some in transit, some installed" breakdown that actually
+// shows implementation progress.
+const CARD_STAGES = LFG_PIPELINE_STAGES.filter((s) => s.key !== "active" && s.key !== "inactive");
 
 export default function LfgProgramsPage() {
   const router = useRouter();
@@ -149,29 +146,8 @@ export default function LfgProgramsPage() {
 
   const unassignedCount = loading ? 0 : siteRows!.filter((r) => r.program_id === null).length;
 
-  const tableRows: ProgramTableRow[] = groups.map((g) => ({
-    id: g.id,
-    name: g.name,
-    programActive: g.active,
-    total: g.total,
-    ...g.counts,
-  }));
-
-  const COLUMNS: TableColumn<ProgramTableRow>[] = [
-    {
-      key: "name",
-      header: "Program",
-      sortable: true,
-      render: (r) => (
-        <span className="flex items-center gap-2">
-          {r.name}
-          <Badge status={r.programActive ? "success" : "neutral"}>{r.programActive ? "Active" : "Inactive"}</Badge>
-        </span>
-      ),
-    },
-    { key: "total", header: "Total", sortable: true },
-    ...LFG_PIPELINE_STAGES.map((s) => ({ key: s.key, header: s.label, sortable: true }) as TableColumn<ProgramTableRow>),
-  ];
+  const activeGroups = groups.filter((g) => g.active);
+  const inactiveGroups = groups.filter((g) => !g.active);
 
   return (
     <div>
@@ -231,20 +207,78 @@ export default function LfgProgramsPage() {
         ) : (
           <>
             {unassignedCount > 0 && (
-              <p className="mb-3 text-xs text-ink-muted">
+              <p className="mb-4 text-xs text-ink-muted">
                 {unassignedCount} site{unassignedCount === 1 ? "" : "s"} not yet assigned to any Program.
               </p>
             )}
-            <div className="overflow-x-auto">
-              <Table
-                columns={COLUMNS}
-                rows={tableRows}
-                onRowClick={(r) => openProgram(r.id, r.name)}
-              />
-            </div>
+
+            {activeGroups.length > 0 && (
+              <div className="flex flex-col gap-4">
+                {activeGroups.map((g) => (
+                  <ProgramCard key={g.id} group={g} size="lg" onClick={() => openProgram(g.id, g.name)} />
+                ))}
+              </div>
+            )}
+
+            {inactiveGroups.length > 0 && (
+              <div className="mt-8">
+                <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-muted">Previous Programs</h2>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {inactiveGroups.map((g) => (
+                    <ProgramCard key={g.id} group={g} size="sm" onClick={() => openProgram(g.id, g.name)} />
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+function ProgramCard({ group, size, onClick }: { group: ProgramGroup; size: "lg" | "sm"; onClick: () => void }) {
+  // Only the stages that actually have sites in them render a pill -- an
+  // empty "0 Printing" pill on every card would bury the ones that matter
+  // (this is exactly the "some in production, some in transit, some
+  // installed" implementation-status view the table's columns buried).
+  const stages = CARD_STAGES.filter((s) => group.counts[s.key] > 0);
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") onClick();
+      }}
+      className={`cursor-pointer rounded-xl border border-line bg-surface shadow-1 transition-shadow hover:shadow-2 ${
+        size === "lg" ? "p-6" : "p-4"
+      }`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2.5">
+          <h3 className={size === "lg" ? "text-xl font-bold text-ink" : "text-sm font-semibold text-ink"}>{group.name}</h3>
+          <Badge status={group.active ? "success" : "neutral"}>{group.active ? "Active" : "Inactive"}</Badge>
+        </div>
+        <span className={size === "lg" ? "text-sm font-medium text-ink-secondary" : "text-xs text-ink-muted"}>
+          {group.total} site{group.total === 1 ? "" : "s"}
+        </span>
+      </div>
+
+      {group.notes && size === "lg" && <p className="mt-1 text-sm text-ink-secondary">{group.notes}</p>}
+
+      {stages.length === 0 ? (
+        <p className={`text-ink-muted ${size === "lg" ? "mt-4 text-sm" : "mt-3 text-xs"}`}>No sites in this Program yet.</p>
+      ) : (
+        <div className={`flex flex-wrap gap-1.5 ${size === "lg" ? "mt-4" : "mt-3"}`}>
+          {stages.map((s) => (
+            <Badge key={s.key} status={LFG_PIPELINE_STAGE_BADGE[s.key]}>
+              {group.counts[s.key]} {s.label}
+            </Badge>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

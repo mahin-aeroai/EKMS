@@ -19,7 +19,6 @@ import {
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
-import { StatCard } from "@/components/ui/Card";
 import { Table, type TableColumn } from "@/components/ui/Table";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
@@ -138,7 +137,10 @@ export default function LfgSiteListPage() {
   // Move-to-Program workflow (which only the table wires up -- see
   // LfgSiteCardGrid.tsx's own header comment) is what a fresh visit
   // still lands on.
-  const [view, setView] = useState<"list" | "cards">("list");
+  // Cards is the default landing view (photo-forward review is the more
+  // common visit); List stays one click away via the toggle below for
+  // bulk-select/Move-to-Program work.
+  const [view, setView] = useState<"list" | "cards">("cards");
   const [rows, setRows] = useState<LfgSiteListRow[] | null>(null);
   // How many OTHER sites currently on screen share each store_id -- a
   // lightweight, page-scoped count (not a full-table aggregate) purely to
@@ -266,11 +268,11 @@ export default function LfgSiteListPage() {
       if (programId) {
         setProgramIdFilter(programId);
         setProgramNameFilter(programName ?? "");
-        // Opening a Program from the Programs page is a "review this
-        // wave's sites" visit, not a bulk-editing one -- Cards is the more
-        // useful default to land on here (List remains the default for a
-        // plain visit or a Format Dashboard/Stores click-through, where
-        // bulk select/Move-to-Program is more likely what's next).
+        // Cards is already the page's own default (see the `view` state
+        // above); this just makes it explicit for a Program click-through
+        // too, in case that default ever changes back to List for a plain
+        // visit while a "review this wave's sites" visit should still land
+        // on Cards.
         setView("cards");
       }
       if (storeId) {
@@ -528,34 +530,36 @@ export default function LfgSiteListPage() {
         </div>
       </div>
 
-      <div className="my-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Total Sites" value={totalCount === null ? "…" : String(totalCount)} trend="flat" trendLabel="Live count" />
+      {/* A slim summary strip rather than four full-size KPI cards -- with
+          Cards view now the default landing surface, this real estate
+          belongs to the sites themselves; these counts stay one glance
+          away instead of pushing the actual review surface further down
+          the page. */}
+      <div className="my-4 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs text-ink-secondary">
+        <span>
+          <span className="font-semibold text-ink">{totalCount === null ? "…" : totalCount}</span> total sites
+        </span>
+        <span className="text-line">·</span>
         <button
           type="button"
           onClick={() => setGapsOnly((v) => !v)}
-          className="text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-lg"
+          className={`rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${gapsOnly ? "font-semibold text-primary" : "hover:text-ink"}`}
+          title="Missing City / ASM / SFO ID — click to view"
         >
-          <StatCard
-            label="Data Gaps"
-            value={missingCount === null ? "…" : String(missingCount)}
-            trend={missingCount ? "down" : "flat"}
-            trendLabel={gapsOnly ? "Showing only these — click to clear" : "Missing City / ASM / SFO ID — click to view"}
-          />
+          <span className="font-semibold">{missingCount === null ? "…" : missingCount}</span> data gaps
         </button>
-        <StatCard
-          label="Showing"
-          value={rows === null ? "…" : String(rows.length)}
-          trend="flat"
-          trendLabel={
-            query.trim() || statusFilter || formatFilter || programIdFilter || storeIdFilter || gapsOnly ? "Filtered" : "All sites"
-          }
-        />
-        <StatCard
-          label="Needs Attention"
-          value={rows === null ? "…" : String(rows.filter((r) => r.site_status === "issue_attention_required").length)}
-          trend="flat"
-          trendLabel="Of rows currently shown"
-        />
+        <span className="text-line">·</span>
+        <span>
+          showing <span className="font-semibold text-ink">{rows === null ? "…" : rows.length}</span>
+          {query.trim() || statusFilter || formatFilter || programIdFilter || storeIdFilter || gapsOnly ? " (filtered)" : ""}
+        </span>
+        <span className="text-line">·</span>
+        <span>
+          <span className="font-semibold text-danger">
+            {rows === null ? "…" : rows.filter((r) => r.site_status === "issue_attention_required").length}
+          </span>{" "}
+          need attention
+        </span>
       </div>
 
       {(formatFilter || programIdFilter || storeIdFilter) && (

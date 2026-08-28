@@ -2,14 +2,14 @@
 
 import { useEffect, useState, type MouseEvent } from "react";
 import { useRouter } from "next/navigation";
-import { MapPin, FileText, ExternalLink } from "lucide-react";
+import { MapPin, FileText, ExternalLink, X } from "lucide-react";
 import { Badge, type BadgeStatus } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
-import { lfgStatusLabel, lfgStatusBadge, lfgTrackingPercent } from "@/lib/lfgStatus";
+import { lfgStatusLabel, lfgStatusBadge, LFG_FORMAT_PRIORITY } from "@/lib/lfgStatus";
 import { formatSizeMm } from "@/lib/lfg-units";
-import { installationReportHref, INSTALLATION_STATUSES } from "./LfgSiteWorkspaceClient";
+import { INSTALLATION_STATUSES } from "./LfgSiteWorkspaceClient";
 
 // Site Cards (task #76) -- a photo-forward, one-card-per-site alternative
 // to the Site Master table, for browsing/reviewing a format's sites
@@ -19,16 +19,16 @@ import { installationReportHref, INSTALLATION_STATUSES } from "./LfgSiteWorkspac
 // in page.tsx) -- this view only decides how many of those rows to
 // actually RENDER as cards (see PAGE_SIZE below) and fetches the extra
 // per-site data the table never needed: a signed reference-picture URL,
-// the latest shipment's AWB, whether a survey PDF is on file (task #37's
-// bulk-link, or a manual upload), and the lfg_installations row's own
-// installation_status.
+// the latest shipment's AWB, the saved Site Survey / Installation Report
+// documents on file (task #37's bulk-link, or a manual upload), and the
+// lfg_installations row's own installation_status.
 //
 // Deliberately NOT wired into the table's bulk-select/Move-to-Program
 // flow -- this is a lighter, read-only browse/review mode; bulk actions
 // stay on the table view, where the header "select all shown" checkbox
 // (task #69) already lives and already works against the full result
-// set. Clicking a card (anywhere except its two link buttons) opens Site
-// 360, same destination as clicking a table row.
+// set. Clicking a card (anywhere except its two document buttons) opens
+// Site 360, same destination as clicking a table row.
 export interface LfgSiteCardRow {
   id: string;
   site_id: string;
@@ -53,9 +53,12 @@ function partnerName(row: LfgSiteCardRow): string | null {
 }
 
 // Same BadgeStatus palette the rest of the app already uses (Badge.tsx,
-// lfgStatusBadge) -- just applied to a few spots Badge itself doesn't
-// cover: the translucent status pill over the photo, and the tracking
-// bar's fill color.
+// lfgStatusBadge) -- applied to the one status indicator a card shows
+// (the pill over the photo, top right) so it stays in sync with the
+// status Badge everywhere else in the app: in_transit/in_production =
+// info (blue), delivered = success (green), survey_pending = warning
+// (yellow), issue_attention_required = danger (red), etc. -- see
+// LFG_STATUS_BADGE in lfgStatus.ts, the single source of truth.
 const STATUS_DOT_CLASS: Record<BadgeStatus, string> = {
   success: "bg-success",
   warning: "bg-warning",
@@ -70,13 +73,36 @@ const STATUS_TEXT_CLASS: Record<BadgeStatus, string> = {
   info: "text-info",
   neutral: "text-ink-secondary",
 };
-const TRACK_FILL_CLASS: Record<BadgeStatus, string> = {
-  success: "bg-success",
-  warning: "bg-warning",
-  danger: "bg-danger",
-  info: "bg-info",
-  neutral: "bg-ink-muted",
-};
+
+// Solid, single-tone color per store FORMAT (lfg_sites.format is free
+// text carried through from two legacy imports -- see LFG_FORMAT_PRIORITY's
+// own comment in lfgStatus.ts, not a controlled vocabulary) -- painted
+// behind the reference-picture placeholder when a site has no photo on
+// file yet, instead of a flat grey gradient. Known formats (APR, Mono
+// AAR, Croma, ...) get a fixed, memorable color from this palette in
+// LFG_FORMAT_PRIORITY's own order; anything else still gets a real color
+// (deterministic per format string, via a simple hash) rather than
+// falling back to grey.
+const FORMAT_COLOR_PALETTE = [
+  "#2563EB", // app -- blue
+  "#7C3AED", // apr -- violet
+  "#0891B2", // mono aar -- cyan
+  "#059669", // multi aar -- emerald
+  "#DC2626", // croma -- red
+  "#EA580C", // reliance -- orange
+  "#CA8A04", // vijay sales -- amber
+  "#DB2777", // pai international -- pink
+];
+
+function formatPlaceholderColor(format: string | null): string {
+  if (!format) return "#475569"; // slate -- no format on file
+  const f = format.trim().toLowerCase();
+  const idx = LFG_FORMAT_PRIORITY.findIndex((keyword) => f.includes(keyword) || keyword.includes(f));
+  if (idx !== -1) return FORMAT_COLOR_PALETTE[idx % FORMAT_COLOR_PALETTE.length];
+  let hash = 0;
+  for (let i = 0; i < format.length; i++) hash = (hash * 31 + format.charCodeAt(i)) >>> 0;
+  return FORMAT_COLOR_PALETTE[hash % FORMAT_COLOR_PALETTE.length];
+}
 
 // lfg_installations.installation_status vocabulary (INSTALLATION_STATUSES,
 // imported from LfgSiteWorkspaceClient.tsx so this can't drift from the
@@ -104,6 +130,23 @@ function installationStatusBadge(status: string): BadgeStatus {
   return INSTALLATION_STATUS_BADGE[status as (typeof INSTALLATION_STATUSES)[number]] ?? "neutral";
 }
 
+// A saved lfg_site_documents row's minimal shape needed to open it -- see
+// openDocument() below, mirroring LfgSiteWorkspaceClient's Documents tab
+// handleView(): file_type (or, failing that, the file name's extension)
+// decides whether it opens in the in-screen preview (PDF/image) or falls
+// back to a new tab (anything else the browser can't render inline).
+interface DocRef {
+  id: string;
+  file_name: string;
+  file_type: string | null;
+}
+
+interface PreviewState {
+  name: string;
+  url: string;
+  kind: "pdf" | "image";
+}
+
 // How many cards render at once, and how many more a "Show more" click
 // reveals -- `rows` itself is the FULL filtered result (the table view
 // has no cap, per this file's sibling page.tsx), but a card carries a
@@ -120,8 +163,26 @@ export function LfgSiteCardGrid({ rows }: { rows: LfgSiteCardRow[] }) {
   const idsKey = visible.map((r) => r.id).join(",");
 
   const [awbBySite, setAwbBySite] = useState<Record<string, string>>({});
-  const [surveyDocBySite, setSurveyDocBySite] = useState<Record<string, string>>({});
+  const [surveyDocBySite, setSurveyDocBySite] = useState<Record<string, DocRef>>({});
+  const [installReportDocBySite, setInstallReportDocBySite] = useState<Record<string, DocRef>>({});
   const [installStatusBySite, setInstallStatusBySite] = useState<Record<string, string>>({});
+
+  // In-screen document preview -- same overlay pattern as the Site 360
+  // Documents tab (LfgSiteWorkspaceClient.tsx's `preview` state): Site
+  // Survey and Installation Report open right here instead of a new tab.
+  // Lifted to the grid rather than kept per-card since only one card's
+  // document can realistically be open at a time -- one shared overlay is
+  // simpler than mounting one in every card.
+  const [preview, setPreview] = useState<PreviewState | null>(null);
+
+  useEffect(() => {
+    if (!preview) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setPreview(null);
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [preview]);
 
   // Resets the page whenever the underlying filtered row set changes (a
   // new search/format/status) -- otherwise a leftover high visibleCount
@@ -156,19 +217,29 @@ export function LfgSiteCardGrid({ rows }: { rows: LfgSiteCardRow[] }) {
         setAwbBySite(map);
       });
 
+    // One query for both document categories -- survey and installation
+    // report -- split into their two per-site maps below, so this stays a
+    // single round trip instead of two near-identical ones.
     supabase
       .from("lfg_site_documents")
-      .select("id, site_id, uploaded_at")
-      .eq("category", "survey")
+      .select("id, site_id, category, file_name, file_type, uploaded_at")
+      .in("category", ["survey", "installation"])
       .in("site_id", ids)
       .order("uploaded_at", { ascending: false })
       .then(({ data }) => {
         if (cancelled) return;
-        const map: Record<string, string> = {};
-        for (const row of (data as { id: string; site_id: string }[]) ?? []) {
-          if (!map[row.site_id]) map[row.site_id] = row.id;
+        const surveyMap: Record<string, DocRef> = {};
+        const installMap: Record<string, DocRef> = {};
+        for (const row of (data as
+          | { id: string; site_id: string; category: string; file_name: string; file_type: string | null }[]
+          | null) ?? []) {
+          const target = row.category === "survey" ? surveyMap : row.category === "installation" ? installMap : null;
+          if (target && !target[row.site_id]) {
+            target[row.site_id] = { id: row.id, file_name: row.file_name, file_type: row.file_type };
+          }
         }
-        setSurveyDocBySite(map);
+        setSurveyDocBySite(surveyMap);
+        setInstallReportDocBySite(installMap);
       });
 
     supabase
@@ -201,8 +272,10 @@ export function LfgSiteCardGrid({ rows }: { rows: LfgSiteCardRow[] }) {
             key={row.id}
             row={row}
             awb={awbBySite[row.id] ?? null}
-            surveyDocId={surveyDocBySite[row.id] ?? null}
+            surveyDoc={surveyDocBySite[row.id] ?? null}
+            installReportDoc={installReportDocBySite[row.id] ?? null}
             installationStatus={installStatusBySite[row.id] ?? "pending"}
+            onPreview={setPreview}
           />
         ))}
       </div>
@@ -213,6 +286,47 @@ export function LfgSiteCardGrid({ rows }: { rows: LfgSiteCardRow[] }) {
           </Button>
         </div>
       )}
+      {preview && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          role="presentation"
+          onClick={() => setPreview(null)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="flex h-full max-h-[90vh] w-full max-w-5xl flex-col rounded-lg bg-surface-overlay shadow-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
+              <p className="min-w-0 truncate text-sm font-semibold text-ink">{preview.name}</p>
+              <div className="flex shrink-0 items-center gap-1">
+                <Button size="sm" variant="ghost" onClick={() => window.open(preview.url, "_blank", "noopener,noreferrer")}>
+                  <ExternalLink size={14} className="mr-1.5" />
+                  Open in new tab
+                </Button>
+                <button
+                  aria-label="Close preview"
+                  onClick={() => setPreview(null)}
+                  className="rounded p-1 text-ink-muted hover:bg-surface-sunken"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+            <div className="min-h-0 flex-1 bg-surface-sunken">
+              {preview.kind === "pdf" ? (
+                <iframe src={preview.url} title={preview.name} className="h-full w-full" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center overflow-auto p-4">
+                  {/* eslint-disable-next-line @next/next/no-img-element -- short-lived signed R2 URL */}
+                  <img src={preview.url} alt={preview.name} className="max-h-full max-w-full object-contain" />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -220,18 +334,22 @@ export function LfgSiteCardGrid({ rows }: { rows: LfgSiteCardRow[] }) {
 function SiteCard({
   row,
   awb,
-  surveyDocId,
+  surveyDoc,
+  installReportDoc,
   installationStatus,
+  onPreview,
 }: {
   row: LfgSiteCardRow;
   awb: string | null;
-  surveyDocId: string | null;
+  surveyDoc: DocRef | null;
+  installReportDoc: DocRef | null;
   installationStatus: string;
+  onPreview: (p: PreviewState) => void;
 }) {
   const router = useRouter();
   const { toast } = useToast();
   const [pictureUrl, setPictureUrl] = useState<string | null>(null);
-  const [openingSurvey, setOpeningSurvey] = useState(false);
+  const [openingDocId, setOpeningDocId] = useState<string | null>(null);
 
   // Only fetched when the site actually has a picture on file -- the
   // route 404s otherwise (see its own header comment), so skipping the
@@ -251,25 +369,33 @@ function SiteCard({
     };
   }, [row.id, row.site_reference_picture_path]);
 
-  async function openSurvey(e: MouseEvent) {
+  // Shared by both the Site Survey and Installation Report buttons -- both
+  // are "view the document already on file", never "create a new one" (a
+  // saved installation report is uploaded via the Documents tab like a
+  // survey is), so both open the same signed-URL + in-screen-preview path.
+  async function openDocument(e: MouseEvent, doc: DocRef) {
     e.stopPropagation();
-    if (!surveyDocId) return;
-    setOpeningSurvey(true);
+    setOpeningDocId(doc.id);
     try {
-      const res = await fetch(`/api/lfg/sites/${row.id}/documents/${surveyDocId}/signed-url`);
+      const res = await fetch(`/api/lfg/sites/${row.id}/documents/${doc.id}/signed-url`);
       const data = await res.json();
       if (!res.ok) {
-        toast("danger", data.message || data.error || "Couldn't open the survey");
+        toast("danger", data.message || data.error || "Couldn't open this document");
         return;
       }
-      window.open(data.url, "_blank", "noopener,noreferrer");
+      const isPdf = doc.file_type === "application/pdf" || /\.pdf$/i.test(doc.file_name);
+      const isImage = (doc.file_type?.startsWith("image/") ?? false) || /\.(png|jpe?g|gif|webp)$/i.test(doc.file_name);
+      if (isPdf || isImage) {
+        onPreview({ name: doc.file_name, url: data.url, kind: isPdf ? "pdf" : "image" });
+      } else {
+        window.open(data.url, "_blank", "noopener,noreferrer");
+      }
     } finally {
-      setOpeningSurvey(false);
+      setOpeningDocId(null);
     }
   }
 
   const statusBadge = lfgStatusBadge(row.site_status);
-  const trackPercent = lfgTrackingPercent(row.site_status);
   const partner = partnerName(row);
   const address = [row.city && row.region ? `${row.city}, ${row.region}` : row.city, row.store_address].filter(Boolean).join(" -- ");
 
@@ -285,7 +411,7 @@ function SiteCard({
     >
       <div
         className="relative h-[180px] w-full shrink-0 overflow-hidden"
-        style={!pictureUrl ? { background: "linear-gradient(135deg, var(--n-800), var(--n-600))" } : undefined}
+        style={!pictureUrl ? { background: formatPlaceholderColor(row.format) } : undefined}
       >
         {pictureUrl ? (
           // eslint-disable-next-line @next/next/no-img-element -- short-lived signed R2 URL
@@ -306,11 +432,19 @@ function SiteCard({
             <line x1="14" y1="26" x2="42" y2="26" stroke="#fff" strokeWidth="1.5" opacity="0.6" />
           </svg>
         )}
+        {/* A tiny soft white blend at the base of the photo/placeholder, as in
+            the approved mockup -- keeps the card's bottom edge feeling
+            finished rather than the image cutting off sharply into the
+            white body below. */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-white/85 to-transparent" />
         {row.format && (
           <span className="absolute left-3 top-3 rounded-full bg-black/55 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide text-white backdrop-blur">
             {row.format}
           </span>
         )}
+        {/* The site's one status indicator on the card -- deliberately shown
+            only here (top right), not repeated lower in the card (Badge
+            usage rule: one status badge per record card). */}
         <span className="absolute right-3 top-3 flex items-center gap-1.5 rounded-full bg-white/95 px-2.5 py-1">
           <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT_CLASS[statusBadge]}`} aria-hidden />
           <span className={`text-[11px] font-semibold ${STATUS_TEXT_CLASS[statusBadge]}`}>{lfgStatusLabel(row.site_status)}</span>
@@ -336,48 +470,45 @@ function SiteCard({
         <div className="my-4 h-px bg-line" />
 
         <div className="flex gap-2">
-          {surveyDocId ? (
-            <Button variant="secondary" size="sm" className="flex-1" loading={openingSurvey} onClick={openSurvey}>
+          {surveyDoc ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              className="flex-1"
+              loading={openingDocId === surveyDoc.id}
+              onClick={(e) => openDocument(e, surveyDoc)}
+            >
               <FileText size={14} className="mr-1.5" />
               Site Survey
             </Button>
           ) : (
             <Button variant="secondary" size="sm" className="flex-1" disabled onClick={(e) => e.stopPropagation()}>
-              Not Yet Saved
+              Survey Not Saved
             </Button>
           )}
-          <Button
-            variant="secondary"
-            size="sm"
-            className="flex-1"
-            onClick={(e) => {
-              e.stopPropagation();
-              window.open(installationReportHref(row), "_blank", "noopener,noreferrer");
-            }}
-          >
-            <ExternalLink size={14} className="mr-1.5" />
-            Install Report
-          </Button>
+          {installReportDoc ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              className="flex-1"
+              loading={openingDocId === installReportDoc.id}
+              onClick={(e) => openDocument(e, installReportDoc)}
+            >
+              <FileText size={14} className="mr-1.5" />
+              Install Report
+            </Button>
+          ) : (
+            <Button variant="secondary" size="sm" className="flex-1" disabled onClick={(e) => e.stopPropagation()}>
+              Report Not Saved
+            </Button>
+          )}
         </div>
 
         <div className="my-4 h-px bg-line" />
 
         <div className="flex items-center justify-between">
-          <Badge status={statusBadge}>{lfgStatusLabel(row.site_status)}</Badge>
-          <span className="text-xs tabular-nums text-ink-muted">{awb ? `AWB ${awb}` : "AWB —"}</span>
-        </div>
-
-        <div className="mt-3">
-          <div className="mb-1.5 flex items-center justify-between">
-            <span className="text-[11px] font-semibold text-ink-secondary">{lfgStatusLabel(row.site_status)}</span>
-            <span className="text-[11px] font-semibold text-ink-secondary">{trackPercent}%</span>
-          </div>
-          <div className="relative h-1.5 rounded-full bg-line">
-            <div
-              className={`absolute inset-y-0 left-0 rounded-full ${TRACK_FILL_CLASS[statusBadge]}`}
-              style={{ width: `${trackPercent}%` }}
-            />
-          </div>
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-secondary">AWB</span>
+          <span className="text-xs tabular-nums text-ink-muted">{awb ?? "—"}</span>
         </div>
 
         <div className="mt-3.5 flex items-center gap-2">
