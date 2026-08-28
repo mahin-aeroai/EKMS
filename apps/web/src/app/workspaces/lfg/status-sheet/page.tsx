@@ -183,7 +183,19 @@ export default function LfgStatusSheetPage() {
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("");
-  const [programFilter, setProgramFilter] = useState<string>(""); // "" = all programs
+  // "" = All Programs (every site ever mapped to a program, plus
+  // unassigned ones -- the lifetime total). Defaults to the CURRENT
+  // program the moment the programs list loads (see the programs-fetch
+  // effect below) rather than sitting on "All Programs" -- task: "every
+  // time freshly we select the sites and add to the program... separate
+  // total sites and current program sites... list only selected program
+  // sites." A season's sites (including the APP/APR/Mono AAR/Multi AAR
+  // "permanent" ones, which get re-mapped into each new Program same as
+  // everything else) are what a reviewer actually wants open by default;
+  // "All Programs" -- and every past season by name -- stays one click
+  // away in the Program select for when the lifetime total or a previous
+  // season is genuinely what's needed.
+  const [programFilter, setProgramFilter] = useState<string>("");
   const [formatFilter, setFormatFilter] = useState<string>("");
   const [cityFilter, setCityFilter] = useState<string>("");
   const [partnerFilter, setPartnerFilter] = useState<string>(""); // partner_id, "" = all partners
@@ -191,6 +203,12 @@ export default function LfgStatusSheetPage() {
   const [programs, setPrograms] = useState<ProgramOption[]>([]);
   const [partners, setPartners] = useState<PartnerOption[]>([]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // Lifetime total across every site regardless of program -- fetched once,
+  // never re-filtered by anything, purely so "N total sites (all programs,
+  // all-time)" can sit next to whatever the Program filter is currently
+  // scoped to, per the same "separate total sites and current program
+  // sites, clear-cut" task.
+  const [totalSiteCount, setTotalSiteCount] = useState<number | null>(null);
   // Per-status counts for the status filter chips (task: match the
   // reference design's "New 34 / Survey Pending 56 / ..." counts) --
   // deliberately its OWN fetch, not derived from `rows` above: `rows`
@@ -198,9 +216,13 @@ export default function LfgStatusSheetPage() {
   // statusFilter), so once a chip is selected, every OTHER chip's count
   // would go stale/zero if it were read from `rows`. This fetch omits
   // statusFilter but keeps every other active filter (search/format/city/
-  // partner), so the counts reflect "how many sites match everything else
-  // I've filtered by", live, per LFG_STATUSES value -- __all__ is the
-  // total across every status for the "All Statuses" chip.
+  // partner/PROGRAM), so the counts reflect "how many sites match
+  // everything else I've filtered by", live, per LFG_STATUSES value --
+  // __all__ is the total across every status for the "All Statuses" chip.
+  // Program is included here (unlike before) specifically so these counts
+  // -- and the "All Statuses" total -- always describe the SELECTED
+  // program, not every site MMDI has ever run, which is the whole point of
+  // this task.
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
 
   // Format/City options: distinct values already typed into lfg_sites
@@ -216,12 +238,24 @@ export default function LfgStatusSheetPage() {
       .from("lfg_programs")
       .select("id, name, created_at")
       .order("created_at", { ascending: false })
-      .then(({ data }) => setPrograms((data as ProgramOption[]) ?? []));
+      .then(({ data }) => {
+        const list = (data as ProgramOption[]) ?? [];
+        setPrograms(list);
+        // Current season = most recently created Program, same convention
+        // as the Programs page/Programs summary card -- default straight
+        // into it rather than "All Programs" (see programFilter's own
+        // comment above).
+        if (list.length > 0) setProgramFilter(list[0].id);
+      });
     supabase
       .from("lfg_partners")
       .select("id, name")
       .order("name")
       .then(({ data }) => setPartners((data as PartnerOption[]) ?? []));
+    supabase
+      .from("lfg_sites")
+      .select("*", { count: "exact", head: true })
+      .then(({ count }) => setTotalSiteCount(count ?? 0));
   }, []);
 
   useEffect(() => {
@@ -235,6 +269,13 @@ export default function LfgStatusSheetPage() {
           )
           .range(from, to);
         if (statusFilter) q = q.eq("site_status", statusFilter);
+        // Scoped server-side to the selected Program (defaults to the
+        // current season, see programFilter's own comment) rather than
+        // always pulling every site and letting the `groups` memo below
+        // filter client-side -- both faster (usually a few hundred rows
+        // instead of the lifetime total) and keeps this query and the
+        // statusCounts one below always describing the same scope.
+        if (programFilter) q = q.eq("program_id", programFilter);
         if (formatFilter) q = q.eq("format", formatFilter);
         if (cityFilter) q = q.eq("city", cityFilter);
         if (partnerFilter) q = q.eq("partner_id", partnerFilter);
@@ -247,7 +288,7 @@ export default function LfgStatusSheetPage() {
       }).then((data) => setRows(sortRows(data as unknown as StatusSheetRow[])));
     }, 250);
     return () => clearTimeout(handle);
-  }, [query, statusFilter, formatFilter, cityFilter, partnerFilter]);
+  }, [query, statusFilter, programFilter, formatFilter, cityFilter, partnerFilter]);
 
   // statusCounts -- see its own declaration comment above for why this is
   // a separate fetch from the one right above it (deliberately NOT
@@ -257,6 +298,7 @@ export default function LfgStatusSheetPage() {
       const trimmed = query.trim();
       fetchAllRows<{ site_status: string }>((from, to) => {
         let q = supabase.from("lfg_sites").select("site_status").range(from, to);
+        if (programFilter) q = q.eq("program_id", programFilter);
         if (formatFilter) q = q.eq("format", formatFilter);
         if (cityFilter) q = q.eq("city", cityFilter);
         if (partnerFilter) q = q.eq("partner_id", partnerFilter);
@@ -274,7 +316,7 @@ export default function LfgStatusSheetPage() {
       });
     }, 250);
     return () => clearTimeout(handle);
-  }, [query, formatFilter, cityFilter, partnerFilter]);
+  }, [query, programFilter, formatFilter, cityFilter, partnerFilter]);
 
   const ordinals = useMemo(() => siteOrdinals(rows ?? []), [rows]);
 
@@ -291,11 +333,17 @@ export default function LfgStatusSheetPage() {
     });
   }
 
-  const hasActiveFilter = !!(query.trim() || statusFilter || programFilter || formatFilter || cityFilter || partnerFilter);
+  // programFilter is deliberately excluded here -- it defaults to the
+  // current Program (see its own comment above), which is the expected
+  // starting scope, not something applied on top that needs "clearing".
+  // Switching Programs (including back to "All Programs") has its own
+  // dedicated select right above; "Clear all filters" only resets the
+  // incidental search/status/format/city/partner filters layered on top
+  // of whichever Program is currently in view.
+  const hasActiveFilter = !!(query.trim() || statusFilter || formatFilter || cityFilter || partnerFilter);
   function clearAllFilters() {
     setQuery("");
     setStatusFilter("");
-    setProgramFilter("");
     setFormatFilter("");
     setCityFilter("");
     setPartnerFilter("");
@@ -303,7 +351,11 @@ export default function LfgStatusSheetPage() {
 
   // Program groups, current-season-first, "No Program" always last -- only
   // built once rows AND programs are both in, so a group's own filtered
-  // count is always accurate.
+  // count is always accurate. `rows` is already scoped to programFilter
+  // server-side now (see the fetch effect above), so there's normally just
+  // one group here when a Program is selected -- the trailing
+  // .filter(programFilter) is a harmless belt-and-suspenders in case that
+  // ever changes, not load-bearing anymore.
   const groups = useMemo(() => {
     if (!rows) return [];
     const byProgram = new Map<string, StatusSheetRow[]>();
@@ -322,6 +374,12 @@ export default function LfgStatusSheetPage() {
     if (unassigned && unassigned.length > 0) ordered.push({ key: NO_PROGRAM_KEY, name: "No Program Assigned", rows: unassigned });
     return programFilter ? ordered.filter((g) => g.key === programFilter) : ordered;
   }, [rows, programs, programFilter]);
+
+  // Current season = programs[0] (most recently created), same convention
+  // as programFilter's own default above -- used only to label that option
+  // "(Current)" in the Program select and in the scope banner below.
+  const currentProgramId = programs[0]?.id ?? null;
+  const selectedProgram = programs.find((p) => p.id === programFilter) ?? null;
 
   return (
     <div>
@@ -346,7 +404,7 @@ export default function LfgStatusSheetPage() {
             <div>
               <h1 className="text-2xl font-bold text-ink">Status Sheet</h1>
               <p className="mt-1 max-w-xl text-sm text-ink-secondary">
-                Every site, grouped by Program, one row each — click Swap Status to move a site to its next stage
+                One row per site, scoped to a Program at a time — click Swap Status to move a site to its next stage
                 without opening Site 360.
                 {!editable && " You have view-only access; ask an admin/editor to change a status."}
               </p>
@@ -359,6 +417,48 @@ export default function LfgStatusSheetPage() {
           >
             <ArrowLeft size={16} /> Back to Site Master
           </button>
+        </div>
+
+        {/* Scope banner (task: "separate total sites and current program
+            sites... show the number related to selected program") -- spells
+            out, in plain language, exactly what's on screen: which Program
+            (or "All Programs") is selected and how many sites that is,
+            right next to the lifetime total across every program/season so
+            the two numbers are never confused for each other again. Many
+            sites (especially the seasonal Croma/Reliance/Vijay Sales-format
+            ones) go inactive once their season ends and simply aren't part
+            of the next Program's site list -- this banner is what makes
+            that visible instead of implicit. */}
+        <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-ink-secondary">Showing</span>
+          <span className="font-semibold text-ink">
+            {rows === null ? "…" : rows.length} site{rows?.length === 1 ? "" : "s"}
+          </span>
+          <span className="text-ink-secondary">for</span>
+          {programFilter ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-primary-tint px-2.5 py-1 text-xs font-semibold text-primary">
+              {selectedProgram?.name ?? "…"}
+              {programFilter === currentProgramId && (
+                <span className="rounded-full bg-primary px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-on-brand">Current</span>
+              )}
+            </span>
+          ) : (
+            <span className="inline-flex items-center rounded-full bg-surface-sunken px-2.5 py-1 text-xs font-semibold text-ink-secondary">
+              All Programs
+            </span>
+          )}
+          <span className="text-ink-secondary">
+            · {totalSiteCount === null ? "…" : totalSiteCount} total sites across every program, all-time
+          </span>
+          {programFilter && (
+            <button
+              type="button"
+              onClick={() => setProgramFilter("")}
+              className="text-xs font-medium text-ink-muted underline-offset-2 hover:text-ink hover:underline"
+            >
+              View all programs
+            </button>
+          )}
         </div>
 
         <div className="mt-5 flex flex-wrap items-center gap-2.5">
@@ -381,15 +481,14 @@ export default function LfgStatusSheetPage() {
               </button>
             )}
           </div>
-          {programs.length > 1 && (
-            <IconSelect icon={CalendarRange} value={programFilter} onChange={setProgramFilter} placeholder="All Programs">
-              {programs.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </IconSelect>
-          )}
+          <IconSelect icon={CalendarRange} value={programFilter} onChange={setProgramFilter} placeholder="All Programs (Total Sites)">
+            {programs.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+                {p.id === currentProgramId ? " (Current)" : ""}
+              </option>
+            ))}
+          </IconSelect>
           <IconSelect icon={FileText} value={formatFilter} onChange={setFormatFilter} placeholder="All Formats">
             {formatOptions.map((f) => (
               <option key={f} value={f}>
