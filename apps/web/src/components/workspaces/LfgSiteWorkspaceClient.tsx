@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { MapPin, Pencil, FileText, Lock, Upload, Eye, Trash2, Truck, ArrowLeft } from "lucide-react";
+import { MapPin, Pencil, FileText, Lock, Upload, Eye, Trash2, Truck, ArrowLeft, X, ExternalLink } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -2358,6 +2358,21 @@ export function DocumentsTab({
   const { toast } = useToast();
   const [uploadingCategory, setUploadingCategory] = useState<string | null>(null);
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
+  // In-screen preview -- PDFs (the bulk of what lands here, e.g. the linked
+  // site surveys) and images render right in the tab via this overlay
+  // instead of forcing a new-tab navigation; anything else (docx, etc.)
+  // still falls back to opening the signed URL in a new tab below, since
+  // browsers can't render those inline anyway.
+  const [preview, setPreview] = useState<{ name: string; url: string; kind: "pdf" | "image" } | null>(null);
+
+  useEffect(() => {
+    if (!preview) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setPreview(null);
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [preview]);
 
   async function handleUpload(category: DocumentRow["category"], file: File) {
     setUploadingCategory(category);
@@ -2409,13 +2424,21 @@ export function DocumentsTab({
   }
 
   async function handleView(documentId: string) {
+    const doc = initialDocuments.find((d) => d.id === documentId);
     const res = await fetch(`/api/lfg/sites/${siteId}/documents/${documentId}/signed-url`);
     const data = await res.json();
     if (!res.ok) {
       toast("danger", data.message || data.error || "Couldn't open this document");
       return;
     }
-    window.open(data.url, "_blank", "noopener,noreferrer");
+    const name = doc?.file_name ?? "Document";
+    const isPdf = doc?.file_type === "application/pdf" || /\.pdf$/i.test(name);
+    const isImage = (doc?.file_type?.startsWith("image/") ?? false) || /\.(png|jpe?g|gif|webp)$/i.test(name);
+    if (isPdf || isImage) {
+      setPreview({ name, url: data.url, kind: isPdf ? "pdf" : "image" });
+    } else {
+      window.open(data.url, "_blank", "noopener,noreferrer");
+    }
   }
 
   async function handleDelete(documentId: string) {
@@ -2495,6 +2518,51 @@ export function DocumentsTab({
           </div>
         );
       })}
+      {preview && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          role="presentation"
+          onClick={() => setPreview(null)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="flex h-full max-h-[90vh] w-full max-w-5xl flex-col rounded-lg bg-surface-overlay shadow-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
+              <p className="min-w-0 truncate text-sm font-semibold text-ink">{preview.name}</p>
+              <div className="flex shrink-0 items-center gap-1">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => window.open(preview.url, "_blank", "noopener,noreferrer")}
+                >
+                  <ExternalLink size={14} className="mr-1.5" />
+                  Open in new tab
+                </Button>
+                <button
+                  aria-label="Close preview"
+                  onClick={() => setPreview(null)}
+                  className="rounded p-1 text-ink-muted hover:bg-surface-sunken"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+            <div className="min-h-0 flex-1 bg-surface-sunken">
+              {preview.kind === "pdf" ? (
+                <iframe src={preview.url} title={preview.name} className="h-full w-full" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center overflow-auto p-4">
+                  {/* eslint-disable-next-line @next/next/no-img-element -- short-lived signed R2 URL */}
+                  <img src={preview.url} alt={preview.name} className="max-h-full max-w-full object-contain" />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
