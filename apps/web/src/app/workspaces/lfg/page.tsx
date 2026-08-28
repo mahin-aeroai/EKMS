@@ -554,6 +554,13 @@ export default function LfgSiteListPage() {
           {
             key: "selected",
             header: "",
+            // width on every column below (task: "reduce font and compact
+            // this view i need to see th e last delete button in single
+            // screen") -- Table's compact density now lays out at exactly
+            // the sum of these widths instead of growing each column to
+            // fit its content, so the Delete column at the end stays
+            // reachable without a horizontal scroll.
+            width: "2rem",
             // "Select all shown" (task #69) -- checks/unchecks every row
             // currently loaded (up to the paginated fetch above, i.e. the
             // WHOLE result set now that the old 100-row cap is gone, not
@@ -582,12 +589,13 @@ export default function LfgSiteListPage() {
           } satisfies TableColumn<SelectableRow>,
         ]
       : []),
-    { key: "site_id", header: "LFG Code", sortable: true },
-    { key: "sfo_id", header: "SFO / Apple ID", sortable: true, render: (r) => r.sfo_id ?? "—" },
+    { key: "site_id", header: "LFG Code", sortable: true, width: "4.5rem" },
+    { key: "sfo_id", header: "SFO / Apple ID", sortable: true, width: "5.5rem", render: (r) => r.sfo_id ?? "—" },
     {
       key: "outlet_name",
       header: "Store Name",
       sortable: true,
+      width: "11rem",
       render: (r) => {
         const siblings = r.store_id ? (siblingCounts[r.store_id] ?? 0) : 0;
         if (siblings <= 1) return r.outlet_name;
@@ -613,37 +621,41 @@ export default function LfgSiteListPage() {
       key: "active",
       header: "Active",
       sortable: true,
+      width: "3.5rem",
       render: (r) => <Badge status={r.active ? "success" : "neutral"}>{r.active ? "Yes" : "No"}</Badge>,
     },
-    { key: "city", header: "City", sortable: true, render: (r) => r.city ?? "—" },
-    { key: "state", header: "State", sortable: true, render: (r) => r.state ?? "—" },
-    { key: "region", header: "Region", sortable: true, render: (r) => r.region ?? "—" },
+    { key: "city", header: "City", sortable: true, width: "5.5rem", render: (r) => r.city ?? "—" },
+    { key: "state", header: "State", sortable: true, width: "5.5rem", render: (r) => r.state ?? "—" },
+    { key: "region", header: "Region", sortable: true, width: "4rem", render: (r) => r.region ?? "—" },
     {
       key: "format",
       header: "Format",
       sortable: true,
+      width: "3.75rem",
       render: (r) => r.format ?? "—",
     },
-    { key: "material", header: "Material", sortable: true, width: "12rem", render: (r) => r.material ?? "—" },
-    { key: "mat_code", header: "Mat Code", sortable: true, render: (r) => r.mat_code ?? "—" },
-    { key: "width", header: "Width (mm)", sortable: true, render: (r) => formatMm(r.width) },
-    { key: "height", header: "Height (mm)", sortable: true, render: (r) => formatMm(r.height) },
-    { key: "lfg_partners", header: "Size (in)", render: (r) => formatSizeInches(r.width, r.height) },
-    { key: "number_of_sites", header: "Qty", sortable: true },
-    { key: "bleed", header: "Bleed", sortable: true, render: (r) => formatDecimal(r.bleed) },
+    { key: "material", header: "Material", sortable: true, width: "7rem", render: (r) => r.material ?? "—" },
+    { key: "mat_code", header: "Mat Code", sortable: true, width: "4.5rem", render: (r) => r.mat_code ?? "—" },
+    { key: "width", header: "Width (mm)", sortable: true, width: "4.5rem", render: (r) => formatMm(r.width) },
+    { key: "height", header: "Height (mm)", sortable: true, width: "4.5rem", render: (r) => formatMm(r.height) },
+    { key: "lfg_partners", header: "Size (in)", width: "5rem", render: (r) => formatSizeInches(r.width, r.height) },
+    { key: "number_of_sites", header: "Qty", sortable: true, width: "2.75rem" },
+    { key: "bleed", header: "Bleed", sortable: true, width: "3.5rem", render: (r) => formatDecimal(r.bleed) },
     {
       key: "site_status",
       header: "Status",
       sortable: true,
+      width: "6.5rem",
       render: (r) => <Badge status={lfgStatusBadge(r.site_status)}>{lfgStatusLabel(r.site_status)}</Badge>,
     },
-    { key: "asm_name", header: "ASM", sortable: true, render: (r) => r.asm_name ?? "—" },
-    { key: "partner_id", header: "Partner", render: (r) => partnerName(r) },
+    { key: "asm_name", header: "ASM", sortable: true, width: "5rem", render: (r) => r.asm_name ?? "—" },
+    { key: "partner_id", header: "Partner", width: "5.5rem", render: (r) => partnerName(r) },
     ...(canDelete(role)
       ? [
           {
             key: "id",
             header: "",
+            width: "2.75rem",
             render: (r) => (
               <Button
                 size="sm"
@@ -898,6 +910,7 @@ export default function LfgSiteListPage() {
               columns={COLUMNS}
               rows={rows.map((r): SelectableRow => ({ ...r, selected: selectedIds.has(r.id) }))}
               onRowClick={(r) => router.push(`/workspaces/lfg/sites/${r.id}`)}
+              density="compact"
             />
           </div>
         )}

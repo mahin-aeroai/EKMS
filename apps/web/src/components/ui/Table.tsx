@@ -66,15 +66,42 @@ export function Table<T extends { id: string }>({
     }
   }
 
+  // Compact trims header/cell padding and font size on top of the
+  // shorter row height it already had -- task feedback on a wide,
+  // many-column table ("reduce font and compact this view i need to see
+  // th e last delete button in single screen"): the old compact mode only
+  // shortened rows (h-9), leaving the same text-sm/px-4 sizing as
+  // "comfortable", which didn't meaningfully narrow a wide table. Cells
+  // also truncate with an ellipsis instead of wrapping onto a second line
+  // -- letting a long value (e.g. a Material name) wrap would blow the
+  // row past its declared height and undo the compaction.
+  //
+  // Compact also switches to a FIXED table layout sized to the sum of
+  // each column's own `width` (not stretched to fill the container like
+  // "comfortable"'s `w-full` does) -- without this, the browser sizes
+  // every column without an explicit width to fit its content, which is
+  // exactly what let a wide, many-column table push its last column (the
+  // Delete button) off screen in the first place. A caller using compact
+  // density should give every column a `width` for this to size
+  // predictably; a column left without one falls back to the browser's
+  // usual fixed-layout heuristic (roughly equal leftover space), which
+  // may not match its content.
+  const compact = density === "compact";
+
   return (
     <div className="overflow-auto rounded-lg border border-line">
-      <table className="w-full text-left text-sm">
-        <thead className="sticky top-0 bg-surface-sunken text-xs font-semibold uppercase tracking-wide text-ink-secondary">
+      <table className={cn("text-left", compact ? "table-fixed text-xs" : "w-full text-sm")}>
+        <thead
+          className={cn(
+            "sticky top-0 bg-surface-sunken font-semibold uppercase tracking-wide text-ink-secondary",
+            compact ? "text-[10px]" : "text-xs"
+          )}
+        >
           <tr>
             {columns.map((col) => (
               <th
                 key={String(col.key)}
-                className="px-4 py-2.5"
+                className={compact ? "px-2 py-1.5" : "px-4 py-2.5"}
                 style={col.width ? { width: col.width, minWidth: col.width } : undefined}
               >
                 {col.headerRender ? (
@@ -106,13 +133,13 @@ export function Table<T extends { id: string }>({
               className={cn(
                 "text-ink",
                 onRowClick && "cursor-pointer hover:bg-surface-sunken",
-                density === "compact" ? "h-9" : "h-12"
+                compact ? "h-8" : "h-12"
               )}
             >
               {columns.map((col) => (
                 <td
                   key={String(col.key)}
-                  className="px-4"
+                  className={cn(compact ? "px-2 overflow-hidden text-ellipsis whitespace-nowrap" : "px-4")}
                   style={col.width ? { width: col.width, minWidth: col.width } : undefined}
                 >
                   {col.render ? col.render(row) : String(row[col.key])}
