@@ -239,7 +239,21 @@ function programOf(site: LfgSite) {
 // header comment), not this app's lfg_sites.format. Only the *source*
 // value read here changed (site.format, was site.program) when lfg_sites'
 // column was renamed (task #39) -- the receiving param name is untouched.
-function installationReportHref(site: LfgSite): string {
+// Typed as a minimal structural subset of LfgSite (not LfgSite itself) so
+// LfgSiteCardGrid.tsx's own, much smaller list-row shape satisfies it too
+// without importing the full Site 360 row type -- exported so that card
+// grid uses this exact same href, rather than a second copy that could
+// drift from it.
+interface InstallationReportSource {
+  outlet_name: string;
+  store_address: string | null;
+  sfo_id: string | null;
+  format: string | null;
+  asm_name: string | null;
+  asm_mobile?: string | null;
+}
+
+export function installationReportHref(site: InstallationReportSource): string {
   const params = new URLSearchParams();
   if (site.outlet_name) params.set("store", site.outlet_name);
   if (site.store_address) params.set("address", site.store_address);
@@ -1971,7 +1985,9 @@ function ShipmentCard({
   );
 }
 
-const INSTALLATION_STATUSES = ["pending", "planned", "in_progress", "completed", "issue"] as const;
+// Exported so LfgSiteCardGrid.tsx's Installation-status pill uses this
+// exact same vocabulary instead of inventing its own.
+export const INSTALLATION_STATUSES = ["pending", "planned", "in_progress", "completed", "issue"] as const;
 const PHOTO_KINDS = [
   { key: "before", label: "Before" },
   { key: "after", label: "After" },

@@ -2,7 +2,21 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { MapPin, Search, Plus, LayoutDashboard, Users, Trash2, X, ArrowLeft, CalendarRange, FolderInput, Store as StoreIcon } from "lucide-react";
+import {
+  MapPin,
+  Search,
+  Plus,
+  LayoutDashboard,
+  Users,
+  Trash2,
+  X,
+  ArrowLeft,
+  CalendarRange,
+  FolderInput,
+  Store as StoreIcon,
+  LayoutGrid,
+  List as ListIcon,
+} from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { StatCard } from "@/components/ui/Card";
@@ -15,6 +29,7 @@ import { supabase } from "@/lib/supabase";
 import { LFG_STATUSES, lfgStatusLabel, lfgStatusBadge } from "@/lib/lfgStatus";
 import { formatMm, formatSizeInches, formatDecimal } from "@/lib/lfg-units";
 import { useLfgDistinctValues } from "@/lib/useLfgDistinctValues";
+import { LfgSiteCardGrid } from "@/components/workspaces/LfgSiteCardGrid";
 
 // Site Master list — the entry point to the LFG Connect program's Site 360
 // view. Deliberately a client component doing direct supabase.from()
@@ -66,6 +81,12 @@ interface LfgSiteListRow {
   asm_name: string | null;
   partner_id: string | null;
   lfg_partners: { name: string } | { name: string }[] | null;
+  // Cards view only (task #76) -- the table itself never renders these,
+  // but they're cheap columns to carry along on the one shared fetch
+  // below rather than giving LfgSiteCardGrid a second query against the
+  // same already-filtered row set.
+  store_address: string | null;
+  site_reference_picture_path: string | null;
 }
 
 function partnerName(row: LfgSiteListRow): string {
@@ -111,6 +132,13 @@ export default function LfgSiteListPage() {
   // checkbox, task #69), and bulk "Move to Program"'d in one visit here,
   // rather than needing a trip through the Dashboard first.
   const formatOptions = useLfgDistinctValues("format");
+  // List/Cards toggle (task #76) -- both views read the exact same `rows`
+  // fetched below (filters apply to both identically); this only picks
+  // how they're rendered. Defaults to List so the existing bulk-select/
+  // Move-to-Program workflow (which only the table wires up -- see
+  // LfgSiteCardGrid.tsx's own header comment) is what a fresh visit
+  // still lands on.
+  const [view, setView] = useState<"list" | "cards">("list");
   const [rows, setRows] = useState<LfgSiteListRow[] | null>(null);
   // How many OTHER sites currently on screen share each store_id -- a
   // lightweight, page-scoped count (not a full-table aggregate) purely to
@@ -268,7 +296,7 @@ export default function LfgSiteListPage() {
           let q = supabase
             .from("lfg_sites")
             .select(
-              "id, site_id, outlet_name, format, sfo_id, city, region, material, mat_code, width, height, bleed, store_id, site_status, number_of_sites, asm_name, partner_id, lfg_partners(name)"
+              "id, site_id, outlet_name, format, sfo_id, city, region, material, mat_code, width, height, bleed, store_id, site_status, number_of_sites, asm_name, partner_id, lfg_partners(name), store_address, site_reference_picture_path"
             )
             // Default sort: SFO/Apple ID ascending, not the internal LFG
             // code -- see this file's header comment. nullsFirst: false so
@@ -641,9 +669,33 @@ export default function LfgSiteListPage() {
             </option>
           ))}
         </select>
+        <div className="flex shrink-0 items-center gap-1 rounded-md border border-line-strong bg-surface p-1">
+          <button
+            type="button"
+            onClick={() => setView("list")}
+            aria-pressed={view === "list"}
+            title="List view"
+            className={`flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium transition-colors ${
+              view === "list" ? "bg-primary text-on-brand" : "text-ink-secondary hover:bg-surface-sunken"
+            }`}
+          >
+            <ListIcon size={14} /> List
+          </button>
+          <button
+            type="button"
+            onClick={() => setView("cards")}
+            aria-pressed={view === "cards"}
+            title="Card view"
+            className={`flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium transition-colors ${
+              view === "cards" ? "bg-primary text-on-brand" : "text-ink-secondary hover:bg-surface-sunken"
+            }`}
+          >
+            <LayoutGrid size={14} /> Cards
+          </button>
+        </div>
       </div>
 
-      {editable && selectedIds.size > 0 && (
+      {view === "list" && editable && selectedIds.size > 0 && (
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary bg-primary-tint px-4 py-2.5">
           <span className="text-sm font-medium text-primary">
             {selectedIds.size} site{selectedIds.size === 1 ? "" : "s"} selected
@@ -662,6 +714,8 @@ export default function LfgSiteListPage() {
       <div className="rounded-lg border border-line bg-surface p-4">
         {rows === null ? (
           <p className="py-6 text-center text-sm text-ink-muted">Loading sites…</p>
+        ) : view === "cards" ? (
+          <LfgSiteCardGrid rows={rows} />
         ) : rows.length === 0 ? (
           <p className="py-6 text-center text-sm text-ink-muted">No sites match your search.</p>
         ) : (

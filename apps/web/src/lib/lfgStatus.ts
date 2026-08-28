@@ -213,6 +213,45 @@ export function lfgPipelineStageOf(status: string, creativeReceivedAt?: string |
 }
 
 /**
+ * Site Cards' tracking bar (task #76) -- a coarse, purely visual "how far
+ * along" percent for a single site, in LFG_STATUSES' own lifecycle order.
+ * This is NOT a second status taxonomy: LFG_STATUSES/lfgStatusLabel/
+ * lfgStatusBadge above stay the single source of truth for the actual
+ * status shown on the pill next to the bar -- this map only decides how
+ * full the bar paints for it. active/deactivation_requested/deactivated
+ * all read as a completed journey (100%) since none of them are "earlier"
+ * than active. on_hold/issue_attention_required are flags a site can hit
+ * from any real stage, not a further position of their own, so they're
+ * pinned at a fixed mid-bar value (paired with the danger/warning badge
+ * color the bar already inherits from lfgStatusBadge) rather than
+ * pretending to know how far that specific site actually got.
+ */
+const LFG_STATUS_TRACKING_PERCENT: Record<LfgStatus, number> = {
+  new: 5,
+  survey_pending: 12,
+  survey_completed: 20,
+  survey_approved: 27,
+  production_pending: 35,
+  in_production: 44,
+  ready_for_dispatch: 53,
+  dispatched: 60,
+  in_transit: 68,
+  delivered: 76,
+  installation_planned: 84,
+  installation_in_progress: 91,
+  installation_completed: 97,
+  active: 100,
+  deactivation_requested: 100,
+  deactivated: 100,
+  on_hold: 50,
+  issue_attention_required: 50,
+};
+
+export function lfgTrackingPercent(status: string): number {
+  return LFG_STATUS_TRACKING_PERCENT[status as LfgStatus] ?? 0;
+}
+
+/**
  * The priority order given for the Program Dashboard's format/chain
  * groups -- everything else follows, alphabetically. Matched
  * case-insensitively and by substring in both directions (so "Reliance"

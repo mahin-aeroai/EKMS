@@ -60,3 +60,11 @@ export function formatSizeInches(width: number | null | undefined, height: numbe
   if (width === null || width === undefined || height === null || height === undefined) return "—";
   return `${Math.round(width * 100) / 100}x${Math.round(height * 100) / 100}`;
 }
+
+/** Combined "W × H" size in whole millimetres (see formatMm) -- Site
+ * Cards' "Size (mm)" field (task #76). "—" if either axis is missing,
+ * same rule as formatSizeInches above. */
+export function formatSizeMm(width: number | null | undefined, height: number | null | undefined): string {
+  if (width === null || width === undefined || height === null || height === undefined) return "—";
+  return `${formatMm(width)} × ${formatMm(height)} mm`;
+}
