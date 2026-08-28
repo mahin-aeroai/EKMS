@@ -16,6 +16,7 @@ import {
   LayoutGrid,
   MapPin as MapPinIcon,
   MoreHorizontal,
+  Pencil,
   PlusCircle,
   Search,
   Send,
@@ -324,6 +325,15 @@ export default function LfgStatusSheetPage() {
     setRows((prev) => (prev ? prev.map((r) => (r.id === id ? { ...r, site_status: newStatus, updated_at: new Date().toISOString() } : r)) : prev));
   }
 
+  // Same in-place-update pattern as handleStatusChanged above, for the
+  // inline field editor (SiteFieldsEditControl) -- SFO ID/Material/Size/
+  // Installation Partner, editable right from this row without opening
+  // Site 360 (task: "need to edit from screen... edit other fields inline
+  // here too").
+  function handleFieldsChanged(id: string, patch: Partial<StatusSheetRow>) {
+    setRows((prev) => (prev ? prev.map((r) => (r.id === id ? { ...r, ...patch, updated_at: new Date().toISOString() } : r)) : prev));
+  }
+
   function toggleCollapsed(key: string) {
     setCollapsed((prev) => {
       const next = new Set(prev);
@@ -613,14 +623,19 @@ export default function LfgStatusSheetPage() {
                                     <LfgBenchmarkStrip status={row.site_status} creativeReceivedAt={row.creative_received_at} />
                                   </div>
                                 </div>
-                                <button
-                                  type="button"
-                                  title="Open Site 360"
-                                  onClick={() => router.push(`/workspaces/lfg/sites/${row.id}`)}
-                                  className="shrink-0 rounded p-1 text-ink-muted hover:bg-surface-sunken hover:text-ink"
-                                >
-                                  <ExternalLink size={13} />
-                                </button>
+                                <div className="flex shrink-0 items-center gap-0.5">
+                                  {editable && (
+                                    <SiteFieldsEditControl row={row} partners={partners} onChanged={handleFieldsChanged} />
+                                  )}
+                                  <button
+                                    type="button"
+                                    title="Open Site 360"
+                                    onClick={() => router.push(`/workspaces/lfg/sites/${row.id}`)}
+                                    className="rounded p-1 text-ink-muted hover:bg-surface-sunken hover:text-ink"
+                                  >
+                                    <ExternalLink size={13} />
+                                  </button>
+                                </div>
                               </div>
                             </td>
                             <td className="px-3 py-2.5 align-top">
@@ -777,6 +792,188 @@ function MoreStatusChip({
         </div>
       )}
     </div>
+  );
+}
+
+// Inline field editor -- a small pencil trigger next to "Open Site 360"
+// that opens a compact popover for the handful of fields a reviewer most
+// often needs to fix without leaving the Status Sheet (SFO ID, Material,
+// Size, Installation Partner). Deliberately NOT every lfg_sites column --
+// this is a fast-correction tool for the fields shown right in this row's
+// own summary line, not a full edit form (Site 360 stays the place for
+// everything else: format, city, survey/creative/production/shipment/
+// installation records, documents). Same "update in place, no page
+// reload" pattern as StatusSwapControl below, writing straight to
+// lfg_sites via a direct .update() (RLS enforces admin/editor same as
+// everywhere else) and reporting back to the page via onChanged.
+function SiteFieldsEditControl({
+  row,
+  partners,
+  onChanged,
+}: {
+  row: StatusSheetRow;
+  partners: PartnerOption[];
+  onChanged: (id: string, patch: Partial<StatusSheetRow>) => void;
+}) {
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  const [sfoId, setSfoId] = useState(row.sfo_id ?? "");
+  const [material, setMaterial] = useState(row.material ?? "");
+  const [width, setWidth] = useState(row.width != null ? String(row.width) : "");
+  const [height, setHeight] = useState(row.height != null ? String(row.height) : "");
+  const [partnerId, setPartnerId] = useState(row.partner_id ?? "");
+
+  // Re-sync the form from the row every time the popover is opened -- the
+  // row can have changed since the last time this was open (another
+  // reviewer's edit, or this same control's own previous save), and
+  // useState's initial value above only runs once on mount.
+  useEffect(() => {
+    if (!open) return;
+    // Resetting the form fields is a deliberate reaction to the popover
+    // being opened (or the underlying row changing while open), not state
+    // derived purely from props/state that could be computed inline --
+    // same justification as LfgSiteCardGrid's own visibleCount reset.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSfoId(row.sfo_id ?? "");
+    setMaterial(row.material ?? "");
+    setWidth(row.width != null ? String(row.width) : "");
+    setHeight(row.height != null ? String(row.height) : "");
+    setPartnerId(row.partner_id ?? "");
+  }, [open, row]);
+
+  useEffect(() => {
+    if (!open) return;
+    function onClick(e: MouseEvent) {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [open]);
+
+  async function save() {
+    const trimmedSfo = sfoId.trim();
+    const trimmedMaterial = material.trim();
+    const widthNum = width.trim() === "" ? null : Number(width);
+    const heightNum = height.trim() === "" ? null : Number(height);
+    if ((width.trim() !== "" && Number.isNaN(widthNum)) || (height.trim() !== "" && Number.isNaN(heightNum))) {
+      toast("danger", "Width and Height must be numbers");
+      return;
+    }
+    setSaving(true);
+    const patch = {
+      sfo_id: trimmedSfo || null,
+      material: trimmedMaterial || null,
+      width: widthNum,
+      height: heightNum,
+      partner_id: partnerId || null,
+    };
+    const { error } = await supabase.from("lfg_sites").update(patch).eq("id", row.id);
+    setSaving(false);
+    if (error) {
+      toast("danger", `Couldn't update ${row.site_id}: ${error.message}`);
+      return;
+    }
+    onChanged(row.id, patch);
+    toast("success", `${row.outlet_name} updated`);
+    setOpen(false);
+  }
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        title="Edit SFO ID / Material / Size / Partner"
+        onClick={() => setOpen((o) => !o)}
+        className={`rounded p-1 hover:bg-surface-sunken ${open ? "text-primary" : "text-ink-muted hover:text-ink"}`}
+      >
+        <Pencil size={13} />
+      </button>
+      {open && (
+        <div
+          className="absolute right-0 z-40 mt-1.5 w-64 rounded-xl border border-line bg-surface-overlay p-3 shadow-3"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <p className="mb-2 text-xs font-semibold text-ink">Edit {row.outlet_name}</p>
+          <div className="flex flex-col gap-2">
+            <EditField label="SFO ID">
+              <input
+                value={sfoId}
+                onChange={(e) => setSfoId(e.target.value)}
+                className="h-8 w-full rounded-md border border-line-strong bg-surface px-2 text-xs text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              />
+            </EditField>
+            <EditField label="Material">
+              <input
+                value={material}
+                onChange={(e) => setMaterial(e.target.value)}
+                className="h-8 w-full rounded-md border border-line-strong bg-surface px-2 text-xs text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              />
+            </EditField>
+            <div className="grid grid-cols-2 gap-2">
+              <EditField label="Width (mm)">
+                <input
+                  value={width}
+                  onChange={(e) => setWidth(e.target.value)}
+                  inputMode="decimal"
+                  className="h-8 w-full rounded-md border border-line-strong bg-surface px-2 text-xs text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                />
+              </EditField>
+              <EditField label="Height (mm)">
+                <input
+                  value={height}
+                  onChange={(e) => setHeight(e.target.value)}
+                  inputMode="decimal"
+                  className="h-8 w-full rounded-md border border-line-strong bg-surface px-2 text-xs text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                />
+              </EditField>
+            </div>
+            <EditField label="Installation Partner">
+              <select
+                value={partnerId}
+                onChange={(e) => setPartnerId(e.target.value)}
+                className="h-8 w-full rounded-md border border-line-strong bg-surface px-2 text-xs text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                <option value="">Unassigned</option>
+                {partners.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </EditField>
+          </div>
+          <div className="mt-3 flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="rounded-md px-2.5 py-1 text-xs font-medium text-ink-muted hover:bg-surface-sunken"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={save}
+              className="rounded-md bg-primary px-2.5 py-1 text-xs font-semibold text-on-brand hover:opacity-90 disabled:opacity-60"
+            >
+              {saving ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EditField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">{label}</span>
+      {children}
+    </label>
   );
 }
 
