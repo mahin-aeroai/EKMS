@@ -86,6 +86,15 @@ export const ENTRANCE_FLOOR_LOCATION_LABEL: Record<Exclude<EntranceFloorLocation
   floors_within_store: "Floors — Within the Store",
 };
 
+// Locked choice of when deliveries can be made to the store -- replaces the
+// old free-text "Delivery timings" field with exactly these three options.
+export type DeliveryTiming = "store_open_timings" | "after_business_hours" | "24_7" | "";
+export const DELIVERY_TIMING_LABEL: Record<Exclude<DeliveryTiming, "">, string> = {
+  store_open_timings: "Store Open timings",
+  after_business_hours: "After Business Hours",
+  "24_7": "24/7",
+};
+
 // The one-off Q&A fields from the reference PDF's On-site personnel/Store
 // description/Installing on site/Deliveries/General site information/Site
 // details/Safety/Approvals sections -- site_survey_reports.form_data. Every
@@ -127,7 +136,6 @@ export interface SiteSurveyFormData {
   floorApplProgramOn: string;
   storeOpenPlan: YesNo;
   openPlanLayoutDescription: string;
-  applProgramPositionEntrance: string;
   siliconJoinsCondition: string;
   existingCreative: string;
   creativeRemovable: YesNo;
@@ -157,7 +165,7 @@ export interface SiteSurveyFormData {
   permitDetails: string;
 
   // -- Deliveries to store --
-  deliveryTimes: string;
+  deliveryTimes: DeliveryTiming;
 
   // -- General site information --
   weatherAffectsInstall: YesNo;
@@ -208,7 +216,6 @@ export function emptyFormData(): SiteSurveyFormData {
     floorApplProgramOn: "",
     storeOpenPlan: "",
     openPlanLayoutDescription: "",
-    applProgramPositionEntrance: "",
     siliconJoinsCondition: "",
     existingCreative: "",
     creativeRemovable: "",

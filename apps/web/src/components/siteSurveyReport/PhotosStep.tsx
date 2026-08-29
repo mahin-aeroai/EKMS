@@ -193,60 +193,69 @@ export function PhotosStep({ reportId, photos, onReload }: Props) {
 
   return (
     <div className="flex flex-col gap-6">
-      {CATEGORY_ORDER.map((category) => {
-        const items = photos.filter((p) => p.category === category).sort((a, b) => a.sort_order - b.sort_order);
-        return (
-          <div key={category} className="rounded-lg border border-line">
-            <div className="flex items-center justify-between rounded-t-lg border-b border-line bg-surface-sunken px-4 py-2.5">
-              <h2 className="text-xs font-bold uppercase tracking-wide text-ink-secondary">{PHOTO_CATEGORY_LABEL[category]}</h2>
-              {canUpload && (
-                <div>
-                  <input
-                    ref={(el) => {
-                      fileInputs.current[category] = el;
-                    }}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      e.target.value = "";
-                      if (file) void handleFileSelected(category, file);
-                    }}
+      {/* Each category is a self-sizing tile in a responsive grid, not a
+          full-width box -- a category with only 1-2 photos used to leave a
+          large empty strip to the right of its cards when it always spanned
+          the full content width; as a tile among several per row, it's only
+          ever as wide as the grid column, so a couple of small photo cards
+          fill it naturally. Categories with more photos simply grow taller
+          within their own cell (grid rows are independent). */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {CATEGORY_ORDER.map((category) => {
+          const items = photos.filter((p) => p.category === category).sort((a, b) => a.sort_order - b.sort_order);
+          return (
+            <div key={category} className="flex flex-col rounded-lg border border-line">
+              <div className="flex items-center justify-between gap-2 rounded-t-lg border-b border-line bg-surface-sunken px-3 py-2">
+                <h2 className="text-xs font-bold uppercase tracking-wide text-ink-secondary">{PHOTO_CATEGORY_LABEL[category]}</h2>
+                {canUpload && (
+                  <div>
+                    <input
+                      ref={(el) => {
+                        fileInputs.current[category] = el;
+                      }}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        e.target.value = "";
+                        if (file) void handleFileSelected(category, file);
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      loading={uploadingCategory === category}
+                      onClick={() => fileInputs.current[category]?.click()}
+                    >
+                      <Plus size={13} /> Add
+                    </Button>
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-1 flex-wrap gap-2 p-3">
+                {items.length === 0 && <p className="text-xs text-ink-muted">No photos yet.</p>}
+                {items.map((photo, i) => (
+                  <PhotoCard
+                    key={photo.id}
+                    photo={photo}
+                    canMoveUp={i > 0}
+                    canMoveDown={i < items.length - 1}
+                    onMove={(dir) => handleMove(photo, dir)}
+                    onDelete={() => handleDelete(photo.id)}
+                    onCaptionChange={(v) => handleCaptionChange(photo.id, v)}
+                    onCategoryChange={(v) => handleCategoryChange(photo, v)}
+                    onAnnotate={category === "measurement" ? () => setAnnotatingId(photo.id) : undefined}
+                    canDeletePhoto={canDeletePhoto}
+                    canEdit={canUpload}
                   />
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    loading={uploadingCategory === category}
-                    onClick={() => fileInputs.current[category]?.click()}
-                  >
-                    <Plus size={13} /> Add Photo
-                  </Button>
-                </div>
-              )}
+                ))}
+              </div>
             </div>
-            <div className="flex flex-wrap gap-3 p-4">
-              {items.length === 0 && <p className="text-xs text-ink-muted">No photos in this category yet.</p>}
-              {items.map((photo, i) => (
-                <PhotoCard
-                  key={photo.id}
-                  photo={photo}
-                  canMoveUp={i > 0}
-                  canMoveDown={i < items.length - 1}
-                  onMove={(dir) => handleMove(photo, dir)}
-                  onDelete={() => handleDelete(photo.id)}
-                  onCaptionChange={(v) => handleCaptionChange(photo.id, v)}
-                  onCategoryChange={(v) => handleCategoryChange(photo, v)}
-                  onAnnotate={category === "measurement" ? () => setAnnotatingId(photo.id) : undefined}
-                  canDeletePhoto={canDeletePhoto}
-                  canEdit={canUpload}
-                />
-              ))}
-            </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
 
       {annotatingId && (
         <AnnotationEditor photo={photos.find((p) => p.id === annotatingId)!} onClose={() => setAnnotatingId(null)} onSave={handleSaveAnnotation} />
@@ -300,8 +309,8 @@ function PhotoCard({
   const [caption, setCaption] = useState(photo.caption ?? "");
 
   return (
-    <div className="flex w-48 flex-col gap-2 rounded-md border border-line-strong p-2">
-      <div className="flex h-32 items-center justify-center overflow-hidden rounded bg-surface-sunken">
+    <div className="flex w-32 flex-col gap-2 rounded-md border border-line-strong p-2">
+      <div className="flex h-24 items-center justify-center overflow-hidden rounded bg-surface-sunken">
         {url ? (
           // eslint-disable-next-line @next/next/no-img-element -- short-lived signed R2 URL
           <img src={url} alt={photo.caption ?? "Site survey photo"} className="h-full w-full object-cover" />

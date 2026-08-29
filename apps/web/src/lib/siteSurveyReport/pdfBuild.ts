@@ -69,6 +69,7 @@ import fontkit from "@pdf-lib/fontkit";
 import {
   normalizeAnnotation,
   APPLE_STANDARDS_MET_LABEL,
+  DELIVERY_TIMING_LABEL,
   ENTRANCE_FLOOR_LOCATION_LABEL,
   PHOTO_CATEGORY_LABEL,
   POSITION_MARKER_LABEL,
@@ -1119,7 +1120,7 @@ function drawDetailsPage(ctx: Ctx) {
     ctx,
     [
       { label: "Time & Date of Installation", value: f.installationDateTime },
-      { label: "Delivery Timings", value: f.deliveryTimes },
+      { label: "Delivery Timings", value: f.deliveryTimes ? DELIVERY_TIMING_LABEL[f.deliveryTimes] : "" },
       { label: "Mall / Work Permits Required?", value: yesNoLabel(f.permitRequired, "Unknown") },
       { label: "Permit Details", value: f.permitDetails },
     ],
@@ -1267,7 +1268,6 @@ function drawInspectionDetailsContinuationPages(ctx: Ctx) {
         { label: "Entrances & Floors", value: f.entranceFloorLocation ? ENTRANCE_FLOOR_LOCATION_LABEL[f.entranceFloorLocation] : "" },
         { label: "Floor Apple Program Is On", value: f.floorApplProgramOn },
         { label: "Is the Store Open Plan?", value: ynDetail(f.storeOpenPlan, f.openPlanLayoutDescription) },
-        { label: "Position of Apple Program vs. Main Entrance", value: f.applProgramPositionEntrance },
         { label: "Store Location (marked)", value: f.storeLocationMarker ? POSITION_MARKER_LABEL[f.storeLocationMarker] : "" },
         { label: "Apple Program Position (marked)", value: f.appleProgramPositionMarker ? POSITION_MARKER_LABEL[f.appleProgramPositionMarker] : "" },
       ],
@@ -1286,7 +1286,7 @@ function drawInspectionDetailsContinuationPages(ctx: Ctx) {
     {
       title: "Deliveries to Store",
       icon: "tag",
-      rows: [{ label: "Delivery Timings", value: f.deliveryTimes }],
+      rows: [{ label: "Delivery Timings", value: f.deliveryTimes ? DELIVERY_TIMING_LABEL[f.deliveryTimes] : "" }],
     },
     {
       title: "General Site Information",

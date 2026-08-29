@@ -21,8 +21,8 @@ import { useToast } from "@/components/ui/Notifications";
 import { cn } from "@/lib/cn";
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/dashboard-queries";
-import type { EntranceFloorLocation, FieldSourceKey, FieldSources, PositionMarker, SiteSurveyFormData } from "@/lib/siteSurveyReport/types";
-import { APPLE_PROGRAM_OPTIONS, emptyFormData } from "@/lib/siteSurveyReport/types";
+import type { DeliveryTiming, EntranceFloorLocation, FieldSourceKey, FieldSources, PositionMarker, SiteSurveyFormData } from "@/lib/siteSurveyReport/types";
+import { APPLE_PROGRAM_OPTIONS, DELIVERY_TIMING_LABEL, emptyFormData } from "@/lib/siteSurveyReport/types";
 
 // The inspection form -- shared by DetailsStep (manual entry), and the
 // "Default Answers" settings page (SiteSurveyReportDefaultsClient.tsx, via
@@ -390,7 +390,6 @@ export function FormDataFields({
           source={src.storeOpenPlan}
           detail={{ value: formData.openPlanLayoutDescription, onChange: (v) => f("openPlanLayoutDescription", v), source: src.openPlanLayoutDescription, placeholder: "If No, describe layout" }}
         />
-        <TextRow label="Apple Program Position vs. Main Entrance" value={formData.applProgramPositionEntrance} onChange={(v) => f("applProgramPositionEntrance", v)} source={src.applProgramPositionEntrance} />
         <TextRow label="Condition of silicon joins/edges" value={formData.siliconJoinsCondition} onChange={(v) => f("siliconJoinsCondition", v)} source={src.siliconJoinsCondition} />
         <TextRow label="Current artwork / store stickers" value={formData.existingCreative} onChange={(v) => f("existingCreative", v)} source={src.existingCreative} />
         <YesNoRow
@@ -491,7 +490,13 @@ export function FormDataFields({
         open={!!openSections.delivery}
         onToggle={onToggleSection}
       >
-        <TextRow label="Delivery timings" value={formData.deliveryTimes} onChange={(v) => f("deliveryTimes", v)} source={src.deliveryTimes} />
+        <SelectRow
+          label="Delivery timings"
+          value={formData.deliveryTimes}
+          onChange={(v) => f("deliveryTimes", v as DeliveryTiming)}
+          source={src.deliveryTimes}
+          options={[["", "— Select —"], ...Object.entries(DELIVERY_TIMING_LABEL)] as [string, string][]}
+        />
       </SurveyCard>
 
       <SurveyCard
@@ -657,7 +662,6 @@ const STORE_DESCRIPTION_KEYS: (keyof SiteSurveyFormData)[] = [
   "floorApplProgramOn",
   "storeOpenPlan",
   "openPlanLayoutDescription",
-  "applProgramPositionEntrance",
   "siliconJoinsCondition",
   "existingCreative",
   "creativeRemovable",
