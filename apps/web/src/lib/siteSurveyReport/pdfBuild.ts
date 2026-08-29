@@ -130,15 +130,6 @@ const TOPBAR_DARK = rgb(0.06, 0.06, 0.07);
 const TOPBAR_GREY = APPLE_GREY;
 const RED = rgb(0.64, 0.09, 0.11); // now only the obstacle-marker colour and a small decorative footer accent -- see below
 
-// Every standard content page (everything drawn via newPage) fills its full
-// background with this very light neutral grey instead of leaving it plain
-// white -- per feedback that every table "section" should read as a white
-// card floating on a light grey page, rather than blending into a plain
-// white one (see drawTableSection below). A hair lighter than
-// PLACEHOLDER_BG so an empty photo box still reads as a visibly distinct
-// box against it.
-const PAGE_BG = rgb(0.965, 0.965, 0.975);
-
 // Cover page identity card -- the store name/address/SFO ID/Program/Survey
 // Date/Surveyor block went through a maroon fill, the topbar's own
 // near-black, a solid APPLE_GREY band, then a white/bordered/shadowed card;
@@ -156,8 +147,13 @@ const IDENTITY_VALUE = IDENTITY_TITLE;
 const IDENTITY_DIVIDER = rgb(0.22, 0.23, 0.26); // a visible-but-subtle grey against the card's own near-black -- was a near-white line for the old white card
 const IDENTITY_PIN_BG = rgb(1, 1, 1); // white pin badge, now that the card itself is dark (was a dark charcoal badge on a white card -- inverted)
 const IDENTITY_PIN_ICON = IDENTITY_CARD_BG; // the pin icon itself goes dark to read against its own now-white badge
-const IDENTITY_CHIP_BG = rgb(0xf0 / 255, 0xf2 / 255, 0xf4 / 255); // unchanged -- a pale chip still reads clearly against the dark card
-const IDENTITY_CHIP_ICON = rgb(0x4b / 255, 0x55 / 255, 0x63 / 255); // unchanged -- dark icon on its own pale chip
+// The Cover page's 4 fact chips (SFO ID/Program/Survey Date/Survey Company)
+// used to be solid pale-grey filled squares; per feedback to use "outline
+// icons instead of solid icons" there, the chip itself is now outline only
+// (no fill, just a thin border) rather than a filled tile, so nothing in
+// that row reads as a solid icon.
+const IDENTITY_CHIP_BORDER = rgb(0.62, 0.65, 0.69);
+const IDENTITY_CHIP_ICON = rgb(1, 1, 1); // white, to read against the dark card behind the now-unfilled chip
 const INK = rgb(0.1, 0.1, 0.12);
 const INK_SECONDARY = rgb(0.34, 0.34, 0.37);
 const MUTED = rgb(0.56, 0.56, 0.6);
@@ -174,23 +170,80 @@ const SECTION_BAND = APPLE_GREY;
 // drawTableSection) -- one radius everywhere a band or card needs rounding,
 // so a band's own corner never mismatches the card it now sits on top of.
 const CARD_RADIUS = mm(2.6);
-// Negative character-spacing factor (multiplied by -size) applied to every
-// drawFauxBoldText call -- SF Pro Text's metrics are tuned for small body
-// copy, so at heading sizes its default spacing reads as "loose"; this is
-// the one lever pdf-lib exposes to tighten it (see drawFauxBoldText's own
-// header comment on the Tc operator). Applied to every headline-weight
-// call site (topbar title, both identity block/card store names).
-const TITLE_TRACKING = 0.02;
-// A smaller sibling of TITLE_TRACKING applied to ordinary table label/value
-// text (see drawTwoColTable). Feedback asked for "condensed" text in the
-// report's sections -- there's no actual Condensed cut of SF Pro Text
-// licensed into this app (only Regular/Semibold/Italic exist, see this
-// file's header comment on font licensing), so this approximates a
-// condensed look with tighter letter-spacing rather than a genuinely
-// narrower typeface.
-const BODY_TRACKING = 0.012;
 const BORDER = rgb(0.8, 0.8, 0.83);
 const PLACEHOLDER_BG = rgb(0.95, 0.95, 0.96);
+
+// ---------------------------------------------------------------------------
+// Tracking (letter-spacing) -- Apple's own published values, followed
+// strictly per the partner's own SF Pro Marketing Communications Typography
+// Guidelines (Aug 2021), replacing this file's earlier ad-hoc
+// TITLE_TRACKING/BODY_TRACKING constants. The guide publishes two tables --
+// "SF Pro Display" for 18pt and above, "SF Pro Text" below 18pt -- each
+// giving tracking in 1/1000 em at a handful of point sizes, with the guide's
+// own instruction to "interpolate the values when working with point sizes
+// between those shown here." Both tables run largest-size-first, matching
+// the guide's own layout; sfTrackingPt looks up (and interpolates/clamps)
+// the right one by size and converts the result into the point-space value
+// pdf-lib's setCharacterSpacing (the Tc operator) expects.
+// ---------------------------------------------------------------------------
+const SF_TRACKING_DISPLAY: [number, number][] = [
+  [80, -15],
+  [72, -12],
+  [60, -7],
+  [48, -3],
+  [36, 3],
+  [30, 6],
+  [24, 9],
+  [18, 12],
+];
+const SF_TRACKING_TEXT: [number, number][] = [
+  [17, -30],
+  [16, -25],
+  [15, -20],
+  [14, -15],
+  [13, -10],
+  [12, -5],
+  [11, 0],
+  [10, 5],
+  [9, 10],
+  [8, 15],
+  [7, 20],
+  [6, 25],
+];
+
+function sfTrackingPer1000Em(sizePt: number): number {
+  const table = sizePt >= 18 ? SF_TRACKING_DISPLAY : SF_TRACKING_TEXT;
+  if (sizePt >= table[0][0]) return table[0][1];
+  if (sizePt <= table[table.length - 1][0]) return table[table.length - 1][1];
+  for (let i = 0; i < table.length - 1; i++) {
+    const [s1, t1] = table[i];
+    const [s2, t2] = table[i + 1];
+    if (sizePt <= s1 && sizePt >= s2) {
+      const frac = (sizePt - s1) / (s2 - s1);
+      return t1 + frac * (t2 - t1);
+    }
+  }
+  return 0;
+}
+
+/** Apple's published tracking for `sizePt`, converted from 1/1000 em into
+ * the point-space offset setCharacterSpacing expects (1/1000 em at N pt is
+ * N/1000 pt) -- the standard baseline tracking used at every text draw in
+ * this file from here on. */
+function sfTrackingPt(sizePt: number): number {
+  return (sfTrackingPer1000Em(sizePt) / 1000) * sizePt;
+}
+
+// An extra, deliberate tightening ON TOP of sfTrackingPt's own guideline
+// baseline -- used only where feedback repeatedly asked for something
+// visibly more condensed than the strict guideline value alone produces
+// (the title page's headline/subheader, and its date/site-name lines).
+// There's no actual Condensed cut of SF Pro Text licensed into this app
+// (only Regular/Semibold/Italic exist, see this file's header comment on
+// font licensing), so this approximates that condensed look with additional
+// negative letter-spacing rather than a genuinely narrower typeface.
+const EXTRA_CONDENSE_HEADLINE_PT = -0.4;
+const EXTRA_CONDENSE_SMALL_PT = -0.3;
 
 // The installation-area marking colour -- greenish-yellow, matching the
 // on-screen annotation tool in PhotosStep.tsx's AnnotationEditor (keep
@@ -330,10 +383,10 @@ function drawFauxBoldText(
   // option (confirmed by reading PDFPageOptions.d.ts) -- pushed immediately
   // before both draw calls and reset to 0 immediately after, so it never
   // leaks into a later drawText call on the same page. Every call site in
-  // this file now passes TITLE_TRACKING-derived tracking (originally only
-  // the title page's header/subheader did, per feedback that letter-spacing
-  // there "look[s] loosen" -- a later round said the report still read
-  // loose overall, so this now applies to every headline-weight call site).
+  // this file now passes sfTrackingPt-derived tracking (Apple's own
+  // published tracking table, see that function's own header comment),
+  // optionally with a bit of extra negative tracking layered on top where
+  // feedback specifically asked for something more condensed.
   if (tracking != null) page.pushOperators(setCharacterSpacing(tracking));
   page.drawText(text, { x, y, size, font, color });
   page.drawText(text, { x: x + offset, y, size, font, color });
@@ -464,12 +517,13 @@ function eyebrowIcon(eyebrow: string): string | null {
 type TopbarVariant = "dark" | "grey";
 
 /**
- * Every page: a full-page fill of PAGE_BG (a very light grey -- see that
- * token's own comment), then a top bar (small Apple logo + title left, page
- * eyebrow -- with a leading icon when one applies -- right) and a footer
- * with page number. The topbar's own colour went through several
- * revisions; it's now one of two styles per page, per feedback after the
- * partner reviewed renders against their own mockups:
+ * Every page: a top bar (small Apple logo + title left, page eyebrow --
+ * with a leading icon when one applies -- right) and a footer with page
+ * number, on a plain white page. (A prior pass filled every page with a
+ * very light grey background -- rolled back per feedback, back to plain
+ * white.) The topbar's own colour went through several revisions; it's now
+ * one of two styles per page, per feedback after the partner reviewed
+ * renders against their own mockups:
  *  - "dark": solid near-black, white text/logo -- the Cover and Inspection
  *    Details pages. The Cover page used to run its own diagonal "split"
  *    black/grey cut here; per a later feedback round asking for that cut
@@ -486,7 +540,6 @@ type TopbarVariant = "dark" | "grey";
 function newPage(ctx: Ctx, eyebrow: string, variant: TopbarVariant = "dark"): PDFPage {
   const page = ctx.doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
   ctx.pageNumber += 1;
-  page.drawRectangle({ x: 0, y: 0, width: PAGE_WIDTH, height: PAGE_HEIGHT, color: PAGE_BG });
 
   const barBottom = PAGE_HEIGHT - TOPBAR_HEIGHT;
 
@@ -513,7 +566,7 @@ function newPage(ctx: Ctx, eyebrow: string, variant: TopbarVariant = "dark"): PD
     page.drawText("Apple", { x: MARGIN, y: PAGE_HEIGHT - TOPBAR_HEIGHT / 2 - 3.5, size: 11, font: ctx.bold, color: INK });
     titleX = MARGIN + ctx.bold.widthOfTextAtSize("Apple", 11) + mm(3);
   }
-  drawFauxBoldText(page, "Apple Site Survey Report", { x: titleX, y: titleY, size: 13, font: ctx.bold, color: titleColor, tracking: -13 * TITLE_TRACKING });
+  drawFauxBoldText(page, "Apple Site Survey Report", { x: titleX, y: titleY, size: 13, font: ctx.bold, color: titleColor, tracking: sfTrackingPt(13) });
 
   if (eyebrow) {
     // The eyebrow always sits in the same zone as the bar itself -- the
@@ -561,44 +614,49 @@ function drawFooter(ctx: Ctx, page: PDFPage) {
 }
 
 /**
- * Grey (Apple-grey) section-header band -- returns the y to start drawing
- * content below it. Takes its own x/width (rather than always spanning the
- * full content width) so the consolidated Inspection Details page can draw
- * two independent columns of sections side by side, matching the
- * reference's own two-up layout on one landscape page instead of the
- * original's two separate, mostly-empty portrait pages.
+ * Section-header band -- returns the y to start drawing content below it.
+ * Takes its own x/width (rather than always spanning the full content
+ * width) so the consolidated Inspection Details page can draw two
+ * independent columns of sections side by side, matching the reference's
+ * own two-up layout on one landscape page instead of the original's two
+ * separate, mostly-empty portrait pages.
  *
  * rightText, when given, is drawn right-aligned in the same band -- used to
  * repeat the site name alongside a section title, exactly as the reference
  * PDF repeats "iMaging @ Model Town, Jalandhar" beside "Site Photo and
  * measurement" on its own final page.
  *
- * Per feedback, bands no longer carry a leading icon (an earlier pass added
- * one) and fill with plain APPLE_GREY again rather than a darker dedicated
- * shade -- so the title/rightText text is dark ink here, not white, the
- * same way the topbar's own "grey" variant has always read dark ink on
- * this exact colour (white text on plain APPLE_GREY tested at only ~2.2:1
- * contrast, too low to keep).
+ * `dark`, when true, fills solid black with white text -- used only for the
+ * "above the photo" bands (Site Orientation, Photo Survey, the Site
+ * Photo & Measurement page's own top band), per feedback. Every other band
+ * (the Measurements & Material section on that same page) stays plain
+ * APPLE_GREY with dark ink text, the same way the topbar's own "grey"
+ * variant has always read dark ink on this exact colour (white text tested
+ * at only ~2.2:1 contrast on plain APPLE_GREY, too low to keep). Square
+ * corners throughout now, per feedback -- an earlier pass had these
+ * rounded.
  */
-function drawSectionBand(page: PDFPage, ctx: Ctx, title: string, x: number, width: number, yTop: number, rightText?: string): number {
+function drawSectionBand(page: PDFPage, ctx: Ctx, title: string, x: number, width: number, yTop: number, rightText?: string, dark?: boolean): number {
   const bandH = mm(7);
-  drawRoundedRect(page, x, yTop, width, bandH, CARD_RADIUS, { color: SECTION_BAND });
+  const fill = dark ? TOPBAR_DARK : SECTION_BAND;
+  const textColor = dark ? WHITE : INK;
+  page.drawRectangle({ x, y: yTop - bandH, width, height: bandH, color: fill });
   const titleX = x + mm(2.5);
-  // A touch of negative tracking on these small uppercase labels -- see
-  // drawFauxBoldText's own header comment on the same Tc-operator technique
-  // -- uppercase letterforms at 9pt otherwise read a little loose/gappy.
-  page.pushOperators(setCharacterSpacing(-0.25));
+  const labelTracking = sfTrackingPt(9);
+  page.pushOperators(setCharacterSpacing(labelTracking));
   page.drawText(title.toUpperCase(), {
     x: titleX,
     y: yTop - bandH / 2 - 3,
     size: 9,
     font: ctx.bold,
-    color: INK,
+    color: textColor,
   });
   page.pushOperators(setCharacterSpacing(0));
   if (rightText) {
     const rw = ctx.bold.widthOfTextAtSize(rightText, 9);
-    page.drawText(rightText, { x: x + width - mm(2.5) - rw, y: yTop - bandH / 2 - 3, size: 9, font: ctx.bold, color: INK });
+    page.pushOperators(setCharacterSpacing(labelTracking));
+    page.drawText(rightText, { x: x + width - mm(2.5) - rw, y: yTop - bandH / 2 - 3, size: 9, font: ctx.bold, color: textColor });
+    page.pushOperators(setCharacterSpacing(0));
   }
   return yTop - bandH;
 }
@@ -624,7 +682,7 @@ function drawIdentityBlock(page: PDFPage, ctx: Ctx, yTop: number): number {
   // maroon) -- and a little bigger -- matching the mockups' identity block.
   // Faux-bolded (see drawFauxBoldText) per feedback that this page's title
   // reads too light at its embedded bold weight.
-  drawFauxBoldText(page, data.storeName || "Untitled Site", { x: nameX, y: yTop - mm(7), size: 17, font: ctx.bold, color: INK, tracking: -17 * TITLE_TRACKING });
+  drawFauxBoldText(page, data.storeName || "Untitled Site", { x: nameX, y: yTop - mm(7), size: 17, font: ctx.bold, color: INK, tracking: sfTrackingPt(17) });
   wrapText(ctx.font, data.address || "—", 10.5, contentWidth() * 0.5)
     .slice(0, 2)
     .forEach((line, i) => {
@@ -663,13 +721,26 @@ interface TableRow {
  * `labelFont` defaults to ctx.bold; the Site Photo & Measurement page passes
  * ctx.font instead so that page uses SF Pro Regular only, per the partner's
  * explicit instruction not to bold anything there.
+ *
+ * `boxed` (default true) draws each cell as its own bordered box, the
+ * original look. Passing false -- used by the Inspection Details page and
+ * its continuation pages, per feedback -- drops the per-cell box entirely
+ * and draws a single horizontal rule under each row instead, no vertical
+ * rule between the label/value columns and no outer box.
+ *
+ * `padMm`, when given, overrides the default 2mm cell padding -- used by
+ * the Site Photo & Measurement page to give its Measurements & Material
+ * rows slightly more breathing room, per feedback to "increase row height
+ * slightly" there specifically.
  */
-function drawTwoColTable(page: PDFPage, ctx: Ctx, rows: TableRow[], x: number, width: number, yTop: number, labelFont?: PDFFont): number {
+function drawTwoColTable(page: PDFPage, ctx: Ctx, rows: TableRow[], x: number, width: number, yTop: number, labelFont?: PDFFont, boxed = true, padMm?: number): number {
   const labelColW = width * 0.42;
   const valueColW = width - labelColW;
-  const pad = mm(2);
+  const pad = padMm ?? mm(2);
   const lineH = mm(4.6);
   const font = labelFont ?? ctx.bold;
+  const labelTracking = sfTrackingPt(8.5);
+  const valueTracking = sfTrackingPt(9);
   let y = yTop;
 
   for (const row of rows) {
@@ -687,28 +758,30 @@ function drawTwoColTable(page: PDFPage, ctx: Ctx, rows: TableRow[], x: number, w
     const valueLines = wrapText(ctx.font, row.value || "—", 9, valueColW - pad * 2);
     const rowH = Math.max(lineH, Math.max(labelLines.length, valueLines.length) * lineH) + pad * 1.2;
 
-    page.drawRectangle({ x, y: y - rowH, width: labelColW, height: rowH, borderColor: BORDER, borderWidth: 0.6, color: WHITE });
-    page.drawRectangle({
-      x: x + labelColW,
-      y: y - rowH,
-      width: valueColW,
-      height: rowH,
-      borderColor: BORDER,
-      borderWidth: 0.6,
-      color: WHITE,
-    });
+    if (boxed) {
+      page.drawRectangle({ x, y: y - rowH, width: labelColW, height: rowH, borderColor: BORDER, borderWidth: 0.6, color: WHITE });
+      page.drawRectangle({
+        x: x + labelColW,
+        y: y - rowH,
+        width: valueColW,
+        height: rowH,
+        borderColor: BORDER,
+        borderWidth: 0.6,
+        color: WHITE,
+      });
+    } else {
+      page.drawLine({ start: { x, y: y - rowH }, end: { x: x + width, y: y - rowH }, thickness: 0.6, color: BORDER });
+    }
 
     if (row.icon) {
       drawIcon(page, row.icon, x + pad, y - pad - 1, mm(4.2), MUTED);
     }
-    // Tightened letter-spacing (see BODY_TRACKING's own header comment) --
-    // approximates a "condensed" look, since no actual Condensed cut of
-    // the brand font is licensed into this app.
-    page.pushOperators(setCharacterSpacing(-8.5 * BODY_TRACKING));
+    // Apple's own published tracking for these sizes (see sfTrackingPt).
+    page.pushOperators(setCharacterSpacing(labelTracking));
     labelLines.forEach((line, i) => {
       page.drawText(line, { x: x + pad + iconIndent, y: y - pad - 7 - i * lineH, size: 8.5, font, color: INK_SECONDARY });
     });
-    page.pushOperators(setCharacterSpacing(-9 * BODY_TRACKING));
+    page.pushOperators(setCharacterSpacing(valueTracking));
     valueLines.forEach((line, i) => {
       page.drawText(line, {
         x: x + labelColW + pad,
@@ -734,10 +807,10 @@ function drawTwoColTable(page: PDFPage, ctx: Ctx, rows: TableRow[], x: number, w
  * move to the next column/page -- blocks are placed as a unit (never split
  * mid-table), which every block on those pages is small enough for.
  */
-function measureTwoColTableHeight(ctx: Ctx, rows: TableRow[], width: number, labelFont?: PDFFont): number {
+function measureTwoColTableHeight(ctx: Ctx, rows: TableRow[], width: number, labelFont?: PDFFont, padMm?: number): number {
   const labelColW = width * 0.42;
   const valueColW = width - labelColW;
-  const pad = mm(2);
+  const pad = padMm ?? mm(2);
   const lineH = mm(4.6);
   const font = labelFont ?? ctx.bold;
   let h = 0;
@@ -773,15 +846,19 @@ function drawCardShadow(page: PDFPage, x: number, yTop: number, width: number, h
 
 /**
  * One "section" -- a band (drawSectionBand) plus its two-column table
- * (drawTwoColTable) -- drawn together as a single white rounded card with a
- * soft shadow (drawCardShadow), floating on the page's own very light grey
- * background (see PAGE_BG). Per feedback that every section should read as
- * "white ... with a shadow" rather than a bare band sitting directly on the
- * page. Used at every call site that draws a labelled table (the Details
- * page, the Inspection Details continuation pages, the Site/Measurement
- * page's own Measurements & Material block) -- the plain photo-only bands
- * (Main Site Photo, Site Orientation, Photo Survey, the Site page's own top
- * band) are unaffected, since there's no table beneath them to card-wrap.
+ * (drawTwoColTable) -- drawn together as a single white card with a soft
+ * shadow (drawCardShadow). A prior pass rounded this card's corners and
+ * gave the whole page a light-grey background; both were rolled back per
+ * feedback, so this now draws square corners on a plain white page. Used
+ * only by the Site/Measurement page's own Measurements & Material block --
+ * the Details page and its continuation pages moved to a plain
+ * header-plus-underline treatment instead (see drawUnderlineTableSection),
+ * and the plain photo-only bands (Main Site Photo, Site Orientation, Photo
+ * Survey, the Site page's own top band) never used this wrapper, since
+ * there's no table beneath them to card-wrap.
+ *
+ * `padMm` is passed straight through to drawTwoColTable/
+ * measureTwoColTableHeight -- see that function's own comment.
  */
 function drawTableSection(
   page: PDFPage,
@@ -792,14 +869,44 @@ function drawTableSection(
   width: number,
   yTop: number,
   rightText?: string,
-  labelFont?: PDFFont
+  labelFont?: PDFFont,
+  padMm?: number
 ): number {
   const bandH = mm(7);
-  const totalH = bandH + measureTwoColTableHeight(ctx, rows, width, labelFont);
-  drawCardShadow(page, x, yTop, width, totalH, CARD_RADIUS);
-  drawRoundedRect(page, x, yTop, width, totalH, CARD_RADIUS, { color: WHITE });
+  const totalH = bandH + measureTwoColTableHeight(ctx, rows, width, labelFont, padMm);
+  drawCardShadow(page, x, yTop, width, totalH, 0);
+  drawRoundedRect(page, x, yTop, width, totalH, 0, { color: WHITE });
   const afterBand = drawSectionBand(page, ctx, title, x, width, yTop, rightText);
-  return drawTwoColTable(page, ctx, rows, x, width, afterBand, labelFont);
+  return drawTwoColTable(page, ctx, rows, x, width, afterBand, labelFont, true, padMm);
+}
+
+/**
+ * Plain header treatment for the Inspection Details page and its
+ * continuation pages -- per feedback, these lost their coloured band
+ * entirely: just the section title in dark ink with a thin rule
+ * underneath, matching a classic "form section" look rather than a
+ * colour-blocked one. Returns the y to start drawing content below it.
+ */
+function drawUnderlineHeader(page: PDFPage, ctx: Ctx, title: string, x: number, width: number, yTop: number): number {
+  const headerH = mm(6);
+  const size = 10;
+  page.pushOperators(setCharacterSpacing(sfTrackingPt(size)));
+  page.drawText(title.toUpperCase(), { x, y: yTop - headerH + mm(2), size, font: ctx.bold, color: INK });
+  page.pushOperators(setCharacterSpacing(0));
+  page.drawLine({ start: { x, y: yTop - headerH }, end: { x: x + width, y: yTop - headerH }, thickness: 1, color: INK });
+  return yTop - headerH - mm(1.5);
+}
+
+/**
+ * The underline-header counterpart to drawTableSection -- a plain header
+ * (drawUnderlineHeader) plus an un-boxed table (drawTwoColTable's
+ * `boxed: false`, horizontal rules only, no per-cell box or vertical rule),
+ * no card, no shadow. Used by the Inspection Details page and its
+ * continuation pages.
+ */
+function drawUnderlineTableSection(page: PDFPage, ctx: Ctx, title: string, rows: TableRow[], x: number, width: number, yTop: number, labelFont?: PDFFont): number {
+  const afterHeader = drawUnderlineHeader(page, ctx, title, x, width, yTop);
+  return drawTwoColTable(page, ctx, rows, x, width, afterHeader, labelFont, false);
 }
 
 /**
@@ -935,20 +1042,22 @@ function drawPhotoBox(page: PDFPage, ctx: Ctx, photo: SurveyPhotoImage | undefin
  * text wordmark rather than attempting to redraw the trademarked mark from
  * scratch.
  *
- * Type sizes: 72pt header / 54pt subheader / 24pt date (all SF Pro Bold
- * except the Regular date line) were the partner's original spec, but at
- * 72pt the header doesn't fit on one line at this page's width -- and a
- * second follow-up made clear that's not wanted: the header must stay a
- * single line, "big bold beautiful", sized to match rather than wrapping.
- * So the header is now auto-fit to the largest size (capped at 72pt) that
- * still renders on one line -- see fitSingleLineFontSize -- and the
- * subheader/date sizes scale down with it in the same 72:54:24 proportion
- * from the original spec, so the whole block stays in the same relative
- * proportions the partner asked for even when the header itself had to
- * shrink below 72pt to fit. A later feedback round asked for the date line
- * and the bottom site-name line to both go bold and white too (bigger, for
- * the site-name line), rather than the original spec's regular-weight dark
- * grey for both.
+ * Type sizes: originally the partner's own 72pt header / 54pt subheader /
+ * 24pt date spec (all SF Pro Bold except the Regular date line). At 72pt
+ * the header didn't fit on one line at this page's width, so it was
+ * auto-fit to the largest size (capped at 72pt) that still renders on one
+ * line -- see fitSingleLineFontSize -- with the subheader/date sizes
+ * scaling down with it in the same proportion, so the whole block stays in
+ * the same relative proportions even when the header shrinks to fit. A
+ * later feedback round -- after repeated notes that the headline still read
+ * "loose" -- reduced the whole spec by ~18% (within the requested 15-20%
+ * range) and applies extra negative tracking on top of Apple's own
+ * published tracking table (see EXTRA_CONDENSE_HEADLINE_PT) for a visibly
+ * tighter, more condensed result than the guideline value alone gives. The
+ * date line and the bottom site-name line are bold and white (bigger, for
+ * the site-name line) with the same extra-condensed treatment applied at a
+ * smaller magnitude (EXTRA_CONDENSE_SMALL_PT), rather than the original
+ * spec's regular-weight dark grey for both.
  */
 function drawTitlePage(ctx: Ctx) {
   const page = ctx.doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
@@ -970,31 +1079,53 @@ function drawTitlePage(ctx: Ctx) {
 
   const headerText = "Custom site installations";
   const subText = "Site survey report";
-  const specHeaderSize = 72;
-  const specSubSize = 54;
-  const specDateSize = 24;
+  // Reduced ~18% from the partner's original 72/54/24 spec, per feedback
+  // that the headline still read loose and large -- see this function's
+  // own header comment.
+  const specHeaderSize = 59;
+  const specSubSize = 44;
+  const specDateSize = 20;
 
   const headerSize = fitSingleLineFontSize(ctx.bold, headerText, maxTextWidth, specHeaderSize);
   const subSize = (specSubSize / specHeaderSize) * headerSize;
   const dateSize = (specDateSize / specHeaderSize) * headerSize;
+  // A bolder faux-bold offset than drawFauxBoldText's own default, just for
+  // this page's two big headline lines -- feedback repeatedly asked for
+  // this specific text to read heavier than the rest of the report.
+  const headlineOffset = (size: number) => size * 0.02;
 
   let cursorY = PAGE_HEIGHT * 0.6;
-  // Faux-bolded and slightly tighter-tracked (see drawFauxBoldText) --
-  // feedback flagged this line specifically as reading "semi bold or
-  // regular" at its embedded weight, and its letter-spacing as "loosen"
-  // compared to the reference mockups' tighter display type.
-  drawFauxBoldText(page, headerText, { x: leftX, y: cursorY, size: headerSize, font: ctx.bold, color: WHITE, tracking: -headerSize * TITLE_TRACKING });
+  drawFauxBoldText(page, headerText, {
+    x: leftX,
+    y: cursorY,
+    size: headerSize,
+    font: ctx.bold,
+    color: WHITE,
+    offset: headlineOffset(headerSize),
+    tracking: sfTrackingPt(headerSize) + EXTRA_CONDENSE_HEADLINE_PT,
+  });
   cursorY -= headerSize * 1.05 + mm(3);
-  drawFauxBoldText(page, subText, { x: leftX, y: cursorY, size: subSize, font: ctx.bold, color: rgb(0.18, 0.2, 0.22), tracking: -subSize * TITLE_TRACKING });
+  drawFauxBoldText(page, subText, {
+    x: leftX,
+    y: cursorY,
+    size: subSize,
+    font: ctx.bold,
+    color: rgb(0.18, 0.2, 0.22),
+    offset: headlineOffset(subSize),
+    tracking: sfTrackingPt(subSize) + EXTRA_CONDENSE_HEADLINE_PT,
+  });
 
   const dateLabel = titlePageDateLabel(data.surveyDate);
-  // Bold + white per feedback -- was regular weight, dark grey.
-  page.drawText(dateLabel, { x: leftX, y: mm(22), size: dateSize, font: ctx.bold, color: WHITE });
+  // Bold + white per feedback, with extra condensed tracking on top of
+  // Apple's own guideline value (see EXTRA_CONDENSE_SMALL_PT).
+  drawFauxBoldText(page, dateLabel, { x: leftX, y: mm(22), size: dateSize, font: ctx.bold, color: WHITE, tracking: sfTrackingPt(dateSize) + EXTRA_CONDENSE_SMALL_PT });
 
   const siteLine = data.storeName ? `${data.storeName}${data.sfoId ? ` — SFO ${data.sfoId}` : ""}` : "";
   if (siteLine) {
-    // Bigger, bold, and white per feedback -- was 11pt regular, dark grey.
-    page.drawText(siteLine, { x: leftX, y: mm(22) - mm(9), size: 14, font: ctx.bold, color: WHITE });
+    // Bigger, bold, white, and condensed per feedback -- was 11pt regular,
+    // dark grey, no tracking.
+    const siteLineSize = 14;
+    drawFauxBoldText(page, siteLine, { x: leftX, y: mm(22) - mm(9), size: siteLineSize, font: ctx.bold, color: WHITE, tracking: sfTrackingPt(siteLineSize) + EXTRA_CONDENSE_SMALL_PT });
   }
 }
 
@@ -1006,7 +1137,7 @@ function titlePageDateLabel(surveyDate: string): string {
   return d.toLocaleDateString(undefined, { year: "numeric", month: "long" });
 }
 
-const COVER_FACT_ICONS = ["idCard", "layoutGrid", "calendar", "user"];
+const COVER_FACT_ICONS = ["idCard", "layoutGrid", "calendar", "store"];
 
 /**
  * A subtle decorative grid of small dots in the bottom-right corner of the
@@ -1086,7 +1217,7 @@ function drawCoverPage(ctx: Ctx) {
   drawRoundedRect(page, pinX, pinTopY, pinSize, pinSize, CARD_RADIUS, { color: IDENTITY_PIN_BG });
   drawIcon(page, "mapPin", pinX + pinPad, pinTopY - pinPad, pinSize - pinPad * 2, IDENTITY_PIN_ICON);
 
-  drawFauxBoldText(page, data.storeName || "Untitled Site", { x: nameX, y: y - mm(9.5), size: 20, font: ctx.bold, color: IDENTITY_TITLE, tracking: -20 * TITLE_TRACKING });
+  drawFauxBoldText(page, data.storeName || "Untitled Site", { x: nameX, y: y - mm(9.5), size: 20, font: ctx.bold, color: IDENTITY_TITLE, tracking: sfTrackingPt(20) });
   wrapText(ctx.font, data.address || "—", 10, contentWidth() * 0.55)
     .slice(0, 2)
     .forEach((line, i) => {
@@ -1095,16 +1226,17 @@ function drawCoverPage(ctx: Ctx) {
 
   page.drawLine({ start: { x: MARGIN + mm(6), y: y - mm(24.5) }, end: { x: MARGIN + contentWidth() - mm(6), y: y - mm(24.5) }, thickness: 0.75, color: IDENTITY_DIVIDER });
 
-  // Icon-chip-LEFT-of-stacked-label/value fact rows -- each icon now sits
-  // in its own pale-grey rounded chip (was a bare icon directly on the
-  // grey band) per the spec's field-icon treatment, vertically centred
-  // against its own two-line label/value pair, with a thin divider between
-  // columns.
+  // Icon-chip-LEFT-of-stacked-label/value fact rows -- each icon sits in
+  // its own rounded chip, vertically centred against its own two-line
+  // label/value pair, with a thin divider between columns. Per feedback,
+  // "Surveyor" was swapped for "Survey Company" here (see the icon list
+  // below too), and the chip itself is now outline-only rather than a
+  // solid pale-grey fill (see IDENTITY_CHIP_BORDER's own comment).
   const facts: [string, string][] = [
     ["SFO ID", data.sfoId || "—"],
     ["Program", data.program || "—"],
     ["Survey Date", formatDate(data.surveyDate)],
-    ["Surveyor", data.surveyorName || "—"],
+    ["Survey Company", data.formData.surveyCompany ? SURVEY_COMPANY_LABEL[data.formData.surveyCompany] : "—"],
   ];
   const factColW = (contentWidth() - mm(6) - dotReserve) / facts.length;
   const factRowCenterY = y - mm(38);
@@ -1122,7 +1254,7 @@ function drawCoverPage(ctx: Ctx) {
       });
     }
     const chipTopY = factRowCenterY + chipSize / 2;
-    drawRoundedRect(page, fx, chipTopY, chipSize, chipSize, CARD_RADIUS, { color: IDENTITY_CHIP_BG });
+    drawRoundedRect(page, fx, chipTopY, chipSize, chipSize, CARD_RADIUS, { borderColor: IDENTITY_CHIP_BORDER, borderWidth: 0.85 });
     drawIcon(page, COVER_FACT_ICONS[i], fx + chipPad, chipTopY - chipPad, chipIconSize, IDENTITY_CHIP_ICON);
     const labelX = fx + chipSize + mm(3);
     page.drawText(label.toUpperCase(), { x: labelX, y: factRowCenterY + mm(3), size: 7.8, font: ctx.bold, color: IDENTITY_LABEL });
@@ -1150,7 +1282,7 @@ function drawDetailsPage(ctx: Ctx) {
   let leftY = y;
   const rightY = y;
 
-  leftY = drawTableSection(
+  leftY = drawUnderlineTableSection(
     page,
     ctx,
     "On-site Details",
@@ -1166,7 +1298,7 @@ function drawDetailsPage(ctx: Ctx) {
   );
 
   leftY -= mm(4);
-  drawTableSection(
+  drawUnderlineTableSection(
     page,
     ctx,
     "Store Description",
@@ -1180,7 +1312,7 @@ function drawDetailsPage(ctx: Ctx) {
     leftY
   );
 
-  drawTableSection(
+  drawUnderlineTableSection(
     page,
     ctx,
     "Installation Details",
@@ -1225,24 +1357,31 @@ interface ContinuationBlock {
   rows: TableRow[];
   /** Passed straight through to drawTwoColTable/measureTwoColTableHeight's own labelFont param -- ctx.bold by default, but drawSitePages below uses ctx.font (no bold) for its Measurements & Material block, matching that section's original no-bold instruction. */
   labelFont?: PDFFont;
+  /** Passed straight through to drawTableSection/drawTwoColTable's own padMm param -- see drawTwoColTable's comment. Only drawSitePages' Measurements & Material block sets this, per feedback to increase its row height slightly. */
+  padMm?: number;
 }
 
 /**
- * Flows a list of section "blocks" (each drawn as a white card via
- * drawTableSection) across as many pages as needed -- two columns per page
- * by default (same geometry as drawDetailsPage's own two-up layout), or a
- * single full-width column when `columns` is 1 (used by drawSitePages so
- * its one remaining Measurements & Material block spreads left to right
- * across the whole page instead of sitting in a half-width column, now
- * that the Apple Standards block that used to sit beside it was removed --
- * see that function). Fills the left column top to bottom, then the right
- * column (2-column mode only), then starts a new page, moving on to the
- * next block whenever the current one doesn't fit rather than splitting a
- * block's own rows across a column/page boundary (every block here is
- * small enough that whole-block placement never wastes much space).
- * `eyebrow`/`variant` are passed straight to newPage for each page created,
- * so a multi-page continuation reads as one consistent extension of the
- * section it continues.
+ * Flows a list of section "blocks" across as many pages as needed -- two
+ * columns per page by default (same geometry as drawDetailsPage's own
+ * two-up layout), or a single full-width column when `columns` is 1 (used
+ * by drawSitePages so its one remaining Measurements & Material block
+ * spreads left to right across the whole page instead of sitting in a
+ * half-width column, now that the Apple Standards block that used to sit
+ * beside it was removed -- see that function). Fills the left column top to
+ * bottom, then the right column (2-column mode only), then starts a new
+ * page, moving on to the next block whenever the current one doesn't fit
+ * rather than splitting a block's own rows across a column/page boundary
+ * (every block here is small enough that whole-block placement never
+ * wastes much space). `eyebrow`/`variant` are passed straight to newPage
+ * for each page created, so a multi-page continuation reads as one
+ * consistent extension of the section it continues.
+ *
+ * `style` picks which of the two section treatments each block draws with:
+ * "card" (default) is drawTableSection's white card + shadow + band, used
+ * by drawSitePages' Measurements & Material block; "underline" is
+ * drawUnderlineTableSection's plain header-plus-rule treatment, used by the
+ * Inspection Details continuation pages, per feedback.
  *
  * `start`, when given, flows the FIRST block into an already-open page at
  * a caller-chosen y (both columns start there) instead of always opening a
@@ -1259,7 +1398,8 @@ function drawFlowingBlocks(
   variant: TopbarVariant,
   blocks: ContinuationBlock[],
   start?: { page: PDFPage; y: number },
-  columns: 1 | 2 = 2
+  columns: 1 | 2 = 2,
+  style: "card" | "underline" = "card"
 ) {
   const colGap = columns === 2 ? mm(6) : 0;
   const colW = columns === 2 ? (contentWidth() - colGap) / 2 : contentWidth();
@@ -1267,7 +1407,7 @@ function drawFlowingBlocks(
   const rightX = contentLeft() + colW + colGap;
   const topY = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
   const bottomLimit = FOOTER_HEIGHT + mm(6);
-  const bandH = mm(7);
+  const headerH = style === "card" ? mm(7) : mm(6);
   const gapAfter = mm(4);
 
   let page = start?.page ?? newPage(ctx, eyebrow, variant);
@@ -1277,7 +1417,7 @@ function drawFlowingBlocks(
   for (const block of blocks) {
     if (block.rows.length === 0) continue;
     const labelFont = block.labelFont ?? ctx.bold;
-    const blockH = bandH + measureTwoColTableHeight(ctx, block.rows, colW, labelFont) + gapAfter;
+    const blockH = headerH + measureTwoColTableHeight(ctx, block.rows, colW, labelFont, block.padMm) + gapAfter;
 
     if (y[col] - blockH < bottomLimit) {
       if (columns === 2 && col === 0) {
@@ -1290,7 +1430,10 @@ function drawFlowingBlocks(
     }
 
     const x = col === 0 ? leftX : rightX;
-    const by = drawTableSection(page, ctx, block.title, block.rows, x, colW, y[col], undefined, labelFont);
+    const by =
+      style === "card"
+        ? drawTableSection(page, ctx, block.title, block.rows, x, colW, y[col], undefined, labelFont, block.padMm)
+        : drawUnderlineTableSection(page, ctx, block.title, block.rows, x, colW, y[col], labelFont);
     y[col] = by - gapAfter;
   }
 }
@@ -1395,7 +1538,7 @@ function drawInspectionDetailsContinuationPages(ctx: Ctx) {
     },
   ];
 
-  drawFlowingBlocks(ctx, "Inspection Details", "dark", blocks);
+  drawFlowingBlocks(ctx, "Inspection Details", "dark", blocks, undefined, 2, "underline");
 }
 
 const ORIENTATION_LABELS: Record<string, string> = {
@@ -1421,7 +1564,7 @@ function drawOrientationPage(ctx: Ctx) {
   const categories: PhotoCategory[] = ["orientation_right", "orientation_left", "orientation_opposite"];
   const page = newPage(ctx, "Site Orientation", "grey");
   let y = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
-  y = drawSectionBand(page, ctx, "Site Orientation", contentLeft(), contentWidth(), y, ctx.data.storeName || undefined);
+  y = drawSectionBand(page, ctx, "Site Orientation", contentLeft(), contentWidth(), y, ctx.data.storeName || undefined, true);
 
   const gap = mm(6);
   const boxW = (contentWidth() - gap * 2) / 3;
@@ -1464,7 +1607,7 @@ function drawPhotoSurveyPages(ctx: Ctx) {
     for (const photo of list) {
       const page = newPage(ctx, eyebrow, "grey");
       let y = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
-      y = drawSectionBand(page, ctx, label, contentLeft(), contentWidth(), y, ctx.data.storeName || undefined);
+      y = drawSectionBand(page, ctx, label, contentLeft(), contentWidth(), y, ctx.data.storeName || undefined, true);
       drawPhotoBox(page, ctx, photo, label, contentLeft(), y, contentWidth(), y - FOOTER_HEIGHT - mm(4));
     }
   }
@@ -1584,7 +1727,7 @@ function drawSitePages(ctx: Ctx, m: SiteSurveyMeasurement, photo: SurveyPhotoIma
 
   const page = newPage(ctx, eyebrow, "grey");
   let y = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
-  y = drawSectionBand(page, ctx, bandTitle, contentLeft(), contentWidth(), y, ctx.data.storeName || undefined);
+  y = drawSectionBand(page, ctx, bandTitle, contentLeft(), contentWidth(), y, ctx.data.storeName || undefined, true);
 
   const halfW = (contentWidth() - mm(6)) / 2;
   const rowH = mm(88);
@@ -1607,6 +1750,9 @@ function drawSitePages(ctx: Ctx, m: SiteSurveyMeasurement, photo: SurveyPhotoIma
       // instruction on the original Measurement page -- no bold labels
       // here.
       labelFont: ctx.font,
+      // Per feedback to increase this block's row height slightly, beyond
+      // drawTwoColTable's default mm(2) cell padding.
+      padMm: mm(2.6),
       rows: [
         { label: "Visual Size (marked in green-yellow)", value: sizeLabel(m.visualWidthMm, m.visualHeightMm), icon: "squareDashed" },
         { label: "Material Size", value: `${sizeLabel(m.materialWidthMm, m.materialHeightMm)} (${bleedLabel(m)})`, icon: "tag" },
