@@ -39,35 +39,77 @@ export type PhotoSource = "uploaded" | "extracted_from_pdf";
 export type StoreLocationType = "mall" | "retail_high_street" | "retail_park" | "other" | "";
 export type SiteType = "permanent" | "temporary" | "";
 
+// The survey company that did the inspection -- replaces the old free-text
+// "Printer" field (see SiteSurveyFormData's own comment on that field's
+// removal) with a closed choice of this business's two actual survey
+// companies.
+export type SurveyCompany = "mmdi" | "i_and_s" | "";
+export const SURVEY_COMPANY_LABEL: Record<Exclude<SurveyCompany, "">, string> = {
+  mmdi: "MMDI",
+  i_and_s: "I&S",
+};
+
+// A simple "which side of the store" marker -- used for both "mark the
+// store location" and "indicate position of the Apple program within the
+// store" (see storeLocationMarker/appleProgramPositionMarker below), each
+// rendered as a row of buttons (PositionMarkerRow in ReportFormFields.tsx)
+// rather than free text, since the actual position is always one of these
+// five relative to the store's own entrance.
+export type PositionMarker = "front" | "back" | "left" | "right" | "center" | "";
+export const POSITION_MARKER_LABEL: Record<Exclude<PositionMarker, "">, string> = {
+  front: "Front",
+  back: "Back",
+  left: "Left",
+  right: "Right",
+  center: "Center",
+};
+
+// The Site/Store Information header's "Apple Program" field is locked to
+// exactly these four values (see ReportFormFields.tsx's header SelectRow) --
+// kept here as the single source of truth for that list rather than
+// hardcoded again at each call site. The underlying column
+// (SiteSurveyReportRow.program) stays a plain string, not a union of this
+// type, since older/legacy rows may still carry a free-text value typed in
+// before this lock existed.
+export const APPLE_PROGRAM_OPTIONS = ["APP", "APR", "MonoAAR", "Multi AAR"] as const;
+
 // The one-off Q&A fields from the reference PDF's On-site personnel/Store
 // description/Installing on site/Deliveries/General site information/Site
-// suitability/Site details/Safety/Graphics/Approvals sections --
-// site_survey_reports.form_data. Every key present, empty string/YesNo ""
-// when unanswered (never omitted -- FIELD_SOURCE_KEYS below needs every key
-// to exist to drive the ✓/⚠/○ indicators).
+// details/Safety/Approvals sections -- site_survey_reports.form_data. Every
+// key present, empty string/YesNo "" when unanswered (never omitted --
+// FIELD_SOURCE_KEYS below needs every key to exist to drive the ✓/⚠/○
+// indicators).
 //
 // Grouped by the reference PDF's own section headers (see the comment above
-// each block) -- this interface got a lot bigger in a later pass that added
-// the reference's full "On-site personnel details" through "Approvals"
-// sections (previously only a handful of fields from each were captured).
-// Fields already covered by the ORIGINAL smaller field set are reused
-// as-is rather than duplicated where the reference's own wording is the
-// same question under a different section heading -- see each block's
-// comment for which of the reference's questions map onto an
-// already-existing field instead of a new one.
+// each block). A later pass trimmed this back down: Site Suitability,
+// Graphics, and Opportunity Information were removed as whole sections
+// (Graphics' one kept question, extra lighting for night viewing, moved
+// into General Site Information instead of being dropped), and a handful
+// of other fields (Printer -> a closed-choice Survey Company field, a
+// single free-text Apple Representative split into Name/Mobile/Email,
+// several address/notes/"if Other" fields) were removed or restructured
+// per that pass's own requirements -- see each field's own comment.
 export interface SiteSurveyFormData {
   // -- On-site personnel details -- (surveyorName lives on the report row
   // itself, not here, since it's a top-level identity field -- see
   // SiteSurveyReportRow.surveyor_name)
   storePersonContacted: string;
-  printer: string;
-  appleRepresentative: string;
+  // Replaces the old free-text "Printer" field -- a closed MMDI/I&S choice
+  // instead (see SurveyCompany above).
+  surveyCompany: SurveyCompany;
+  // Split from a single free-text "Apple Representative" field into three,
+  // so a person picked from LFG Connect's own ASM records (see the "Select
+  // ASM" picker in ReportFormFields.tsx, sourced from lfg_sites.asm_name/
+  // asm_mobile/asm_email) can fill all three in one go, while still staying
+  // individually editable afterward.
+  appleRepresentativeName: string;
+  appleRepresentativeMobile: string;
+  appleRepresentativeEmail: string;
   retailerRepresentative: string;
   storeContactNumber: string;
 
   // -- Store description --
   storeLocationType: StoreLocationType;
-  storeLocationOther: string;
   entrancesIntoMall: string;
   entrancesIntoStore: string;
   floorsWithinMall: string;
@@ -76,14 +118,14 @@ export interface SiteSurveyFormData {
   storeOpenPlan: YesNo;
   openPlanLayoutDescription: string;
   applProgramPositionEntrance: string;
-  siteStoreAddress: string;
-  storeContactDetails: string;
   siliconJoinsCondition: string;
-  perspexCondition: string;
-  lightingDescription: string;
   existingCreative: string;
   creativeRemovable: YesNo;
-  additionalStoreNotes: string;
+  // Where the store itself sits (front/back/left/right/center relative to
+  // its own entrance) -- a button picker (PositionMarkerRow), not free text.
+  storeLocationMarker: PositionMarker;
+  // Where the Apple program sits within the store -- same button picker.
+  appleProgramPositionMarker: PositionMarker;
 
   // -- Installing on site --
   openingTimeMon: string;
@@ -105,27 +147,15 @@ export interface SiteSurveyFormData {
   permitDetails: string;
 
   // -- Deliveries to store --
-  deliveryContactNameNumber: string;
-  deliveryAddressSameAsStore: YesNo;
-  deliveryAddress: string;
   deliveryTimes: string;
-  deliveryOtherComments: string;
 
   // -- General site information --
   weatherAffectsInstall: YesNo;
   weatherAffectsInstallDetails: string;
-  allOpportunitiesSurveyed: YesNo;
-  allOpportunitiesSurveyedReason: string;
-  generalNotes: string;
-
-  // -- Site suitability / installation details --
-  siteVisibility: YesNo;
-  siteVisibilityDescription: string;
-  premiumLocation: YesNo;
-  premiumLocationDescription: string;
-  installationTimeFlexible: YesNo;
-  installationTimeFlexibleDescription: string;
-  potentialIssues: string;
+  // Moved here from Graphics (now removed -- see below) -- the only
+  // Graphics question kept.
+  extraLightingRequired: YesNo;
+  extraLightingDescription: string;
 
   // -- Site details --
   maxWorkingSpace: string;
@@ -137,9 +167,6 @@ export interface SiteSurveyFormData {
   accessIssuesDescription: string;
   siteType: SiteType;
   siteTypeDuration: string;
-  competitorAdvertising: YesNo;
-  competitorAdvertisingDescription: string;
-  generalInstallInfo: string;
 
   // -- Safety --
   siteSafeForInstall: YesNo;
@@ -149,58 +176,24 @@ export interface SiteSurveyFormData {
   safetyEquipmentRequired: YesNo;
   safetyEquipmentDetails: string;
 
-  // -- Graphics --
-  graffitiRisk: YesNo;
-  graffitiRiskDescription: string;
-  extraLightingRequired: YesNo;
-  extraLightingDescription: string;
-  graphicsCutoutRequired: YesNo;
-  graphicsCutoutDescription: string;
-  graphicsOtherInfo: string;
-
   // -- Approvals --
   specialApprovalsNeeded: YesNo;
   specialApprovalsDetails: string;
   chainCentralApprovalNeeded: YesNo;
   chainCentralApprovalReason: string;
-  approvalsOtherInfo: string;
-
-  // -- Opportunity information -- (moved here from SiteSurveyMeasurement:
-  // originally per-site, now filled ONCE per report and applied to every
-  // site regardless of how many `measurements` entries exist -- same
-  // "fill it once, most of it fills itself in" treatment every other field
-  // in this interface already gets via the Default Answers page and
-  // "Apply saved defaults". drawSitePages in pdfBuild.ts reads these off
-  // ctx.data.formData now, not the per-site SiteSurveyMeasurement, so
-  // every site's PDF section prints the same Opportunity Information
-  // block.)
-  opportunityName: string;
-  opportunityType: OpportunityType;
-  opportunityTypeOther: string;
-  opportunityLocation: string;
-  storeFacadeArea: string;
-  appleProgramPosition: string;
-  opportunityDescription: string;
-  // Distinct from `materialType` on SiteSurveyMeasurement -- this is what's
-  // *already* on the wall/window before the new install, while
-  // `materialType` is what's being ordered for the NEW install.
-  existingMaterialType: string;
-  existingCreativeConditionForOpportunity: string;
-  existingCreativeRemovableForOpportunity: YesNo;
-  additionalOpportunityNotes: string;
-  mainFootfallEntranceNote: string;
 }
 
 export function emptyFormData(): SiteSurveyFormData {
   return {
     storePersonContacted: "",
-    printer: "",
-    appleRepresentative: "",
+    surveyCompany: "",
+    appleRepresentativeName: "",
+    appleRepresentativeMobile: "",
+    appleRepresentativeEmail: "",
     retailerRepresentative: "",
     storeContactNumber: "",
 
     storeLocationType: "",
-    storeLocationOther: "",
     entrancesIntoMall: "",
     entrancesIntoStore: "",
     floorsWithinMall: "",
@@ -209,14 +202,11 @@ export function emptyFormData(): SiteSurveyFormData {
     storeOpenPlan: "",
     openPlanLayoutDescription: "",
     applProgramPositionEntrance: "",
-    siteStoreAddress: "",
-    storeContactDetails: "",
     siliconJoinsCondition: "",
-    perspexCondition: "",
-    lightingDescription: "",
     existingCreative: "",
     creativeRemovable: "",
-    additionalStoreNotes: "",
+    storeLocationMarker: "",
+    appleProgramPositionMarker: "",
 
     openingTimeMon: "",
     openingTimeTue: "",
@@ -233,25 +223,12 @@ export function emptyFormData(): SiteSurveyFormData {
     permitRequired: "",
     permitDetails: "",
 
-    deliveryContactNameNumber: "",
-    deliveryAddressSameAsStore: "",
-    deliveryAddress: "",
     deliveryTimes: "",
-    deliveryOtherComments: "",
 
     weatherAffectsInstall: "",
     weatherAffectsInstallDetails: "",
-    allOpportunitiesSurveyed: "",
-    allOpportunitiesSurveyedReason: "",
-    generalNotes: "",
-
-    siteVisibility: "",
-    siteVisibilityDescription: "",
-    premiumLocation: "",
-    premiumLocationDescription: "",
-    installationTimeFlexible: "",
-    installationTimeFlexibleDescription: "",
-    potentialIssues: "",
+    extraLightingRequired: "",
+    extraLightingDescription: "",
 
     maxWorkingSpace: "",
     accessEquipmentAvailable: "",
@@ -262,9 +239,6 @@ export function emptyFormData(): SiteSurveyFormData {
     accessIssuesDescription: "",
     siteType: "",
     siteTypeDuration: "",
-    competitorAdvertising: "",
-    competitorAdvertisingDescription: "",
-    generalInstallInfo: "",
 
     siteSafeForInstall: "",
     siteSafeDescription: "",
@@ -273,48 +247,16 @@ export function emptyFormData(): SiteSurveyFormData {
     safetyEquipmentRequired: "",
     safetyEquipmentDetails: "",
 
-    graffitiRisk: "",
-    graffitiRiskDescription: "",
-    extraLightingRequired: "",
-    extraLightingDescription: "",
-    graphicsCutoutRequired: "",
-    graphicsCutoutDescription: "",
-    graphicsOtherInfo: "",
-
     specialApprovalsNeeded: "",
     specialApprovalsDetails: "",
     chainCentralApprovalNeeded: "",
     chainCentralApprovalReason: "",
-    approvalsOtherInfo: "",
-
-    opportunityName: "",
-    opportunityType: "",
-    opportunityTypeOther: "",
-    opportunityLocation: "",
-    storeFacadeArea: "",
-    appleProgramPosition: "",
-    opportunityDescription: "",
-    existingMaterialType: "",
-    existingCreativeConditionForOpportunity: "",
-    existingCreativeRemovableForOpportunity: "",
-    additionalOpportunityNotes: "",
-    mainFootfallEntranceNote: "",
   };
 }
 
 // Every SiteSurveyFormData key, for iterating the form / building
 // FIELD_SOURCE_KEYS below without repeating the list a third time.
 export const FORM_DATA_KEYS = Object.keys(emptyFormData()) as (keyof SiteSurveyFormData)[];
-
-export type OpportunityType =
-  | "individual_window"
-  | "window_vinyl"
-  | "banner"
-  | "light_box"
-  | "glass_facade"
-  | "existing_graphic"
-  | "other"
-  | "";
 
 export type AppleStandardsMet = "yes" | "no" | "modifications" | "";
 
@@ -324,15 +266,15 @@ export type AppleStandardsMet = "yes" | "no" | "modifications" | "";
 // shape -- apps/web/src/components/siteSurveyReport/MeasurementStep.tsx
 // renders one repeatable "Site N" card per array element, and
 // pdfBuild.ts's drawSitePages loops the array, each site producing its own
-// combined Photo + Facade diagram + Opportunity Information + Measurements
-// & Material + Apple Standards section rather than three separate,
-// non-adjacent pages the way the original single-measurement build did.
+// combined Photo + Facade diagram + Measurements & Material + Apple
+// Standards section rather than three separate, non-adjacent pages the way
+// the original single-measurement build did.
 //
-// NOTE: Opportunity information (name/type/location/etc.) does NOT live
-// here -- it moved to SiteSurveyFormData (see that interface's own comment)
-// so it's filled once per report and shared across every site, rather than
-// re-typed per site. Only the genuinely per-site measurement/material/
-// installation/Apple-standards fields remain below.
+// NOTE: Opportunity Information (name/type/location/etc.) does NOT live
+// here -- it briefly lived on SiteSurveyFormData instead (filled once per
+// report, shared across every site) and has since been removed as a whole
+// section from the tool entirely. Only the genuinely per-site measurement/
+// material/installation/Apple-standards fields remain below.
 export interface SiteSurveyMeasurement {
   // -- Measurements --
   visualWidthMm: number | null;
@@ -628,16 +570,6 @@ export const STORE_LOCATION_TYPE_LABEL: Record<Exclude<StoreLocationType, "">, s
 export const SITE_TYPE_LABEL: Record<Exclude<SiteType, "">, string> = {
   permanent: "Permanent",
   temporary: "Temporary",
-};
-
-export const OPPORTUNITY_TYPE_LABEL: Record<Exclude<OpportunityType, "">, string> = {
-  individual_window: "Individual Window",
-  window_vinyl: "Window Vinyl",
-  banner: "Banner",
-  light_box: "Light Box",
-  glass_facade: "Glass Façade",
-  existing_graphic: "Existing Graphic",
-  other: "Other",
 };
 
 export const APPLE_STANDARDS_MET_LABEL: Record<Exclude<AppleStandardsMet, "">, string> = {

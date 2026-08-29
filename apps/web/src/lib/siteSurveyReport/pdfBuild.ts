@@ -69,10 +69,11 @@ import fontkit from "@pdf-lib/fontkit";
 import {
   normalizeAnnotation,
   APPLE_STANDARDS_MET_LABEL,
-  OPPORTUNITY_TYPE_LABEL,
   PHOTO_CATEGORY_LABEL,
+  POSITION_MARKER_LABEL,
   SITE_TYPE_LABEL,
   STORE_LOCATION_TYPE_LABEL,
+  SURVEY_COMPANY_LABEL,
   type PhotoCategory,
   type SiteSurveyFormData,
   type SiteSurveyMeasurement,
@@ -1089,7 +1090,7 @@ function drawDetailsPage(ctx: Ctx) {
       { label: "Date of Inspection", value: formatDate(ctx.data.surveyDate) },
       { label: "Surveyor Details", value: ctx.data.surveyorName },
       { label: "Store Person Contacted", value: f.storePersonContacted },
-      { label: "Printer", value: f.printer },
+      { label: "Survey Company", value: f.surveyCompany ? SURVEY_COMPANY_LABEL[f.surveyCompany] : "" },
     ],
     leftX,
     colW,
@@ -1103,39 +1104,21 @@ function drawDetailsPage(ctx: Ctx) {
     ctx,
     [
       { label: "Silicon Joins / Edges Condition", value: f.siliconJoinsCondition },
-      { label: "Perspex Cover Condition", value: f.perspexCondition },
-      { label: "Lighting / Backlit Potential", value: f.lightingDescription },
       { label: "Existing Creative / Stickers", value: f.existingCreative },
       { label: "Can Existing Creative Be Removed?", value: yesNoLabel(f.creativeRemovable, "Not Applicable") },
-      { label: "Additional Store Observations", value: f.additionalStoreNotes },
     ],
     leftX,
     colW,
     leftY
   );
 
-  rightY = drawSectionBand(page, ctx, "Site Suitability", rightX, colW, rightY, undefined, "shieldCheck");
-  rightY = drawTwoColTable(
-    page,
-    ctx,
-    [
-      { label: "High & Uninterrupted Visibility?", value: yesNoLabel(f.siteVisibility) },
-      { label: "Premium Location?", value: yesNoLabel(f.premiumLocation) },
-      { label: "Potential Issues With Location", value: f.potentialIssues },
-    ],
-    rightX,
-    colW,
-    rightY
-  );
-
-  rightY -= mm(3);
   rightY = drawSectionBand(page, ctx, "Installation Details", rightX, colW, rightY, undefined, "wrench");
-  rightY = drawTwoColTable(
+  drawTwoColTable(
     page,
     ctx,
     [
       { label: "Time & Date of Installation", value: f.installationDateTime },
-      { label: "Delivery Times Into Store", value: f.deliveryTimes },
+      { label: "Delivery Timings", value: f.deliveryTimes },
       { label: "Mall / Work Permits Required?", value: yesNoLabel(f.permitRequired, "Unknown") },
       { label: "Permit Details", value: f.permitDetails },
     ],
@@ -1143,10 +1126,6 @@ function drawDetailsPage(ctx: Ctx) {
     colW,
     rightY
   );
-
-  rightY -= mm(3);
-  rightY = drawSectionBand(page, ctx, "Additional Details", rightX, colW, rightY, undefined, "fileText");
-  drawTwoColTable(page, ctx, [{ label: "General Notes", value: f.generalNotes }], rightX, colW, rightY);
 }
 
 function yesNoLabel(v: string, thirdLabel = "—"): string {
@@ -1269,7 +1248,9 @@ function drawInspectionDetailsContinuationPages(ctx: Ctx) {
       title: "On-site Personnel Details",
       icon: "user",
       rows: [
-        { label: "Apple Representative", value: f.appleRepresentative },
+        { label: "Apple Representative — Name", value: f.appleRepresentativeName },
+        { label: "Apple Representative — Mobile", value: f.appleRepresentativeMobile },
+        { label: "Apple Representative — Email", value: f.appleRepresentativeEmail },
         { label: "Retailer Representative", value: f.retailerRepresentative },
         { label: "Store Contact Number", value: f.storeContactNumber },
       ],
@@ -1280,7 +1261,7 @@ function drawInspectionDetailsContinuationPages(ctx: Ctx) {
       rows: [
         {
           label: "Location of Store",
-          value: f.storeLocationType ? (f.storeLocationType === "other" ? f.storeLocationOther || "Other" : STORE_LOCATION_TYPE_LABEL[f.storeLocationType]) : "",
+          value: f.storeLocationType ? STORE_LOCATION_TYPE_LABEL[f.storeLocationType] : "",
         },
         { label: "Store Entrances — Into the Mall / Into the Store", value: [f.entrancesIntoMall, f.entrancesIntoStore].filter(Boolean).join(" / ") },
         {
@@ -1289,8 +1270,8 @@ function drawInspectionDetailsContinuationPages(ctx: Ctx) {
         },
         { label: "Is the Store Open Plan?", value: ynDetail(f.storeOpenPlan, f.openPlanLayoutDescription) },
         { label: "Position of Apple Program vs. Main Entrance", value: f.applProgramPositionEntrance },
-        { label: "Store Address", value: f.siteStoreAddress },
-        { label: "Store Contact Details", value: f.storeContactDetails },
+        { label: "Store Location (marked)", value: f.storeLocationMarker ? POSITION_MARKER_LABEL[f.storeLocationMarker] : "" },
+        { label: "Apple Program Position (marked)", value: f.appleProgramPositionMarker ? POSITION_MARKER_LABEL[f.appleProgramPositionMarker] : "" },
       ],
     },
     {
@@ -1307,29 +1288,14 @@ function drawInspectionDetailsContinuationPages(ctx: Ctx) {
     {
       title: "Deliveries to Store",
       icon: "tag",
-      rows: [
-        { label: "Store Contact Name and Number", value: f.deliveryContactNameNumber },
-        { label: "Delivery Address Same as Store?", value: ynDetail(f.deliveryAddressSameAsStore, f.deliveryAddress) },
-        { label: "Day/Time Deliveries Can Be Made", value: f.deliveryTimes },
-        { label: "Other Delivery Comments", value: f.deliveryOtherComments },
-      ],
+      rows: [{ label: "Delivery Timings", value: f.deliveryTimes }],
     },
     {
       title: "General Site Information",
       icon: "fileText",
       rows: [
         { label: "Will Weather Conditions Affect the Install?", value: ynDetail(f.weatherAffectsInstall, f.weatherAffectsInstallDetails) },
-        { label: "Confirm All Possible Opportunities Surveyed", value: ynDetail(f.allOpportunitiesSurveyed, f.allOpportunitiesSurveyedReason) },
-        { label: "Other Information / Comments", value: f.generalNotes },
-      ],
-    },
-    {
-      title: "Site Suitability (continued)",
-      icon: "shieldCheck",
-      rows: [
-        { label: "High Visibility — Description", value: f.siteVisibilityDescription },
-        { label: "Premium Site — Description", value: f.premiumLocationDescription },
-        { label: "Is Installation Time Flexible?", value: ynDetail(f.installationTimeFlexible, f.installationTimeFlexibleDescription) },
+        { label: "Extra Lighting Required at Night?", value: ynDetail(f.extraLightingRequired, f.extraLightingDescription) },
       ],
     },
     {
@@ -1341,8 +1307,6 @@ function drawInspectionDetailsContinuationPages(ctx: Ctx) {
         { label: "Powered Access to Be Used?", value: ynDetail(f.poweredAccessUsed, f.poweredAccessDescription) },
         { label: "Any Access Issues?", value: ynDetail(f.accessIssues, f.accessIssuesDescription) },
         { label: "Site Type", value: f.siteType ? `${SITE_TYPE_LABEL[f.siteType]}${f.siteType === "temporary" && f.siteTypeDuration ? ` — ${f.siteTypeDuration}` : ""}` : "" },
-        { label: "Competitor Advertising Nearby?", value: ynDetail(f.competitorAdvertising, f.competitorAdvertisingDescription) },
-        { label: "General Info for a Successful Install", value: f.generalInstallInfo },
       ],
     },
     {
@@ -1355,22 +1319,11 @@ function drawInspectionDetailsContinuationPages(ctx: Ctx) {
       ],
     },
     {
-      title: "Graphics",
-      icon: "camera",
-      rows: [
-        { label: "At Risk From Graffiti?", value: ynDetail(f.graffitiRisk, f.graffitiRiskDescription) },
-        { label: "Extra Lighting Required at Night?", value: ynDetail(f.extraLightingRequired, f.extraLightingDescription) },
-        { label: "Cutout Required for the Graphics?", value: ynDetail(f.graphicsCutoutRequired, f.graphicsCutoutDescription) },
-        { label: "Any Other Graphics Information", value: f.graphicsOtherInfo },
-      ],
-    },
-    {
       title: "Approvals",
       icon: "fileText",
       rows: [
         { label: "Does the Store Need Special Approvals?", value: ynDetail(f.specialApprovalsNeeded, f.specialApprovalsDetails) },
         { label: "Chain Store — Central Team Approval Needed?", value: ynDetail(f.chainCentralApprovalNeeded, f.chainCentralApprovalReason) },
-        { label: "Any Other Approval Information", value: f.approvalsOtherInfo },
       ],
     },
   ];
@@ -1541,17 +1494,15 @@ function drawFacadeDiagram(page: PDFPage, ctx: Ctx, m: SiteSurveyMeasurement, x:
 }
 
 /**
- * Combines what used to be three separate, non-adjacent pages -- Opportunity
- * Information (originally right after Orientation), Site Photo &
- * Measurement, and its Apple Standards continuation (both originally after
- * the A/B/C/D photo survey pages) -- into ONE section per site: photo +
- * Facade diagram up top, then the Opportunity Information / Measurements &
- * Material / Apple Standards tables flowing straight on beneath it via
- * drawFlowingBlocks, spilling to a same-titled "(continued)" page only if a
- * site's own content doesn't fit. Called once per entry in
- * ctx.data.measurements (see buildSiteSurveyReportPdf) -- `index`/`total`
- * label multi-site reports as "Site 1 of 2" etc.; a single-site report
- * (the common case) reads exactly as the original one-block build did.
+ * One section per site: photo + Facade diagram up top, then the
+ * Measurements & Material / Apple Standards tables flowing straight on
+ * beneath it via drawFlowingBlocks, spilling to a same-titled "(continued)"
+ * page only if a site's own content doesn't fit. (Opportunity Information
+ * used to print here too -- removed entirely, see SiteSurveyFormData's own
+ * header comment.) Called once per entry in ctx.data.measurements (see
+ * buildSiteSurveyReportPdf) -- `index`/`total` label multi-site reports as
+ * "Site 1 of 2" etc.; a single-site report (the common case) reads exactly
+ * as the original one-block build did.
  *
  * `photo` is resolved by the caller via SiteSurveyMeasurement.measurementPhotoId
  * (falling back to positional assignment among uploaded 'measurement'-
@@ -1559,13 +1510,8 @@ function drawFacadeDiagram(page: PDFPage, ctx: Ctx, m: SiteSurveyMeasurement, x:
  * photo -- see buildSiteSurveyReportPdf.
  */
 function drawSitePages(ctx: Ctx, m: SiteSurveyMeasurement, photo: SurveyPhotoImage | undefined, index: number, total: number) {
-  // Opportunity information is now filled once per report (SiteSurveyFormData,
-  // not the per-site SiteSurveyMeasurement) and applies to every site --
-  // read it off ctx.data.formData rather than `m`, so it's identical on
-  // every site's page here by construction.
-  const o = ctx.data.formData;
   const eyebrow = total > 1 ? `Site Photo & Measurement — Site ${index + 1} of ${total}` : "Site Photo & Measurement";
-  const bandTitle = total > 1 ? `Site ${index + 1} of ${total}${o.opportunityName ? ` — ${o.opportunityName}` : ""}` : "Site Photo & Measurement";
+  const bandTitle = total > 1 ? `Site ${index + 1} of ${total}` : "Site Photo & Measurement";
 
   const page = newPage(ctx, eyebrow, "grey");
   let y = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
@@ -1577,12 +1523,6 @@ function drawSitePages(ctx: Ctx, m: SiteSurveyMeasurement, photo: SurveyPhotoIma
   drawFacadeDiagram(page, ctx, m, contentLeft() + halfW + mm(6), y, halfW, rowH);
   y -= rowH + mm(5);
 
-  const opportunityTypeValue = o.opportunityType
-    ? o.opportunityType === "other"
-      ? o.opportunityTypeOther || "Other"
-      : OPPORTUNITY_TYPE_LABEL[o.opportunityType]
-    : "";
-
   const standardsValue = (() => {
     if (!m.appleStandardsMet) return "";
     const base = APPLE_STANDARDS_MET_LABEL[m.appleStandardsMet];
@@ -1590,37 +1530,10 @@ function drawSitePages(ctx: Ctx, m: SiteSurveyMeasurement, photo: SurveyPhotoIma
     return detail ? `${base} — ${detail}` : base;
   })();
 
-  // Opportunity Information stays full-width, directly under the photo/
-  // Facade row -- same table shape (and bold labels) the original
-  // Opportunity page used, just relocated here instead of a separate,
-  // non-adjacent page. A full-width table wraps far less than the same
-  // content squeezed into a half-width column, so this reads cleanly
-  // whether or not the two blocks below end up sharing this page.
-  y = drawSectionBand(page, ctx, "Opportunity Information", contentLeft(), contentWidth(), y, undefined, "tag");
-  y = drawTwoColTable(
-    page,
-    ctx,
-    [
-      { label: "Opportunity Name", value: o.opportunityName, icon: "tag" },
-      { label: "Opportunity Type", value: opportunityTypeValue, icon: "layoutGrid" },
-      { label: "Location", value: o.opportunityLocation, icon: "mapPin" },
-      { label: "Store / Facade Area", value: o.storeFacadeArea, icon: "squareDashed" },
-      { label: "Apple Program Position", value: o.appleProgramPosition, icon: "idCard" },
-      { label: "Description", value: o.opportunityDescription, icon: "fileText" },
-      { label: "Existing Material Type", value: o.existingMaterialType, icon: "layers" },
-      { label: "Existing Creative Condition", value: o.existingCreativeConditionForOpportunity, icon: "camera" },
-      { label: "Existing Creative Removable?", value: yesNoLabel(o.existingCreativeRemovableForOpportunity), icon: "wrench" },
-      { label: "Main Footfall Entrance Note", value: o.mainFootfallEntranceNote, icon: "users" },
-      { label: "Additional Opportunity Notes", value: o.additionalOpportunityNotes, icon: "clipboardList" },
-    ],
-    contentLeft(),
-    contentWidth(),
-    y
-  );
-
-  // The remaining two (shorter) blocks flow two-up beneath that, via the
-  // same engine the Inspection Details continuation pages use -- on THIS
-  // page if there's still meaningfully room, otherwise starting a fresh
+  // The remaining two (shorter) blocks flow two-up beneath the photo/Facade
+  // row, via the same engine the Inspection Details continuation pages use
+  // -- on THIS page if there's still meaningfully room, otherwise starting
+  // a fresh
   // "(continued)" page rather than risking either block's own table
   // getting cut off mid-row.
   const bottomLimit = FOOTER_HEIGHT + mm(6);

@@ -4,16 +4,13 @@ import { useEffect, useRef, useState } from "react";
 import {
   CalendarClock,
   ChevronDown,
-  Eye,
   FileCheck2,
   HardHat,
-  Image as ImageIcon,
   Info,
   LayoutGrid,
   MapPin,
   Sparkles,
   Store,
-  Tag,
   Truck,
   Users,
   type LucideIcon,
@@ -21,32 +18,32 @@ import {
 import { FieldIndicator } from "./FieldIndicator";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Notifications";
+import { cn } from "@/lib/cn";
 import { supabase } from "@/lib/supabase";
-import type { FieldSourceKey, FieldSources, SiteSurveyFormData } from "@/lib/siteSurveyReport/types";
-import { emptyFormData } from "@/lib/siteSurveyReport/types";
+import { fetchAllRows } from "@/lib/dashboard-queries";
+import type { FieldSourceKey, FieldSources, PositionMarker, SiteSurveyFormData } from "@/lib/siteSurveyReport/types";
+import { APPLE_PROGRAM_OPTIONS, emptyFormData } from "@/lib/siteSurveyReport/types";
 
-// The full ~78-field inspection form -- shared by DetailsStep (manual entry
-// / "fill in the rest" after extraction), ReviewStep (same fields, an
-// extraction-progress banner instead of a plain heading), and the "Default
-// Answers" settings page (SiteSurveyReportDefaultsClient.tsx, via the
-// FormDataFields export below, header section omitted).
+// The inspection form -- shared by DetailsStep (manual entry), and the
+// "Default Answers" settings page (SiteSurveyReportDefaultsClient.tsx, via
+// the FormDataFields export below, header section omitted).
 //
 // Presented as a stack of rounded, shadowed "cards" (one per section --
 // LFG Connect's own card look, see LfgSiteCardGrid.tsx: rounded-[20px]
-// border shadow-2) rather than the flat bordered accordion this used
-// before -- every section still starts COLLAPSED except the first, so the
-// whole form is "visible in one shot" as a stack of card headers with a
-// filled-count badge. Inside an open card, every field is one compact,
-// landscape (label-left, control-right) ROW rather than a multi-column
-// grid -- this mirrors the reference Apple PDF's own row-per-question
-// table layout. A Yes/No question and its "if Yes/No, give details" follow
-// -up (two separate fields/rows before) are now ONE row: real radio
-// buttons (native <input type="radio">, tinted via accent-color so the
-// selected one reads as a filled circle -- the same visual the reference
-// PDF uses) plus the detail input inline, right where the reference PDF
-// puts it. Field labels/inputs stay small (text-[11px]/text-xs) and
-// tightly padded throughout, matching this app's own existing compact
-// patterns (Comments.tsx, WorkflowTimeline.tsx, etc).
+// border shadow-2) -- every section still starts COLLAPSED except the
+// first, so the whole form is "visible in one shot" as a stack of card
+// headers with a filled-count badge. Inside an open card, every field is
+// one compact, landscape (label-left, control-right) ROW rather than a
+// multi-column grid. A Yes/No question and its "if Yes/No, give details"
+// follow-up are ONE row: real radio buttons (native <input type="radio">,
+// tinted via accent-color) plus the detail input inline. Several small,
+// short-answer fields (Entrances/Floors counts, the Apple Representative's
+// Name/Mobile/Email) are grouped into one MiniFieldsRow -- a single compact
+// row holding 2-4 small labeled inputs side by side -- rather than one full
+// row each, matching this app's own "Store Opening Times" day-grid pattern.
+// Field labels/inputs stay small (text-[11px]/text-xs) and tightly padded
+// throughout, matching this app's own existing compact patterns
+// (Comments.tsx, WorkflowTimeline.tsx, etc).
 
 export interface ReportHeaderFields {
   store_name: string;
@@ -175,7 +172,7 @@ export function ReportFormFields({ header, onHeaderChange, formData, onFormDataC
           }}
           source={fieldSources.sfo_id}
         />
-        <TextRow
+        <SelectRow
           label="Apple Program"
           value={header.program}
           onChange={(v) => {
@@ -183,6 +180,7 @@ export function ReportFormFields({ header, onHeaderChange, formData, onFormDataC
             onTouched("program");
           }}
           source={fieldSources.program}
+          options={[["", "— Select —"], ...APPLE_PROGRAM_OPTIONS.map((p) => [p, p] as [string, string])]}
         />
         <TextRow
           label="Date of Inspection"
@@ -217,6 +215,50 @@ export function ReportFormFields({ header, onHeaderChange, formData, onFormDataC
   );
 }
 
+// One distinct LFG Connect ASM (Apple team contact) -- name/mobile/email,
+// deduped by that combination.
+interface AsmContact {
+  name: string;
+  mobile: string;
+  email: string;
+}
+
+/**
+ * Every distinct ASM (name/mobile/email combination) already on file across
+ * LFG Connect's own site records (lfg_sites.asm_name/asm_mobile/asm_email)
+ * -- feeds the "Select ASM" picker below. Paginated via fetchAllRows (not a
+ * plain `.select()`) for the same reason useLfgDistinctValues.ts is: a
+ * plain client `.limit()`/no-limit select silently truncates past
+ * PostgREST's 1000-row server-side cap, which would quietly drop rarer ASMs
+ * from this list.
+ */
+function useAsmContacts(): AsmContact[] {
+  const [contacts, setContacts] = useState<AsmContact[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchAllRows<{ asm_name: string | null; asm_mobile: string | null; asm_email: string | null }>((from, to) =>
+      supabase.from("lfg_sites").select("asm_name, asm_mobile, asm_email").not("asm_name", "is", null).range(from, to)
+    ).then((rows) => {
+      if (cancelled) return;
+      const map = new Map<string, AsmContact>();
+      for (const row of rows) {
+        const name = (row.asm_name ?? "").trim();
+        if (!name) continue;
+        const mobile = (row.asm_mobile ?? "").trim();
+        const email = (row.asm_email ?? "").trim();
+        map.set(`${name}|${mobile}|${email}`, { name, mobile, email });
+      }
+      setContacts(Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name)));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return contacts;
+}
+
 /**
  * Every formData-driven section, WITHOUT the header (Site/Store
  * Information) section above -- reused as-is by the "Default Answers"
@@ -240,6 +282,7 @@ export function FormDataFields({
   onToggleSection: (key: string) => void;
 }) {
   const src = fieldSources ?? {};
+  const asmContacts = useAsmContacts();
   // Shorthand bound to this call's onFormDataChange/onTouched, so every
   // field below just does `f("key", value)` instead of repeating both.
   const f = <K extends keyof SiteSurveyFormData>(key: K, value: SiteSurveyFormData[K]) => set(onFormDataChange, onTouched, key, value);
@@ -256,11 +299,53 @@ export function FormDataFields({
         open={!!openSections.personnel}
         onToggle={onToggleSection}
       >
-        <TextRow label="Apple Representative" value={formData.appleRepresentative} onChange={(v) => f("appleRepresentative", v)} source={src.appleRepresentative} />
+        <Row>
+          <RowLabel label="Select ASM (fills Apple Representative below)" />
+          <select
+            defaultValue=""
+            onChange={(e) => {
+              const idx = Number(e.target.value);
+              const contact = asmContacts[idx];
+              if (!contact) return;
+              f("appleRepresentativeName", contact.name);
+              f("appleRepresentativeMobile", contact.mobile);
+              f("appleRepresentativeEmail", contact.email);
+              e.target.value = "";
+            }}
+            className="min-w-[10rem] flex-1 rounded border border-line-strong bg-surface px-2 py-1 text-xs text-ink focus:border-primary focus:outline-none"
+          >
+            <option value="">{asmContacts.length ? "— Choose from LFG Connect —" : "No ASM records found yet"}</option>
+            {asmContacts.map((c, i) => (
+              <option key={`${c.name}-${c.mobile}-${c.email}-${i}`} value={i}>
+                {c.name}
+                {c.mobile ? ` — ${c.mobile}` : ""}
+                {c.email ? ` — ${c.email}` : ""}
+              </option>
+            ))}
+          </select>
+        </Row>
+        <MiniFieldsRow
+          title="Apple Representative"
+          fields={[
+            { key: "appleRepresentativeName", label: "Name", value: formData.appleRepresentativeName, onChange: (v) => f("appleRepresentativeName", v), source: src.appleRepresentativeName },
+            { key: "appleRepresentativeMobile", label: "Mobile", value: formData.appleRepresentativeMobile, onChange: (v) => f("appleRepresentativeMobile", v), source: src.appleRepresentativeMobile },
+            { key: "appleRepresentativeEmail", label: "Email", value: formData.appleRepresentativeEmail, onChange: (v) => f("appleRepresentativeEmail", v), source: src.appleRepresentativeEmail },
+          ]}
+        />
         <TextRow label="Retailer Representative" value={formData.retailerRepresentative} onChange={(v) => f("retailerRepresentative", v)} source={src.retailerRepresentative} />
         <TextRow label="Store Person Contacted" value={formData.storePersonContacted} onChange={(v) => f("storePersonContacted", v)} source={src.storePersonContacted} />
         <TextRow label="Store Contact Number" value={formData.storeContactNumber} onChange={(v) => f("storeContactNumber", v)} source={src.storeContactNumber} />
-        <TextRow label="Printer / Survey Company" value={formData.printer} onChange={(v) => f("printer", v)} source={src.printer} />
+        <SelectRow
+          label="Survey Company"
+          value={formData.surveyCompany}
+          onChange={(v) => f("surveyCompany", v as SiteSurveyFormData["surveyCompany"])}
+          source={src.surveyCompany}
+          options={[
+            ["", "— Select —"],
+            ["mmdi", "MMDI"],
+            ["i_and_s", "I&S"],
+          ]}
+        />
       </SurveyCard>
 
       <SurveyCard
@@ -286,11 +371,15 @@ export function FormDataFields({
             ["other", "Other"],
           ]}
         />
-        <TextRow label="If Other, please specify" value={formData.storeLocationOther} onChange={(v) => f("storeLocationOther", v)} source={src.storeLocationOther} />
-        <TextRow label="Entrances — Into the Mall" value={formData.entrancesIntoMall} onChange={(v) => f("entrancesIntoMall", v)} source={src.entrancesIntoMall} />
-        <TextRow label="Entrances — Into the Store" value={formData.entrancesIntoStore} onChange={(v) => f("entrancesIntoStore", v)} source={src.entrancesIntoStore} />
-        <TextRow label="Floors — Within the Mall" value={formData.floorsWithinMall} onChange={(v) => f("floorsWithinMall", v)} source={src.floorsWithinMall} />
-        <TextRow label="Floors — Within the Store" value={formData.floorsWithinStore} onChange={(v) => f("floorsWithinStore", v)} source={src.floorsWithinStore} />
+        <MiniFieldsRow
+          title="Entrances & Floors"
+          fields={[
+            { key: "entrancesIntoMall", label: "Entrances — Mall", value: formData.entrancesIntoMall, onChange: (v) => f("entrancesIntoMall", v), source: src.entrancesIntoMall },
+            { key: "entrancesIntoStore", label: "Entrances — Store", value: formData.entrancesIntoStore, onChange: (v) => f("entrancesIntoStore", v), source: src.entrancesIntoStore },
+            { key: "floorsWithinMall", label: "Floors — Mall", value: formData.floorsWithinMall, onChange: (v) => f("floorsWithinMall", v), source: src.floorsWithinMall },
+            { key: "floorsWithinStore", label: "Floors — Store", value: formData.floorsWithinStore, onChange: (v) => f("floorsWithinStore", v), source: src.floorsWithinStore },
+          ]}
+        />
         <TextRow label="Floor Apple Program Is On" value={formData.floorApplProgramOn} onChange={(v) => f("floorApplProgramOn", v)} source={src.floorApplProgramOn} />
         <YesNoRow
           name="storeOpenPlan"
@@ -301,11 +390,7 @@ export function FormDataFields({
           detail={{ value: formData.openPlanLayoutDescription, onChange: (v) => f("openPlanLayoutDescription", v), source: src.openPlanLayoutDescription, placeholder: "If No, describe layout" }}
         />
         <TextRow label="Apple Program Position vs. Main Entrance" value={formData.applProgramPositionEntrance} onChange={(v) => f("applProgramPositionEntrance", v)} source={src.applProgramPositionEntrance} />
-        <TextRow label="Store Address" value={formData.siteStoreAddress} onChange={(v) => f("siteStoreAddress", v)} source={src.siteStoreAddress} />
-        <TextRow label="Store Contact Details" value={formData.storeContactDetails} onChange={(v) => f("storeContactDetails", v)} source={src.storeContactDetails} />
         <TextRow label="Condition of silicon joins/edges" value={formData.siliconJoinsCondition} onChange={(v) => f("siliconJoinsCondition", v)} source={src.siliconJoinsCondition} />
-        <TextRow label="Condition of Perspex cover" value={formData.perspexCondition} onChange={(v) => f("perspexCondition", v)} source={src.perspexCondition} />
-        <TextRow label="Lighting / backlit potential" value={formData.lightingDescription} onChange={(v) => f("lightingDescription", v)} source={src.lightingDescription} />
         <TextRow label="Current artwork / store stickers" value={formData.existingCreative} onChange={(v) => f("existingCreative", v)} source={src.existingCreative} />
         <YesNoRow
           name="creativeRemovable"
@@ -314,7 +399,13 @@ export function FormDataFields({
           onChange={(v) => f("creativeRemovable", v as SiteSurveyFormData["creativeRemovable"])}
           source={src.creativeRemovable}
         />
-        <TextAreaRow label="Additional store observations" value={formData.additionalStoreNotes} onChange={(v) => f("additionalStoreNotes", v)} source={src.additionalStoreNotes} />
+        <PositionMarkerRow label="Mark the Store Location" value={formData.storeLocationMarker} onChange={(v) => f("storeLocationMarker", v)} source={src.storeLocationMarker} />
+        <PositionMarkerRow
+          label="Indicate Position of Apple Program Within the Store"
+          value={formData.appleProgramPositionMarker}
+          onChange={(v) => f("appleProgramPositionMarker", v)}
+          source={src.appleProgramPositionMarker}
+        />
       </SurveyCard>
 
       <SurveyCard
@@ -399,17 +490,7 @@ export function FormDataFields({
         open={!!openSections.delivery}
         onToggle={onToggleSection}
       >
-        <TextRow label="Store Contact Name and Number" value={formData.deliveryContactNameNumber} onChange={(v) => f("deliveryContactNameNumber", v)} source={src.deliveryContactNameNumber} />
-        <YesNoRow
-          name="deliveryAddressSameAsStore"
-          label="Delivery address same as store?"
-          value={formData.deliveryAddressSameAsStore}
-          onChange={(v) => f("deliveryAddressSameAsStore", v as SiteSurveyFormData["deliveryAddressSameAsStore"])}
-          source={src.deliveryAddressSameAsStore}
-          detail={{ value: formData.deliveryAddress, onChange: (v) => f("deliveryAddress", v), source: src.deliveryAddress, placeholder: "If No, give address" }}
-        />
-        <TextRow label="Day/time deliveries can be made" value={formData.deliveryTimes} onChange={(v) => f("deliveryTimes", v)} source={src.deliveryTimes} />
-        <TextRow label="Other delivery comments" value={formData.deliveryOtherComments} onChange={(v) => f("deliveryOtherComments", v)} source={src.deliveryOtherComments} />
+        <TextRow label="Delivery timings" value={formData.deliveryTimes} onChange={(v) => f("deliveryTimes", v)} source={src.deliveryTimes} />
       </SurveyCard>
 
       <SurveyCard
@@ -431,61 +512,13 @@ export function FormDataFields({
           detail={{ value: formData.weatherAffectsInstallDetails, onChange: (v) => f("weatherAffectsInstallDetails", v), source: src.weatherAffectsInstallDetails, placeholder: "If Yes, give details" }}
         />
         <YesNoRow
-          name="allOpportunitiesSurveyed"
-          label="All possible opportunities surveyed?"
-          value={formData.allOpportunitiesSurveyed}
-          onChange={(v) => f("allOpportunitiesSurveyed", v as SiteSurveyFormData["allOpportunitiesSurveyed"])}
-          source={src.allOpportunitiesSurveyed}
-          detail={{
-            value: formData.allOpportunitiesSurveyedReason,
-            onChange: (v) => f("allOpportunitiesSurveyedReason", v),
-            source: src.allOpportunitiesSurveyedReason,
-            placeholder: "If No, give reason",
-          }}
+          name="extraLightingRequired"
+          label="Extra lighting for night view?"
+          value={formData.extraLightingRequired}
+          onChange={(v) => f("extraLightingRequired", v as SiteSurveyFormData["extraLightingRequired"])}
+          source={src.extraLightingRequired}
+          detail={{ value: formData.extraLightingDescription, onChange: (v) => f("extraLightingDescription", v), source: src.extraLightingDescription, placeholder: "Description" }}
         />
-        <TextAreaRow label="Any other helpful information" value={formData.generalNotes} onChange={(v) => f("generalNotes", v)} source={src.generalNotes} />
-      </SurveyCard>
-
-      <SurveyCard
-        sectionKey="suitability"
-        title="Site Suitability / Installation Details"
-        icon={Eye}
-        color="success"
-        filled={countFilledKeys(formData, SUITABILITY_KEYS)}
-        total={SUITABILITY_KEYS.length}
-        open={!!openSections.suitability}
-        onToggle={onToggleSection}
-      >
-        <YesNoRow
-          name="siteVisibility"
-          label="Highly visible opportunity?"
-          value={formData.siteVisibility}
-          onChange={(v) => f("siteVisibility", v as SiteSurveyFormData["siteVisibility"])}
-          source={src.siteVisibility}
-          detail={{ value: formData.siteVisibilityDescription, onChange: (v) => f("siteVisibilityDescription", v), source: src.siteVisibilityDescription, placeholder: "Description" }}
-        />
-        <YesNoRow
-          name="premiumLocation"
-          label="Is this a premium site?"
-          value={formData.premiumLocation}
-          onChange={(v) => f("premiumLocation", v as SiteSurveyFormData["premiumLocation"])}
-          source={src.premiumLocation}
-          detail={{ value: formData.premiumLocationDescription, onChange: (v) => f("premiumLocationDescription", v), source: src.premiumLocationDescription, placeholder: "Description" }}
-        />
-        <YesNoRow
-          name="installationTimeFlexible"
-          label="Is installation time flexible?"
-          value={formData.installationTimeFlexible}
-          onChange={(v) => f("installationTimeFlexible", v as SiteSurveyFormData["installationTimeFlexible"])}
-          source={src.installationTimeFlexible}
-          detail={{
-            value: formData.installationTimeFlexibleDescription,
-            onChange: (v) => f("installationTimeFlexibleDescription", v),
-            source: src.installationTimeFlexibleDescription,
-            placeholder: "Description",
-          }}
-        />
-        <TextAreaRow label="Potential issues with location" value={formData.potentialIssues} onChange={(v) => f("potentialIssues", v)} source={src.potentialIssues} />
       </SurveyCard>
 
       <SurveyCard
@@ -535,20 +568,6 @@ export function FormDataFields({
           ]}
         />
         <TextRow label="If temporary, how long available?" value={formData.siteTypeDuration} onChange={(v) => f("siteTypeDuration", v)} source={src.siteTypeDuration} />
-        <YesNoRow
-          name="competitorAdvertising"
-          label="Competitor advertising nearby?"
-          value={formData.competitorAdvertising}
-          onChange={(v) => f("competitorAdvertising", v as SiteSurveyFormData["competitorAdvertising"])}
-          source={src.competitorAdvertising}
-          detail={{
-            value: formData.competitorAdvertisingDescription,
-            onChange: (v) => f("competitorAdvertisingDescription", v),
-            source: src.competitorAdvertisingDescription,
-            placeholder: "Description",
-          }}
-        />
-        <TextAreaRow label="General info for a successful install" value={formData.generalInstallInfo} onChange={(v) => f("generalInstallInfo", v)} source={src.generalInstallInfo} />
       </SurveyCard>
 
       <SurveyCard
@@ -588,43 +607,6 @@ export function FormDataFields({
       </SurveyCard>
 
       <SurveyCard
-        sectionKey="graphics"
-        title="Graphics"
-        icon={ImageIcon}
-        color="ai"
-        filled={countFilledKeys(formData, GRAPHICS_KEYS)}
-        total={GRAPHICS_KEYS.length}
-        open={!!openSections.graphics}
-        onToggle={onToggleSection}
-      >
-        <YesNoRow
-          name="graffitiRisk"
-          label="At risk from graffiti?"
-          value={formData.graffitiRisk}
-          onChange={(v) => f("graffitiRisk", v as SiteSurveyFormData["graffitiRisk"])}
-          source={src.graffitiRisk}
-          detail={{ value: formData.graffitiRiskDescription, onChange: (v) => f("graffitiRiskDescription", v), source: src.graffitiRiskDescription, placeholder: "Description" }}
-        />
-        <YesNoRow
-          name="extraLightingRequired"
-          label="Extra lighting for night viewing?"
-          value={formData.extraLightingRequired}
-          onChange={(v) => f("extraLightingRequired", v as SiteSurveyFormData["extraLightingRequired"])}
-          source={src.extraLightingRequired}
-          detail={{ value: formData.extraLightingDescription, onChange: (v) => f("extraLightingDescription", v), source: src.extraLightingDescription, placeholder: "Description" }}
-        />
-        <YesNoRow
-          name="graphicsCutoutRequired"
-          label="Cutout required for the graphics?"
-          value={formData.graphicsCutoutRequired}
-          onChange={(v) => f("graphicsCutoutRequired", v as SiteSurveyFormData["graphicsCutoutRequired"])}
-          source={src.graphicsCutoutRequired}
-          detail={{ value: formData.graphicsCutoutDescription, onChange: (v) => f("graphicsCutoutDescription", v), source: src.graphicsCutoutDescription, placeholder: "Description" }}
-        />
-        <TextAreaRow label="Any other graphics information" value={formData.graphicsOtherInfo} onChange={(v) => f("graphicsOtherInfo", v)} source={src.graphicsOtherInfo} />
-      </SurveyCard>
-
-      <SurveyCard
         sectionKey="approvals"
         title="Approvals"
         icon={FileCheck2}
@@ -650,75 +632,6 @@ export function FormDataFields({
           source={src.chainCentralApprovalNeeded}
           detail={{ value: formData.chainCentralApprovalReason, onChange: (v) => f("chainCentralApprovalReason", v), source: src.chainCentralApprovalReason, placeholder: "If No, give reason" }}
         />
-        <TextAreaRow label="Any other helpful information" value={formData.approvalsOtherInfo} onChange={(v) => f("approvalsOtherInfo", v)} source={src.approvalsOtherInfo} />
-      </SurveyCard>
-
-      {/*
-        Opportunity Information -- matches the reference PDF's own page
-        order (right after Approvals, before the photo-survey pages).
-        Filled ONCE here and shared across every site in this report (see
-        SiteSurveyFormData's own header comment) rather than re-typed per
-        site on the Measurement step -- MeasurementStep.tsx/SiteCard no
-        longer has its own copy of these fields.
-      */}
-      <SurveyCard
-        sectionKey="opportunity"
-        title="Opportunity Information"
-        icon={Tag}
-        color="primary"
-        filled={countFilledKeys(formData, OPPORTUNITY_KEYS)}
-        total={OPPORTUNITY_KEYS.length}
-        open={!!openSections.opportunity}
-        onToggle={onToggleSection}
-      >
-        <TextRow label="Opportunity Name" value={formData.opportunityName} onChange={(v) => f("opportunityName", v)} source={src.opportunityName} />
-        <SelectRow
-          label="Opportunity Type"
-          value={formData.opportunityType}
-          onChange={(v) => f("opportunityType", v as SiteSurveyFormData["opportunityType"])}
-          source={src.opportunityType}
-          options={[
-            ["", "— Select —"],
-            ["individual_window", "Individual Window"],
-            ["window_vinyl", "Window Vinyl"],
-            ["banner", "Banner"],
-            ["light_box", "Light Box"],
-            ["glass_facade", "Glass Façade"],
-            ["existing_graphic", "Existing Graphic"],
-            ["other", "Other"],
-          ]}
-        />
-        <TextRow label="Opportunity Type — if Other, please specify" value={formData.opportunityTypeOther} onChange={(v) => f("opportunityTypeOther", v)} source={src.opportunityTypeOther} />
-        <TextRow label="Location" value={formData.opportunityLocation} onChange={(v) => f("opportunityLocation", v)} source={src.opportunityLocation} />
-        <TextRow label="Store / Facade Area" value={formData.storeFacadeArea} onChange={(v) => f("storeFacadeArea", v)} source={src.storeFacadeArea} />
-        <TextRow label="Apple Program Position" value={formData.appleProgramPosition} onChange={(v) => f("appleProgramPosition", v)} source={src.appleProgramPosition} />
-        <TextAreaRow label="Description" value={formData.opportunityDescription} onChange={(v) => f("opportunityDescription", v)} source={src.opportunityDescription} />
-        <TextRow
-          label="Existing Material Type (if a banner/graphic already exists)"
-          value={formData.existingMaterialType}
-          onChange={(v) => f("existingMaterialType", v)}
-          source={src.existingMaterialType}
-        />
-        <TextRow
-          label="Existing Creative Condition"
-          value={formData.existingCreativeConditionForOpportunity}
-          onChange={(v) => f("existingCreativeConditionForOpportunity", v)}
-          source={src.existingCreativeConditionForOpportunity}
-        />
-        <YesNoRow
-          name="existingCreativeRemovableForOpportunity"
-          label="Can existing creative be removed?"
-          value={formData.existingCreativeRemovableForOpportunity}
-          onChange={(v) => f("existingCreativeRemovableForOpportunity", v as SiteSurveyFormData["existingCreativeRemovableForOpportunity"])}
-          source={src.existingCreativeRemovableForOpportunity}
-        />
-        <TextRow
-          label="Which entrance has the main footfall? (if multiple entrances)"
-          value={formData.mainFootfallEntranceNote}
-          onChange={(v) => f("mainFootfallEntranceNote", v)}
-          source={src.mainFootfallEntranceNote}
-        />
-        <TextAreaRow label="Additional Opportunity Notes" value={formData.additionalOpportunityNotes} onChange={(v) => f("additionalOpportunityNotes", v)} source={src.additionalOpportunityNotes} />
       </SurveyCard>
     </>
   );
@@ -728,10 +641,17 @@ export function FormDataFields({
 // Section field-key lists -- drive each SurveyCard's "X/Y filled" badge.
 // ---------------------------------------------------------------------------
 
-const PERSONNEL_KEYS: (keyof SiteSurveyFormData)[] = ["appleRepresentative", "retailerRepresentative", "storePersonContacted", "storeContactNumber", "printer"];
+const PERSONNEL_KEYS: (keyof SiteSurveyFormData)[] = [
+  "appleRepresentativeName",
+  "appleRepresentativeMobile",
+  "appleRepresentativeEmail",
+  "retailerRepresentative",
+  "storePersonContacted",
+  "storeContactNumber",
+  "surveyCompany",
+];
 const STORE_DESCRIPTION_KEYS: (keyof SiteSurveyFormData)[] = [
   "storeLocationType",
-  "storeLocationOther",
   "entrancesIntoMall",
   "entrancesIntoStore",
   "floorsWithinMall",
@@ -740,14 +660,11 @@ const STORE_DESCRIPTION_KEYS: (keyof SiteSurveyFormData)[] = [
   "storeOpenPlan",
   "openPlanLayoutDescription",
   "applProgramPositionEntrance",
-  "siteStoreAddress",
-  "storeContactDetails",
   "siliconJoinsCondition",
-  "perspexCondition",
-  "lightingDescription",
   "existingCreative",
   "creativeRemovable",
-  "additionalStoreNotes",
+  "storeLocationMarker",
+  "appleProgramPositionMarker",
 ];
 const INSTALL_KEYS: (keyof SiteSurveyFormData)[] = [
   "openingTimeMon",
@@ -765,17 +682,8 @@ const INSTALL_KEYS: (keyof SiteSurveyFormData)[] = [
   "permitRequired",
   "permitDetails",
 ];
-const DELIVERY_KEYS: (keyof SiteSurveyFormData)[] = ["deliveryContactNameNumber", "deliveryAddressSameAsStore", "deliveryAddress", "deliveryTimes", "deliveryOtherComments"];
-const GENERAL_KEYS: (keyof SiteSurveyFormData)[] = ["weatherAffectsInstall", "weatherAffectsInstallDetails", "allOpportunitiesSurveyed", "allOpportunitiesSurveyedReason", "generalNotes"];
-const SUITABILITY_KEYS: (keyof SiteSurveyFormData)[] = [
-  "siteVisibility",
-  "siteVisibilityDescription",
-  "premiumLocation",
-  "premiumLocationDescription",
-  "installationTimeFlexible",
-  "installationTimeFlexibleDescription",
-  "potentialIssues",
-];
+const DELIVERY_KEYS: (keyof SiteSurveyFormData)[] = ["deliveryTimes"];
+const GENERAL_KEYS: (keyof SiteSurveyFormData)[] = ["weatherAffectsInstall", "weatherAffectsInstallDetails", "extraLightingRequired", "extraLightingDescription"];
 const SITE_DETAILS_KEYS: (keyof SiteSurveyFormData)[] = [
   "maxWorkingSpace",
   "accessEquipmentAvailable",
@@ -786,37 +694,11 @@ const SITE_DETAILS_KEYS: (keyof SiteSurveyFormData)[] = [
   "accessIssuesDescription",
   "siteType",
   "siteTypeDuration",
-  "competitorAdvertising",
-  "competitorAdvertisingDescription",
-  "generalInstallInfo",
 ];
 const SAFETY_KEYS: (keyof SiteSurveyFormData)[] = ["siteSafeForInstall", "siteSafeDescription", "safetyConcerns", "safetyConcernsDetails", "safetyEquipmentRequired", "safetyEquipmentDetails"];
-const GRAPHICS_KEYS: (keyof SiteSurveyFormData)[] = [
-  "graffitiRisk",
-  "graffitiRiskDescription",
-  "extraLightingRequired",
-  "extraLightingDescription",
-  "graphicsCutoutRequired",
-  "graphicsCutoutDescription",
-  "graphicsOtherInfo",
-];
-const APPROVALS_KEYS: (keyof SiteSurveyFormData)[] = ["specialApprovalsNeeded", "specialApprovalsDetails", "chainCentralApprovalNeeded", "chainCentralApprovalReason", "approvalsOtherInfo"];
-const OPPORTUNITY_KEYS: (keyof SiteSurveyFormData)[] = [
-  "opportunityName",
-  "opportunityType",
-  "opportunityTypeOther",
-  "opportunityLocation",
-  "storeFacadeArea",
-  "appleProgramPosition",
-  "opportunityDescription",
-  "existingMaterialType",
-  "existingCreativeConditionForOpportunity",
-  "existingCreativeRemovableForOpportunity",
-  "mainFootfallEntranceNote",
-  "additionalOpportunityNotes",
-];
+const APPROVALS_KEYS: (keyof SiteSurveyFormData)[] = ["specialApprovalsNeeded", "specialApprovalsDetails", "chainCentralApprovalNeeded", "chainCentralApprovalReason"];
 
-const SECTION_KEYS = ["site", "personnel", "store", "install", "delivery", "general", "suitability", "details", "safety", "graphics", "approvals", "opportunity"];
+const SECTION_KEYS = ["site", "personnel", "store", "install", "delivery", "general", "details", "safety", "approvals"];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -855,15 +737,15 @@ const SECTION_COLOR_CLASSES: Record<SectionColor, { chipBg: string; chipText: st
 
 /**
  * A collapsible, rounded "card" per section -- LFG Connect's own card look
- * (see LfgSiteCardGrid.tsx: rounded-[20px] border shadow-2), not the flatter
- * bordered-accordion look this used before. The header row (colour chip +
- * icon, title, X/Y filled badge, chevron) is always visible even collapsed,
- * so the WHOLE form reads as a compact stack of card headers at a glance;
- * only the section actually being worked on expands and takes up vertical
- * space. Controlled (open/onToggle), not self-managed state, so a parent
- * "Expand all"/"Collapse all" control can drive every card at once. Direct
- * children are rendered as a stack of compact landscape ROWS (label-left,
- * control-right), not a wrapping grid -- see Row/TextRow/YesNoRow etc below.
+ * (see LfgSiteCardGrid.tsx: rounded-[20px] border shadow-2). The header row
+ * (colour chip + icon, title, X/Y filled badge, chevron) is always visible
+ * even collapsed, so the WHOLE form reads as a compact stack of card
+ * headers at a glance; only the section actually being worked on expands
+ * and takes up vertical space. Controlled (open/onToggle), not self-managed
+ * state, so a parent "Expand all"/"Collapse all" control can drive every
+ * card at once. Direct children are rendered as a stack of compact
+ * landscape ROWS (label-left, control-right), not a wrapping grid -- see
+ * Row/TextRow/YesNoRow/MiniFieldsRow/PositionMarkerRow etc below.
  */
 function SurveyCard({
   sectionKey,
@@ -945,30 +827,6 @@ function TextRow({
   );
 }
 
-function TextAreaRow({
-  label,
-  value,
-  onChange,
-  source,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  source?: FieldSources[FieldSourceKey];
-}) {
-  return (
-    <Row>
-      <RowLabel label={label} source={source} />
-      <textarea
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        rows={2}
-        className="min-w-[10rem] flex-1 resize-y rounded border border-line-strong bg-surface px-2 py-1 text-xs text-ink focus:border-primary focus:outline-none"
-      />
-    </Row>
-  );
-}
-
 function SelectRow({
   label,
   value,
@@ -1005,10 +863,8 @@ function SelectRow({
  * buttons -- `accent-primary` tints the native control so the selected one
  * reads as a filled circle, the same visual the reference Apple PDF uses
  * for its own Yes/No boxes -- with an optional inline "give details" input
- * right alongside, replacing what used to be two separate fields (a Yes/No
- * select plus its own "If Yes, give details" text field below it).
- * `name` must be unique per field instance (radio groups share selection
- * state by `name`) -- pass the underlying formData key.
+ * right alongside. `name` must be unique per field instance (radio groups
+ * share selection state by `name`) -- pass the underlying formData key.
  */
 function YesNoRow({
   name,
@@ -1052,6 +908,90 @@ function YesNoRow({
           <FieldIndicator source={detail.source} />
         </>
       )}
+    </Row>
+  );
+}
+
+/**
+ * Several small, short-answer fields packed into ONE compact row (2-4
+ * mini labeled inputs side by side) instead of a full Row each -- same
+ * visual pattern as the pre-existing "Store Opening Times" day grid inside
+ * Installing on Site, generalized here for any short-value field group
+ * (entrance/floor counts, a split name/mobile/email, etc).
+ */
+function MiniFieldsRow({
+  title,
+  fields,
+}: {
+  title: string;
+  fields: { key: string; label: string; value: string; onChange: (v: string) => void; source?: FieldSources[FieldSourceKey] }[];
+}) {
+  return (
+    <div className="flex flex-col rounded-lg border border-line bg-surface px-2.5 py-1.5">
+      <span className="mb-1 text-[11px] font-medium text-ink-secondary">{title}</span>
+      <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+        {fields.map((fld) => (
+          <label key={fld.key} className="flex flex-col gap-0.5">
+            <span className="flex items-center gap-1 text-[10px] font-medium text-ink-muted">
+              {fld.label}
+              <FieldIndicator source={fld.source} />
+            </span>
+            <input
+              value={fld.value}
+              onChange={(e) => fld.onChange(e.target.value)}
+              className="w-full rounded border border-line-strong bg-surface px-1.5 py-1 text-[11px] text-ink focus:border-primary focus:outline-none"
+            />
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const POSITION_MARKER_OPTIONS: { value: Exclude<PositionMarker, "">; label: string }[] = [
+  { value: "front", label: "Front" },
+  { value: "back", label: "Back" },
+  { value: "left", label: "Left" },
+  { value: "right", label: "Right" },
+  { value: "center", label: "Center" },
+];
+
+/**
+ * "Give buttons to mark the position" -- a single-select row of small
+ * pill buttons (Front/Back/Left/Right/Center, relative to the store's own
+ * entrance) rather than free text or a native radio/select, matching the
+ * requirement's own wording. Clicking the already-selected button clears
+ * it back to unanswered.
+ */
+function PositionMarkerRow({
+  label,
+  value,
+  onChange,
+  source,
+}: {
+  label: string;
+  value: PositionMarker;
+  onChange: (v: PositionMarker) => void;
+  source?: FieldSources[FieldSourceKey];
+}) {
+  return (
+    <Row>
+      <RowLabel label={label} source={source} />
+      <div className="flex flex-wrap items-center gap-1.5">
+        {POSITION_MARKER_OPTIONS.map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => onChange(value === opt.value ? "" : opt.value)}
+            className={cn(
+              "rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
+              value === opt.value ? "border-primary bg-primary text-on-brand" : "border-line-strong bg-surface text-ink-secondary hover:bg-surface-sunken"
+            )}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
     </Row>
   );
 }
