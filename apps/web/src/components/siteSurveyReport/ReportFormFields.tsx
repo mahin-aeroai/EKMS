@@ -13,6 +13,7 @@ import {
   MapPin,
   Sparkles,
   Store,
+  Tag,
   Truck,
   Users,
   type LucideIcon,
@@ -522,6 +523,75 @@ export function FormDataFields({
           <TextAreaField label="Any other helpful information" value={formData.approvalsOtherInfo} onChange={(v) => set(onFormDataChange, onTouched, "approvalsOtherInfo", v)} source={src.approvalsOtherInfo} className={FULL} />
         </FieldGrid>
       </AccordionSection>
+
+      {/*
+        Opportunity Information -- matches the reference PDF's own page
+        order (right after Approvals, before the photo-survey pages).
+        Filled ONCE here and shared across every site in this report (see
+        SiteSurveyFormData's own header comment) rather than re-typed per
+        site on the Measurement step -- MeasurementStep.tsx/SiteCard no
+        longer has its own copy of these fields.
+      */}
+      <AccordionSection
+        sectionKey="opportunity"
+        title="Opportunity Information"
+        icon={Tag}
+        color="primary"
+        filled={countFilledKeys(formData, OPPORTUNITY_KEYS)}
+        total={OPPORTUNITY_KEYS.length}
+        open={!!openSections.opportunity}
+        onToggle={onToggleSection}
+      >
+        <FieldGrid>
+          <TextField label="Opportunity Name" value={formData.opportunityName} onChange={(v) => set(onFormDataChange, onTouched, "opportunityName", v)} source={src.opportunityName} />
+          <SelectField
+            label="Opportunity Type"
+            value={formData.opportunityType}
+            onChange={(v) => set(onFormDataChange, onTouched, "opportunityType", v as SiteSurveyFormData["opportunityType"])}
+            source={src.opportunityType}
+            options={[
+              ["", "— Select —"],
+              ["individual_window", "Individual Window"],
+              ["window_vinyl", "Window Vinyl"],
+              ["banner", "Banner"],
+              ["light_box", "Light Box"],
+              ["glass_facade", "Glass Façade"],
+              ["existing_graphic", "Existing Graphic"],
+              ["other", "Other"],
+            ]}
+          />
+          <TextField label="Opportunity Type — if Other, please specify" value={formData.opportunityTypeOther} onChange={(v) => set(onFormDataChange, onTouched, "opportunityTypeOther", v)} source={src.opportunityTypeOther} />
+          <TextField label="Location" value={formData.opportunityLocation} onChange={(v) => set(onFormDataChange, onTouched, "opportunityLocation", v)} source={src.opportunityLocation} />
+          <TextField label="Store / Facade Area" value={formData.storeFacadeArea} onChange={(v) => set(onFormDataChange, onTouched, "storeFacadeArea", v)} source={src.storeFacadeArea} />
+          <TextField label="Apple Program Position" value={formData.appleProgramPosition} onChange={(v) => set(onFormDataChange, onTouched, "appleProgramPosition", v)} source={src.appleProgramPosition} />
+          <TextAreaField label="Description" value={formData.opportunityDescription} onChange={(v) => set(onFormDataChange, onTouched, "opportunityDescription", v)} source={src.opportunityDescription} className={HALF} />
+          <TextField
+            label="Existing Material Type (if a banner/graphic already exists)"
+            value={formData.existingMaterialType}
+            onChange={(v) => set(onFormDataChange, onTouched, "existingMaterialType", v)}
+            source={src.existingMaterialType}
+          />
+          <TextField
+            label="Existing Creative Condition"
+            value={formData.existingCreativeConditionForOpportunity}
+            onChange={(v) => set(onFormDataChange, onTouched, "existingCreativeConditionForOpportunity", v)}
+            source={src.existingCreativeConditionForOpportunity}
+          />
+          <YesNoField
+            label="Can existing creative be removed?"
+            value={formData.existingCreativeRemovableForOpportunity}
+            onChange={(v) => set(onFormDataChange, onTouched, "existingCreativeRemovableForOpportunity", v as YesNo)}
+            source={src.existingCreativeRemovableForOpportunity}
+          />
+          <TextField
+            label="Which entrance has the main footfall? (if multiple entrances)"
+            value={formData.mainFootfallEntranceNote}
+            onChange={(v) => set(onFormDataChange, onTouched, "mainFootfallEntranceNote", v)}
+            source={src.mainFootfallEntranceNote}
+          />
+          <TextAreaField label="Additional Opportunity Notes" value={formData.additionalOpportunityNotes} onChange={(v) => set(onFormDataChange, onTouched, "additionalOpportunityNotes", v)} source={src.additionalOpportunityNotes} className={FULL} />
+        </FieldGrid>
+      </AccordionSection>
     </>
   );
 }
@@ -603,8 +673,22 @@ const GRAPHICS_KEYS: (keyof SiteSurveyFormData)[] = [
   "graphicsOtherInfo",
 ];
 const APPROVALS_KEYS: (keyof SiteSurveyFormData)[] = ["specialApprovalsNeeded", "specialApprovalsDetails", "chainCentralApprovalNeeded", "chainCentralApprovalReason", "approvalsOtherInfo"];
+const OPPORTUNITY_KEYS: (keyof SiteSurveyFormData)[] = [
+  "opportunityName",
+  "opportunityType",
+  "opportunityTypeOther",
+  "opportunityLocation",
+  "storeFacadeArea",
+  "appleProgramPosition",
+  "opportunityDescription",
+  "existingMaterialType",
+  "existingCreativeConditionForOpportunity",
+  "existingCreativeRemovableForOpportunity",
+  "mainFootfallEntranceNote",
+  "additionalOpportunityNotes",
+];
 
-const SECTION_KEYS = ["site", "personnel", "store", "install", "delivery", "general", "suitability", "details", "safety", "graphics", "approvals"];
+const SECTION_KEYS = ["site", "personnel", "store", "install", "delivery", "general", "suitability", "details", "safety", "graphics", "approvals", "opportunity"];
 
 // ---------------------------------------------------------------------------
 // Helpers

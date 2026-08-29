@@ -91,10 +91,7 @@ function SiteCard({
   return (
     <div className="overflow-hidden rounded-xl border-2 border-line-strong">
       <div className="flex items-center justify-between gap-3 bg-surface-sunken px-4 py-2.5">
-        <h2 className="text-sm font-bold text-ink">
-          {total > 1 ? `Site ${index + 1} of ${total}` : "Site Details"}
-          {measurement.opportunityName ? ` — ${measurement.opportunityName}` : ""}
-        </h2>
+        <h2 className="text-sm font-bold text-ink">{total > 1 ? `Site ${index + 1} of ${total}` : "Site Details"}</h2>
         {onRemove && (
           <Button type="button" variant="ghost" size="sm" onClick={onRemove}>
             <Trash2 size={13} /> Remove site
@@ -121,66 +118,14 @@ function SiteCard({
           </p>
         </Section>
 
-        <Section title="Opportunity Information">
-        <Grid>
-          <TextField label="Opportunity Name" value={measurement.opportunityName} onChange={(v) => onChange("opportunityName", v)} />
-          <SelectField
-            label="Opportunity Type"
-            value={measurement.opportunityType}
-            onChange={(v) => onChange("opportunityType", v as SiteSurveyMeasurement["opportunityType"])}
-            options={[
-              ["", "— Select —"],
-              ["individual_window", "Individual Window"],
-              ["window_vinyl", "Window Vinyl"],
-              ["banner", "Banner"],
-              ["light_box", "Light Box"],
-              ["glass_facade", "Glass Façade"],
-              ["existing_graphic", "Existing Graphic"],
-              ["other", "Other"],
-            ]}
-          />
-          <TextField
-            label="Opportunity Type — if Other, please specify"
-            value={measurement.opportunityTypeOther}
-            onChange={(v) => onChange("opportunityTypeOther", v)}
-          />
-          <TextField label="Opportunity Location" value={measurement.opportunityLocation} onChange={(v) => onChange("opportunityLocation", v)} />
-          <TextField label="Store / Facade Area" value={measurement.storeFacadeArea} onChange={(v) => onChange("storeFacadeArea", v)} />
-          <TextField label="Apple Program Position" value={measurement.appleProgramPosition} onChange={(v) => onChange("appleProgramPosition", v)} />
-          <TextAreaField
-            label="Opportunity Description"
-            value={measurement.opportunityDescription}
-            onChange={(v) => onChange("opportunityDescription", v)}
-            className="sm:col-span-2"
-          />
-          <TextField
-            label="Existing Material Type (if a banner/graphic already exists)"
-            value={measurement.existingMaterialType}
-            onChange={(v) => onChange("existingMaterialType", v)}
-          />
-          <TextField
-            label="Existing Creative Condition"
-            value={measurement.existingCreativeConditionForOpportunity}
-            onChange={(v) => onChange("existingCreativeConditionForOpportunity", v)}
-          />
-          <YesNoField
-            label="Can existing creative be removed?"
-            value={measurement.existingCreativeRemovableForOpportunity}
-            onChange={(v) => onChange("existingCreativeRemovableForOpportunity", v as SiteSurveyMeasurement["existingCreativeRemovableForOpportunity"])}
-          />
-          <TextField
-            label="Which entrance has the main footfall? (if multiple entrances)"
-            value={measurement.mainFootfallEntranceNote}
-            onChange={(v) => onChange("mainFootfallEntranceNote", v)}
-          />
-          <TextAreaField
-            label="Additional Opportunity Notes"
-            value={measurement.additionalOpportunityNotes}
-            onChange={(v) => onChange("additionalOpportunityNotes", v)}
-            className="sm:col-span-2"
-          />
-        </Grid>
-      </Section>
+        {/*
+          Opportunity Information used to live here, per-site. It's now
+          filled once for the whole report on the Complete Details step /
+          Default Answers page (SiteSurveyFormData) and applies to every
+          site -- see that interface's own header comment. Only genuinely
+          per-site measurement/material/installation/Apple-standards fields
+          remain on this card.
+        */}
 
       <Section title="Visual Size">
         <Grid>

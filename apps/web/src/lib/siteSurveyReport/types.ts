@@ -164,6 +164,31 @@ export interface SiteSurveyFormData {
   chainCentralApprovalNeeded: YesNo;
   chainCentralApprovalReason: string;
   approvalsOtherInfo: string;
+
+  // -- Opportunity information -- (moved here from SiteSurveyMeasurement:
+  // originally per-site, now filled ONCE per report and applied to every
+  // site regardless of how many `measurements` entries exist -- same
+  // "fill it once, most of it fills itself in" treatment every other field
+  // in this interface already gets via the Default Answers page and
+  // "Apply saved defaults". drawSitePages in pdfBuild.ts reads these off
+  // ctx.data.formData now, not the per-site SiteSurveyMeasurement, so
+  // every site's PDF section prints the same Opportunity Information
+  // block.)
+  opportunityName: string;
+  opportunityType: OpportunityType;
+  opportunityTypeOther: string;
+  opportunityLocation: string;
+  storeFacadeArea: string;
+  appleProgramPosition: string;
+  opportunityDescription: string;
+  // Distinct from `materialType` on SiteSurveyMeasurement -- this is what's
+  // *already* on the wall/window before the new install, while
+  // `materialType` is what's being ordered for the NEW install.
+  existingMaterialType: string;
+  existingCreativeConditionForOpportunity: string;
+  existingCreativeRemovableForOpportunity: YesNo;
+  additionalOpportunityNotes: string;
+  mainFootfallEntranceNote: string;
 }
 
 export function emptyFormData(): SiteSurveyFormData {
@@ -261,6 +286,19 @@ export function emptyFormData(): SiteSurveyFormData {
     chainCentralApprovalNeeded: "",
     chainCentralApprovalReason: "",
     approvalsOtherInfo: "",
+
+    opportunityName: "",
+    opportunityType: "",
+    opportunityTypeOther: "",
+    opportunityLocation: "",
+    storeFacadeArea: "",
+    appleProgramPosition: "",
+    opportunityDescription: "",
+    existingMaterialType: "",
+    existingCreativeConditionForOpportunity: "",
+    existingCreativeRemovableForOpportunity: "",
+    additionalOpportunityNotes: "",
+    mainFootfallEntranceNote: "",
   };
 }
 
@@ -289,29 +327,13 @@ export type AppleStandardsMet = "yes" | "no" | "modifications" | "";
 // combined Photo + Facade diagram + Opportunity Information + Measurements
 // & Material + Apple Standards section rather than three separate,
 // non-adjacent pages the way the original single-measurement build did.
+//
+// NOTE: Opportunity information (name/type/location/etc.) does NOT live
+// here -- it moved to SiteSurveyFormData (see that interface's own comment)
+// so it's filled once per report and shared across every site, rather than
+// re-typed per site. Only the genuinely per-site measurement/material/
+// installation/Apple-standards fields remain below.
 export interface SiteSurveyMeasurement {
-  // -- Opportunity information --
-  opportunityName: string;
-  opportunityType: OpportunityType;
-  opportunityTypeOther: string;
-  opportunityLocation: string;
-  storeFacadeArea: string;
-  appleProgramPosition: string;
-  opportunityDescription: string;
-  // Distinct from `materialType` below -- this is what's *already* on the
-  // wall/window before the new install (per the reference's "Determine and
-  // record the type material being used if there is an existing banner or
-  // graphic in place"), while `materialType` is what's being ordered for
-  // the NEW install.
-  existingMaterialType: string;
-  existingCreativeConditionForOpportunity: string;
-  existingCreativeRemovableForOpportunity: YesNo;
-  additionalOpportunityNotes: string;
-  // Which entrance (of possibly several) carries the main footfall, per the
-  // reference's photo-survey diagram instructions ("For multiple entrances
-  // indicate which entrance has main footfall").
-  mainFootfallEntranceNote: string;
-
   // -- Measurements --
   visualWidthMm: number | null;
   visualHeightMm: number | null;
@@ -353,19 +375,6 @@ export interface SiteSurveyMeasurement {
 
 export function emptyMeasurement(): SiteSurveyMeasurement {
   return {
-    opportunityName: "",
-    opportunityType: "",
-    opportunityTypeOther: "",
-    opportunityLocation: "",
-    storeFacadeArea: "",
-    appleProgramPosition: "",
-    opportunityDescription: "",
-    existingMaterialType: "",
-    existingCreativeConditionForOpportunity: "",
-    existingCreativeRemovableForOpportunity: "",
-    additionalOpportunityNotes: "",
-    mainFootfallEntranceNote: "",
-
     visualWidthMm: null,
     visualHeightMm: null,
     visualSizeQuantity: null,

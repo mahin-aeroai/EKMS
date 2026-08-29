@@ -1559,8 +1559,13 @@ function drawFacadeDiagram(page: PDFPage, ctx: Ctx, m: SiteSurveyMeasurement, x:
  * photo -- see buildSiteSurveyReportPdf.
  */
 function drawSitePages(ctx: Ctx, m: SiteSurveyMeasurement, photo: SurveyPhotoImage | undefined, index: number, total: number) {
+  // Opportunity information is now filled once per report (SiteSurveyFormData,
+  // not the per-site SiteSurveyMeasurement) and applies to every site --
+  // read it off ctx.data.formData rather than `m`, so it's identical on
+  // every site's page here by construction.
+  const o = ctx.data.formData;
   const eyebrow = total > 1 ? `Site Photo & Measurement — Site ${index + 1} of ${total}` : "Site Photo & Measurement";
-  const bandTitle = total > 1 ? `Site ${index + 1} of ${total}${m.opportunityName ? ` — ${m.opportunityName}` : ""}` : "Site Photo & Measurement";
+  const bandTitle = total > 1 ? `Site ${index + 1} of ${total}${o.opportunityName ? ` — ${o.opportunityName}` : ""}` : "Site Photo & Measurement";
 
   const page = newPage(ctx, eyebrow, "grey");
   let y = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
@@ -1572,10 +1577,10 @@ function drawSitePages(ctx: Ctx, m: SiteSurveyMeasurement, photo: SurveyPhotoIma
   drawFacadeDiagram(page, ctx, m, contentLeft() + halfW + mm(6), y, halfW, rowH);
   y -= rowH + mm(5);
 
-  const opportunityTypeValue = m.opportunityType
-    ? m.opportunityType === "other"
-      ? m.opportunityTypeOther || "Other"
-      : OPPORTUNITY_TYPE_LABEL[m.opportunityType]
+  const opportunityTypeValue = o.opportunityType
+    ? o.opportunityType === "other"
+      ? o.opportunityTypeOther || "Other"
+      : OPPORTUNITY_TYPE_LABEL[o.opportunityType]
     : "";
 
   const standardsValue = (() => {
@@ -1596,17 +1601,17 @@ function drawSitePages(ctx: Ctx, m: SiteSurveyMeasurement, photo: SurveyPhotoIma
     page,
     ctx,
     [
-      { label: "Opportunity Name", value: m.opportunityName, icon: "tag" },
+      { label: "Opportunity Name", value: o.opportunityName, icon: "tag" },
       { label: "Opportunity Type", value: opportunityTypeValue, icon: "layoutGrid" },
-      { label: "Location", value: m.opportunityLocation, icon: "mapPin" },
-      { label: "Store / Facade Area", value: m.storeFacadeArea, icon: "squareDashed" },
-      { label: "Apple Program Position", value: m.appleProgramPosition, icon: "idCard" },
-      { label: "Description", value: m.opportunityDescription, icon: "fileText" },
-      { label: "Existing Material Type", value: m.existingMaterialType, icon: "layers" },
-      { label: "Existing Creative Condition", value: m.existingCreativeConditionForOpportunity, icon: "camera" },
-      { label: "Existing Creative Removable?", value: yesNoLabel(m.existingCreativeRemovableForOpportunity), icon: "wrench" },
-      { label: "Main Footfall Entrance Note", value: m.mainFootfallEntranceNote, icon: "users" },
-      { label: "Additional Opportunity Notes", value: m.additionalOpportunityNotes, icon: "clipboardList" },
+      { label: "Location", value: o.opportunityLocation, icon: "mapPin" },
+      { label: "Store / Facade Area", value: o.storeFacadeArea, icon: "squareDashed" },
+      { label: "Apple Program Position", value: o.appleProgramPosition, icon: "idCard" },
+      { label: "Description", value: o.opportunityDescription, icon: "fileText" },
+      { label: "Existing Material Type", value: o.existingMaterialType, icon: "layers" },
+      { label: "Existing Creative Condition", value: o.existingCreativeConditionForOpportunity, icon: "camera" },
+      { label: "Existing Creative Removable?", value: yesNoLabel(o.existingCreativeRemovableForOpportunity), icon: "wrench" },
+      { label: "Main Footfall Entrance Note", value: o.mainFootfallEntranceNote, icon: "users" },
+      { label: "Additional Opportunity Notes", value: o.additionalOpportunityNotes, icon: "clipboardList" },
     ],
     contentLeft(),
     contentWidth(),

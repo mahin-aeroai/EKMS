@@ -59,19 +59,10 @@ const PHOTO_CATEGORIES = [
 ] as const;
 
 const HEADER_KEYS = ["storeName", "address", "sfoId", "program", "surveyDate", "surveyorName"] as const;
+// Opportunity information (name/type/location/etc.) is extracted as part of
+// `formData` now, not `measurement` -- see SiteSurveyFormData's own header
+// comment on why it moved (filled once per report, shared across sites).
 const MEASUREMENT_STRING_KEYS = [
-  "opportunityName",
-  "opportunityType",
-  "opportunityTypeOther",
-  "opportunityLocation",
-  "storeFacadeArea",
-  "appleProgramPosition",
-  "opportunityDescription",
-  "existingMaterialType",
-  "existingCreativeConditionForOpportunity",
-  "existingCreativeRemovableForOpportunity",
-  "additionalOpportunityNotes",
-  "mainFootfallEntranceNote",
   "visualWidthMm",
   "visualHeightMm",
   "visualSizeQuantity",
@@ -239,14 +230,13 @@ const EXTRACT_TOOL: Tool = {
           chainCentralApprovalNeeded: { type: "string", enum: ["yes", "no", ""], description: "If chain store, does it need approval from central team?" },
           chainCentralApprovalReason: { type: "string" },
           approvalsOtherInfo: { type: "string" },
-        },
-        required: [...FORM_DATA_KEYS],
-      },
-      measurement: {
-        type: "object",
-        description:
-          "The Opportunity Information / Photo Survey / Measurements / Material Information / Technical Opportunity Details / Apple Standards sections, describing the single primary opportunity surveyed in detail (if the document genuinely surveys more than one opportunity to this level of detail, describe the others in additionalOpportunityNotes rather than inventing extra fields). Numeric size/bleed/quantity fields are DIGITS-ONLY STRINGS in millimetres (e.g. '5522') -- convert cm/inches to mm and add the field to `flagged` if you had to convert. Empty string for any value not found.",
-        properties: {
+
+          // Opportunity information -- describes the single primary
+          // opportunity surveyed in detail (if the document genuinely
+          // surveys more than one opportunity to this level of detail,
+          // describe the others in additionalOpportunityNotes rather than
+          // inventing extra fields). Filled once per report and shared
+          // across every site, not per-measurement.
           opportunityName: { type: "string" },
           opportunityType: {
             type: "string",
@@ -259,13 +249,20 @@ const EXTRACT_TOOL: Tool = {
           opportunityDescription: { type: "string" },
           existingMaterialType: {
             type: "string",
-            description: "Type of material already in place, if a banner or graphic already exists at this opportunity (distinct from materialType below, which is for the NEW install).",
+            description: "Type of material already in place, if a banner or graphic already exists at this opportunity (distinct from measurement.materialType, which is for the NEW install).",
           },
           existingCreativeConditionForOpportunity: { type: "string" },
           existingCreativeRemovableForOpportunity: { type: "string", enum: ["yes", "no", ""] },
           additionalOpportunityNotes: { type: "string" },
           mainFootfallEntranceNote: { type: "string", description: "If multiple entrances, which one carries the main footfall." },
-
+        },
+        required: [...FORM_DATA_KEYS],
+      },
+      measurement: {
+        type: "object",
+        description:
+          "The Measurements / Material Information / Technical Opportunity Details / Apple Standards sections for the single primary opportunity surveyed in detail. Numeric size/bleed/quantity fields are DIGITS-ONLY STRINGS in millimetres (e.g. '5522') -- convert cm/inches to mm and add the field to `flagged` if you had to convert. Empty string for any value not found.",
+        properties: {
           visualWidthMm: { type: "string" },
           visualHeightMm: { type: "string" },
           visualSizeQuantity: { type: "string", description: "Quantity of this opportunity (e.g. '1' for '1 No'). Digits only." },
