@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ClipboardCheck, Copy, Download, Eye, FileUp, PenLine, Search, Sparkles, Trash2 } from "lucide-react";
+import { ClipboardCheck, Copy, Download, Eye, Search, Sparkles, Trash2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -64,7 +64,6 @@ export function SiteSurveyReportsListClient() {
   const role = useUserRole();
   const [rows, setRows] = useState<ListRow[] | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [showNewDialog, setShowNewDialog] = useState(false);
   const [creating, setCreating] = useState(false);
   const [query, setQuery] = useState("");
   const [programFilter, setProgramFilter] = useState("");
@@ -106,23 +105,17 @@ export function SiteSurveyReportsListClient() {
     });
   }, [rows, query, programFilter, statusFilter, surveyorFilter, fromDate, toDate]);
 
-  async function startNewReport(source: "pdf" | "manual") {
+  async function startNewReport() {
     setCreating(true);
     const { data: userData } = await supabase.auth.getUser();
-    // Manually-started reports pre-fill from the saved defaults template
-    // (site_survey_report_field_defaults) so a person isn't re-typing the
-    // same standard answers on every report -- deliberately NOT done for
-    // PDF-sourced reports, which land here with empty form_data and get
-    // their first, unobstructed pass from AI extraction instead (see
-    // that migration's own header comment for why).
+    // Pre-fill from the saved defaults template (site_survey_report_field_defaults)
+    // so a person isn't re-typing the same standard answers on every report.
     let form_data: SiteSurveyFormData | undefined;
-    if (source === "manual") {
-      const { data: defaults } = await supabase.from("site_survey_report_field_defaults").select("form_data").eq("id", true).maybeSingle();
-      if (defaults?.form_data) form_data = { ...emptyFormData(), ...(defaults.form_data as Partial<SiteSurveyFormData>) };
-    }
+    const { data: defaults } = await supabase.from("site_survey_report_field_defaults").select("form_data").eq("id", true).maybeSingle();
+    if (defaults?.form_data) form_data = { ...emptyFormData(), ...(defaults.form_data as Partial<SiteSurveyFormData>) };
     const { data, error } = await supabase
       .from("site_survey_reports")
-      .insert({ source, status: "draft", created_by: userData?.user?.id ?? null, ...(form_data ? { form_data } : {}) })
+      .insert({ source: "manual", status: "draft", created_by: userData?.user?.id ?? null, ...(form_data ? { form_data } : {}) })
       .select("id")
       .single();
     setCreating(false);
@@ -354,10 +347,7 @@ export function SiteSurveyReportsListClient() {
           </span>
           <div>
             <h1 className="text-xl font-semibold text-ink">Site Survey Reports</h1>
-            <p className="mt-0.5 text-sm text-ink-secondary">
-              Upload an existing Apple Site Survey Report PDF for AI-assisted extraction, or start one manually, then
-              export a matching PDF.
-            </p>
+            <p className="mt-0.5 text-sm text-ink-secondary">Fill in a Site Survey Report and export a matching PDF.</p>
           </div>
         </div>
         <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
@@ -367,7 +357,7 @@ export function SiteSurveyReportsListClient() {
           >
             <Sparkles size={14} /> Default Answers
           </Link>
-          <Button onClick={() => setShowNewDialog(true)} className="w-full sm:w-auto">
+          <Button onClick={() => startNewReport()} loading={creating} className="w-full sm:w-auto">
             New Report
           </Button>
         </div>
@@ -476,35 +466,6 @@ export function SiteSurveyReportsListClient() {
           <Table columns={COLUMNS} rows={filtered} onRowClick={(r) => router.push(`/workspaces/site-survey-report/${r.id}`)} />
         )}
       </div>
-
-      <Dialog open={showNewDialog} onClose={() => setShowNewDialog(false)} title="New Site Survey Report">
-        <div className="flex flex-col gap-2">
-          <button
-            type="button"
-            disabled={creating}
-            onClick={() => startNewReport("pdf")}
-            className="flex items-center gap-3 rounded-lg border border-line-strong p-3 text-left hover:bg-surface-sunken disabled:opacity-50"
-          >
-            <FileUp size={18} className="text-primary" />
-            <span>
-              <span className="block text-sm font-medium text-ink">Upload existing PDF</span>
-              <span className="block text-xs text-ink-muted">AI reads it and fills in as many fields as it can.</span>
-            </span>
-          </button>
-          <button
-            type="button"
-            disabled={creating}
-            onClick={() => startNewReport("manual")}
-            className="flex items-center gap-3 rounded-lg border border-line-strong p-3 text-left hover:bg-surface-sunken disabled:opacity-50"
-          >
-            <PenLine size={18} className="text-primary" />
-            <span>
-              <span className="block text-sm font-medium text-ink">Start manually</span>
-              <span className="block text-xs text-ink-muted">Fill in a blank form yourself.</span>
-            </span>
-          </button>
-        </div>
-      </Dialog>
 
       <Dialog
         open={!!deleteTarget}

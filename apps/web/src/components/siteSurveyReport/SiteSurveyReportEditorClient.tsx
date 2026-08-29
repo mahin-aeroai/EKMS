@@ -9,9 +9,6 @@ import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
 import { StepperNav, type StepperStep } from "./StepperNav";
-import { UploadStep } from "./UploadStep";
-import { ExtractionStep } from "./ExtractionStep";
-import { ReviewStep } from "./ReviewStep";
 import { PreviewStep } from "./PreviewStep";
 import { DetailsStep } from "./DetailsStep";
 import { MeasurementStep } from "./MeasurementStep";
@@ -25,23 +22,18 @@ import {
   emptyMeasurement,
   normalizeMeasurements,
   type FieldSourceKey,
-  type PhotoCategory,
   type SiteSurveyFormData,
   type SiteSurveyMeasurement,
   type SiteSurveyPhotoRow,
   type SiteSurveyReportRow,
 } from "@/lib/siteSurveyReport/types";
 
-// Milestone 5 adds Preview -- builds the exact PDF Generate would produce
-// (see buildPdfBlob, shared by both) and renders it inline, without
-// downloading or touching status/generated_at -- completing every step in
-// the stepper. A manually-created report still lands on Complete Details
-// (nothing upstream applies to it); a PDF-sourced report lands on Upload
-// PDF if it has no source PDF yet, on AI Extraction if it has one but
-// hasn't been reviewed yet, or on Review once extraction has run --
-// decided once, right after the report loads (see the initialStepRef
-// effect), not re-decided on every render so a person's own
-// step navigation is never fought.
+// Manual entry only -- the PDF-upload / AI-extraction / Review path has
+// been removed (see UploadStep/ExtractionStep/ReviewStep's git history if
+// it's ever needed again); every report now lands straight on Complete
+// Details. Preview builds the exact PDF Generate would produce (see
+// buildPdfBlob, shared by both) and renders it inline, without downloading
+// or touching status/generated_at.
 
 const STATUS_BADGE: Record<SiteSurveyReportRow["status"], "neutral" | "info" | "warning" | "success"> = {
   draft: "neutral",
@@ -51,7 +43,7 @@ const STATUS_BADGE: Record<SiteSurveyReportRow["status"], "neutral" | "info" | "
   generated: "success",
 };
 
-type StepId = "upload" | "extraction" | "review" | "details" | "photos" | "measurements" | "preview" | "generate";
+type StepId = "details" | "photos" | "measurements" | "preview" | "generate";
 
 export function SiteSurveyReportEditorClient({ reportId }: { reportId: string }) {
   const { toast } = useToast();
@@ -63,15 +55,7 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [buildingPreview, setBuildingPreview] = useState(false);
   const previewUrlRef = useRef<string | null>(null);
-  const [uploadingSourcePdf, setUploadingSourcePdf] = useState(false);
-  const [extracting, setExtracting] = useState(false);
-  const [extractionError, setExtractionError] = useState<string | null>(null);
-  const [hasRunExtraction, setHasRunExtraction] = useState(false);
-  const [flagged, setFlagged] = useState<string[]>([]);
-  const [pageHints, setPageHints] = useState<{ page: number; likelyCategory: PhotoCategory; note: string }[]>([]);
-  const [flagMessages, setFlagMessages] = useState<Record<string, string>>({});
   const loadedRef = useRef(false);
-  const initialStepChosenRef = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function reloadPhotos() {
@@ -101,11 +85,6 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
           field_sources: data.field_sources ?? {},
           extraction_meta: data.extraction_meta ?? null,
         });
-        if (data.extraction_meta) {
-          setFlagged(data.extraction_meta.flagged ?? []);
-          setPageHints(data.extraction_meta.pageHints ?? []);
-          setFlagMessages(data.extraction_meta.flagMessages ?? {});
-        }
         loadedRef.current = true;
       });
     reloadPhotos();
@@ -127,103 +106,6 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [report]);
-
-  // Chooses the right landing step exactly once, right after the report
-  // first loads -- never again, so a person's own navigation afterward is
-  // never overridden by this effect re-running.
-  useEffect(() => {
-    if (!report || initialStepChosenRef.current) return;
-    initialStepChosenRef.current = true;
-    if (report.source !== "pdf") return; // manual reports already default to "details"
-    // Any status past "draft" means extraction has run at least once in an
-    // earlier session -- this flag only starts false because it's derived
-    // client state, not persisted; it must still reflect reality on load.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (report.status !== "draft") setHasRunExtraction(true);
-    if (!report.source_pdf_relative_path) {
-      setStep("upload");
-    } else if (report.status === "draft" || report.status === "extracting") {
-      setStep("extraction");
-    } else {
-      setStep("review");
-    }
-  }, [report]);
-
-  async function handleSourcePdfUpload(file: File) {
-    setUploadingSourcePdf(true);
-    try {
-      const uploadRes = await fetch(`/api/site-survey-reports/${reportId}/source-pdf/upload-url`, { method: "POST" });
-      const uploadData = await uploadRes.json();
-      if (!uploadRes.ok) {
-        toast("danger", uploadData.message || uploadData.error || "Couldn't get an upload link");
-        return;
-      }
-      const putRes = await fetch(uploadData.url, { method: "PUT", headers: { "Content-Type": "application/pdf" }, body: file });
-      if (!putRes.ok) {
-        toast("danger", "Upload to storage failed");
-        return;
-      }
-      const { error } = await supabase
-        .from("site_survey_reports")
-        .update({ source_pdf_relative_path: uploadData.relative_path })
-        .eq("id", reportId);
-      if (error) {
-        toast("danger", `Uploaded, but couldn't record it: ${error.message}`);
-        return;
-      }
-      setReport((prev) => (prev ? { ...prev, source_pdf_relative_path: uploadData.relative_path } : prev));
-      toast("success", "PDF uploaded");
-    } catch {
-      toast("danger", "Couldn't upload that PDF");
-    } finally {
-      setUploadingSourcePdf(false);
-    }
-  }
-
-  async function handleRunExtraction() {
-    if (!report?.source_pdf_relative_path) return;
-    setExtracting(true);
-    setExtractionError(null);
-    try {
-      const res = await fetch(`/api/site-survey-reports/${reportId}/extract`, { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) {
-        setExtractionError(data.message || data.error || "Extraction failed");
-        return;
-      }
-      setReport((prev) =>
-        prev
-          ? {
-              ...prev,
-              store_name: data.report.store_name,
-              address: data.report.address,
-              sfo_id: data.report.sfo_id,
-              program: data.report.program,
-              survey_date: data.report.survey_date,
-              surveyor_name: data.report.surveyor_name,
-              form_data: { ...emptyFormData(), ...data.report.form_data },
-              // Extraction only ever targets the primary/first site -- fold
-              // its result into slot 0, keeping any additional sites a
-              // person has already added by hand on this report.
-              measurements: [{ ...emptyMeasurement(), ...data.report.measurement }, ...prev.measurements.slice(1)],
-              field_sources: data.report.field_sources,
-              extraction_meta: data.report.extraction_meta,
-              status: data.report.status,
-            }
-          : prev
-      );
-      setFlagged(data.flagged ?? []);
-      setPageHints(data.pageHints ?? []);
-      setFlagMessages(data.flagMessages ?? {});
-      setHasRunExtraction(true);
-      toast("success", "Extraction complete — review the results below");
-      setStep("review");
-    } catch {
-      setExtractionError("Couldn't reach the extraction service");
-    } finally {
-      setExtracting(false);
-    }
-  }
 
   async function persist(current: SiteSurveyReportRow, opts?: { silent?: boolean }) {
     setSaving(true);
@@ -382,11 +264,7 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
   const detailsComplete = Boolean(report.store_name && report.sfo_id && report.surveyor_name);
   const measurementsComplete = report.measurements.every((m) => m.visualWidthMm != null && m.visualHeightMm != null);
 
-  const isPdfSourced = report.source === "pdf";
   const STEPS: StepperStep[] = [
-    { id: "upload", label: "Upload PDF", disabled: !isPdfSourced, complete: Boolean(report.source_pdf_relative_path) },
-    { id: "extraction", label: "AI Extraction", disabled: !isPdfSourced || !report.source_pdf_relative_path, complete: hasRunExtraction },
-    { id: "review", label: "Review", disabled: !isPdfSourced || !hasRunExtraction, complete: report.status !== "review_required" && hasRunExtraction },
     { id: "details", label: "Complete Details", complete: detailsComplete },
     { id: "photos", label: "Photos", complete: photos.length > 0 },
     { id: "measurements", label: "Measurements", complete: measurementsComplete },
@@ -411,9 +289,7 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
               <Badge status={STATUS_BADGE[report.status]}>{REPORT_STATUS_LABEL[report.status]}</Badge>
               {saving && <span className="text-xs text-ink-muted">Saving…</span>}
             </div>
-            <p className="mt-0.5 text-sm text-ink-secondary">
-              {report.source === "pdf" ? "Created from an uploaded Site Survey PDF" : "Created manually"}
-            </p>
+            <p className="mt-0.5 text-sm text-ink-secondary">Created manually</p>
           </div>
         </div>
         <Link
@@ -429,39 +305,6 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
       </div>
 
       <div className="mt-6">
-        {step === "upload" && (
-          <UploadStep
-            sourcePdfName={report.source_pdf_relative_path}
-            uploading={uploadingSourcePdf}
-            onUpload={handleSourcePdfUpload}
-            onContinue={() => setStep("extraction")}
-          />
-        )}
-        {step === "extraction" && (
-          <ExtractionStep
-            canRun={Boolean(report.source_pdf_relative_path)}
-            running={extracting}
-            error={extractionError}
-            hasRunBefore={hasRunExtraction}
-            onRun={handleRunExtraction}
-          />
-        )}
-        {step === "review" && (
-          <ReviewStep
-            reportId={reportId}
-            header={header}
-            onHeaderChange={updateHeader}
-            formData={report.form_data}
-            onFormDataChange={updateFormData}
-            fieldSources={report.field_sources}
-            onTouched={onTouched}
-            flagged={flagged}
-            flagMessages={flagMessages}
-            pageHints={pageHints}
-            photos={photos}
-            onPhotoAdded={reloadPhotos}
-          />
-        )}
         {step === "details" && (
           <DetailsStep
             header={header}
