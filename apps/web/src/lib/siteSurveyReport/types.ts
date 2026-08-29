@@ -157,6 +157,13 @@ export type FieldSources = Partial<Record<FieldSourceKey, FieldSource>>;
 export interface ExtractionMeta {
   flagged: string[];
   pageHints: { page: number; likelyCategory: PhotoCategory; note: string }[];
+  // Human-readable explanation for a subset of `flagged` entries -- keyed by
+  // the same dot-path, e.g. "header.surveyDate" -> `Original text was "25th
+  // September" -- no year stated, so it was left blank rather than guessed.`
+  // Only code-derived flags (right now: unparseable survey dates) populate
+  // this; model-derived flags have no entry here. Optional/absent on older
+  // persisted rows from before this field existed.
+  flagMessages?: Record<string, string>;
 }
 
 // site_survey_reports -- one row per report.

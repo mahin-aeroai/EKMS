@@ -190,6 +190,73 @@ function parseMm(value: string): number | null {
   return Number.isFinite(n) ? Math.round(n) : null;
 }
 
+const MONTH_NAMES: Record<string, number> = {
+  jan: 1, january: 1,
+  feb: 2, february: 2,
+  mar: 3, march: 3,
+  apr: 4, april: 4,
+  may: 5,
+  jun: 6, june: 6,
+  jul: 7, july: 7,
+  aug: 8, august: 8,
+  sep: 9, sept: 9, september: 9,
+  oct: 10, october: 10,
+  nov: 11, november: 11,
+  dec: 12, december: 12,
+};
+
+// Parses a survey-date string the model extracted from a PDF into a
+// YYYY-MM-DD string Postgres's `date` column will accept, or `null` when
+// the text doesn't state a year, or isn't a recognizable date at all.
+// CRITICAL: never guesses a year -- per this feature's "never invent a
+// value" rule, a bare "25th September" (this app's real-world trigger case:
+// a reference report with no year on the inspection date) must come back
+// null, not today's year or any other invented one, so the caller can leave
+// the field blank and flag it for a human instead of writing something
+// unverifiable -- or, previously, something Postgres outright rejected
+// (this whole helper exists because writing the raw un-parsed text straight
+// into a `date` column crashed extraction with "invalid input syntax for
+// type date").
+//
+// Recognized formats:
+//   "2026-09-25"               ISO, validated then passed through
+//   "25th September 2026"      day (+ordinal) + month name + year
+//   "September 25, 2026"       month name + day (+ordinal, +comma) + year
+//   "25/09/2026", "25-09-2026" day-first numeric (this app is India-based)
+function parseSurveyDateIso(raw: string): string | null {
+  const text = raw.trim();
+  if (!text) return null;
+
+  const toIso = (y: number, mo: number, d: number): string | null => {
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+    const dt = new Date(Date.UTC(y, mo - 1, d));
+    // Catches out-of-range days (e.g. Feb 30) that Date would otherwise
+    // silently roll over into the next month.
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return null;
+    return `${y.toString().padStart(4, "0")}-${mo.toString().padStart(2, "0")}-${d.toString().padStart(2, "0")}`;
+  };
+
+  let m = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) return toIso(Number(m[1]), Number(m[2]), Number(m[3]));
+
+  m = text.match(/^(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+)\.?\s+(\d{4})$/);
+  if (m) {
+    const month = MONTH_NAMES[m[2].toLowerCase()];
+    if (month) return toIso(Number(m[3]), month, Number(m[1]));
+  }
+
+  m = text.match(/^([A-Za-z]+)\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})$/);
+  if (m) {
+    const month = MONTH_NAMES[m[1].toLowerCase()];
+    if (month) return toIso(Number(m[3]), month, Number(m[2]));
+  }
+
+  m = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (m) return toIso(Number(m[3]), Number(m[2]), Number(m[1]));
+
+  return null;
+}
+
 interface ExtractedPayload {
   header: Record<(typeof HEADER_KEYS)[number], string>;
   formData: Record<string, string>;
@@ -289,13 +356,38 @@ export async function POST(request: Request, { params }: { params: Promise<{ rep
       surveyDate: "survey_date",
       surveyorName: "surveyor_name",
     };
+    // Fields the merge loop itself flags (right now: an unparseable
+    // surveyDate), merged with the model's own `flagged` further below --
+    // kept separate from `extracted.flagged` here since only these have a
+    // human-readable `flagMessages` entry.
+    const codeFlags: string[] = [];
+    const flagMessages: Record<string, string> = {};
+
     const fieldSources: FieldSources = { ...report.field_sources };
     for (const key of HEADER_KEYS) {
       const extractedValue = (extracted.header?.[key] ?? "").trim();
-      if (!mergedHeader[key] && extractedValue) {
-        mergedHeader[key] = extractedValue;
-        fieldSources[dbHeaderKey[key]] = "ai";
+      if (mergedHeader[key] || !extractedValue) continue;
+
+      if (key === "surveyDate") {
+        // Never write the model's raw text straight into the `date`
+        // column (see parseSurveyDateIso) -- parse it first, and if it
+        // doesn't resolve to a real calendar date (most commonly: no year
+        // stated), leave the field blank and flag it instead of guessing
+        // or crashing.
+        const iso = parseSurveyDateIso(extractedValue);
+        if (iso) {
+          mergedHeader.surveyDate = iso;
+          fieldSources[dbHeaderKey.surveyDate] = "ai";
+        } else {
+          codeFlags.push("header.surveyDate");
+          flagMessages["header.surveyDate"] =
+            `The document says "${extractedValue}" -- that doesn't include a year (or isn't a date format this can parse), so it was left blank rather than guessed. Enter the survey date manually.`;
+        }
+        continue;
       }
+
+      mergedHeader[key] = extractedValue;
+      fieldSources[dbHeaderKey[key]] = "ai";
     }
 
     const mergedFormData: SiteSurveyFormData = { ...emptyFormData(), ...report.form_data };
@@ -327,8 +419,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ rep
     const pageHints = (extracted.pageHints ?? []).filter(
       (h) => typeof h.page === "number" && (PHOTO_CATEGORIES as readonly string[]).includes(h.likelyCategory)
     );
-    const flagged = extracted.flagged ?? [];
-    const extractionMeta = { flagged, pageHints };
+    const flagged = [...new Set([...(extracted.flagged ?? []), ...codeFlags])];
+    const extractionMeta = { flagged, pageHints, flagMessages };
 
     const { error: updateErr } = await supabase
       .from("site_survey_reports")
@@ -365,6 +457,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ rep
       },
       flagged,
       pageHints,
+      flagMessages,
     });
   } catch (err) {
     await supabase.from("site_survey_reports").update({ status: previousStatus }).eq("id", reportId);

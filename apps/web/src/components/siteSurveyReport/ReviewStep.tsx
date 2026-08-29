@@ -42,6 +42,7 @@ interface Props {
   fieldSources: FieldSources;
   onTouched: (key: FieldSourceKey) => void;
   flagged: string[];
+  flagMessages?: Record<string, string>;
   pageHints: PageHint[];
   photos: SiteSurveyPhotoRow[];
   onPhotoAdded: () => void;
@@ -54,7 +55,20 @@ function prettifyFieldPath(path: string): string {
     .replace(/^./, (c) => c.toUpperCase());
 }
 
-export function ReviewStep({ reportId, header, onHeaderChange, formData, onFormDataChange, fieldSources, onTouched, flagged, pageHints, photos, onPhotoAdded }: Props) {
+export function ReviewStep({
+  reportId,
+  header,
+  onHeaderChange,
+  formData,
+  onFormDataChange,
+  fieldSources,
+  onTouched,
+  flagged,
+  flagMessages,
+  pageHints,
+  photos,
+  onPhotoAdded,
+}: Props) {
   const { toast } = useToast();
   const [pdfBytes, setPdfBytes] = useState<ArrayBuffer | null>(null);
   const [pages, setPages] = useState<RasterizedPage[] | null>(null);
@@ -115,7 +129,10 @@ export function ReviewStep({ reportId, header, onHeaderChange, formData, onFormD
           </div>
           <ul className="ml-5 list-disc text-xs text-ink-secondary">
             {flagged.map((f) => (
-              <li key={f}>{prettifyFieldPath(f)}</li>
+              <li key={f}>
+                {prettifyFieldPath(f)}
+                {flagMessages?.[f] && <span className="block opacity-80">{flagMessages[f]}</span>}
+              </li>
             ))}
           </ul>
         </div>

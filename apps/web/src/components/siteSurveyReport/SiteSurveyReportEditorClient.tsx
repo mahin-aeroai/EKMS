@@ -68,6 +68,7 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
   const [hasRunExtraction, setHasRunExtraction] = useState(false);
   const [flagged, setFlagged] = useState<string[]>([]);
   const [pageHints, setPageHints] = useState<{ page: number; likelyCategory: PhotoCategory; note: string }[]>([]);
+  const [flagMessages, setFlagMessages] = useState<Record<string, string>>({});
   const loadedRef = useRef(false);
   const initialStepChosenRef = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -102,6 +103,7 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
         if (data.extraction_meta) {
           setFlagged(data.extraction_meta.flagged ?? []);
           setPageHints(data.extraction_meta.pageHints ?? []);
+          setFlagMessages(data.extraction_meta.flagMessages ?? {});
         }
         loadedRef.current = true;
       });
@@ -208,6 +210,7 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
       );
       setFlagged(data.flagged ?? []);
       setPageHints(data.pageHints ?? []);
+      setFlagMessages(data.flagMessages ?? {});
       setHasRunExtraction(true);
       toast("success", "Extraction complete — review the results below");
       setStep("review");
@@ -440,6 +443,7 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
             fieldSources={report.field_sources}
             onTouched={onTouched}
             flagged={flagged}
+            flagMessages={flagMessages}
             pageHints={pageHints}
             photos={photos}
             onPhotoAdded={reloadPhotos}
