@@ -214,6 +214,61 @@ export function emptyReportDefaults(source: ReportSource): NewSiteSurveyReport {
   };
 }
 
+// The installation-area marking on the category="measurement" photo. A
+// real installed area is essentially never a perfect axis-aligned
+// rectangle once perspective is involved, so this is an arbitrary polygon
+// (>=3 points, fractional 0-1 relative to the FULL original image,
+// top-left origin) that every corner -- and any point inserted along an
+// edge -- can be dragged independently to align with the photo, rather
+// than a fixed rectangle. `obstacles` are zero or more separate cut-out
+// rectangles inside/near the marked area (a pillar, pipe, or other
+// obstruction), each carrying its own free-text note (e.g. "Pillar -- 300
+// x 200mm") -- drawn distinctly from the main outline both on screen and
+// in the generated PDF.
+export interface AnnotationPoint {
+  x: number;
+  y: number;
+}
+export interface AnnotationObstacle {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  note: string;
+}
+export interface SiteSurveyPhotoAnnotation {
+  points: AnnotationPoint[];
+  obstacles: AnnotationObstacle[];
+}
+/** The original single-rectangle shape this replaced -- still what's stored on any photo annotated before this change. */
+export interface LegacyRectAnnotation {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+/** What's actually read back from the DB (site_survey_photos.annotation, jsonb, un-migrated) -- either shape, or nothing yet. Always pass this through normalizeAnnotation() before using it; never assume the new shape directly. */
+export type SiteSurveyPhotoAnnotationRaw = SiteSurveyPhotoAnnotation | LegacyRectAnnotation | null;
+
+/** Converts whatever's actually stored (new polygon+obstacles shape, the original single-rectangle shape from before this change, or nothing) into the canonical polygon shape. A legacy rectangle becomes its equivalent 4-corner polygon with no obstacles, so every already-marked photo keeps rendering exactly as before until someone re-edits it. */
+export function normalizeAnnotation(raw: SiteSurveyPhotoAnnotationRaw): SiteSurveyPhotoAnnotation | null {
+  if (!raw) return null;
+  if ("points" in raw && Array.isArray(raw.points)) {
+    return { points: raw.points, obstacles: Array.isArray(raw.obstacles) ? raw.obstacles : [] };
+  }
+  const { x, y, w, h } = raw as LegacyRectAnnotation;
+  if ([x, y, w, h].some((n) => typeof n !== "number" || Number.isNaN(n))) return null;
+  return {
+    points: [
+      { x, y },
+      { x: x + w, y },
+      { x: x + w, y: y + h },
+      { x, y: y + h },
+    ],
+    obstacles: [],
+  };
+}
+
 // site_survey_photos -- one row per photo.
 export interface SiteSurveyPhotoRow {
   id: string;
@@ -224,9 +279,10 @@ export interface SiteSurveyPhotoRow {
   sort_order: number;
   source: PhotoSource;
   original_page_number: number | null;
-  // Fractional {x,y,w,h}, 0-1 relative to the image, only ever set on the
-  // category="measurement" photo.
-  annotation: { x: number; y: number; w: number; h: number } | null;
+  // Only ever set on the category="measurement" photo -- see
+  // SiteSurveyPhotoAnnotationRaw's header comment. Always read via
+  // normalizeAnnotation(), never assumed to already be the new shape.
+  annotation: SiteSurveyPhotoAnnotationRaw;
   created_at: string;
 }
 

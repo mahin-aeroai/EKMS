@@ -64,7 +64,7 @@ import {
   type PDFPage,
 } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
-import type { PhotoCategory, SiteSurveyFormData, SiteSurveyMeasurement } from "./types";
+import { normalizeAnnotation, type PhotoCategory, type SiteSurveyFormData, type SiteSurveyMeasurement, type SiteSurveyPhotoAnnotation, type SiteSurveyPhotoAnnotationRaw } from "./types";
 
 const PT_PER_MM = 72 / 25.4;
 const mm = (v: number) => v * PT_PER_MM;
@@ -112,6 +112,11 @@ const PLACEHOLDER_BG = rgb(0.95, 0.95, 0.96);
 const MARK = rgb(0.86, 0.91, 0.24);
 const MARK_TEXT = rgb(0.42, 0.46, 0.06);
 
+// Obstacle/cut-out colour -- reuses the same brand RED (defined below) at
+// low opacity for the fill, full-strength for the border and cross, so an
+// obstruction inside the marked area (a pillar, pipe, etc.) reads clearly
+// as "excluded", distinct from the greenish-yellow marking colour itself.
+
 // ---------------------------------------------------------------------------
 // Data shapes
 // ---------------------------------------------------------------------------
@@ -126,8 +131,8 @@ export interface SurveyPhotoInput {
   format?: "jpg" | "png";
   category: PhotoCategory;
   caption: string | null;
-  /** Fractional {x,y,w,h} installation-area marker, top-left origin relative to the FULL original image as shown uncropped in the editor -- only ever present for the measurement photo. */
-  annotation: { x: number; y: number; w: number; h: number } | null;
+  /** Installation-area marker (polygon + obstacle cut-outs), top-left origin fractional coords relative to the FULL original image as shown uncropped in the editor -- only ever present for the measurement photo. Whatever shape is actually in the DB (new or the original single-rectangle one) -- normalized once, below, before any drawing happens. */
+  annotation: SiteSurveyPhotoAnnotationRaw;
 }
 
 // Internal shape once a photo's bytes have been embedded into this build's
@@ -136,7 +141,7 @@ interface SurveyPhotoImage {
   image: PDFImage;
   category: PhotoCategory;
   caption: string | null;
-  annotation: { x: number; y: number; w: number; h: number } | null;
+  annotation: SiteSurveyPhotoAnnotation | null;
 }
 
 export interface SiteSurveyReportPdfData {
@@ -345,6 +350,56 @@ function drawTwoColTable(page: PDFPage, ctx: Ctx, rows: TableRow[], x: number, w
 }
 
 /**
+ * Draws the installation-area marking on a photo already placed at
+ * [imgX, imgY, drawW, drawH] (see drawPhotoBox): the outline as an
+ * arbitrary closed polygon (>=3 points -- edge by edge via drawLine, since
+ * pdf-lib has no native polygon primitive), plus each obstacle cut-out as
+ * its own rectangle with a diagonal cross and a text note, in a
+ * contrasting red rather than the marking colour itself, so an
+ * obstruction inside the marked area (a pillar, pipe, etc.) reads clearly
+ * as excluded rather than as more installable area.
+ */
+function drawAnnotation(
+  page: PDFPage,
+  ctx: Ctx,
+  annotation: SiteSurveyPhotoAnnotation,
+  imgX: number,
+  imgY: number,
+  drawW: number,
+  drawH: number
+) {
+  const toPage = (p: { x: number; y: number }) => ({ x: imgX + p.x * drawW, y: imgY + drawH - p.y * drawH });
+
+  const pts = annotation.points.map(toPage);
+  for (let i = 0; i < pts.length; i++) {
+    page.drawLine({ start: pts[i], end: pts[(i + 1) % pts.length], thickness: 2.5, color: MARK });
+  }
+
+  for (const o of annotation.obstacles) {
+    const rectX = imgX + o.x * drawW;
+    const rectY = imgY + drawH - (o.y + o.h) * drawH;
+    const rectW = o.w * drawW;
+    const rectH = o.h * drawH;
+
+    page.drawRectangle({ x: rectX, y: rectY, width: rectW, height: rectH, color: RED, opacity: 0.15, borderColor: RED, borderWidth: 1.25 });
+    page.drawLine({ start: { x: rectX, y: rectY }, end: { x: rectX + rectW, y: rectY + rectH }, thickness: 1, color: RED });
+    page.drawLine({ start: { x: rectX, y: rectY + rectH }, end: { x: rectX + rectW, y: rectY }, thickness: 1, color: RED });
+
+    if (o.note) {
+      const noteSize = 7;
+      const noteLines = wrapText(ctx.font, o.note, noteSize, Math.max(rectW, mm(30))).slice(0, 2);
+      let noteY = rectY - mm(3.6);
+      for (const line of noteLines) {
+        const lw = ctx.font.widthOfTextAtSize(line, noteSize);
+        page.drawRectangle({ x: rectX - mm(0.8), y: noteY - mm(0.8), width: lw + mm(1.6), height: mm(3.6), color: WHITE, opacity: 0.82 });
+        page.drawText(line, { x: rectX, y: noteY, size: noteSize, font: ctx.font, color: RED });
+        noteY -= mm(3.8);
+      }
+    }
+  }
+}
+
+/**
  * A photo box: draws the real image (cover-fit) when present, otherwise a
  * dashed placeholder naming what's missing, or a greenish-yellow-marked box
  * when the photo carries an installation-area annotation (the measurement
@@ -357,16 +412,17 @@ function drawTwoColTable(page: PDFPage, ctx: Ctx, rows: TableRow[], x: number, w
  * this clip the oversized image spills past the box edges (see file header
  * comment).
  *
- * When an annotation is present, its fractional {x,y,w,h} is relative to
- * the FULL original image as shown uncropped in the editor (top-left
- * origin -- see PhotosStep.tsx's AnnotationEditor), so it's converted using
- * the same drawW/drawH/imgX/imgY the image itself was placed with, not the
- * box's own w/h -- using the box's dimensions directly (as a previous
- * version did) only happens to line up when the box's aspect ratio matches
- * the photo's own, and silently drifts off the real marked area otherwise.
- * The annotation rectangle is drawn inside the same clip as the image, so a
- * marked area that falls partly in the cover-fit-cropped-off portion of the
- * photo is clipped at the box edge rather than spilling out of it.
+ * When an annotation is present, its points/obstacles are fractional
+ * coordinates relative to the FULL original image as shown uncropped in
+ * the editor (top-left origin -- see PhotosStep.tsx's AnnotationEditor), so
+ * they're converted using the same drawW/drawH/imgX/imgY the image itself
+ * was placed with, not the box's own w/h -- using the box's dimensions
+ * directly (as a previous version did) only happens to line up when the
+ * box's aspect ratio matches the photo's own, and silently drifts off the
+ * real marked area otherwise. The annotation is drawn inside the same clip
+ * as the image, so a marking that falls partly in the cover-fit-cropped-off
+ * portion of the photo is clipped at the box edge rather than spilling out
+ * of it.
  */
 function drawPhotoBox(page: PDFPage, ctx: Ctx, photo: SurveyPhotoImage | undefined, label: string, x: number, yTop: number, w: number, h: number) {
   const boxY = yTop - h;
@@ -391,16 +447,8 @@ function drawPhotoBox(page: PDFPage, ctx: Ctx, photo: SurveyPhotoImage | undefin
   page.pushOperators(pushGraphicsState(), clipRectOp(x, boxY, w, h), clipOp(), endPathOp());
   page.drawImage(img, { x: imgX, y: imgY, width: drawW, height: drawH });
 
-  if (photo.annotation) {
-    const { x: ax, y: ay, w: aw, h: ah } = photo.annotation;
-    page.drawRectangle({
-      x: imgX + ax * drawW,
-      y: imgY + drawH - (ay + ah) * drawH,
-      width: aw * drawW,
-      height: ah * drawH,
-      borderColor: MARK,
-      borderWidth: 2.5,
-    });
+  if (photo.annotation && photo.annotation.points.length >= 3) {
+    drawAnnotation(page, ctx, photo.annotation, imgX, imgY, drawW, drawH);
   }
   page.pushOperators(popGraphicsState());
 
@@ -800,7 +848,7 @@ export async function buildSiteSurveyReportPdf(data: SiteSurveyReportPdfData, fo
       image: p.format === "png" ? await doc.embedPng(p.bytes) : await doc.embedJpg(p.bytes),
       category: p.category,
       caption: p.caption,
-      annotation: p.annotation,
+      annotation: normalizeAnnotation(p.annotation),
     }))
   );
 
