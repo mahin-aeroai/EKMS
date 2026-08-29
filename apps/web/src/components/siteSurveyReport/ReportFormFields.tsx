@@ -21,7 +21,7 @@ import { useToast } from "@/components/ui/Notifications";
 import { cn } from "@/lib/cn";
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/dashboard-queries";
-import type { FieldSourceKey, FieldSources, PositionMarker, SiteSurveyFormData } from "@/lib/siteSurveyReport/types";
+import type { EntranceFloorLocation, FieldSourceKey, FieldSources, PositionMarker, SiteSurveyFormData } from "@/lib/siteSurveyReport/types";
 import { APPLE_PROGRAM_OPTIONS, emptyFormData } from "@/lib/siteSurveyReport/types";
 
 // The inspection form -- shared by DetailsStep (manual entry), and the
@@ -36,13 +36,16 @@ import { APPLE_PROGRAM_OPTIONS, emptyFormData } from "@/lib/siteSurveyReport/typ
 // one compact, landscape (label-left, control-right) ROW rather than a
 // multi-column grid. A Yes/No question and its "if Yes/No, give details"
 // follow-up are ONE row: real radio buttons (native <input type="radio">,
-// tinted via accent-color) plus the detail input inline. Several small,
-// short-answer fields (Entrances/Floors counts, the Apple Representative's
-// Name/Mobile/Email) are grouped into one MiniFieldsRow -- a single compact
-// row holding 2-4 small labeled inputs side by side -- rather than one full
-// row each, matching this app's own "Store Opening Times" day-grid pattern.
-// Field labels/inputs stay small (text-[11px]/text-xs) and tightly padded
-// throughout, matching this app's own existing compact patterns
+// tinted via accent-color) plus the detail input inline. A single-choice
+// "pick one of these" question (Entrances & Floors, the two position
+// markers) is a ButtonGroupRow -- small pill buttons, single-select.
+// Several small, short-answer fields that are genuinely independent (the
+// Apple Representative's Name/Mobile/Email) are grouped into one
+// MiniFieldsRow instead -- a single compact row holding 2-4 small labeled
+// inputs side by side, matching this app's own "Store Opening Times"
+// day-grid pattern. Field labels/inputs stay small (text-[11px]/text-xs)
+// and tightly padded throughout, matching this app's own existing compact
+// patterns
 // (Comments.tsx, WorkflowTimeline.tsx, etc).
 
 export interface ReportHeaderFields {
@@ -371,14 +374,12 @@ export function FormDataFields({
             ["other", "Other"],
           ]}
         />
-        <MiniFieldsRow
-          title="Entrances & Floors"
-          fields={[
-            { key: "entrancesIntoMall", label: "Entrances — Mall", value: formData.entrancesIntoMall, onChange: (v) => f("entrancesIntoMall", v), source: src.entrancesIntoMall },
-            { key: "entrancesIntoStore", label: "Entrances — Store", value: formData.entrancesIntoStore, onChange: (v) => f("entrancesIntoStore", v), source: src.entrancesIntoStore },
-            { key: "floorsWithinMall", label: "Floors — Mall", value: formData.floorsWithinMall, onChange: (v) => f("floorsWithinMall", v), source: src.floorsWithinMall },
-            { key: "floorsWithinStore", label: "Floors — Store", value: formData.floorsWithinStore, onChange: (v) => f("floorsWithinStore", v), source: src.floorsWithinStore },
-          ]}
+        <ButtonGroupRow
+          label="Entrances & Floors"
+          value={formData.entranceFloorLocation}
+          onChange={(v) => f("entranceFloorLocation", v)}
+          source={src.entranceFloorLocation}
+          options={ENTRANCE_FLOOR_OPTIONS}
         />
         <TextRow label="Floor Apple Program Is On" value={formData.floorApplProgramOn} onChange={(v) => f("floorApplProgramOn", v)} source={src.floorApplProgramOn} />
         <YesNoRow
@@ -652,10 +653,7 @@ const PERSONNEL_KEYS: (keyof SiteSurveyFormData)[] = [
 ];
 const STORE_DESCRIPTION_KEYS: (keyof SiteSurveyFormData)[] = [
   "storeLocationType",
-  "entrancesIntoMall",
-  "entrancesIntoStore",
-  "floorsWithinMall",
-  "floorsWithinStore",
+  "entranceFloorLocation",
   "floorApplProgramOn",
   "storeOpenPlan",
   "openPlanLayoutDescription",
@@ -917,7 +915,8 @@ function YesNoRow({
  * mini labeled inputs side by side) instead of a full Row each -- same
  * visual pattern as the pre-existing "Store Opening Times" day grid inside
  * Installing on Site, generalized here for any short-value field group
- * (entrance/floor counts, a split name/mobile/email, etc).
+ * (the split Apple Representative Name/Mobile/Email, etc). For a
+ * single-choice "pick one of these" question, use ButtonGroupRow instead.
  */
 function MiniFieldsRow({
   title,
@@ -948,41 +947,36 @@ function MiniFieldsRow({
   );
 }
 
-const POSITION_MARKER_OPTIONS: { value: Exclude<PositionMarker, "">; label: string }[] = [
-  { value: "front", label: "Front" },
-  { value: "back", label: "Back" },
-  { value: "left", label: "Left" },
-  { value: "right", label: "Right" },
-  { value: "center", label: "Center" },
-];
-
 /**
- * "Give buttons to mark the position" -- a single-select row of small
- * pill buttons (Front/Back/Left/Right/Center, relative to the store's own
- * entrance) rather than free text or a native radio/select, matching the
- * requirement's own wording. Clicking the already-selected button clears
- * it back to unanswered.
+ * A single-select row of small pill buttons -- "give buttons to select any
+ * one of" a fixed set of options, rather than free text, a native radio
+ * group, or a <select>. Clicking the already-selected button clears it
+ * back to unanswered. Generic over the option-value type so both
+ * PositionMarkerRow (Front/Back/Left/Right/Center) and the Entrances &
+ * Floors picker below share one implementation.
  */
-function PositionMarkerRow({
+function ButtonGroupRow<T extends string>({
   label,
   value,
   onChange,
   source,
+  options,
 }: {
   label: string;
-  value: PositionMarker;
-  onChange: (v: PositionMarker) => void;
+  value: T;
+  onChange: (v: T) => void;
   source?: FieldSources[FieldSourceKey];
+  options: { value: Exclude<T, "">; label: string }[];
 }) {
   return (
     <Row>
       <RowLabel label={label} source={source} />
       <div className="flex flex-wrap items-center gap-1.5">
-        {POSITION_MARKER_OPTIONS.map((opt) => (
+        {options.map((opt) => (
           <button
             key={opt.value}
             type="button"
-            onClick={() => onChange(value === opt.value ? "" : opt.value)}
+            onClick={() => onChange((value === opt.value ? "" : opt.value) as T)}
             className={cn(
               "rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
               value === opt.value ? "border-primary bg-primary text-on-brand" : "border-line-strong bg-surface text-ink-secondary hover:bg-surface-sunken"
@@ -995,3 +989,33 @@ function PositionMarkerRow({
     </Row>
   );
 }
+
+const POSITION_MARKER_OPTIONS: { value: Exclude<PositionMarker, "">; label: string }[] = [
+  { value: "front", label: "Front" },
+  { value: "back", label: "Back" },
+  { value: "left", label: "Left" },
+  { value: "right", label: "Right" },
+  { value: "center", label: "Center" },
+];
+
+/** Front/Back/Left/Right/Center, relative to the store's own entrance -- see ButtonGroupRow. */
+function PositionMarkerRow({
+  label,
+  value,
+  onChange,
+  source,
+}: {
+  label: string;
+  value: PositionMarker;
+  onChange: (v: PositionMarker) => void;
+  source?: FieldSources[FieldSourceKey];
+}) {
+  return <ButtonGroupRow label={label} value={value} onChange={onChange} source={source} options={POSITION_MARKER_OPTIONS} />;
+}
+
+const ENTRANCE_FLOOR_OPTIONS: { value: Exclude<EntranceFloorLocation, "">; label: string }[] = [
+  { value: "entrances_into_mall", label: "Entrances — Into the Mall" },
+  { value: "entrances_into_store", label: "Entrances — Into the Store" },
+  { value: "floors_within_mall", label: "Floors — Within the Mall" },
+  { value: "floors_within_store", label: "Floors — Within the Store" },
+];

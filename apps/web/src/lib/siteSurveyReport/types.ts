@@ -73,6 +73,19 @@ export const POSITION_MARKER_LABEL: Record<Exclude<PositionMarker, "">, string> 
 // before this lock existed.
 export const APPLE_PROGRAM_OPTIONS = ["APP", "APR", "MonoAAR", "Multi AAR"] as const;
 
+// Single-choice "which of these applies" button picker -- replaces four
+// separate free-text count fields (Entrances Into the Mall / Into the
+// Store, Floors Within the Mall / Within the Store) with ONE radio-style
+// choice among exactly those four, per the requirement's own "Radio
+// button: 1... 2... 3... 4..." wording.
+export type EntranceFloorLocation = "entrances_into_mall" | "entrances_into_store" | "floors_within_mall" | "floors_within_store" | "";
+export const ENTRANCE_FLOOR_LOCATION_LABEL: Record<Exclude<EntranceFloorLocation, "">, string> = {
+  entrances_into_mall: "Entrances — Into the Mall",
+  entrances_into_store: "Entrances — Into the Store",
+  floors_within_mall: "Floors — Within the Mall",
+  floors_within_store: "Floors — Within the Store",
+};
+
 // The one-off Q&A fields from the reference PDF's On-site personnel/Store
 // description/Installing on site/Deliveries/General site information/Site
 // details/Safety/Approvals sections -- site_survey_reports.form_data. Every
@@ -110,10 +123,7 @@ export interface SiteSurveyFormData {
 
   // -- Store description --
   storeLocationType: StoreLocationType;
-  entrancesIntoMall: string;
-  entrancesIntoStore: string;
-  floorsWithinMall: string;
-  floorsWithinStore: string;
+  entranceFloorLocation: EntranceFloorLocation;
   floorApplProgramOn: string;
   storeOpenPlan: YesNo;
   openPlanLayoutDescription: string;
@@ -194,10 +204,7 @@ export function emptyFormData(): SiteSurveyFormData {
     storeContactNumber: "",
 
     storeLocationType: "",
-    entrancesIntoMall: "",
-    entrancesIntoStore: "",
-    floorsWithinMall: "",
-    floorsWithinStore: "",
+    entranceFloorLocation: "",
     floorApplProgramOn: "",
     storeOpenPlan: "",
     openPlanLayoutDescription: "",

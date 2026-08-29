@@ -69,6 +69,7 @@ import fontkit from "@pdf-lib/fontkit";
 import {
   normalizeAnnotation,
   APPLE_STANDARDS_MET_LABEL,
+  ENTRANCE_FLOOR_LOCATION_LABEL,
   PHOTO_CATEGORY_LABEL,
   POSITION_MARKER_LABEL,
   SITE_TYPE_LABEL,
@@ -652,9 +653,9 @@ function drawTwoColTable(page: PDFPage, ctx: Ctx, rows: TableRow[], x: number, w
   for (const row of rows) {
     const iconIndent = row.icon ? mm(6) : 0;
     // Labels are wrapped too, not just values -- a handful of the newer
-    // continuation-page labels ("Store Entrances — Into the Mall / Into the
-    // Store", "Confirm All Possible Opportunities Surveyed", etc) run
-    // longer than every original label ever did, and an un-wrapped
+    // continuation-page labels ("Chain Store — Central Team Approval
+    // Needed?", "Retailer Preferred Install Days/Time?", etc) run longer
+    // than every original label ever did, and an un-wrapped
     // single-line drawText silently overflows past the label column's own
     // border into the value column, overlapping that row's value text.
     // Wrapping keeps every existing (short) label rendering exactly as
@@ -1263,11 +1264,8 @@ function drawInspectionDetailsContinuationPages(ctx: Ctx) {
           label: "Location of Store",
           value: f.storeLocationType ? STORE_LOCATION_TYPE_LABEL[f.storeLocationType] : "",
         },
-        { label: "Store Entrances — Into the Mall / Into the Store", value: [f.entrancesIntoMall, f.entrancesIntoStore].filter(Boolean).join(" / ") },
-        {
-          label: "Floors — Within Mall / Within Store / Apple Program Floor",
-          value: [f.floorsWithinMall, f.floorsWithinStore, f.floorApplProgramOn].filter(Boolean).join(" / "),
-        },
+        { label: "Entrances & Floors", value: f.entranceFloorLocation ? ENTRANCE_FLOOR_LOCATION_LABEL[f.entranceFloorLocation] : "" },
+        { label: "Floor Apple Program Is On", value: f.floorApplProgramOn },
         { label: "Is the Store Open Plan?", value: ynDetail(f.storeOpenPlan, f.openPlanLayoutDescription) },
         { label: "Position of Apple Program vs. Main Entrance", value: f.applProgramPositionEntrance },
         { label: "Store Location (marked)", value: f.storeLocationMarker ? POSITION_MARKER_LABEL[f.storeLocationMarker] : "" },
