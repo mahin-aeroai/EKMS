@@ -1,28 +1,38 @@
 "use client";
 
-import { Plus, RefreshCw, Trash2 } from "lucide-react";
+import { useEffect } from "react";
+import { Plus, Trash2 } from "lucide-react";
 import { MasterPickSelect } from "@/components/installationReport/MasterPickSelect";
 import { Button } from "@/components/ui/Button";
-import type { SiteSurveyMeasurement, SiteSurveyPhotoRow, YesNo } from "@/lib/siteSurveyReport/types";
+import { useLfgDistinctValues } from "@/lib/useLfgDistinctValues";
+import { INSTALLATION_TYPE_LABEL, SURVEY_COMPANY_LABEL, type SiteSurveyMeasurement, type SiteSurveyPhotoRow, type YesNo } from "@/lib/siteSurveyReport/types";
 
 // The reference PDF's "Site Photo and measurement" page: a Visual size (the
 // artwork itself) plus a Bleed allowance on each side (how much bigger the
 // printed material is cut, so it can be trimmed to the wall/window edge)
 // combine into the Material size actually ordered from the printer --
 // Material width = Visual width + Bleed left + Bleed right (same for
-// height). Bleed defaults to 30mm/side (see emptyMeasurement()) and, like
-// every field here, is directly editable -- "Recalculate" re-derives
-// Material from the current Visual + Bleed values on demand rather than
-// fighting the user's typing on every keystroke; editing Material directly
-// (e.g. to match a PDF's own stated material size once AI extraction lands)
-// simply sticks until Recalculate is pressed again.
+// height). Bleed defaults to 30mm/side (see emptyMeasurement()). Material
+// size is calculated automatically and kept read-only: an effect in
+// SiteCard re-derives Material Width/Height from the current Visual +
+// Bleed values on mount and on every subsequent Visual/Bleed edit, rather
+// than requiring a manual "Recalculate" step or allowing Material to drift
+// out of sync (or show stale/blank values for an already-filled site until
+// its next edit).
 //
-// Material Type / Installation Type / Equipment Source / Installed By use
-// MasterPickSelect, the same admin-editable master-data-table pick-list
-// component Installation Report Creator uses for its own Material/Fixture
-// Type/Team pickers (see supabase-site-survey-report-master-migration.sql)
-// -- a real dropdown with an inline "+ Add new" escape hatch, rather than a
-// hardcoded (and possibly wrong) enum.
+// Equipment Source still uses MasterPickSelect, the same admin-editable
+// master-data-table pick-list component Installation Report Creator uses
+// for its own Material/Fixture Type/Team pickers (see
+// supabase-site-survey-report-master-migration.sql) -- a real dropdown with
+// an inline "+ Add new" escape hatch. Material Type / Installation Type /
+// Installed By do NOT use it (any more): Material Type is free text with
+// autocomplete suggestions drawn from LFG Connect's own real site records
+// (lfg_sites.material, via useLfgDistinctValues -- same "New Site" form
+// pattern LfgSiteWorkspaceClient.tsx already uses) rather than a
+// site-survey-report-specific master table; Installation Type and Installed
+// By are locked dropdowns (InstallationType / SurveyCompany, both from
+// types.ts) with a fixed set of real-world options, not admin-editable
+// lists.
 //
 // A store can have more than one opportunity worth surveying at this level
 // of detail (a second window/banner location, say) -- `measurements` is an
@@ -78,15 +88,22 @@ function SiteCard({
   onRemove?: () => void;
   measurementPhotos: SiteSurveyPhotoRow[];
 }) {
-  function recalculateMaterial() {
-    const { visualWidthMm, visualHeightMm, bleedLeftMm, bleedRightMm, bleedTopMm, bleedBottomMm } = measurement;
-    if (visualWidthMm != null) {
-      onChange("materialWidthMm", visualWidthMm + (bleedLeftMm ?? 0) + (bleedRightMm ?? 0));
-    }
-    if (visualHeightMm != null) {
-      onChange("materialHeightMm", visualHeightMm + (bleedTopMm ?? 0) + (bleedBottomMm ?? 0));
-    }
-  }
+  const materialOptions = useLfgDistinctValues("material");
+
+  // Material Width/Height are fully derived from Visual + Bleed -- kept in
+  // sync on mount (so an already-filled site shows the correct Material
+  // immediately, not just after its next edit) and on every subsequent
+  // Visual/Bleed change, via this effect rather than threading extra logic
+  // through each of the six NumberFields below. The equality checks just
+  // avoid redundant onChange calls once already in sync.
+  const { visualWidthMm, visualHeightMm, bleedLeftMm, bleedRightMm, bleedTopMm, bleedBottomMm, materialWidthMm, materialHeightMm } = measurement;
+  useEffect(() => {
+    const width = visualWidthMm != null ? visualWidthMm + (bleedLeftMm ?? 0) + (bleedRightMm ?? 0) : null;
+    const height = visualHeightMm != null ? visualHeightMm + (bleedTopMm ?? 0) + (bleedBottomMm ?? 0) : null;
+    if (width !== materialWidthMm) onChange("materialWidthMm", width);
+    if (height !== materialHeightMm) onChange("materialHeightMm", height);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visualWidthMm, visualHeightMm, bleedLeftMm, bleedRightMm, bleedTopMm, bleedBottomMm]);
 
   return (
     <div className="overflow-hidden rounded-xl border-2 border-line-strong">
@@ -154,37 +171,30 @@ function SiteCard({
         </Grid>
       </Section>
 
-      <Section
-        title="Material Size"
-        action={
-          <Button type="button" variant="secondary" size="sm" onClick={recalculateMaterial}>
-            <RefreshCw size={13} /> Recalculate from Visual + Bleed
-          </Button>
-        }
-      >
+      <Section title="Material Size">
         <Grid>
-          <NumberField label="Material Width (mm)" value={measurement.materialWidthMm} onChange={(v) => onChange("materialWidthMm", v)} />
-          <NumberField label="Material Height (mm)" value={measurement.materialHeightMm} onChange={(v) => onChange("materialHeightMm", v)} />
+          <NumberField label="Material Width (mm)" value={measurement.materialWidthMm} readOnly />
+          <NumberField label="Material Height (mm)" value={measurement.materialHeightMm} readOnly />
         </Grid>
         <p className="mt-2 text-xs text-ink-muted">
-          Material = Visual + Bleed (left/right for width, top/bottom for height). Edit directly to override, or use
-          Recalculate to re-derive it.
+          Calculated automatically as Visual + Bleed (left/right for width, top/bottom for height) -- updates as soon
+          as either changes.
         </p>
       </Section>
 
       <Section title="Installation">
         <Grid>
-          <MasterPickSelect
+          <ComboField
             label="Material Type"
-            table="site_survey_report_materials"
             value={measurement.materialType}
             onChange={(v) => onChange("materialType", v)}
+            options={materialOptions}
           />
-          <MasterPickSelect
+          <SelectField
             label="Installation Type"
-            table="site_survey_report_installation_types"
             value={measurement.installationType}
-            onChange={(v) => onChange("installationType", v)}
+            onChange={(v) => onChange("installationType", v as SiteSurveyMeasurement["installationType"])}
+            options={[["", "— Select —"], ...Object.entries(INSTALLATION_TYPE_LABEL)] as [string, string][]}
           />
           <MasterPickSelect
             label="Equipment Source"
@@ -192,11 +202,11 @@ function SiteCard({
             value={measurement.equipmentSource}
             onChange={(v) => onChange("equipmentSource", v)}
           />
-          <MasterPickSelect
+          <SelectField
             label="Installed By"
-            table="site_survey_report_installers"
             value={measurement.installedBy}
-            onChange={(v) => onChange("installedBy", v)}
+            onChange={(v) => onChange("installedBy", v as SiteSurveyMeasurement["installedBy"])}
+            options={[["", "— Select —"], ...Object.entries(SURVEY_COMPANY_LABEL)] as [string, string][]}
           />
           <TextField
             label="Fixing Requirements (inc. any measurements)"
@@ -276,16 +286,64 @@ function Grid({ children }: { children: React.ReactNode }) {
   return <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">{children}</div>;
 }
 
-function NumberField({ label, value, onChange }: { label: string; value: number | null; onChange: (v: number | null) => void }) {
+function NumberField({
+  label,
+  value,
+  onChange,
+  readOnly,
+}: {
+  label: string;
+  value: number | null;
+  onChange?: (v: number | null) => void;
+  /** Used for Material Width/Height -- calculated from Visual + Bleed, not directly editable. */
+  readOnly?: boolean;
+}) {
   return (
     <label className="flex flex-col gap-1">
       <span className="text-xs font-medium text-ink-secondary">{label}</span>
       <input
         type="number"
         value={value ?? ""}
-        onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
+        readOnly={readOnly}
+        onChange={readOnly ? undefined : (e) => onChange?.(e.target.value === "" ? null : Number(e.target.value))}
+        className={`w-full rounded-md border px-3 py-2 text-sm focus:outline-none ${
+          readOnly ? "cursor-default border-line bg-surface-sunken text-ink-secondary" : "border-line-strong bg-surface text-ink focus:border-primary"
+        }`}
+      />
+    </label>
+  );
+}
+
+/** A free-text field with a <datalist> of existing values -- same pattern as LfgSiteWorkspaceClient.tsx's ComboEditField / the New Site form: autocomplete over what's already on file, typing a genuinely new value still works. */
+function ComboField({
+  label,
+  value,
+  onChange,
+  options,
+  className,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: string[];
+  className?: string;
+}) {
+  const listId = `measurement-${label.replace(/\s+/g, "-").toLowerCase()}-options`;
+  return (
+    <label className={`flex flex-col gap-1 ${className ?? ""}`}>
+      <span className="text-xs font-medium text-ink-secondary">{label}</span>
+      <input
+        list={listId}
+        autoComplete="off"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
         className="w-full rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
       />
+      <datalist id={listId}>
+        {options.map((v) => (
+          <option key={v} value={v} />
+        ))}
+      </datalist>
     </label>
   );
 }

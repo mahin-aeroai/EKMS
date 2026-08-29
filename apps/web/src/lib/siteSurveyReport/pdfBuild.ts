@@ -71,6 +71,7 @@ import {
   APPLE_STANDARDS_MET_LABEL,
   DELIVERY_TIMING_LABEL,
   ENTRANCE_FLOOR_LOCATION_LABEL,
+  INSTALLATION_TYPE_LABEL,
   PHOTO_CATEGORY_LABEL,
   POSITION_MARKER_LABEL,
   SITE_TYPE_LABEL,
@@ -1120,7 +1121,7 @@ function drawDetailsPage(ctx: Ctx) {
     ctx,
     [
       { label: "Time & Date of Installation", value: f.installationDateTime },
-      { label: "Delivery Timings", value: f.deliveryTimes ? DELIVERY_TIMING_LABEL[f.deliveryTimes] : "" },
+      { label: "Delivery Timings", value: f.deliveryTimes ? DELIVERY_TIMING_LABEL[f.deliveryTimes] ?? f.deliveryTimes : "" },
       { label: "Mall / Work Permits Required?", value: yesNoLabel(f.permitRequired, "Unknown") },
       { label: "Permit Details", value: f.permitDetails },
     ],
@@ -1286,7 +1287,7 @@ function drawInspectionDetailsContinuationPages(ctx: Ctx) {
     {
       title: "Deliveries to Store",
       icon: "tag",
-      rows: [{ label: "Delivery Timings", value: f.deliveryTimes ? DELIVERY_TIMING_LABEL[f.deliveryTimes] : "" }],
+      rows: [{ label: "Delivery Timings", value: f.deliveryTimes ? DELIVERY_TIMING_LABEL[f.deliveryTimes] ?? f.deliveryTimes : "" }],
     },
     {
       title: "General Site Information",
@@ -1549,10 +1550,10 @@ function drawSitePages(ctx: Ctx, m: SiteSurveyMeasurement, photo: SurveyPhotoIma
         { label: "Visual Size (marked in green-yellow)", value: sizeLabel(m.visualWidthMm, m.visualHeightMm), icon: "squareDashed" },
         { label: "Material Size", value: `${sizeLabel(m.materialWidthMm, m.materialHeightMm)} (${bleedLabel(m)})`, icon: "tag" },
         { label: "Material Type", value: m.materialType, icon: "layers" },
-        { label: "Installation Type", value: m.installationType, icon: "layoutGrid" },
+        { label: "Installation Type", value: m.installationType ? INSTALLATION_TYPE_LABEL[m.installationType] ?? m.installationType : "", icon: "layoutGrid" },
         { label: "Detailed Equipment Material", value: m.equipmentDetail, icon: "frame" },
         { label: "Who Is To Source Equipment?", value: m.equipmentSource, icon: "users" },
-        { label: "Who Will Do The Installation?", value: m.installedBy, icon: "wrench" },
+        { label: "Who Will Do The Installation?", value: m.installedBy ? SURVEY_COMPANY_LABEL[m.installedBy] ?? m.installedBy : "", icon: "wrench" },
         { label: "Any Important Notes", value: m.measurementNotes, icon: "clipboardList" },
       ],
     },

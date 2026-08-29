@@ -95,6 +95,30 @@ export const DELIVERY_TIMING_LABEL: Record<Exclude<DeliveryTiming, "">, string> 
   "24_7": "24/7",
 };
 
+// Locked choice of installation method for a SiteSurveyMeasurement -- was a
+// free-text MasterPickSelect (site_survey_report_installation_types)
+// before, replaced with exactly these eight options.
+export type InstallationType =
+  | "film_application"
+  | "non_lit_banner_mounting"
+  | "backlit_banner_mounting"
+  | "non_lit_fabric_mounting"
+  | "backlit_fabric_mounting"
+  | "fixtures_installation"
+  | "signage_installation"
+  | "others"
+  | "";
+export const INSTALLATION_TYPE_LABEL: Record<Exclude<InstallationType, "">, string> = {
+  film_application: "Film Application",
+  non_lit_banner_mounting: "Non-lit Banner Mounting",
+  backlit_banner_mounting: "Backlit Banner Mounting",
+  non_lit_fabric_mounting: "Non-lit Fabric mounting",
+  backlit_fabric_mounting: "Backlit Fabric Mounting",
+  fixtures_installation: "Fixtures Installation",
+  signage_installation: "Signage Installation",
+  others: "Others",
+};
+
 // The one-off Q&A fields from the reference PDF's On-site personnel/Store
 // description/Installing on site/Deliveries/General site information/Site
 // details/Safety/Approvals sections -- site_survey_reports.form_data. Every
@@ -307,14 +331,22 @@ export interface SiteSurveyMeasurement {
   // opportunity details" answers to "detailed equipment required" / "who is
   // to source the equipment" / "who will carry out the installation" -- same
   // questions, not duplicated as separate fields)
+  // Free text with autocomplete suggestions drawn from LFG Connect's own
+  // site records (lfg_sites.material -- see useLfgDistinctValues), not a
+  // locked enum or a site-survey-report-specific master table -- the real
+  // material/product names already on file across every LFG site are the
+  // source of truth here, and a genuinely new one can still be typed.
   materialType: string;
-  installationType: string;
+  installationType: InstallationType;
   fixingsRequired: string;
   existingVisualObstructions: YesNo;
   existingVisualObstructionsDescription: string;
   equipmentDetail: string;
   equipmentSource: string;
-  installedBy: string;
+  // Reuses SurveyCompany (MMDI / I&S) -- same two businesses as the
+  // report-level Survey Company field, just answering "who installs" rather
+  // than "who surveyed."
+  installedBy: SurveyCompany;
   measurementNotes: string;
 
   // -- Apple standards --
