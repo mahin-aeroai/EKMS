@@ -259,6 +259,21 @@ function wrapText(font: PDFFont, text: string, size: number, maxWidth: number): 
   return lines;
 }
 
+/**
+ * The largest font size (capped at `maxSize`) that fits `text` on a single
+ * line within `maxWidth` -- computed directly rather than by iterating
+ * downward, since a font's text width scales linearly with size. Used by
+ * the title page so its big header line never wraps to a second line, no
+ * matter which font (SF Pro or the Helvetica fallback) ends up embedded or
+ * how long the store's own text turns out to be.
+ */
+function fitSingleLineFontSize(font: PDFFont, text: string, maxWidth: number, maxSize: number): number {
+  const widthAtMax = font.widthOfTextAtSize(text, maxSize);
+  if (widthAtMax <= maxWidth) return maxSize;
+  // A hair under the exact fit so the line never touches the page edge.
+  return (maxWidth / widthAtMax) * maxSize * 0.98;
+}
+
 function contentLeft() {
   return MARGIN;
 }
@@ -625,10 +640,17 @@ function drawPhotoBox(page: PDFPage, ctx: Ctx, photo: SurveyPhotoImage | undefin
  * text wordmark rather than attempting to redraw the trademarked mark from
  * scratch.
  *
- * Type sizes (header 72pt / subheader 54pt / date 24pt, all SF Pro) are
- * also the partner's explicit spec -- large enough that the header line
- * doesn't fit in one line at this page's content width, so it's wrapped via
- * wrapText the same way any other long value on this page would be.
+ * Type sizes: 72pt header / 54pt subheader / 24pt date (all SF Pro Bold
+ * except the Regular date line) were the partner's original spec, but at
+ * 72pt the header doesn't fit on one line at this page's width -- and a
+ * second follow-up made clear that's not wanted: the header must stay a
+ * single line, "big bold beautiful", sized to match rather than wrapping.
+ * So the header is now auto-fit to the largest size (capped at 72pt) that
+ * still renders on one line -- see fitSingleLineFontSize -- and the
+ * subheader/date sizes scale down with it in the same 72:54:24 proportion
+ * from the original spec, so the whole block stays in the same relative
+ * proportions the partner asked for even when the header itself had to
+ * shrink below 72pt to fit.
  */
 function drawTitlePage(ctx: Ctx) {
   const page = ctx.doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
@@ -636,7 +658,7 @@ function drawTitlePage(ctx: Ctx) {
 
   page.drawRectangle({ x: 0, y: 0, width: PAGE_WIDTH, height: PAGE_HEIGHT, color: APPLE_GREY });
 
-  const leftX = MARGIN + mm(4);
+  const leftX = MARGIN;
   const maxTextWidth = PAGE_WIDTH - leftX - MARGIN;
 
   const logoTop = PAGE_HEIGHT - MARGIN - mm(2);
@@ -648,24 +670,20 @@ function drawTitlePage(ctx: Ctx) {
     page.drawText("Apple", { x: leftX, y: logoTop - mm(8), size: 15, font: ctx.bold, color: WHITE });
   }
 
-  const headerSize = 72;
-  const subSize = 54;
-  const dateSize = 24;
-  const headerLines = wrapText(ctx.bold, "Custom site installations", headerSize, maxTextWidth);
-  const subLines = wrapText(ctx.bold, "Site survey report", subSize, maxTextWidth);
-  const headerLineH = headerSize * 1.08;
-  const subLineH = subSize * 1.1;
+  const headerText = "Custom site installations";
+  const subText = "Site survey report";
+  const specHeaderSize = 72;
+  const specSubSize = 54;
+  const specDateSize = 24;
 
-  let cursorY = PAGE_HEIGHT * 0.64;
-  headerLines.forEach((line) => {
-    page.drawText(line, { x: leftX, y: cursorY, size: headerSize, font: ctx.bold, color: WHITE });
-    cursorY -= headerLineH;
-  });
-  cursorY -= mm(2);
-  subLines.forEach((line) => {
-    page.drawText(line, { x: leftX, y: cursorY, size: subSize, font: ctx.bold, color: rgb(0.18, 0.2, 0.22) });
-    cursorY -= subLineH;
-  });
+  const headerSize = fitSingleLineFontSize(ctx.bold, headerText, maxTextWidth, specHeaderSize);
+  const subSize = (specSubSize / specHeaderSize) * headerSize;
+  const dateSize = (specDateSize / specHeaderSize) * headerSize;
+
+  let cursorY = PAGE_HEIGHT * 0.6;
+  page.drawText(headerText, { x: leftX, y: cursorY, size: headerSize, font: ctx.bold, color: WHITE });
+  cursorY -= headerSize * 1.05 + mm(3);
+  page.drawText(subText, { x: leftX, y: cursorY, size: subSize, font: ctx.bold, color: rgb(0.18, 0.2, 0.22) });
 
   const dateLabel = titlePageDateLabel(data.surveyDate);
   page.drawText(dateLabel, { x: leftX, y: mm(22), size: dateSize, font: ctx.font, color: rgb(0.2, 0.22, 0.24) });
