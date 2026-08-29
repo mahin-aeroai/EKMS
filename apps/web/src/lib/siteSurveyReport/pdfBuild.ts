@@ -147,7 +147,28 @@ const INK = rgb(0.1, 0.1, 0.12);
 const INK_SECONDARY = rgb(0.34, 0.34, 0.37);
 const MUTED = rgb(0.56, 0.56, 0.6);
 const WHITE = rgb(1, 1, 1);
-const SECTION_BAND = APPLE_GREY;
+// Darkened sibling of APPLE_GREY (same blue-grey family, not a new hue) --
+// section-header bands (drawSectionBand) used to fill with plain APPLE_GREY
+// and dark ink text, which read low-contrast/washed out at the small
+// bold-9pt label size. White text needs a background this dark to stay
+// legible (~5.8:1 contrast) -- APPLE_GREY itself is too light for that
+// (~2.2:1), which is exactly why an earlier feedback round rejected
+// white-on-APPLE_GREY for the page topbar (see newPage's "grey" variant
+// comment) -- that decision stands for the topbar; this is a separate,
+// deliberately darker token only for the smaller in-content bands.
+const SECTION_BAND = rgb(0x5a / 255, 0x63 / 255, 0x69 / 255);
+const SECTION_BAND_ICON_CHIP = rgb(1, 1, 1); // drawn at low opacity -- a faint highlight square behind each band's icon, see drawSectionBand
+const BAND_RADIUS = mm(1.6); // rounded corners for drawSectionBand's strip -- smaller than CARD_RADIUS since the band itself is much shorter than the identity card
+// Negative character-spacing factor (multiplied by -size) applied to every
+// drawFauxBoldText call -- SF Pro Text's metrics are tuned for small body
+// copy, so at heading sizes its default spacing reads as "loose"; this is
+// the one lever pdf-lib exposes to tighten it (see drawFauxBoldText's own
+// header comment on the Tc operator). Was 0.015 on the title page's two
+// lines only; per a further round of feedback that the whole report still
+// read loose, raised slightly and now applied to every headline-weight
+// call site (topbar title, both identity block/card store names), not
+// just those two.
+const TITLE_TRACKING = 0.02;
 const BORDER = rgb(0.8, 0.8, 0.83);
 const PLACEHOLDER_BG = rgb(0.95, 0.95, 0.96);
 
@@ -288,9 +309,11 @@ function drawFauxBoldText(
   // operator -- pdf-lib's high-level `drawText` has no character-spacing
   // option (confirmed by reading PDFPageOptions.d.ts) -- pushed immediately
   // before both draw calls and reset to 0 immediately after, so it never
-  // leaks into a later drawText call on the same page. Only passed by the
-  // title page's big display type, per feedback that its letter-spacing
-  // "look[s] loosen".
+  // leaks into a later drawText call on the same page. Every call site in
+  // this file now passes TITLE_TRACKING-derived tracking (originally only
+  // the title page's header/subheader did, per feedback that letter-spacing
+  // there "look[s] loosen" -- a later round said the report still read
+  // loose overall, so this now applies to every headline-weight call site).
   if (tracking != null) page.pushOperators(setCharacterSpacing(tracking));
   page.drawText(text, { x, y, size, font, color });
   page.drawText(text, { x: x + offset, y, size, font, color });
@@ -494,7 +517,7 @@ function newPage(ctx: Ctx, eyebrow: string, variant: TopbarVariant = "dark"): PD
     page.drawText("Apple", { x: MARGIN, y: PAGE_HEIGHT - TOPBAR_HEIGHT / 2 - 3.5, size: 11, font: ctx.bold, color: INK });
     titleX = MARGIN + ctx.bold.widthOfTextAtSize("Apple", 11) + mm(3);
   }
-  drawFauxBoldText(page, "Apple Site Survey Report", { x: titleX, y: titleY, size: 13, font: ctx.bold, color: titleColor });
+  drawFauxBoldText(page, "Apple Site Survey Report", { x: titleX, y: titleY, size: 13, font: ctx.bold, color: titleColor, tracking: -13 * TITLE_TRACKING });
 
   if (eyebrow) {
     // The eyebrow always sits in a grey zone ("grey" variant: the whole
@@ -562,23 +585,41 @@ function drawFooter(ctx: Ctx, page: PDFPage) {
  */
 function drawSectionBand(page: PDFPage, ctx: Ctx, title: string, x: number, width: number, yTop: number, rightText?: string, icon?: string): number {
   const bandH = mm(7);
-  page.drawRectangle({ x, y: yTop - bandH, width, height: bandH, color: SECTION_BAND });
+  drawRoundedRect(page, x, yTop, width, bandH, BAND_RADIUS, { color: SECTION_BAND });
   let titleX = x + mm(2.5);
   if (icon) {
     const iconSize = mm(4.2);
-    drawIcon(page, icon, titleX, yTop - bandH / 2 + mm(2.4), iconSize, INK_SECONDARY);
+    const iconTopY = yTop - bandH / 2 + mm(2.4);
+    // A faint square highlight behind the icon -- same "icon in its own
+    // chip" treatment as the identity card's fact icons (IDENTITY_CHIP_BG),
+    // just a translucent white overlay here since the chip needs to read
+    // against a dark band rather than a white card. Purely decorative --
+    // the icon itself carries all the meaning. Centred on the icon: both
+    // drawIcon and drawRoundedRect anchor at their own top-left corner and
+    // extend down/right, so centring means matching each shape's own
+    // (top-left + half its own size) midpoint, not just sharing a corner.
+    const chipSize = iconSize + mm(2);
+    const chipX = titleX - (chipSize - iconSize) / 2;
+    const chipTopY = iconTopY + (chipSize - iconSize) / 2;
+    drawRoundedRect(page, chipX, chipTopY, chipSize, chipSize, mm(0.9), { color: SECTION_BAND_ICON_CHIP, opacity: 0.16 });
+    drawIcon(page, icon, titleX, iconTopY, iconSize, WHITE);
     titleX += iconSize + mm(1.8);
   }
+  // A touch of negative tracking on these small uppercase labels -- see
+  // drawFauxBoldText's own header comment on the same Tc-operator technique
+  // -- uppercase letterforms at 9pt otherwise read a little loose/gappy.
+  page.pushOperators(setCharacterSpacing(-0.25));
   page.drawText(title.toUpperCase(), {
     x: titleX,
     y: yTop - bandH / 2 - 3,
     size: 9,
     font: ctx.bold,
-    color: INK_SECONDARY,
+    color: WHITE,
   });
+  page.pushOperators(setCharacterSpacing(0));
   if (rightText) {
     const rw = ctx.bold.widthOfTextAtSize(rightText, 9);
-    page.drawText(rightText, { x: x + width - mm(2.5) - rw, y: yTop - bandH / 2 - 3, size: 9, font: ctx.bold, color: INK });
+    page.drawText(rightText, { x: x + width - mm(2.5) - rw, y: yTop - bandH / 2 - 3, size: 9, font: ctx.bold, color: WHITE });
   }
   return yTop - bandH;
 }
@@ -604,7 +645,7 @@ function drawIdentityBlock(page: PDFPage, ctx: Ctx, yTop: number): number {
   // maroon) -- and a little bigger -- matching the mockups' identity block.
   // Faux-bolded (see drawFauxBoldText) per feedback that this page's title
   // reads too light at its embedded bold weight.
-  drawFauxBoldText(page, data.storeName || "Untitled Site", { x: nameX, y: yTop - mm(7), size: 17, font: ctx.bold, color: INK });
+  drawFauxBoldText(page, data.storeName || "Untitled Site", { x: nameX, y: yTop - mm(7), size: 17, font: ctx.bold, color: INK, tracking: -17 * TITLE_TRACKING });
   wrapText(ctx.font, data.address || "—", 10.5, contentWidth() * 0.5)
     .slice(0, 2)
     .forEach((line, i) => {
@@ -902,9 +943,9 @@ function drawTitlePage(ctx: Ctx) {
   // feedback flagged this line specifically as reading "semi bold or
   // regular" at its embedded weight, and its letter-spacing as "loosen"
   // compared to the reference mockups' tighter display type.
-  drawFauxBoldText(page, headerText, { x: leftX, y: cursorY, size: headerSize, font: ctx.bold, color: WHITE, tracking: -headerSize * 0.015 });
+  drawFauxBoldText(page, headerText, { x: leftX, y: cursorY, size: headerSize, font: ctx.bold, color: WHITE, tracking: -headerSize * TITLE_TRACKING });
   cursorY -= headerSize * 1.05 + mm(3);
-  drawFauxBoldText(page, subText, { x: leftX, y: cursorY, size: subSize, font: ctx.bold, color: rgb(0.18, 0.2, 0.22), tracking: -subSize * 0.015 });
+  drawFauxBoldText(page, subText, { x: leftX, y: cursorY, size: subSize, font: ctx.bold, color: rgb(0.18, 0.2, 0.22), tracking: -subSize * TITLE_TRACKING });
 
   const dateLabel = titlePageDateLabel(data.surveyDate);
   page.drawText(dateLabel, { x: leftX, y: mm(22), size: dateSize, font: ctx.font, color: rgb(0.2, 0.22, 0.24) });
@@ -1021,7 +1062,7 @@ function drawCoverPage(ctx: Ctx) {
   drawRoundedRect(page, pinX, pinTopY, pinSize, pinSize, CARD_RADIUS, { color: IDENTITY_PIN_BG });
   drawIcon(page, "mapPin", pinX + pinPad, pinTopY - pinPad, pinSize - pinPad * 2, WHITE);
 
-  drawFauxBoldText(page, data.storeName || "Untitled Site", { x: nameX, y: y - mm(9.5), size: 20, font: ctx.bold, color: IDENTITY_TITLE });
+  drawFauxBoldText(page, data.storeName || "Untitled Site", { x: nameX, y: y - mm(9.5), size: 20, font: ctx.bold, color: IDENTITY_TITLE, tracking: -20 * TITLE_TRACKING });
   wrapText(ctx.font, data.address || "—", 10, contentWidth() * 0.55)
     .slice(0, 2)
     .forEach((line, i) => {
