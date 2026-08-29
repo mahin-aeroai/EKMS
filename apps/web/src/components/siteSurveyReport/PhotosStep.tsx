@@ -8,12 +8,21 @@ import { supabase } from "@/lib/supabase";
 import { useUserRole, canDelete, canWrite } from "@/lib/UserRoleContext";
 import { PHOTO_CATEGORY_LABEL, type PhotoCategory, type SiteSurveyPhotoRow } from "@/lib/siteSurveyReport/types";
 
+// Matches pdfBuild.ts's MARK constant (rgb(0.86, 0.91, 0.24)) -- the same
+// greenish-yellow used to mark the installation area, here and in the
+// generated PDF, so the on-screen tool previews the exact colour that ends
+// up in the exported report.
+const MARK_COLOR_HEX = "#dbe83d";
+
 // Upload + organize photos for a Site Survey Report -- multiple photos per
 // category (Main Site, Site Orientation Right/Left/Opposite, Site
 // Measurement, Other), reorder/caption/recategorize/delete, and for the
 // Site Measurement photo specifically a simple drag-corners rectangle
-// annotation tool (the reference PDF's red box around the installation
-// area). Photos are stored client-side as JPEG (resized to a max
+// annotation tool marking exactly where the sign will install, drawn as a
+// greenish-yellow box (MARK_COLOR_HEX below -- keep in sync with
+// pdfBuild.ts's MARK/MARK_TEXT constants, which render the same marker
+// into the generated PDF, both on the real photo and redrawn as the
+// Facade diagram's solid rectangle). Photos are stored client-side as JPEG (resized to a max
 // dimension before upload, matching the presign route's fixed
 // image/jpeg content type) and go straight to R2 via a presigned PUT --
 // see /api/site-survey-reports/[reportId]/photos/upload-url. The DB row
@@ -331,7 +340,7 @@ function PhotoCard({
   );
 }
 
-/** Drag-corners rectangle annotation tool: click-drag on the image to draw the red box (fractional 0-1 coords relative to the image's natural size, so it stays correct at any display size, including in the exported PDF). */
+/** Drag-corners rectangle annotation tool: click-drag on the image to draw the greenish-yellow installation-area box (fractional 0-1 coords relative to the image's natural size, so it stays correct at any display size, including in the exported PDF). */
 function AnnotationEditor({
   photo,
   onClose,
@@ -387,7 +396,7 @@ function AnnotationEditor({
             <X size={16} />
           </button>
         </div>
-        <p className="text-xs text-ink-secondary">Click and drag on the photo to draw a box around the installation area — mirrors the red box in the reference report.</p>
+        <p className="text-xs text-ink-secondary">Click and drag on the photo to draw a greenish-yellow box around the exact area where the sign will install.</p>
         <div
           className="relative select-none overflow-hidden rounded border border-line-strong bg-surface-sunken"
           onMouseDown={handleMouseDown}
@@ -403,12 +412,14 @@ function AnnotationEditor({
           )}
           {rect && (
             <div
-              className="pointer-events-none absolute border-2 border-danger"
+              className="pointer-events-none absolute border-[3px]"
               style={{
                 left: `${rect.x * 100}%`,
                 top: `${rect.y * 100}%`,
                 width: `${rect.w * 100}%`,
                 height: `${rect.h * 100}%`,
+                borderColor: MARK_COLOR_HEX,
+                boxShadow: "0 0 0 1px rgba(0,0,0,0.35)",
               }}
             />
           )}

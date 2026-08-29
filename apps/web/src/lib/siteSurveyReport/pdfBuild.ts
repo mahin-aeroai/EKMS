@@ -6,28 +6,56 @@
 // deliberately does NOT reuse Installation Report's own "editorial
 // magazine" visual language (A3 landscape, rounded cards, ghost numerals).
 // This instead matches the *reference* Apple Site Inspection/Survey Report
-// PDF's own look: A4 portrait, a dark grey top bar, a red site-identity
-// header block, grey section-header bands, and plain bordered two-column
-// tables -- so an exported report reads as "the same document, filled in
-// digitally" rather than a different-looking redesign.
+// PDF's own look: A4 LANDSCAPE, a dark grey top bar, a red site-identity
+// block, grey section-header bands (each carrying the page's own site-name
+// recap on the right, exactly as the reference repeats it), and plain
+// bordered two-column tables -- so an exported report reads as "the same
+// document, filled in digitally" rather than a different-looking redesign.
+// Landscape (not the original portrait A4) matches the real Apple-issued
+// reference reports this feature was rebuilt against a second time, which
+// are all landscape; it also gives the consolidated Inspection Details
+// page (see drawDetailsPage) enough width to fit every field on one page,
+// same as the reference does, instead of spreading across two mostly-empty
+// portrait pages.
 //
 // Photos: every photo section is written to gracefully render an empty
 // placeholder slot when a category has no matching photo yet (see
-// drawPhotoBox), rather than assuming photos always exist -- still true
-// now that milestone 3 (PhotosStep.tsx) uploads real ones, since any given
-// report can still be missing a category. `SurveyPhotoInput` takes raw
-// image bytes (fetched from R2 by the caller) rather than an already
-// -embedded PDFImage, since a PDFImage is only ever valid for the
+// drawPhotoBox), rather than assuming photos always exist. `SurveyPhotoInput`
+// takes raw image bytes (fetched from R2 by the caller) rather than an
+// already-embedded PDFImage, since a PDFImage is only ever valid for the
 // PDFDocument that embedded it, and this file creates its own.
+//
+// Every photo box now clips the drawn image to its own box bounds via a PDF
+// clipping path (see drawPhotoBox) -- cover-fit scaling makes the drawn
+// image *larger* than the box on one axis by design (that's how "cover"
+// crops), and pdf-lib's drawImage has no built-in cropping, so without an
+// explicit clip the oversized image spills straight past the box edges and
+// over whatever is drawn next to it. That was visible as photos bleeding
+// across the Site Orientation page's 3-photo grid and past the page edge.
 
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFImage, type PDFPage } from "pdf-lib";
+import {
+  PDFDocument,
+  StandardFonts,
+  rgb,
+  pushGraphicsState,
+  popGraphicsState,
+  rectangle as clipRectOp,
+  clip as clipOp,
+  endPath as endPathOp,
+  degrees,
+  type PDFFont,
+  type PDFImage,
+  type PDFPage,
+} from "pdf-lib";
 import type { PhotoCategory, SiteSurveyFormData, SiteSurveyMeasurement } from "./types";
 
 const PT_PER_MM = 72 / 25.4;
 const mm = (v: number) => v * PT_PER_MM;
 
-const PAGE_WIDTH = mm(210);
-const PAGE_HEIGHT = mm(297);
+// Landscape A4 -- see header comment for why (matches the real reference
+// reports, and gives the consolidated details page room to breathe).
+const PAGE_WIDTH = mm(297);
+const PAGE_HEIGHT = mm(210);
 const MARGIN = mm(14);
 const TOPBAR_HEIGHT = mm(13);
 const FOOTER_HEIGHT = mm(8);
@@ -38,7 +66,7 @@ const FOOTER_HEIGHT = mm(8);
 // ---------------------------------------------------------------------------
 
 const DARKBAR = rgb(0.16, 0.16, 0.18); // top bar
-const RED = rgb(0.64, 0.09, 0.11); // header identity block
+const RED = rgb(0.64, 0.09, 0.11); // brand/identity accent (cover block, site name)
 const INK = rgb(0.1, 0.1, 0.12);
 const INK_SECONDARY = rgb(0.34, 0.34, 0.37);
 const MUTED = rgb(0.56, 0.56, 0.6);
@@ -46,6 +74,16 @@ const WHITE = rgb(1, 1, 1);
 const SECTION_BAND = rgb(0.91, 0.91, 0.93);
 const BORDER = rgb(0.8, 0.8, 0.83);
 const PLACEHOLDER_BG = rgb(0.95, 0.95, 0.96);
+
+// The installation-area marking colour -- greenish-yellow, matching the
+// on-screen annotation tool in PhotosStep.tsx's AnnotationEditor (keep
+// these two in sync; search for MARK_COLOR_HEX in that file). Deliberately
+// NOT the reference PDF's red -- this app's own marking convention. MARK is
+// used for the border/fill itself; MARK_TEXT is a darker olive shade of the
+// same hue for any text drawn in this colour, since pale greenish-yellow
+// text is close to unreadable on a white page.
+const MARK = rgb(0.86, 0.91, 0.24);
+const MARK_TEXT = rgb(0.42, 0.46, 0.06);
 
 // ---------------------------------------------------------------------------
 // Data shapes
@@ -61,7 +99,7 @@ export interface SurveyPhotoInput {
   format?: "jpg" | "png";
   category: PhotoCategory;
   caption: string | null;
-  /** Fractional {x,y,w,h} red box, only ever present for the measurement photo. */
+  /** Fractional {x,y,w,h} installation-area marker, top-left origin relative to the FULL original image as shown uncropped in the editor -- only ever present for the measurement photo. */
   annotation: { x: number; y: number; w: number; h: number } | null;
 }
 
@@ -147,15 +185,17 @@ function newPage(ctx: Ctx, eyebrow: string): PDFPage {
     font: ctx.bold,
     color: WHITE,
   });
-  const eyebrowUpper = eyebrow.toUpperCase();
-  const ew = ctx.font.widthOfTextAtSize(eyebrowUpper, 8.5);
-  page.drawText(eyebrowUpper, {
-    x: PAGE_WIDTH - MARGIN - ew,
-    y: PAGE_HEIGHT - TOPBAR_HEIGHT / 2 - 3,
-    size: 8.5,
-    font: ctx.font,
-    color: rgb(0.85, 0.85, 0.87),
-  });
+  if (eyebrow) {
+    const eyebrowUpper = eyebrow.toUpperCase();
+    const ew = ctx.font.widthOfTextAtSize(eyebrowUpper, 8.5);
+    page.drawText(eyebrowUpper, {
+      x: PAGE_WIDTH - MARGIN - ew,
+      y: PAGE_HEIGHT - TOPBAR_HEIGHT / 2 - 3,
+      size: 8.5,
+      font: ctx.font,
+      color: rgb(0.85, 0.85, 0.87),
+    });
+  }
 
   drawFooter(ctx, page);
   return page;
@@ -170,18 +210,67 @@ function drawFooter(ctx: Ctx, page: PDFPage) {
   page.drawText(right, { x: PAGE_WIDTH - MARGIN - rw, y: FOOTER_HEIGHT / 2 - 2, size: 7.5, font: ctx.font, color: MUTED });
 }
 
-/** Grey section-header band -- returns the y to start drawing content below it. */
-function drawSectionBand(page: PDFPage, ctx: Ctx, title: string, yTop: number): number {
+/**
+ * Grey section-header band -- returns the y to start drawing content below
+ * it. Takes its own x/width (rather than always spanning the full content
+ * width) so the consolidated Inspection Details page can draw two
+ * independent columns of sections side by side, matching the reference's
+ * own two-up layout on one landscape page instead of the original's two
+ * separate, mostly-empty portrait pages.
+ *
+ * rightText, when given, is drawn right-aligned in the same band -- used to
+ * repeat the site name alongside a section title, exactly as the reference
+ * PDF repeats "iMaging @ Model Town, Jalandhar" beside "Site Photo and
+ * measurement" on its own final page.
+ */
+function drawSectionBand(page: PDFPage, ctx: Ctx, title: string, x: number, width: number, yTop: number, rightText?: string): number {
   const bandH = mm(7);
-  page.drawRectangle({ x: contentLeft(), y: yTop - bandH, width: contentWidth(), height: bandH, color: SECTION_BAND });
+  page.drawRectangle({ x, y: yTop - bandH, width, height: bandH, color: SECTION_BAND });
   page.drawText(title.toUpperCase(), {
-    x: contentLeft() + mm(2.5),
+    x: x + mm(2.5),
     y: yTop - bandH / 2 - 3,
     size: 9,
     font: ctx.bold,
     color: INK_SECONDARY,
   });
+  if (rightText) {
+    const rw = ctx.bold.widthOfTextAtSize(rightText, 9);
+    page.drawText(rightText, { x: x + width - mm(2.5) - rw, y: yTop - bandH / 2 - 3, size: 9, font: ctx.bold, color: INK });
+  }
   return yTop - bandH;
+}
+
+/**
+ * The site name / address / SFO ID / Program header block that sits above
+ * the Inspection Details page's tables -- mirrors the reference PDF's own
+ * plain-text (not colour-blocked) identity header repeated at the top of
+ * its inspection-details page.
+ */
+function drawIdentityBlock(page: PDFPage, ctx: Ctx, yTop: number): number {
+  const { data } = ctx;
+  const blockH = mm(22);
+
+  page.drawText(data.storeName || "Untitled Site", { x: contentLeft(), y: yTop - mm(7), size: 15, font: ctx.bold, color: RED });
+  wrapText(ctx.font, data.address || "—", 9.5, contentWidth() * 0.55)
+    .slice(0, 2)
+    .forEach((line, i) => {
+      page.drawText(line, { x: contentLeft(), y: yTop - mm(13) - i * mm(4.6), size: 9.5, font: ctx.font, color: rgb(0.5, 0.16, 0.17) });
+    });
+
+  const facts: [string, string][] = [
+    ["SFO ID", data.sfoId || "—"],
+    ["Program", data.program || "—"],
+  ];
+  const factColW = contentWidth() * 0.16;
+  const factX = contentRight() - factColW * facts.length;
+  facts.forEach(([label, value], i) => {
+    const fx = factX + i * factColW;
+    page.drawText(label.toUpperCase(), { x: fx, y: yTop - mm(4), size: 7.5, font: ctx.bold, color: MUTED });
+    page.drawText(value, { x: fx, y: yTop - mm(10), size: 10.5, font: ctx.bold, color: INK });
+  });
+
+  page.drawLine({ start: { x: contentLeft(), y: yTop - blockH }, end: { x: contentRight(), y: yTop - blockH }, thickness: 0.75, color: BORDER });
+  return yTop - blockH - mm(3);
 }
 
 interface TableRow {
@@ -189,10 +278,10 @@ interface TableRow {
   value: string;
 }
 
-/** A plain bordered 2-column (label | value) table, matching the reference's inspection-details page. Returns the y position after the table; wraps long values. */
-function drawTwoColTable(page: PDFPage, ctx: Ctx, rows: TableRow[], yTop: number): number {
-  const labelColW = contentWidth() * 0.38;
-  const valueColW = contentWidth() - labelColW;
+/** A plain bordered 2-column (label | value) table, matching the reference's inspection-details page. Takes its own x/width for the same two-column-page reason as drawSectionBand above. Returns the y position after the table; wraps long values. */
+function drawTwoColTable(page: PDFPage, ctx: Ctx, rows: TableRow[], x: number, width: number, yTop: number): number {
+  const labelColW = width * 0.42;
+  const valueColW = width - labelColW;
   const pad = mm(2);
   const lineH = mm(4.6);
   let y = yTop;
@@ -201,9 +290,9 @@ function drawTwoColTable(page: PDFPage, ctx: Ctx, rows: TableRow[], yTop: number
     const valueLines = wrapText(ctx.font, row.value || "—", 9, valueColW - pad * 2);
     const rowH = Math.max(lineH, valueLines.length * lineH) + pad * 1.2;
 
-    page.drawRectangle({ x: contentLeft(), y: y - rowH, width: labelColW, height: rowH, borderColor: BORDER, borderWidth: 0.6, color: WHITE });
+    page.drawRectangle({ x, y: y - rowH, width: labelColW, height: rowH, borderColor: BORDER, borderWidth: 0.6, color: WHITE });
     page.drawRectangle({
-      x: contentLeft() + labelColW,
+      x: x + labelColW,
       y: y - rowH,
       width: valueColW,
       height: rowH,
@@ -212,10 +301,10 @@ function drawTwoColTable(page: PDFPage, ctx: Ctx, rows: TableRow[], yTop: number
       color: WHITE,
     });
 
-    page.drawText(row.label, { x: contentLeft() + pad, y: y - pad - 7, size: 8.5, font: ctx.bold, color: INK_SECONDARY });
+    page.drawText(row.label, { x: x + pad, y: y - pad - 7, size: 8.5, font: ctx.bold, color: INK_SECONDARY });
     valueLines.forEach((line, i) => {
       page.drawText(line, {
-        x: contentLeft() + labelColW + pad,
+        x: x + labelColW + pad,
         y: y - pad - 7 - i * lineH,
         size: 9,
         font: ctx.font,
@@ -228,10 +317,35 @@ function drawTwoColTable(page: PDFPage, ctx: Ctx, rows: TableRow[], yTop: number
   return y;
 }
 
-/** A photo box: draws the real image (cover-fit) when present, otherwise a dashed placeholder naming what's missing -- lets the manual-fill export loop work end to end before photo upload (milestone 3) exists. */
+/**
+ * A photo box: draws the real image (cover-fit) when present, otherwise a
+ * dashed placeholder naming what's missing, or a greenish-yellow-marked box
+ * when the photo carries an installation-area annotation (the measurement
+ * photo only).
+ *
+ * The drawn image is clipped to exactly [x, boxY, w, h] via a PDF clipping
+ * path -- cover-fit scaling (`Math.max`) intentionally makes the drawn
+ * image larger than the box on whichever axis doesn't match the box's own
+ * aspect ratio, and pdf-lib's drawImage has no built-in crop, so without
+ * this clip the oversized image spills past the box edges (see file header
+ * comment).
+ *
+ * When an annotation is present, its fractional {x,y,w,h} is relative to
+ * the FULL original image as shown uncropped in the editor (top-left
+ * origin -- see PhotosStep.tsx's AnnotationEditor), so it's converted using
+ * the same drawW/drawH/imgX/imgY the image itself was placed with, not the
+ * box's own w/h -- using the box's dimensions directly (as a previous
+ * version did) only happens to line up when the box's aspect ratio matches
+ * the photo's own, and silently drifts off the real marked area otherwise.
+ * The annotation rectangle is drawn inside the same clip as the image, so a
+ * marked area that falls partly in the cover-fit-cropped-off portion of the
+ * photo is clipped at the box edge rather than spilling out of it.
+ */
 function drawPhotoBox(page: PDFPage, ctx: Ctx, photo: SurveyPhotoImage | undefined, label: string, x: number, yTop: number, w: number, h: number) {
+  const boxY = yTop - h;
+
   if (!photo) {
-    page.drawRectangle({ x, y: yTop - h, width: w, height: h, color: PLACEHOLDER_BG, borderColor: BORDER, borderWidth: 0.75 });
+    page.drawRectangle({ x, y: boxY, width: w, height: h, color: PLACEHOLDER_BG, borderColor: BORDER, borderWidth: 0.75 });
     const text = `${label} — not yet added`;
     const tw = ctx.font.widthOfTextAtSize(text, 8.5);
     page.drawText(text, { x: x + (w - tw) / 2, y: yTop - h / 2, size: 8.5, font: ctx.font, color: MUTED });
@@ -242,24 +356,30 @@ function drawPhotoBox(page: PDFPage, ctx: Ctx, photo: SurveyPhotoImage | undefin
   const scale = Math.max(w / img.width, h / img.height);
   const drawW = img.width * scale;
   const drawH = img.height * scale;
-  page.drawRectangle({ x, y: yTop - h, width: w, height: h, borderColor: BORDER, borderWidth: 0.75 });
-  page.drawImage(img, { x: x + (w - drawW) / 2, y: yTop - h - (drawH - h) / 2, width: drawW, height: drawH });
+  const imgX = x + (w - drawW) / 2;
+  const imgY = boxY - (drawH - h) / 2;
+
+  page.drawRectangle({ x, y: boxY, width: w, height: h, borderColor: BORDER, borderWidth: 0.75 });
+
+  page.pushOperators(pushGraphicsState(), clipRectOp(x, boxY, w, h), clipOp(), endPathOp());
+  page.drawImage(img, { x: imgX, y: imgY, width: drawW, height: drawH });
 
   if (photo.annotation) {
     const { x: ax, y: ay, w: aw, h: ah } = photo.annotation;
     page.drawRectangle({
-      x: x + ax * w,
-      y: yTop - ay * h - ah * h,
-      width: aw * w,
-      height: ah * h,
-      borderColor: RED,
-      borderWidth: 1.5,
+      x: imgX + ax * drawW,
+      y: imgY + drawH - (ay + ah) * drawH,
+      width: aw * drawW,
+      height: ah * drawH,
+      borderColor: MARK,
+      borderWidth: 2.5,
     });
   }
+  page.pushOperators(popGraphicsState());
 
   if (photo.caption) {
-    page.drawRectangle({ x, y: yTop - h, width: w, height: mm(6), color: rgb(0, 0, 0), opacity: 0.55 });
-    page.drawText(photo.caption, { x: x + mm(1.5), y: yTop - h + mm(1.7), size: 7.5, font: ctx.font, color: WHITE });
+    page.drawRectangle({ x, y: boxY, width: w, height: mm(6), color: rgb(0, 0, 0), opacity: 0.55 });
+    page.drawText(photo.caption, { x: x + mm(1.5), y: boxY + mm(1.7), size: 7.5, font: ctx.font, color: WHITE });
   }
 }
 
@@ -268,27 +388,24 @@ function drawPhotoBox(page: PDFPage, ctx: Ctx, photo: SurveyPhotoImage | undefin
 // ---------------------------------------------------------------------------
 
 function drawCoverPage(ctx: Ctx) {
-  const page = ctx.doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-  ctx.pageNumber += 1;
+  const page = newPage(ctx, "");
   const { data } = ctx;
-
-  page.drawRectangle({ x: 0, y: PAGE_HEIGHT - mm(30), width: PAGE_WIDTH, height: mm(30), color: DARKBAR });
-  page.drawText("SITE SURVEY REPORT", { x: MARGIN, y: PAGE_HEIGHT - mm(19), size: 20, font: ctx.bold, color: WHITE });
+  let y = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
 
   const mainPhoto = ctx.photos.find((p) => p.category === "main_site");
-  const photoTop = PAGE_HEIGHT - mm(30);
-  const photoH = mm(120);
-  drawPhotoBox(page, ctx, mainPhoto, "Main Site Photo", MARGIN, photoTop, contentWidth(), photoH);
+  const photoH = mm(108);
+  drawPhotoBox(page, ctx, mainPhoto, "Main Site Photo", MARGIN, y, contentWidth(), photoH);
+  y -= photoH + mm(5);
 
-  const blockTop = photoTop - photoH - mm(6);
-  const blockH = mm(58);
-  page.drawRectangle({ x: MARGIN, y: blockTop - blockH, width: contentWidth(), height: blockH, color: RED });
+  const blockH = mm(46);
+  page.drawRectangle({ x: MARGIN, y: y - blockH, width: contentWidth(), height: blockH, color: RED });
 
-  const nameSize = 18;
-  page.drawText(data.storeName || "Untitled Site", { x: MARGIN + mm(5), y: blockTop - mm(11), size: nameSize, font: ctx.bold, color: WHITE });
-  wrapText(ctx.font, data.address || "—", 10.5, contentWidth() - mm(10)).forEach((line, i) => {
-    page.drawText(line, { x: MARGIN + mm(5), y: blockTop - mm(19) - i * mm(5), size: 10.5, font: ctx.font, color: rgb(0.96, 0.9, 0.9) });
-  });
+  page.drawText(data.storeName || "Untitled Site", { x: MARGIN + mm(5), y: y - mm(10), size: 17, font: ctx.bold, color: WHITE });
+  wrapText(ctx.font, data.address || "—", 10.5, contentWidth() * 0.55)
+    .slice(0, 2)
+    .forEach((line, i) => {
+      page.drawText(line, { x: MARGIN + mm(5), y: y - mm(17) - i * mm(5), size: 10.5, font: ctx.font, color: rgb(0.96, 0.9, 0.9) });
+    });
 
   const facts: [string, string][] = [
     ["SFO ID", data.sfoId || "—"],
@@ -296,26 +413,36 @@ function drawCoverPage(ctx: Ctx) {
     ["Survey Date", formatDate(data.surveyDate)],
     ["Surveyor", data.surveyorName || "—"],
   ];
-  const factColW = contentWidth() / 2;
+  const factColW = contentWidth() / facts.length;
   facts.forEach(([label, value], i) => {
-    const col = i % 2;
-    const row = Math.floor(i / 2);
-    const fx = MARGIN + mm(5) + col * factColW;
-    const fy = blockTop - mm(34) - row * mm(11);
-    page.drawText(label.toUpperCase(), { x: fx, y: fy, size: 7.5, font: ctx.bold, color: rgb(0.93, 0.82, 0.82) });
-    page.drawText(value, { x: fx, y: fy - mm(5), size: 10.5, font: ctx.font, color: WHITE });
+    const fx = MARGIN + mm(5) + i * factColW;
+    page.drawText(label.toUpperCase(), { x: fx, y: y - mm(28), size: 7.5, font: ctx.bold, color: rgb(0.93, 0.82, 0.82) });
+    page.drawText(value, { x: fx, y: y - mm(34), size: 10.5, font: ctx.font, color: WHITE });
   });
-
-  drawFooter(ctx, page);
 }
 
+/**
+ * Every ~20 one-off Q&A field, consolidated onto a single landscape page in
+ * two side-by-side columns -- matching the reference PDF's own single
+ * inspection-details page, instead of the original portrait build's two
+ * separate, mostly-empty pages (which only existed because a portrait page
+ * didn't have the width for two columns).
+ */
 function drawDetailsPage(ctx: Ctx) {
   const page = newPage(ctx, "Inspection Details");
   const { formData: f } = ctx.data;
   let y = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
+  y = drawIdentityBlock(page, ctx, y);
 
-  y = drawSectionBand(page, ctx, "On-site Details", y);
-  y = drawTwoColTable(
+  const colGap = mm(6);
+  const colW = (contentWidth() - colGap) / 2;
+  const leftX = contentLeft();
+  const rightX = contentLeft() + colW + colGap;
+  let leftY = y;
+  let rightY = y;
+
+  leftY = drawSectionBand(page, ctx, "On-site Details", leftX, colW, leftY);
+  leftY = drawTwoColTable(
     page,
     ctx,
     [
@@ -324,62 +451,62 @@ function drawDetailsPage(ctx: Ctx) {
       { label: "Store Person Contacted", value: f.storePersonContacted },
       { label: "Printer", value: f.printer },
     ],
-    y
+    leftX,
+    colW,
+    leftY
   );
 
-  y -= mm(3);
-  y = drawSectionBand(page, ctx, "Site Suitability", y);
-  y = drawTwoColTable(
+  leftY -= mm(3);
+  leftY = drawSectionBand(page, ctx, "Store Description", leftX, colW, leftY);
+  drawTwoColTable(
     page,
     ctx,
     [
-      { label: "High & uninterrupted visibility?", value: yesNoLabel(f.siteVisibility) },
-      { label: "Premium location?", value: yesNoLabel(f.premiumLocation) },
-      { label: "Potential issues with location", value: f.potentialIssues },
+      { label: "Silicon Joins / Edges Condition", value: f.siliconJoinsCondition },
+      { label: "Perspex Cover Condition", value: f.perspexCondition },
+      { label: "Lighting / Backlit Potential", value: f.lightingDescription },
+      { label: "Existing Creative / Stickers", value: f.existingCreative },
+      { label: "Can Existing Creative Be Removed?", value: yesNoLabel(f.creativeRemovable, "Not Applicable") },
+      { label: "Additional Store Observations", value: f.additionalStoreNotes },
     ],
-    y
+    leftX,
+    colW,
+    leftY
   );
 
-  y -= mm(3);
-  y = drawSectionBand(page, ctx, "Store Description", y);
-  y = drawTwoColTable(
+  rightY = drawSectionBand(page, ctx, "Site Suitability", rightX, colW, rightY);
+  rightY = drawTwoColTable(
     page,
     ctx,
     [
-      { label: "Silicon joins / edges condition", value: f.siliconJoinsCondition },
-      { label: "Perspex cover condition", value: f.perspexCondition },
-      { label: "Lighting / backlit potential", value: f.lightingDescription },
-      { label: "Existing creative / stickers", value: f.existingCreative },
-      { label: "Can existing creative be removed?", value: yesNoLabel(f.creativeRemovable, "Not Applicable") },
-      { label: "Additional store observations", value: f.additionalStoreNotes },
+      { label: "High & Uninterrupted Visibility?", value: yesNoLabel(f.siteVisibility) },
+      { label: "Premium Location?", value: yesNoLabel(f.premiumLocation) },
+      { label: "Potential Issues With Location", value: f.potentialIssues },
     ],
-    y
+    rightX,
+    colW,
+    rightY
   );
 
-  return y;
-}
-
-function drawInstallationDetailsPage(ctx: Ctx) {
-  const page = newPage(ctx, "Installation Details");
-  const { formData: f } = ctx.data;
-  let y = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
-
-  y = drawSectionBand(page, ctx, "Installation Details", y);
-  y = drawTwoColTable(
+  rightY -= mm(3);
+  rightY = drawSectionBand(page, ctx, "Installation Details", rightX, colW, rightY);
+  rightY = drawTwoColTable(
     page,
     ctx,
     [
-      { label: "Time & date of installation", value: f.installationDateTime },
-      { label: "Delivery times into store", value: f.deliveryTimes },
-      { label: "Mall / work permits required?", value: yesNoLabel(f.permitRequired, "Unknown") },
-      { label: "Permit details", value: f.permitDetails },
+      { label: "Time & Date of Installation", value: f.installationDateTime },
+      { label: "Delivery Times Into Store", value: f.deliveryTimes },
+      { label: "Mall / Work Permits Required?", value: yesNoLabel(f.permitRequired, "Unknown") },
+      { label: "Permit Details", value: f.permitDetails },
     ],
-    y
+    rightX,
+    colW,
+    rightY
   );
 
-  y -= mm(3);
-  y = drawSectionBand(page, ctx, "Additional Details", y);
-  drawTwoColTable(page, ctx, [{ label: "General notes", value: f.generalNotes }], y);
+  rightY -= mm(3);
+  rightY = drawSectionBand(page, ctx, "Additional Details", rightX, colW, rightY);
+  drawTwoColTable(page, ctx, [{ label: "General Notes", value: f.generalNotes }], rightX, colW, rightY);
 }
 
 function yesNoLabel(v: string, thirdLabel = "—"): string {
@@ -407,97 +534,151 @@ function drawMainSitePhotoPages(ctx: Ctx) {
 function drawOrientationPage(ctx: Ctx) {
   // Always drawn, one box per orientation whether or not a matching photo
   // exists yet (drawPhotoBox falls back to a placeholder) -- so the export
-  // loop is complete end to end before photo upload (milestone 3) lands.
+  // loop is complete end to end before photo upload lands.
   const categories: PhotoCategory[] = ["orientation_right", "orientation_left", "orientation_opposite"];
   const page = newPage(ctx, "Site Orientation");
   let y = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
-  y = drawSectionBand(page, ctx, "Site Orientation", y);
+  y = drawSectionBand(page, ctx, "Site Orientation", contentLeft(), contentWidth(), y, ctx.data.storeName || undefined);
 
-  const gap = mm(4);
+  const gap = mm(6);
   const boxW = (contentWidth() - gap * 2) / 3;
-  const boxH = mm(85);
+  const boxH = mm(118);
   categories.forEach((cat, i) => {
     const photo = ctx.photos.find((p) => p.category === cat);
     const x = contentLeft() + i * (boxW + gap);
     drawPhotoBox(page, ctx, photo, ORIENTATION_LABELS[cat], x, y, boxW, boxH);
     const label = ORIENTATION_LABELS[cat];
     const lw = ctx.bold.widthOfTextAtSize(label, 9);
-    page.drawText(label, { x: x + (boxW - lw) / 2, y: y - boxH - mm(4.5), size: 9, font: ctx.bold, color: INK_SECONDARY });
+    page.drawText(label, { x: x + (boxW - lw) / 2, y: y - boxH - mm(5), size: 9, font: ctx.bold, color: INK_SECONDARY });
   });
 }
 
-/** Draws a simple facade dimension diagram: an outer rect (material size) with an inner rect (visual size) and bleed dimension callouts on each side -- the reference PDF's hand-drawn Facade sketch, redrawn as clean vector shapes. */
+/**
+ * A dimension line: a straight line between two points with an open
+ * chevron arrowhead at each end, generic to any direction (used both for
+ * the facade diagram's horizontal width and vertical height dimensions
+ * below) -- the reference PDF's own arrowed dimension lines under/beside
+ * its Facade rectangle, redrawn as clean vectors.
+ */
+function drawDimensionLine(page: PDFPage, x1: number, y1: number, x2: number, y2: number, color: ReturnType<typeof rgb>) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len;
+  const uy = dy / len;
+  const px = -uy;
+  const py = ux;
+  const arrowLen = mm(2.2);
+  const arrowW = mm(1);
+  const thickness = 0.9;
+
+  page.drawLine({ start: { x: x1, y: y1 }, end: { x: x2, y: y2 }, thickness, color });
+
+  page.drawLine({ start: { x: x1, y: y1 }, end: { x: x1 + ux * arrowLen + px * arrowW, y: y1 + uy * arrowLen + py * arrowW }, thickness, color });
+  page.drawLine({ start: { x: x1, y: y1 }, end: { x: x1 + ux * arrowLen - px * arrowW, y: y1 + uy * arrowLen - py * arrowW }, thickness, color });
+  page.drawLine({ start: { x: x2, y: y2 }, end: { x: x2 - ux * arrowLen + px * arrowW, y: y2 - uy * arrowLen + py * arrowW }, thickness, color });
+  page.drawLine({ start: { x: x2, y: y2 }, end: { x: x2 - ux * arrowLen - px * arrowW, y: y2 - uy * arrowLen - py * arrowW }, thickness, color });
+}
+
+/**
+ * The reference PDF's "Facade" schematic: a solid rectangle representing
+ * the marked (Visual size) installation area, with arrowed dimension lines
+ * giving its width (below) and height (rotated, to its left) -- redrawn
+ * here as a filled rectangle in this app's own greenish-yellow marking
+ * colour (see MARK) rather than the reference's arbitrary orange, since
+ * this rectangle represents the exact same area as the greenish-yellow box
+ * drawn on the real photo beside it (see drawMeasurementPage).
+ */
 function drawFacadeDiagram(page: PDFPage, ctx: Ctx, m: SiteSurveyMeasurement, x: number, yTop: number, w: number, h: number) {
-  page.drawRectangle({ x, y: yTop - h, width: w, height: h, borderColor: BORDER, borderWidth: 0.75, color: WHITE });
+  page.drawText("Facade", { x, y: yTop - mm(7), size: 13, font: ctx.bold, color: INK });
 
   const vw = m.visualWidthMm ?? 0;
   const vh = m.visualHeightMm ?? 0;
-  const mw = m.materialWidthMm ?? vw;
-  const mh = m.materialHeightMm ?? vh;
 
-  if (mw <= 0 || mh <= 0) {
-    const text = "Add Visual/Material size to draw the dimension diagram";
+  const diagramTop = yTop - mm(12);
+  const diagramBottom = yTop - h;
+
+  if (vw <= 0 || vh <= 0) {
+    const text = "Add Visual size to draw the Facade diagram";
     const tw = ctx.font.widthOfTextAtSize(text, 8.5);
-    page.drawText(text, { x: x + (w - tw) / 2, y: yTop - h / 2, size: 8.5, font: ctx.font, color: MUTED });
+    page.drawText(text, { x: x + (w - tw) / 2, y: (diagramTop + diagramBottom) / 2, size: 8.5, font: ctx.font, color: MUTED });
     return;
   }
 
-  const pad = mm(10);
-  const availW = w - pad * 2;
-  const availH = h - pad * 2;
-  const scale = Math.min(availW / mw, availH / mh);
-  const outerW = mw * scale;
-  const outerH = mh * scale;
-  const outerX = x + (w - outerW) / 2;
-  const outerY = yTop - h + (h - outerH) / 2;
+  const leftGutter = mm(13);
+  const bottomGutter = mm(11);
+  const rightPad = mm(4);
+  const availW = w - leftGutter - rightPad;
+  const availH = diagramTop - bottomGutter - diagramBottom;
+  const scale = Math.min(availW / vw, availH / vh);
+  const rectW = vw * scale;
+  const rectH = vh * scale;
+  const rectX = x + leftGutter + (availW - rectW) / 2;
+  const rectY = diagramBottom + bottomGutter + (availH - rectH) / 2;
 
-  page.drawRectangle({ x: outerX, y: outerY, width: outerW, height: outerH, borderColor: INK_SECONDARY, borderWidth: 1 });
+  page.drawRectangle({ x: rectX, y: rectY, width: rectW, height: rectH, color: MARK, borderColor: MARK_TEXT, borderWidth: 1 });
 
-  const bl = (m.bleedLeftMm ?? 0) * scale;
-  const br = (m.bleedRightMm ?? 0) * scale;
-  const bt = (m.bleedTopMm ?? 0) * scale;
-  const bb = (m.bleedBottomMm ?? 0) * scale;
-  const innerX = outerX + bl;
-  const innerY = outerY + bb;
-  const innerW = Math.max(0, outerW - bl - br);
-  const innerH = Math.max(0, outerH - bt - bb);
-  page.drawRectangle({ x: innerX, y: innerY, width: innerW, height: innerH, borderColor: RED, borderWidth: 1.25 });
+  // Width dimension (below the rectangle)
+  const dimY = rectY - mm(5);
+  drawDimensionLine(page, rectX, dimY, rectX + rectW, dimY, INK_SECONDARY);
+  const widthLabel = `${vw} mm`;
+  const wlw = ctx.bold.widthOfTextAtSize(widthLabel, 8.5);
+  page.drawText(widthLabel, { x: rectX + (rectW - wlw) / 2, y: dimY - mm(4.5), size: 8.5, font: ctx.bold, color: INK_SECONDARY });
 
-  page.drawText(`Material ${mw}mm × ${mh}mm`, { x: outerX, y: outerY + outerH + mm(2.5), size: 8, font: ctx.bold, color: INK_SECONDARY });
-  const visualLabel = `Visual ${vw}mm × ${vh}mm`;
-  const vlw = ctx.font.widthOfTextAtSize(visualLabel, 7.5);
-  page.drawText(visualLabel, { x: innerX + (innerW - vlw) / 2, y: innerY + innerH / 2, size: 7.5, font: ctx.font, color: RED });
+  // Height dimension (left of the rectangle), label rotated to read
+  // bottom-to-top alongside the vertical arrow, same as the reference.
+  const dimX = rectX - mm(5);
+  drawDimensionLine(page, dimX, rectY, dimX, rectY + rectH, INK_SECONDARY);
+  const heightLabel = `${vh} mm`;
+  const hlw = ctx.bold.widthOfTextAtSize(heightLabel, 8.5);
+  page.drawText(heightLabel, {
+    x: dimX - mm(3.2),
+    y: rectY + rectH / 2 - hlw / 2,
+    size: 8.5,
+    font: ctx.bold,
+    color: INK_SECONDARY,
+    rotate: degrees(90),
+  });
 }
 
 function drawMeasurementPage(ctx: Ctx) {
   const page = newPage(ctx, "Site Photo & Measurement");
   const m = ctx.data.measurement;
   let y = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
-  y = drawSectionBand(page, ctx, "Site Photo & Measurement", y);
+  y = drawSectionBand(page, ctx, "Site Photo & Measurement", contentLeft(), contentWidth(), y, ctx.data.storeName || undefined);
 
   const photo = ctx.photos.find((p) => p.category === "measurement");
-  const halfW = (contentWidth() - mm(4)) / 2;
-  const rowH = mm(85);
+  const halfW = (contentWidth() - mm(6)) / 2;
+  const rowH = mm(105);
   drawPhotoBox(page, ctx, photo, "Site Measurement Photo", contentLeft(), y, halfW, rowH);
-  drawFacadeDiagram(page, ctx, m, contentLeft() + halfW + mm(4), y, halfW, rowH);
-  y -= rowH + mm(4);
+  drawFacadeDiagram(page, ctx, m, contentLeft() + halfW + mm(6), y, halfW, rowH);
+  y -= rowH + mm(5);
 
-  y = drawTwoColTable(
+  drawTwoColTable(
     page,
     ctx,
     [
-      { label: "Visual Size", value: sizeLabel(m.visualWidthMm, m.visualHeightMm) },
-      { label: "Material Size", value: sizeLabel(m.materialWidthMm, m.materialHeightMm) },
-      { label: "Bleed (L / R / T / B)", value: `${m.bleedLeftMm ?? "—"} / ${m.bleedRightMm ?? "—"} / ${m.bleedTopMm ?? "—"} / ${m.bleedBottomMm ?? "—"} mm` },
+      { label: "Visual Size (marked in green-yellow)", value: sizeLabel(m.visualWidthMm, m.visualHeightMm) },
+      { label: "Material Size", value: `${sizeLabel(m.materialWidthMm, m.materialHeightMm)} (${bleedLabel(m)})` },
       { label: "Material Type", value: m.materialType },
       { label: "Installation Type", value: m.installationType },
-      { label: "Equipment Required", value: m.equipmentDetail },
-      { label: "Equipment Source", value: m.equipmentSource },
-      { label: "Installed By", value: m.installedBy },
-      { label: "Notes", value: m.measurementNotes },
+      { label: "Detailed Equipment Material", value: m.equipmentDetail },
+      { label: "Who Is To Source Equipment?", value: m.equipmentSource },
+      { label: "Who Will Do The Installation?", value: m.installedBy },
+      { label: "Any Important Notes", value: m.measurementNotes },
     ],
+    contentLeft(),
+    contentWidth(),
     y
   );
+}
+
+/** "30mm bleed across all sides" when uniform (the common case -- see MeasurementStep.tsx's default), otherwise spelled out per side -- matching the reference table's own phrasing ("30mm bleed across all sides") instead of a separate, easy-to-miss Bleed row. */
+function bleedLabel(m: SiteSurveyMeasurement): string {
+  const [l, r, t, b] = [m.bleedLeftMm, m.bleedRightMm, m.bleedTopMm, m.bleedBottomMm];
+  if (l == null && r == null && t == null && b == null) return "no bleed specified";
+  if (l === r && r === t && t === b) return `${l ?? 0}mm bleed across all sides`;
+  return `${l ?? "—"} / ${r ?? "—"} / ${t ?? "—"} / ${b ?? "—"} mm bleed (L / R / T / B)`;
 }
 
 function sizeLabel(w: number | null, h: number | null): string {
@@ -531,7 +712,6 @@ export async function buildSiteSurveyReportPdf(data: SiteSurveyReportPdfData): P
 
   drawCoverPage(ctx);
   drawDetailsPage(ctx);
-  drawInstallationDetailsPage(ctx);
   drawMainSitePhotoPages(ctx);
   drawOrientationPage(ctx);
   drawMeasurementPage(ctx);
