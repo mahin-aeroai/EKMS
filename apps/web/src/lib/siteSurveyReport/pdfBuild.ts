@@ -58,6 +58,7 @@ import {
   rectangle as clipRectOp,
   clip as clipOp,
   endPath as endPathOp,
+  setCharacterSpacing,
   degrees,
   LineCapStyle,
   type PDFFont,
@@ -94,12 +95,22 @@ const APPLE_GREY = rgb(0xa6 / 255, 0xb1 / 255, 0xb7 / 255);
 // contrast at body-text sizes. Named separately from "black" because it's a
 // touch off pure black, matching the mockups' bar colour exactly.
 const TOPBAR_DARK = rgb(0.06, 0.06, 0.07);
-// The cover page's identity block was originally filled with a maroon/red
-// (see RED below); the mockups show this block in the same near-black as
-// the topbar instead, so it's pulled out as its own token even though the
-// value matches TOPBAR_DARK today, to keep the two call sites independently
-// nameable if they diverge later.
-const IDENTITY_BLOCK = TOPBAR_DARK;
+// A further feedback round asked for this near-black bar on the Cover and
+// Inspection Details pages only (see newPage's `variant` param) -- every
+// photo-led page (Main Site Photo, Site Orientation, Site Photo &
+// Measurement) goes back to the "old" grey bar, #a6b1b7, with dark ink
+// text/icons instead of white, since white-on-black reads as too heavy
+// next to a full-bleed photo. Named TOPBAR_GREY (rather than reusing
+// APPLE_GREY directly at each call site) purely so the topbar call sites
+// read intent, even though the colour is identical to APPLE_GREY.
+const TOPBAR_GREY = APPLE_GREY;
+// The cover page's identity/fact block was originally filled with a
+// maroon/red, then the topbar's own near-black -- a later feedback round
+// asked for this specific block (store name + SFO ID/Program/Survey
+// Date/Surveyor facts) to be grey instead, distinct from the topbar above
+// it (which stays black, or black+grey cross-cut -- see drawCoverPage),
+// so it's its own token rather than reusing TOPBAR_DARK.
+const IDENTITY_BLOCK = APPLE_GREY;
 const RED = rgb(0.64, 0.09, 0.11); // now only the obstacle-marker colour and a small decorative footer accent -- see below
 const INK = rgb(0.1, 0.1, 0.12);
 const INK_SECONDARY = rgb(0.34, 0.34, 0.37);
@@ -108,10 +119,6 @@ const WHITE = rgb(1, 1, 1);
 const SECTION_BAND = APPLE_GREY;
 const BORDER = rgb(0.8, 0.8, 0.83);
 const PLACEHOLDER_BG = rgb(0.95, 0.95, 0.96);
-// Muted light-grey text for secondary lines drawn on IDENTITY_BLOCK/TOPBAR_DARK
-// backgrounds (labels, addresses) -- readable on near-black without being
-// full white, matching the mockups' two-tone white/grey text on dark bars.
-const ON_DARK_MUTED = rgb(0.72, 0.73, 0.75);
 
 // The installation-area marking colour -- greenish-yellow, matching the
 // on-screen annotation tool in PhotosStep.tsx's AnnotationEditor (keep
@@ -178,6 +185,85 @@ function drawIcon(page: PDFPage, name: string, x: number, yTop: number, size: nu
     borderWidth: 2,
     borderLineCap: LineCapStyle.Round,
   });
+}
+
+/**
+ * A filled/bordered rectangle with small rounded corners -- pdf-lib's
+ * `drawRectangle` has no native radius option, so this hand-builds the
+ * outline as an SVG path (four straight edges + four quarter-circle arc
+ * commands) and draws it via `drawSvgPath`, matching drawIcon's own
+ * anchoring convention: (x, yTop) is the rectangle's own top-left corner,
+ * extending down/right. `radius` is deliberately meant to stay small ("very
+ * less radius", per feedback) -- this doesn't clamp it, but every call site
+ * in this file uses 2-3pt.
+ */
+function drawRoundedRect(
+  page: PDFPage,
+  x: number,
+  yTop: number,
+  width: number,
+  height: number,
+  radius: number,
+  options: { color?: ReturnType<typeof rgb>; opacity?: number; borderColor?: ReturnType<typeof rgb>; borderWidth?: number }
+) {
+  const r = Math.min(radius, width / 2, height / 2);
+  const w = width;
+  const h = height;
+  // Path drawn in the icon/SVG's own local (y-down) space -- (0,0) is the
+  // rectangle's top-left corner, matching how drawSvgPath is anchored
+  // everywhere else in this file (see drawIcon's own comment).
+  const d = [
+    `M ${r},0`,
+    `L ${w - r},0`,
+    `A ${r},${r} 0 0 1 ${w},${r}`,
+    `L ${w},${h - r}`,
+    `A ${r},${r} 0 0 1 ${w - r},${h}`,
+    `L ${r},${h}`,
+    `A ${r},${r} 0 0 1 0,${h - r}`,
+    `L 0,${r}`,
+    `A ${r},${r} 0 0 1 ${r},0`,
+    "Z",
+  ].join(" ");
+  page.drawSvgPath(d, {
+    x,
+    y: yTop,
+    scale: 1,
+    color: options.color,
+    opacity: options.opacity,
+    borderColor: options.borderColor,
+    borderWidth: options.borderWidth,
+  });
+}
+
+/**
+ * Draws `text` twice at a hairline horizontal offset (same colour, both
+ * copies) to visually thicken its strokes -- a "faux bold". Used only on a
+ * handful of the biggest/most prominent headings (the title page's header
+ * and subheader, the Cover/Details store name) where feedback specifically
+ * flagged the embedded bold weight as reading "semi bold or regular" rather
+ * than truly bold -- pdf-lib's `drawText` has no way to request a heavier
+ * weight from an already-embedded font, so this is the only lever available
+ * here. `offset` defaults to a fraction of the font size so it scales with
+ * how big the text is instead of needing a different constant per call
+ * site.
+ */
+function drawFauxBoldText(
+  page: PDFPage,
+  text: string,
+  options: { x: number; y: number; size: number; font: PDFFont; color: ReturnType<typeof rgb>; offset?: number; tracking?: number }
+) {
+  const { x, y, size, font, color, offset = Math.max(0.35, size * 0.012), tracking } = options;
+  // Tightened letter-spacing via the low-level `Tc` (character spacing)
+  // operator -- pdf-lib's high-level `drawText` has no character-spacing
+  // option (confirmed by reading PDFPageOptions.d.ts) -- pushed immediately
+  // before both draw calls and reset to 0 immediately after, so it never
+  // leaks into a later drawText call on the same page. Only passed by the
+  // title page's big display type, per feedback that its letter-spacing
+  // "look[s] loosen".
+  if (tracking != null) page.pushOperators(setCharacterSpacing(tracking));
+  page.drawText(text, { x, y, size, font, color });
+  page.drawText(text, { x: x + offset, y, size, font, color });
+  if (tracking != null) page.pushOperators(setCharacterSpacing(0));
 }
 
 // ---------------------------------------------------------------------------
@@ -293,38 +379,92 @@ function eyebrowIcon(eyebrow: string): string | null {
   return null;
 }
 
+/** Which of the three topbar treatments a page uses -- see newPage. */
+type TopbarVariant = "dark" | "grey" | "split";
+
+// How far right the black zone's top/bottom edges reach on the "split"
+// (cross-cut) topbar, as a fraction of the page width -- measured directly
+// off the partner's own mockup (323fba96-image.png: the black/grey seam
+// sits at ~60% of the bar's width at the top edge, ~56.5% at the bottom),
+// so the diagonal leans the same way and by roughly the same amount as the
+// reference rather than being an arbitrary guess.
+const SPLIT_TOP_FRAC = 0.6;
+const SPLIT_BOTTOM_FRAC = 0.565;
+
 /**
- * Every page: a near-black top bar (small Apple logo + title left, page
- * eyebrow -- with a leading icon when one applies -- right) and a footer
- * with page number. The topbar's own colour/size went through three
- * revisions in this feature -- see TOPBAR_DARK's own comment for why it's
- * back to near-black with bigger white text now, matching the partner's
- * design mockups.
+ * Every page: a top bar (small Apple logo + title left, page eyebrow --
+ * with a leading icon when one applies -- right) and a footer with page
+ * number. The topbar's own colour went through several revisions in this
+ * feature; it's now per-page rather than one fixed style everywhere, per
+ * feedback after the partner reviewed an all-dark-topbar render against
+ * their own mockups:
+ *  - "dark": solid near-black, white text/logo -- the Cover and Inspection
+ *    Details pages (see drawCoverPage/drawDetailsPage's own call sites for
+ *    why Cover actually uses "split" instead -- this variant is what
+ *    Inspection Details uses, and what Cover *would* use without the
+ *    cross-cut).
+ *  - "grey": solid APPLE_GREY (TOPBAR_GREY), dark ink text -- every
+ *    photo-led page (Main Site Photo, Site Orientation, Site Photo &
+ *    Measurement), reverting to the report's original pre-redesign topbar
+ *    now that white-on-black tested as too heavy next to a full-bleed
+ *    photo. The white logo PNG has poor contrast on this light a grey, so
+ *    this variant always falls back to the plain "Apple" text wordmark
+ *    instead of the image, matching how the topbar looked before the logo
+ *    asset existed.
+ *  - "split": a diagonal black+grey "cross cut" -- Cover only, matching
+ *    the mockup exactly (see SPLIT_TOP_FRAC/SPLIT_BOTTOM_FRAC). Logo/title
+ *    sit in the black zone (white text); an eyebrow, if given, sits in the
+ *    grey zone (dark ink text) same as the "grey" variant.
  */
-function newPage(ctx: Ctx, eyebrow: string): PDFPage {
+function newPage(ctx: Ctx, eyebrow: string, variant: TopbarVariant = "dark"): PDFPage {
   const page = ctx.doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
   ctx.pageNumber += 1;
 
-  page.drawRectangle({ x: 0, y: PAGE_HEIGHT - TOPBAR_HEIGHT, width: PAGE_WIDTH, height: TOPBAR_HEIGHT, color: TOPBAR_DARK });
+  const barTop = PAGE_HEIGHT;
+  const barBottom = PAGE_HEIGHT - TOPBAR_HEIGHT;
+
+  if (variant === "grey") {
+    page.drawRectangle({ x: 0, y: barBottom, width: PAGE_WIDTH, height: TOPBAR_HEIGHT, color: TOPBAR_GREY });
+  } else if (variant === "split") {
+    page.drawRectangle({ x: 0, y: barBottom, width: PAGE_WIDTH, height: TOPBAR_HEIGHT, color: TOPBAR_GREY });
+    const d = [
+      "M 0,0",
+      `L ${SPLIT_TOP_FRAC * PAGE_WIDTH},0`,
+      `L ${SPLIT_BOTTOM_FRAC * PAGE_WIDTH},${TOPBAR_HEIGHT}`,
+      `L 0,${TOPBAR_HEIGHT}`,
+      "Z",
+    ].join(" ");
+    page.drawSvgPath(d, { x: 0, y: barTop, scale: 1, color: TOPBAR_DARK });
+  } else {
+    page.drawRectangle({ x: 0, y: barBottom, width: PAGE_WIDTH, height: TOPBAR_HEIGHT, color: TOPBAR_DARK });
+  }
+
+  // "dark"/"split" sit their title in the black zone -> white; "grey" has
+  // no black zone at all, so it always reads dark ink.
+  const titleColor = variant === "grey" ? INK : WHITE;
+  const useLogoImage = variant !== "grey" && !!ctx.logo;
 
   const logoSize = mm(6.5);
   let titleX = MARGIN;
   const titleY = PAGE_HEIGHT - TOPBAR_HEIGHT / 2 - 3.5;
-  if (ctx.logo) {
+  if (useLogoImage && ctx.logo) {
     const logoH = logoSize;
     const logoW = (ctx.logo.width / ctx.logo.height) * logoH;
     page.drawImage(ctx.logo, { x: MARGIN, y: PAGE_HEIGHT - TOPBAR_HEIGHT / 2 - logoH / 2, width: logoW, height: logoH });
     titleX = MARGIN + logoW + mm(3);
+  } else if (variant === "grey") {
+    page.drawText("Apple", { x: MARGIN, y: PAGE_HEIGHT - TOPBAR_HEIGHT / 2 - 3.5, size: 11, font: ctx.bold, color: INK });
+    titleX = MARGIN + ctx.bold.widthOfTextAtSize("Apple", 11) + mm(3);
   }
-  page.drawText("Apple Site Survey Report", {
-    x: titleX,
-    y: titleY,
-    size: 13,
-    font: ctx.bold,
-    color: WHITE,
-  });
+  drawFauxBoldText(page, "Apple Site Survey Report", { x: titleX, y: titleY, size: 13, font: ctx.bold, color: titleColor });
 
   if (eyebrow) {
+    // The eyebrow always sits in a grey zone ("grey" variant: the whole
+    // bar; "split": the right-hand wedge) or the black zone ("dark"), so
+    // its colour follows the same rule as the title text above -- except
+    // on "split", where it's in the grey wedge regardless of the title
+    // being in the black one.
+    const eyebrowColor = variant === "dark" ? WHITE : INK;
     const eyebrowUpper = eyebrow.toUpperCase();
     const eyebrowSize = 10;
     const ew = ctx.bold.widthOfTextAtSize(eyebrowUpper, eyebrowSize);
@@ -332,7 +472,7 @@ function newPage(ctx: Ctx, eyebrow: string): PDFPage {
     const iconW = icon ? mm(5) + mm(1.8) : 0;
     let ex = PAGE_WIDTH - MARGIN - ew - iconW;
     if (icon) {
-      drawIcon(page, icon, ex, PAGE_HEIGHT - TOPBAR_HEIGHT / 2 + mm(2.5), mm(5), WHITE);
+      drawIcon(page, icon, ex, PAGE_HEIGHT - TOPBAR_HEIGHT / 2 + mm(2.5), mm(5), eyebrowColor);
       ex += mm(5) + mm(1.8);
     }
     page.drawText(eyebrowUpper, {
@@ -340,7 +480,7 @@ function newPage(ctx: Ctx, eyebrow: string): PDFPage {
       y: titleY,
       size: eyebrowSize,
       font: ctx.bold,
-      color: WHITE,
+      color: eyebrowColor,
     });
   }
 
@@ -419,12 +559,14 @@ function drawIdentityBlock(page: PDFPage, ctx: Ctx, yTop: number): number {
   const nameX = contentLeft() + pinSize + mm(2.5);
   // A rounded-square pin badge behind the location icon, matching the
   // mockups' pale-grey icon chip beside the store name.
-  page.drawRectangle({ x: contentLeft(), y: yTop - pinSize - mm(1), width: pinSize, height: pinSize, color: PLACEHOLDER_BG });
+  drawRoundedRect(page, contentLeft(), yTop - pinSize - mm(1), pinSize, pinSize, mm(0.8), { color: PLACEHOLDER_BG });
   drawIcon(page, "mapPin", contentLeft() + mm(0.7), yTop - mm(1.1), pinSize - mm(1.4), INK_SECONDARY);
 
   // Store name and address are now plain black/grey (not the previous
   // maroon) -- and a little bigger -- matching the mockups' identity block.
-  page.drawText(data.storeName || "Untitled Site", { x: nameX, y: yTop - mm(7), size: 17, font: ctx.bold, color: INK });
+  // Faux-bolded (see drawFauxBoldText) per feedback that this page's title
+  // reads too light at its embedded bold weight.
+  drawFauxBoldText(page, data.storeName || "Untitled Site", { x: nameX, y: yTop - mm(7), size: 17, font: ctx.bold, color: INK });
   wrapText(ctx.font, data.address || "—", 10.5, contentWidth() * 0.5)
     .slice(0, 2)
     .forEach((line, i) => {
@@ -681,9 +823,13 @@ function drawTitlePage(ctx: Ctx) {
   const dateSize = (specDateSize / specHeaderSize) * headerSize;
 
   let cursorY = PAGE_HEIGHT * 0.6;
-  page.drawText(headerText, { x: leftX, y: cursorY, size: headerSize, font: ctx.bold, color: WHITE });
+  // Faux-bolded and slightly tighter-tracked (see drawFauxBoldText) --
+  // feedback flagged this line specifically as reading "semi bold or
+  // regular" at its embedded weight, and its letter-spacing as "loosen"
+  // compared to the reference mockups' tighter display type.
+  drawFauxBoldText(page, headerText, { x: leftX, y: cursorY, size: headerSize, font: ctx.bold, color: WHITE, tracking: -headerSize * 0.015 });
   cursorY -= headerSize * 1.05 + mm(3);
-  page.drawText(subText, { x: leftX, y: cursorY, size: subSize, font: ctx.bold, color: rgb(0.18, 0.2, 0.22) });
+  drawFauxBoldText(page, subText, { x: leftX, y: cursorY, size: subSize, font: ctx.bold, color: rgb(0.18, 0.2, 0.22), tracking: -subSize * 0.015 });
 
   const dateLabel = titlePageDateLabel(data.surveyDate);
   page.drawText(dateLabel, { x: leftX, y: mm(22), size: dateSize, font: ctx.font, color: rgb(0.2, 0.22, 0.24) });
@@ -704,8 +850,36 @@ function titlePageDateLabel(surveyDate: string): string {
 
 const COVER_FACT_ICONS = ["idCard", "layoutGrid", "calendar", "user"];
 
+// Small rounded-corner radius shared by every card-style rectangle on this
+// page (identity block, pin badge) -- "very less radius", per feedback,
+// not the pronounced rounding Installation Report uses elsewhere.
+const CARD_RADIUS = mm(1.4);
+
+/**
+ * A subtle decorative grid of small dots in the bottom-right corner of the
+ * Cover page's identity block, matching the mockup's own dot-grid texture
+ * there (confirmed present in the mockup and absent from earlier renders).
+ * `x`/`yTop` is the grid's own top-left corner; drawn outward to the right
+ * and downward from there, so call sites anchor it from the block's own
+ * bottom-right corner.
+ */
+function drawDotGrid(page: PDFPage, x: number, yTop: number, cols: number, rows: number, spacing: number, dotRadius: number, color: ReturnType<typeof rgb>, opacity: number) {
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      page.drawEllipse({
+        x: x + col * spacing,
+        y: yTop - row * spacing,
+        xScale: dotRadius,
+        yScale: dotRadius,
+        color,
+        opacity,
+      });
+    }
+  }
+}
+
 function drawCoverPage(ctx: Ctx) {
-  const page = newPage(ctx, "");
+  const page = newPage(ctx, "", "split");
   const { data } = ctx;
   let y = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
 
@@ -714,37 +888,78 @@ function drawCoverPage(ctx: Ctx) {
   drawPhotoBox(page, ctx, mainPhoto, "Main Site Photo", MARGIN, y, contentWidth(), photoH);
   y -= photoH + mm(5);
 
-  // Black identity block (was maroon/red -- see IDENTITY_BLOCK's comment),
-  // matching the mockups' near-black data card.
-  const blockH = mm(46);
-  page.drawRectangle({ x: MARGIN, y: y - blockH, width: contentWidth(), height: blockH, color: IDENTITY_BLOCK });
+  // Grey identity block (was black -- see IDENTITY_BLOCK's own comment for
+  // why it's grey now, distinct from the topbar above it), small rounded
+  // corners, with the partner's dot-grid decoration in its bottom-right
+  // corner. Text on this lighter background reads as dark ink now instead
+  // of white.
+  const blockH = mm(48);
+  drawRoundedRect(page, MARGIN, y, contentWidth(), blockH, CARD_RADIUS, { color: IDENTITY_BLOCK });
 
-  const pinSize = mm(6.5);
-  const nameX = MARGIN + mm(5) + pinSize + mm(2.5);
-  page.drawRectangle({ x: MARGIN + mm(5), y: y - mm(11) - mm(1), width: pinSize, height: pinSize, color: rgb(0.95, 0.95, 0.96) });
-  drawIcon(page, "mapPin", MARGIN + mm(5) + mm(0.8), y - mm(2.5), pinSize - mm(1.6), INK_SECONDARY);
+  const dotCols = 5;
+  const dotRows = 4;
+  const dotSpacing = mm(3);
+  const dotGridW = (dotCols - 1) * dotSpacing;
+  const dotGridH = (dotRows - 1) * dotSpacing;
+  // Reserved on the right of the fact-row area below (see factColW) so this
+  // never overlaps the Surveyor column's own text -- anchored off the
+  // block's own bottom-right corner (rather than its top) so the grid stays
+  // pinned to that corner even if blockH changes later.
+  const dotReserve = mm(24);
+  drawDotGrid(
+    page,
+    MARGIN + contentWidth() - mm(6) - dotGridW,
+    y - blockH + mm(6) + dotGridH,
+    dotCols,
+    dotRows,
+    dotSpacing,
+    mm(0.45),
+    WHITE,
+    0.4
+  );
 
-  page.drawText(data.storeName || "Untitled Site", { x: nameX, y: y - mm(10), size: 19, font: ctx.bold, color: WHITE });
+  const pinSize = mm(7.5);
+  const nameX = MARGIN + mm(5) + pinSize + mm(3);
+  drawRoundedRect(page, MARGIN + mm(5), y - mm(1), pinSize, pinSize, mm(1), { color: WHITE });
+  drawIcon(page, "mapPin", MARGIN + mm(5) + mm(1), y - mm(1.9), pinSize - mm(1.8), INK_SECONDARY);
+
+  drawFauxBoldText(page, data.storeName || "Untitled Site", { x: nameX, y: y - mm(9.5), size: 19, font: ctx.bold, color: INK });
   wrapText(ctx.font, data.address || "—", 10.5, contentWidth() * 0.55)
     .slice(0, 2)
     .forEach((line, i) => {
-      page.drawText(line, { x: nameX, y: y - mm(17) - i * mm(5), size: 10.5, font: ctx.font, color: ON_DARK_MUTED });
+      page.drawText(line, { x: nameX, y: y - mm(17) - i * mm(5), size: 10.5, font: ctx.font, color: INK_SECONDARY });
     });
 
+  page.drawLine({ start: { x: MARGIN + mm(5), y: y - mm(23) }, end: { x: MARGIN + contentWidth() - mm(5), y: y - mm(23) }, thickness: 0.6, color: rgb(0.35, 0.37, 0.4), opacity: 0.35 });
+
+  // Icon-LEFT-of-stacked-label/value fact rows, matching the mockup
+  // exactly (earlier icon-above-label layout read as "small and not
+  // aligned" -- each icon is now bigger and vertically centred against its
+  // own two-line label/value pair, with a thin divider between columns).
   const facts: [string, string][] = [
     ["SFO ID", data.sfoId || "—"],
     ["Program", data.program || "—"],
     ["Survey Date", formatDate(data.surveyDate)],
     ["Surveyor", data.surveyorName || "—"],
   ];
-  const factColW = contentWidth() / facts.length;
+  const factColW = (contentWidth() - mm(5) - dotReserve) / facts.length;
+  const factRowCenterY = y - mm(35.5);
+  const factIconSize = mm(6.5);
   facts.forEach(([label, value], i) => {
     const fx = MARGIN + mm(5) + i * factColW;
-    const iconSize = mm(4.2);
-    drawIcon(page, COVER_FACT_ICONS[i], fx, y - mm(24), iconSize, ON_DARK_MUTED);
-    const labelX = fx + iconSize + mm(1.6);
-    page.drawText(label.toUpperCase(), { x: labelX, y: y - mm(24) + iconSize / 2 - 3, size: 7.5, font: ctx.bold, color: ON_DARK_MUTED });
-    page.drawText(value, { x: fx, y: y - mm(34), size: 11, font: ctx.bold, color: WHITE });
+    if (i > 0) {
+      page.drawLine({
+        start: { x: fx - mm(4), y: factRowCenterY - mm(6) },
+        end: { x: fx - mm(4), y: factRowCenterY + mm(6) },
+        thickness: 0.6,
+        color: rgb(0.35, 0.37, 0.4),
+        opacity: 0.3,
+      });
+    }
+    drawIcon(page, COVER_FACT_ICONS[i], fx, factRowCenterY + factIconSize / 2, factIconSize, INK_SECONDARY);
+    const labelX = fx + factIconSize + mm(2.2);
+    page.drawText(label.toUpperCase(), { x: labelX, y: factRowCenterY + mm(2.2), size: 7.5, font: ctx.bold, color: INK_SECONDARY });
+    page.drawText(value, { x: labelX, y: factRowCenterY - mm(4.4), size: 11.5, font: ctx.bold, color: INK });
   });
 }
 
@@ -756,7 +971,7 @@ function drawCoverPage(ctx: Ctx) {
  * didn't have the width for two columns).
  */
 function drawDetailsPage(ctx: Ctx) {
-  const page = newPage(ctx, "Inspection Details");
+  const page = newPage(ctx, "Inspection Details", "dark");
   const { formData: f } = ctx.data;
   let y = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
   y = drawIdentityBlock(page, ctx, y);
@@ -852,7 +1067,7 @@ function drawMainSitePhotoPages(ctx: Ctx) {
   const photos = ctx.photos.filter((p) => p.category === "main_site");
   const list = photos.length > 0 ? photos : [undefined];
   for (const photo of list) {
-    const page = newPage(ctx, "Main Site Photo");
+    const page = newPage(ctx, "Main Site Photo", "grey");
     const top = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
     drawPhotoBox(page, ctx, photo, "Main Site Photo", MARGIN, top, contentWidth(), top - FOOTER_HEIGHT - mm(4));
   }
@@ -863,7 +1078,7 @@ function drawOrientationPage(ctx: Ctx) {
   // exists yet (drawPhotoBox falls back to a placeholder) -- so the export
   // loop is complete end to end before photo upload lands.
   const categories: PhotoCategory[] = ["orientation_right", "orientation_left", "orientation_opposite"];
-  const page = newPage(ctx, "Site Orientation");
+  const page = newPage(ctx, "Site Orientation", "grey");
   let y = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
   y = drawSectionBand(page, ctx, "Site Orientation", contentLeft(), contentWidth(), y, ctx.data.storeName || undefined, "camera");
 
@@ -971,7 +1186,7 @@ function drawFacadeDiagram(page: PDFPage, ctx: Ctx, m: SiteSurveyMeasurement, x:
 }
 
 function drawMeasurementPage(ctx: Ctx) {
-  const page = newPage(ctx, "Site Photo & Measurement");
+  const page = newPage(ctx, "Site Photo & Measurement", "grey");
   const m = ctx.data.measurement;
   let y = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
   y = drawSectionBand(page, ctx, "Site Photo & Measurement", contentLeft(), contentWidth(), y, ctx.data.storeName || undefined, "camera");
@@ -1092,7 +1307,7 @@ export async function buildSiteSurveyReportPdf(data: SiteSurveyReportPdfData, fo
   const otherPhotos = ctx.photos.filter((p) => p.category === "other");
   if (otherPhotos.length > 0) {
     for (const photo of otherPhotos) {
-      const page = newPage(ctx, "Additional Photo");
+      const page = newPage(ctx, "Additional Photo", "grey");
       const top = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
       drawPhotoBox(page, ctx, photo, "Additional Photo", MARGIN, top, contentWidth(), top - FOOTER_HEIGHT - mm(4));
     }
