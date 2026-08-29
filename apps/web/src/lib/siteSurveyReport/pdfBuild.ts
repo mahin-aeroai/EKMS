@@ -68,7 +68,6 @@ import {
 import fontkit from "@pdf-lib/fontkit";
 import {
   normalizeAnnotation,
-  APPLE_STANDARDS_MET_LABEL,
   DELIVERY_TIMING_LABEL,
   ENTRANCE_FLOOR_LOCATION_LABEL,
   INSTALLATION_TYPE_LABEL,
@@ -101,20 +100,29 @@ const FOOTER_HEIGHT = mm(8);
 // ---------------------------------------------------------------------------
 
 // Apple's own grey, exactly as specified by the partner (#a6b1b7) -- kept
-// for every section-header band (see drawSectionBand) and the title page's
-// full-bleed background, matching the partner-supplied design mockups.
+// for the title page's full-bleed background and, once again, every
+// section-header band (see drawSectionBand). An earlier pass replaced the
+// bands' own fill with a darker, dedicated SECTION_BAND token so white band
+// text stayed legible against it; a later feedback round asked for bands to
+// go back to plain APPLE_GREY like everywhere else, so SECTION_BAND is now
+// just an alias for it -- legibility is kept by switching the band's own
+// text to dark ink instead of white (the same trick the topbar's own
+// "grey" variant already uses), not by darkening the fill.
 const APPLE_GREY = rgb(0xa6 / 255, 0xb1 / 255, 0xb7 / 255);
-// Page topbars themselves went through three revisions: near-black
-// originally, then this same APPLE_GREY, and now -- per the mockups
-// (screenshots of the actual target design system) -- back to a near-black
-// bar with bigger white text, since white text on #a6b1b7 reads too low
-// contrast at body-text sizes. Named separately from "black" because it's a
-// touch off pure black, matching the mockups' bar colour exactly.
+// Page topbars themselves went through several revisions: near-black
+// originally, then this same APPLE_GREY, then (per the mockups) back to a
+// near-black bar with bigger white text, since white text on #a6b1b7 reads
+// too low contrast at body-text sizes. Named separately from "black" because
+// it's a touch off pure black, matching the mockups' bar colour exactly.
 const TOPBAR_DARK = rgb(0.06, 0.06, 0.07);
-// A further feedback round asked for this near-black bar on the Cover and
-// Inspection Details pages only (see newPage's `variant` param) -- every
-// photo-led page (Main Site Photo, Site Orientation, Site Photo &
-// Measurement) goes back to the "old" grey bar, #a6b1b7, with dark ink
+// The Cover page used to run its own diagonal "split" black/grey topbar
+// (see the now-removed SPLIT_TOP_FRAC/SPLIT_BOTTOM_FRAC constants and
+// newPage's old "split" variant); per feedback asking for that diagonal cut
+// removed and the bar made "full black," the Cover page now just uses this
+// same TOPBAR_DARK bar, same as the Inspection Details page (see
+// drawCoverPage/newPage's `variant` param).
+// Every photo-led page (Main Site Photo, Site Orientation, Site Photo &
+// Measurement) still uses the "old" grey bar, #a6b1b7, with dark ink
 // text/icons instead of white, since white-on-black reads as too heavy
 // next to a full-bleed photo. Named TOPBAR_GREY (rather than reusing
 // APPLE_GREY directly at each call site) purely so the topbar call sites
@@ -122,53 +130,65 @@ const TOPBAR_DARK = rgb(0.06, 0.06, 0.07);
 const TOPBAR_GREY = APPLE_GREY;
 const RED = rgb(0.64, 0.09, 0.11); // now only the obstacle-marker colour and a small decorative footer accent -- see below
 
+// Every standard content page (everything drawn via newPage) fills its full
+// background with this very light neutral grey instead of leaving it plain
+// white -- per feedback that every table "section" should read as a white
+// card floating on a light grey page, rather than blending into a plain
+// white one (see drawTableSection below). A hair lighter than
+// PLACEHOLDER_BG so an empty photo box still reads as a visibly distinct
+// box against it.
+const PAGE_BG = rgb(0.965, 0.965, 0.975);
+
 // Cover page identity card -- the store name/address/SFO ID/Program/Survey
-// Date/Surveyor block went through a maroon fill, then the topbar's own
-// near-black, then a solid APPLE_GREY band; this latest pass replaces that
-// solid band with a white, bordered, softly-shadowed "card" per the
-// partner's own detailed spec (exact hex values below), plus a dark
-// charcoal badge for the main location pin and pale-grey chips behind each
-// fact's icon -- a step up from the flat grey band toward a "premium ERP"
-// look. Kept as dedicated tokens (not reused from INK/MUTED/BORDER above)
-// since none of those already matched the spec's exact hex values, and
-// every other page's own typography/colours must stay exactly as they were.
-const IDENTITY_CARD_BG = rgb(1, 1, 1); // white
-const IDENTITY_CARD_BORDER = rgb(0xe1 / 255, 0xe5 / 255, 0xe9 / 255);
-const IDENTITY_CARD_SHADOW = rgb(0x15 / 255, 0x19 / 255, 0x22 / 255); // used only at low opacity, see drawCoverPage
-const IDENTITY_TITLE = rgb(0, 0, 0); // pure black, per the partner's own request -- was a near-black charcoal (#171A20)
-const IDENTITY_SUBTITLE = rgb(0x72 / 255, 0x79 / 255, 0x83 / 255);
-const IDENTITY_LABEL = rgb(0x6b / 255, 0x70 / 255, 0x78 / 255);
+// Date/Surveyor block went through a maroon fill, the topbar's own
+// near-black, a solid APPLE_GREY band, then a white/bordered/shadowed card;
+// per the latest feedback round it's inverted once more -- a solid
+// near-black card with light/white text -- so these tokens are named for
+// what they MEAN (title/subtitle/label/value/divider/etc), not for a
+// specific light-or-dark scheme, since which scheme they resolve to keeps
+// changing.
+const IDENTITY_CARD_BG = TOPBAR_DARK; // same near-black as the topbar bar itself
+const IDENTITY_CARD_SHADOW = rgb(0x15 / 255, 0x19 / 255, 0x22 / 255); // used only at low opacity -- see drawCardShadow, now shared by every "card with a shadow" in this file, not just this one
+const IDENTITY_TITLE = rgb(1, 1, 1); // white, on the card's own near-black fill -- was pure black on the old white card
+const IDENTITY_SUBTITLE = rgb(0.62, 0.65, 0.69); // light grey, for the dark card -- was a darker grey meant for the old white one
+const IDENTITY_LABEL = rgb(0.56, 0.59, 0.63); // light grey, a touch dimmer than IDENTITY_SUBTITLE for the small uppercase fact labels
 const IDENTITY_VALUE = IDENTITY_TITLE;
-const IDENTITY_DIVIDER = rgb(0xe2 / 255, 0xe6 / 255, 0xea / 255);
-const IDENTITY_PIN_BG = rgb(0x15 / 255, 0x19 / 255, 0x22 / 255);
-const IDENTITY_CHIP_BG = rgb(0xf0 / 255, 0xf2 / 255, 0xf4 / 255);
-const IDENTITY_CHIP_ICON = rgb(0x4b / 255, 0x55 / 255, 0x63 / 255);
+const IDENTITY_DIVIDER = rgb(0.22, 0.23, 0.26); // a visible-but-subtle grey against the card's own near-black -- was a near-white line for the old white card
+const IDENTITY_PIN_BG = rgb(1, 1, 1); // white pin badge, now that the card itself is dark (was a dark charcoal badge on a white card -- inverted)
+const IDENTITY_PIN_ICON = IDENTITY_CARD_BG; // the pin icon itself goes dark to read against its own now-white badge
+const IDENTITY_CHIP_BG = rgb(0xf0 / 255, 0xf2 / 255, 0xf4 / 255); // unchanged -- a pale chip still reads clearly against the dark card
+const IDENTITY_CHIP_ICON = rgb(0x4b / 255, 0x55 / 255, 0x63 / 255); // unchanged -- dark icon on its own pale chip
 const INK = rgb(0.1, 0.1, 0.12);
 const INK_SECONDARY = rgb(0.34, 0.34, 0.37);
 const MUTED = rgb(0.56, 0.56, 0.6);
 const WHITE = rgb(1, 1, 1);
-// Darkened sibling of APPLE_GREY (same blue-grey family, not a new hue) --
-// section-header bands (drawSectionBand) used to fill with plain APPLE_GREY
-// and dark ink text, which read low-contrast/washed out at the small
-// bold-9pt label size. White text needs a background this dark to stay
-// legible (~5.8:1 contrast) -- APPLE_GREY itself is too light for that
-// (~2.2:1), which is exactly why an earlier feedback round rejected
-// white-on-APPLE_GREY for the page topbar (see newPage's "grey" variant
-// comment) -- that decision stands for the topbar; this is a separate,
-// deliberately darker token only for the smaller in-content bands.
-const SECTION_BAND = rgb(0x5a / 255, 0x63 / 255, 0x69 / 255);
-const SECTION_BAND_ICON_CHIP = rgb(1, 1, 1); // drawn at low opacity -- a faint highlight square behind each band's icon, see drawSectionBand
-const BAND_RADIUS = mm(1.6); // rounded corners for drawSectionBand's strip -- smaller than CARD_RADIUS since the band itself is much shorter than the identity card
+// Bands used to fill with a darker, dedicated token here (white text tested
+// at only ~2.2:1 contrast on plain APPLE_GREY, too low to keep) -- per
+// feedback that bands should go back to plain Apple grey, this is now just
+// an alias, and drawSectionBand instead switches its own text to dark ink
+// to stay legible (matching the topbar's own "grey" variant, which has
+// always used dark ink on this exact colour).
+const SECTION_BAND = APPLE_GREY;
+// Shared rounded-corner radius for the identity card, its pin badge/fact
+// chips, every section band, and every white "table section" card (see
+// drawTableSection) -- one radius everywhere a band or card needs rounding,
+// so a band's own corner never mismatches the card it now sits on top of.
+const CARD_RADIUS = mm(2.6);
 // Negative character-spacing factor (multiplied by -size) applied to every
 // drawFauxBoldText call -- SF Pro Text's metrics are tuned for small body
 // copy, so at heading sizes its default spacing reads as "loose"; this is
 // the one lever pdf-lib exposes to tighten it (see drawFauxBoldText's own
-// header comment on the Tc operator). Was 0.015 on the title page's two
-// lines only; per a further round of feedback that the whole report still
-// read loose, raised slightly and now applied to every headline-weight
-// call site (topbar title, both identity block/card store names), not
-// just those two.
+// header comment on the Tc operator). Applied to every headline-weight
+// call site (topbar title, both identity block/card store names).
 const TITLE_TRACKING = 0.02;
+// A smaller sibling of TITLE_TRACKING applied to ordinary table label/value
+// text (see drawTwoColTable). Feedback asked for "condensed" text in the
+// report's sections -- there's no actual Condensed cut of SF Pro Text
+// licensed into this app (only Regular/Semibold/Italic exist, see this
+// file's header comment on font licensing), so this approximates a
+// condensed look with tighter letter-spacing rather than a genuinely
+// narrower typeface.
+const BODY_TRACKING = 0.012;
 const BORDER = rgb(0.8, 0.8, 0.83);
 const PLACEHOLDER_BG = rgb(0.95, 0.95, 0.96);
 
@@ -440,62 +460,38 @@ function eyebrowIcon(eyebrow: string): string | null {
   return null;
 }
 
-/** Which of the three topbar treatments a page uses -- see newPage. */
-type TopbarVariant = "dark" | "grey" | "split";
-
-// How far right the black zone's top/bottom edges reach on the "split"
-// (cross-cut) topbar, as a fraction of the page width -- measured directly
-// off the partner's own mockup (323fba96-image.png: the black/grey seam
-// sits at ~60% of the bar's width at the top edge, ~56.5% at the bottom),
-// so the diagonal leans the same way and by roughly the same amount as the
-// reference rather than being an arbitrary guess.
-const SPLIT_TOP_FRAC = 0.6;
-const SPLIT_BOTTOM_FRAC = 0.565;
+/** Which of the two topbar treatments a page uses -- see newPage. */
+type TopbarVariant = "dark" | "grey";
 
 /**
- * Every page: a top bar (small Apple logo + title left, page eyebrow --
- * with a leading icon when one applies -- right) and a footer with page
- * number. The topbar's own colour went through several revisions in this
- * feature; it's now per-page rather than one fixed style everywhere, per
- * feedback after the partner reviewed an all-dark-topbar render against
- * their own mockups:
+ * Every page: a full-page fill of PAGE_BG (a very light grey -- see that
+ * token's own comment), then a top bar (small Apple logo + title left, page
+ * eyebrow -- with a leading icon when one applies -- right) and a footer
+ * with page number. The topbar's own colour went through several
+ * revisions; it's now one of two styles per page, per feedback after the
+ * partner reviewed renders against their own mockups:
  *  - "dark": solid near-black, white text/logo -- the Cover and Inspection
- *    Details pages (see drawCoverPage/drawDetailsPage's own call sites for
- *    why Cover actually uses "split" instead -- this variant is what
- *    Inspection Details uses, and what Cover *would* use without the
- *    cross-cut).
+ *    Details pages. The Cover page used to run its own diagonal "split"
+ *    black/grey cut here; per a later feedback round asking for that cut
+ *    removed and the bar made "full black," it now just uses this same
+ *    plain "dark" variant, same as Inspection Details.
  *  - "grey": solid APPLE_GREY (TOPBAR_GREY), dark ink text -- every
  *    photo-led page (Main Site Photo, Site Orientation, Site Photo &
- *    Measurement), reverting to the report's original pre-redesign topbar
- *    now that white-on-black tested as too heavy next to a full-bleed
- *    photo. The white logo PNG has poor contrast on this light a grey, so
- *    this variant always falls back to the plain "Apple" text wordmark
- *    instead of the image, matching how the topbar looked before the logo
- *    asset existed.
- *  - "split": a diagonal black+grey "cross cut" -- Cover only, matching
- *    the mockup exactly (see SPLIT_TOP_FRAC/SPLIT_BOTTOM_FRAC). Logo/title
- *    sit in the black zone (white text); an eyebrow, if given, sits in the
- *    grey zone (dark ink text) same as the "grey" variant.
+ *    Measurement), since white-on-black tested as too heavy next to a
+ *    full-bleed photo. The white logo PNG has poor contrast on this light a
+ *    grey, so this variant always falls back to the plain "Apple" text
+ *    wordmark instead of the image, matching how the topbar looked before
+ *    the logo asset existed.
  */
 function newPage(ctx: Ctx, eyebrow: string, variant: TopbarVariant = "dark"): PDFPage {
   const page = ctx.doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
   ctx.pageNumber += 1;
+  page.drawRectangle({ x: 0, y: 0, width: PAGE_WIDTH, height: PAGE_HEIGHT, color: PAGE_BG });
 
-  const barTop = PAGE_HEIGHT;
   const barBottom = PAGE_HEIGHT - TOPBAR_HEIGHT;
 
   if (variant === "grey") {
     page.drawRectangle({ x: 0, y: barBottom, width: PAGE_WIDTH, height: TOPBAR_HEIGHT, color: TOPBAR_GREY });
-  } else if (variant === "split") {
-    page.drawRectangle({ x: 0, y: barBottom, width: PAGE_WIDTH, height: TOPBAR_HEIGHT, color: TOPBAR_GREY });
-    const d = [
-      "M 0,0",
-      `L ${SPLIT_TOP_FRAC * PAGE_WIDTH},0`,
-      `L ${SPLIT_BOTTOM_FRAC * PAGE_WIDTH},${TOPBAR_HEIGHT}`,
-      `L 0,${TOPBAR_HEIGHT}`,
-      "Z",
-    ].join(" ");
-    page.drawSvgPath(d, { x: 0, y: barTop, scale: 1, color: TOPBAR_DARK });
   } else {
     page.drawRectangle({ x: 0, y: barBottom, width: PAGE_WIDTH, height: TOPBAR_HEIGHT, color: TOPBAR_DARK });
   }
@@ -520,11 +516,9 @@ function newPage(ctx: Ctx, eyebrow: string, variant: TopbarVariant = "dark"): PD
   drawFauxBoldText(page, "Apple Site Survey Report", { x: titleX, y: titleY, size: 13, font: ctx.bold, color: titleColor, tracking: -13 * TITLE_TRACKING });
 
   if (eyebrow) {
-    // The eyebrow always sits in a grey zone ("grey" variant: the whole
-    // bar; "split": the right-hand wedge) or the black zone ("dark"), so
-    // its colour follows the same rule as the title text above -- except
-    // on "split", where it's in the grey wedge regardless of the title
-    // being in the black one.
+    // The eyebrow always sits in the same zone as the bar itself -- the
+    // grey bar ("grey" variant) or the black bar ("dark") -- so its colour
+    // follows the same rule as the title text above.
     const eyebrowColor = variant === "dark" ? WHITE : INK;
     const eyebrowUpper = eyebrow.toUpperCase();
     const eyebrowSize = 10;
@@ -567,44 +561,29 @@ function drawFooter(ctx: Ctx, page: PDFPage) {
 }
 
 /**
- * Grey section-header band -- returns the y to start drawing content below
- * it. Takes its own x/width (rather than always spanning the full content
- * width) so the consolidated Inspection Details page can draw two
- * independent columns of sections side by side, matching the reference's
- * own two-up layout on one landscape page instead of the original's two
- * separate, mostly-empty portrait pages.
+ * Grey (Apple-grey) section-header band -- returns the y to start drawing
+ * content below it. Takes its own x/width (rather than always spanning the
+ * full content width) so the consolidated Inspection Details page can draw
+ * two independent columns of sections side by side, matching the
+ * reference's own two-up layout on one landscape page instead of the
+ * original's two separate, mostly-empty portrait pages.
  *
  * rightText, when given, is drawn right-aligned in the same band -- used to
  * repeat the site name alongside a section title, exactly as the reference
  * PDF repeats "iMaging @ Model Town, Jalandhar" beside "Site Photo and
  * measurement" on its own final page.
  *
- * `icon`, when given, is drawn to the left of the title (matching the
- * mockups' icon-led section bands -- ON-SITE DETAILS, STORE DESCRIPTION,
- * etc.), shifting the title text right to make room.
+ * Per feedback, bands no longer carry a leading icon (an earlier pass added
+ * one) and fill with plain APPLE_GREY again rather than a darker dedicated
+ * shade -- so the title/rightText text is dark ink here, not white, the
+ * same way the topbar's own "grey" variant has always read dark ink on
+ * this exact colour (white text on plain APPLE_GREY tested at only ~2.2:1
+ * contrast, too low to keep).
  */
-function drawSectionBand(page: PDFPage, ctx: Ctx, title: string, x: number, width: number, yTop: number, rightText?: string, icon?: string): number {
+function drawSectionBand(page: PDFPage, ctx: Ctx, title: string, x: number, width: number, yTop: number, rightText?: string): number {
   const bandH = mm(7);
-  drawRoundedRect(page, x, yTop, width, bandH, BAND_RADIUS, { color: SECTION_BAND });
-  let titleX = x + mm(2.5);
-  if (icon) {
-    const iconSize = mm(4.2);
-    const iconTopY = yTop - bandH / 2 + mm(2.4);
-    // A faint square highlight behind the icon -- same "icon in its own
-    // chip" treatment as the identity card's fact icons (IDENTITY_CHIP_BG),
-    // just a translucent white overlay here since the chip needs to read
-    // against a dark band rather than a white card. Purely decorative --
-    // the icon itself carries all the meaning. Centred on the icon: both
-    // drawIcon and drawRoundedRect anchor at their own top-left corner and
-    // extend down/right, so centring means matching each shape's own
-    // (top-left + half its own size) midpoint, not just sharing a corner.
-    const chipSize = iconSize + mm(2);
-    const chipX = titleX - (chipSize - iconSize) / 2;
-    const chipTopY = iconTopY + (chipSize - iconSize) / 2;
-    drawRoundedRect(page, chipX, chipTopY, chipSize, chipSize, mm(0.9), { color: SECTION_BAND_ICON_CHIP, opacity: 0.16 });
-    drawIcon(page, icon, titleX, iconTopY, iconSize, WHITE);
-    titleX += iconSize + mm(1.8);
-  }
+  drawRoundedRect(page, x, yTop, width, bandH, CARD_RADIUS, { color: SECTION_BAND });
+  const titleX = x + mm(2.5);
   // A touch of negative tracking on these small uppercase labels -- see
   // drawFauxBoldText's own header comment on the same Tc-operator technique
   // -- uppercase letterforms at 9pt otherwise read a little loose/gappy.
@@ -614,12 +593,12 @@ function drawSectionBand(page: PDFPage, ctx: Ctx, title: string, x: number, widt
     y: yTop - bandH / 2 - 3,
     size: 9,
     font: ctx.bold,
-    color: WHITE,
+    color: INK,
   });
   page.pushOperators(setCharacterSpacing(0));
   if (rightText) {
     const rw = ctx.bold.widthOfTextAtSize(rightText, 9);
-    page.drawText(rightText, { x: x + width - mm(2.5) - rw, y: yTop - bandH / 2 - 3, size: 9, font: ctx.bold, color: WHITE });
+    page.drawText(rightText, { x: x + width - mm(2.5) - rw, y: yTop - bandH / 2 - 3, size: 9, font: ctx.bold, color: INK });
   }
   return yTop - bandH;
 }
@@ -722,9 +701,14 @@ function drawTwoColTable(page: PDFPage, ctx: Ctx, rows: TableRow[], x: number, w
     if (row.icon) {
       drawIcon(page, row.icon, x + pad, y - pad - 1, mm(4.2), MUTED);
     }
+    // Tightened letter-spacing (see BODY_TRACKING's own header comment) --
+    // approximates a "condensed" look, since no actual Condensed cut of
+    // the brand font is licensed into this app.
+    page.pushOperators(setCharacterSpacing(-8.5 * BODY_TRACKING));
     labelLines.forEach((line, i) => {
       page.drawText(line, { x: x + pad + iconIndent, y: y - pad - 7 - i * lineH, size: 8.5, font, color: INK_SECONDARY });
     });
+    page.pushOperators(setCharacterSpacing(-9 * BODY_TRACKING));
     valueLines.forEach((line, i) => {
       page.drawText(line, {
         x: x + labelColW + pad,
@@ -734,6 +718,7 @@ function drawTwoColTable(page: PDFPage, ctx: Ctx, rows: TableRow[], x: number, w
         color: INK,
       });
     });
+    page.pushOperators(setCharacterSpacing(0));
 
     y -= rowH;
   }
@@ -763,6 +748,58 @@ function measureTwoColTableHeight(ctx: Ctx, rows: TableRow[], width: number, lab
     h += Math.max(lineH, Math.max(labelLines.length, valueLines.length) * lineH) + pad * 1.2;
   }
   return h;
+}
+
+/**
+ * A soft drop shadow behind a white rounded card -- two stacked, slightly
+ * larger, low-opacity copies of the same rounded rect, offset downward.
+ * pdf-lib has no blur primitive, so this is the same approximation the
+ * Cover page's identity card already used (see IDENTITY_CARD_SHADOW),
+ * generalised here so every white "table section" card (drawTableSection)
+ * gets the same treatment.
+ */
+function drawCardShadow(page: PDFPage, x: number, yTop: number, width: number, height: number, radius: number) {
+  const layers: { offset: number; grow: number; opacity: number }[] = [
+    { offset: mm(1.6), grow: mm(1), opacity: 0.05 },
+    { offset: mm(0.8), grow: mm(0.4), opacity: 0.08 },
+  ];
+  for (const s of layers) {
+    drawRoundedRect(page, x - s.grow / 2, yTop - s.offset, width + s.grow, height, radius, {
+      color: IDENTITY_CARD_SHADOW,
+      opacity: s.opacity,
+    });
+  }
+}
+
+/**
+ * One "section" -- a band (drawSectionBand) plus its two-column table
+ * (drawTwoColTable) -- drawn together as a single white rounded card with a
+ * soft shadow (drawCardShadow), floating on the page's own very light grey
+ * background (see PAGE_BG). Per feedback that every section should read as
+ * "white ... with a shadow" rather than a bare band sitting directly on the
+ * page. Used at every call site that draws a labelled table (the Details
+ * page, the Inspection Details continuation pages, the Site/Measurement
+ * page's own Measurements & Material block) -- the plain photo-only bands
+ * (Main Site Photo, Site Orientation, Photo Survey, the Site page's own top
+ * band) are unaffected, since there's no table beneath them to card-wrap.
+ */
+function drawTableSection(
+  page: PDFPage,
+  ctx: Ctx,
+  title: string,
+  rows: TableRow[],
+  x: number,
+  width: number,
+  yTop: number,
+  rightText?: string,
+  labelFont?: PDFFont
+): number {
+  const bandH = mm(7);
+  const totalH = bandH + measureTwoColTableHeight(ctx, rows, width, labelFont);
+  drawCardShadow(page, x, yTop, width, totalH, CARD_RADIUS);
+  drawRoundedRect(page, x, yTop, width, totalH, CARD_RADIUS, { color: WHITE });
+  const afterBand = drawSectionBand(page, ctx, title, x, width, yTop, rightText);
+  return drawTwoColTable(page, ctx, rows, x, width, afterBand, labelFont);
 }
 
 /**
@@ -908,7 +945,10 @@ function drawPhotoBox(page: PDFPage, ctx: Ctx, photo: SurveyPhotoImage | undefin
  * subheader/date sizes scale down with it in the same 72:54:24 proportion
  * from the original spec, so the whole block stays in the same relative
  * proportions the partner asked for even when the header itself had to
- * shrink below 72pt to fit.
+ * shrink below 72pt to fit. A later feedback round asked for the date line
+ * and the bottom site-name line to both go bold and white too (bigger, for
+ * the site-name line), rather than the original spec's regular-weight dark
+ * grey for both.
  */
 function drawTitlePage(ctx: Ctx) {
   const page = ctx.doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
@@ -948,11 +988,13 @@ function drawTitlePage(ctx: Ctx) {
   drawFauxBoldText(page, subText, { x: leftX, y: cursorY, size: subSize, font: ctx.bold, color: rgb(0.18, 0.2, 0.22), tracking: -subSize * TITLE_TRACKING });
 
   const dateLabel = titlePageDateLabel(data.surveyDate);
-  page.drawText(dateLabel, { x: leftX, y: mm(22), size: dateSize, font: ctx.font, color: rgb(0.2, 0.22, 0.24) });
+  // Bold + white per feedback -- was regular weight, dark grey.
+  page.drawText(dateLabel, { x: leftX, y: mm(22), size: dateSize, font: ctx.bold, color: WHITE });
 
   const siteLine = data.storeName ? `${data.storeName}${data.sfoId ? ` — SFO ${data.sfoId}` : ""}` : "";
   if (siteLine) {
-    page.drawText(siteLine, { x: leftX, y: mm(22) - mm(9), size: 11, font: ctx.font, color: rgb(0.27, 0.3, 0.32) });
+    // Bigger, bold, and white per feedback -- was 11pt regular, dark grey.
+    page.drawText(siteLine, { x: leftX, y: mm(22) - mm(9), size: 14, font: ctx.bold, color: WHITE });
   }
 }
 
@@ -965,12 +1007,6 @@ function titlePageDateLabel(surveyDate: string): string {
 }
 
 const COVER_FACT_ICONS = ["idCard", "layoutGrid", "calendar", "user"];
-
-// Rounded-corner radius shared by the identity card and its pin badge/fact
-// chips -- ~18px in the partner's own spec, scaled to this page's mm units
-// (a step up from the very tight 1.4mm radius earlier feedback asked for
-// elsewhere, per this later spec's own more pronounced rounding).
-const CARD_RADIUS = mm(2.6);
 
 /**
  * A subtle decorative grid of small dots in the bottom-right corner of the
@@ -996,7 +1032,7 @@ function drawDotGrid(page: PDFPage, x: number, yTop: number, cols: number, rows:
 }
 
 function drawCoverPage(ctx: Ctx) {
-  const page = newPage(ctx, "", "split");
+  const page = newPage(ctx, "", "dark");
   const { data } = ctx;
   let y = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
 
@@ -1005,28 +1041,16 @@ function drawCoverPage(ctx: Ctx) {
   drawPhotoBox(page, ctx, mainPhoto, "Main Site Photo", MARGIN, y, contentWidth(), photoH);
   y -= photoH + mm(5);
 
-  // White, bordered, softly-shadowed identity card -- see the
-  // IDENTITY_CARD_*/IDENTITY_TITLE etc. tokens' own header comment for why
-  // this replaced the earlier solid-grey band. "Shadow" is faked with two
-  // stacked, slightly larger, low-opacity copies of the same rounded rect
-  // offset downward -- pdf-lib has no blur primitive, so this is the
-  // closest approximation to a soft drop shadow available here.
+  // Near-black, softly-shadowed identity card -- see the
+  // IDENTITY_CARD_*/IDENTITY_TITLE etc. tokens' own header comment for the
+  // white/black history here. "Shadow" is faked with two stacked, slightly
+  // larger, low-opacity copies of the same rounded rect offset downward --
+  // pdf-lib has no blur primitive, so this is the closest approximation to
+  // a soft drop shadow available here (see drawCardShadow for the same
+  // technique, generalised for the report's other white cards).
   const blockH = mm(52);
-  const shadowLayers: { offset: number; grow: number; opacity: number }[] = [
-    { offset: mm(2.4), grow: mm(1.4), opacity: 0.05 },
-    { offset: mm(1.2), grow: mm(0.6), opacity: 0.08 },
-  ];
-  for (const s of shadowLayers) {
-    drawRoundedRect(page, MARGIN - s.grow / 2, y - s.offset, contentWidth() + s.grow, blockH, CARD_RADIUS, {
-      color: IDENTITY_CARD_SHADOW,
-      opacity: s.opacity,
-    });
-  }
-  drawRoundedRect(page, MARGIN, y, contentWidth(), blockH, CARD_RADIUS, {
-    color: IDENTITY_CARD_BG,
-    borderColor: IDENTITY_CARD_BORDER,
-    borderWidth: 0.85,
-  });
+  drawCardShadow(page, MARGIN, y, contentWidth(), blockH, CARD_RADIUS);
+  drawRoundedRect(page, MARGIN, y, contentWidth(), blockH, CARD_RADIUS, { color: IDENTITY_CARD_BG });
 
   const dotCols = 5;
   const dotRows = 4;
@@ -1060,7 +1084,7 @@ function drawCoverPage(ctx: Ctx) {
   const pinTopY = y - mm(6);
   const nameX = pinX + pinSize + mm(4);
   drawRoundedRect(page, pinX, pinTopY, pinSize, pinSize, CARD_RADIUS, { color: IDENTITY_PIN_BG });
-  drawIcon(page, "mapPin", pinX + pinPad, pinTopY - pinPad, pinSize - pinPad * 2, WHITE);
+  drawIcon(page, "mapPin", pinX + pinPad, pinTopY - pinPad, pinSize - pinPad * 2, IDENTITY_PIN_ICON);
 
   drawFauxBoldText(page, data.storeName || "Untitled Site", { x: nameX, y: y - mm(9.5), size: 20, font: ctx.bold, color: IDENTITY_TITLE, tracking: -20 * TITLE_TRACKING });
   wrapText(ctx.font, data.address || "—", 10, contentWidth() * 0.55)
@@ -1124,12 +1148,12 @@ function drawDetailsPage(ctx: Ctx) {
   const leftX = contentLeft();
   const rightX = contentLeft() + colW + colGap;
   let leftY = y;
-  let rightY = y;
+  const rightY = y;
 
-  leftY = drawSectionBand(page, ctx, "On-site Details", leftX, colW, leftY, undefined, "clipboardList");
-  leftY = drawTwoColTable(
+  leftY = drawTableSection(
     page,
     ctx,
+    "On-site Details",
     [
       { label: "Date of Inspection", value: formatDate(ctx.data.surveyDate) },
       { label: "Surveyor Details", value: ctx.data.surveyorName },
@@ -1141,11 +1165,11 @@ function drawDetailsPage(ctx: Ctx) {
     leftY
   );
 
-  leftY -= mm(3);
-  leftY = drawSectionBand(page, ctx, "Store Description", leftX, colW, leftY, undefined, "store");
-  drawTwoColTable(
+  leftY -= mm(4);
+  drawTableSection(
     page,
     ctx,
+    "Store Description",
     [
       { label: "Silicon Joins / Edges Condition", value: f.siliconJoinsCondition },
       { label: "Existing Creative / Stickers", value: f.existingCreative },
@@ -1156,10 +1180,10 @@ function drawDetailsPage(ctx: Ctx) {
     leftY
   );
 
-  rightY = drawSectionBand(page, ctx, "Installation Details", rightX, colW, rightY, undefined, "wrench");
-  drawTwoColTable(
+  drawTableSection(
     page,
     ctx,
+    "Installation Details",
     [
       { label: "Time & Date of Installation", value: f.installationDateTime },
       { label: "Delivery Timings", value: f.deliveryTimes ? DELIVERY_TIMING_LABEL[f.deliveryTimes] ?? f.deliveryTimes : "" },
@@ -1198,41 +1222,53 @@ function ynDetail(value: string, detail: string): string {
 
 interface ContinuationBlock {
   title: string;
-  icon?: string;
   rows: TableRow[];
-  /** Passed straight through to drawTwoColTable/measureTwoColTableHeight's own labelFont param -- ctx.bold by default, but drawSitePages below uses ctx.font (no bold) for its Measurements/Apple Standards blocks, matching that section's original no-bold instruction. */
+  /** Passed straight through to drawTwoColTable/measureTwoColTableHeight's own labelFont param -- ctx.bold by default, but drawSitePages below uses ctx.font (no bold) for its Measurements & Material block, matching that section's original no-bold instruction. */
   labelFont?: PDFFont;
 }
 
 /**
- * Flows a list of section-band+table "blocks" across as many pages as
- * needed, two columns per page (same geometry as drawDetailsPage's own
- * two-up layout) -- fills the left column top to bottom, then the right
- * column, then starts a new page, moving on to the next block whenever the
- * current one doesn't fit rather than splitting a block's own rows across
- * a column/page boundary (every block here is small enough that whole-block
- * placement never wastes much space). `eyebrow`/`variant` are passed
- * straight to newPage for each page created, so a multi-page continuation
- * reads as one consistent extension of the section it continues.
+ * Flows a list of section "blocks" (each drawn as a white card via
+ * drawTableSection) across as many pages as needed -- two columns per page
+ * by default (same geometry as drawDetailsPage's own two-up layout), or a
+ * single full-width column when `columns` is 1 (used by drawSitePages so
+ * its one remaining Measurements & Material block spreads left to right
+ * across the whole page instead of sitting in a half-width column, now
+ * that the Apple Standards block that used to sit beside it was removed --
+ * see that function). Fills the left column top to bottom, then the right
+ * column (2-column mode only), then starts a new page, moving on to the
+ * next block whenever the current one doesn't fit rather than splitting a
+ * block's own rows across a column/page boundary (every block here is
+ * small enough that whole-block placement never wastes much space).
+ * `eyebrow`/`variant` are passed straight to newPage for each page created,
+ * so a multi-page continuation reads as one consistent extension of the
+ * section it continues.
  *
  * `start`, when given, flows the FIRST block into an already-open page at
  * a caller-chosen y (both columns start there) instead of always opening a
  * fresh page -- used by drawSitePages to continue straight on from the
  * photo + Facade diagram it draws above these blocks, so a site's whole
- * section (photo, diagram, Opportunity/Measurements/Apple Standards
- * tables) reads as one place rather than starting a new page immediately.
- * Any page this still has to add beyond that first one (when a site's
- * content doesn't all fit) opens normally via newPage, same as ever.
+ * section (photo, diagram, Measurements & Material table) reads as one
+ * place rather than starting a new page immediately. Any page this still
+ * has to add beyond that first one (when a site's content doesn't all fit)
+ * opens normally via newPage, same as ever.
  */
-function drawFlowingBlocks(ctx: Ctx, eyebrow: string, variant: TopbarVariant, blocks: ContinuationBlock[], start?: { page: PDFPage; y: number }) {
-  const colGap = mm(6);
-  const colW = (contentWidth() - colGap) / 2;
+function drawFlowingBlocks(
+  ctx: Ctx,
+  eyebrow: string,
+  variant: TopbarVariant,
+  blocks: ContinuationBlock[],
+  start?: { page: PDFPage; y: number },
+  columns: 1 | 2 = 2
+) {
+  const colGap = columns === 2 ? mm(6) : 0;
+  const colW = columns === 2 ? (contentWidth() - colGap) / 2 : contentWidth();
   const leftX = contentLeft();
   const rightX = contentLeft() + colW + colGap;
   const topY = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
   const bottomLimit = FOOTER_HEIGHT + mm(6);
   const bandH = mm(7);
-  const gapAfter = mm(3);
+  const gapAfter = mm(4);
 
   let page = start?.page ?? newPage(ctx, eyebrow, variant);
   let col: 0 | 1 = 0;
@@ -1244,7 +1280,7 @@ function drawFlowingBlocks(ctx: Ctx, eyebrow: string, variant: TopbarVariant, bl
     const blockH = bandH + measureTwoColTableHeight(ctx, block.rows, colW, labelFont) + gapAfter;
 
     if (y[col] - blockH < bottomLimit) {
-      if (col === 0) {
+      if (columns === 2 && col === 0) {
         col = 1;
       } else {
         page = newPage(ctx, eyebrow, variant);
@@ -1254,8 +1290,7 @@ function drawFlowingBlocks(ctx: Ctx, eyebrow: string, variant: TopbarVariant, bl
     }
 
     const x = col === 0 ? leftX : rightX;
-    let by = drawSectionBand(page, ctx, block.title, x, colW, y[col], undefined, block.icon);
-    by = drawTwoColTable(page, ctx, block.rows, x, colW, by, labelFont);
+    const by = drawTableSection(page, ctx, block.title, block.rows, x, colW, y[col], undefined, labelFont);
     y[col] = by - gapAfter;
   }
 }
@@ -1290,7 +1325,6 @@ function drawInspectionDetailsContinuationPages(ctx: Ctx) {
   const blocks: ContinuationBlock[] = [
     {
       title: "On-site Personnel Details",
-      icon: "user",
       rows: [
         { label: "Apple Representative — Name", value: f.appleRepresentativeName },
         { label: "Apple Representative — Mobile", value: f.appleRepresentativeMobile },
@@ -1301,7 +1335,6 @@ function drawInspectionDetailsContinuationPages(ctx: Ctx) {
     },
     {
       title: "Store Description (continued)",
-      icon: "store",
       rows: [
         {
           label: "Location of Store",
@@ -1316,7 +1349,6 @@ function drawInspectionDetailsContinuationPages(ctx: Ctx) {
     },
     {
       title: "Installing on Site",
-      icon: "calendar",
       rows: [
         { label: "Store Opening Times", value: openingTimes },
         { label: "Install Outside Store Opening Hours?", value: ynDetail(f.installOutsideHours, f.installOutsideHoursDetails) },
@@ -1327,12 +1359,10 @@ function drawInspectionDetailsContinuationPages(ctx: Ctx) {
     },
     {
       title: "Deliveries to Store",
-      icon: "tag",
       rows: [{ label: "Delivery Timings", value: f.deliveryTimes ? DELIVERY_TIMING_LABEL[f.deliveryTimes] ?? f.deliveryTimes : "" }],
     },
     {
       title: "General Site Information",
-      icon: "fileText",
       rows: [
         { label: "Will Weather Conditions Affect the Install?", value: ynDetail(f.weatherAffectsInstall, f.weatherAffectsInstallDetails) },
         { label: "Extra Lighting Required at Night?", value: ynDetail(f.extraLightingRequired, f.extraLightingDescription) },
@@ -1340,7 +1370,6 @@ function drawInspectionDetailsContinuationPages(ctx: Ctx) {
     },
     {
       title: "Site Details",
-      icon: "layoutGrid",
       rows: [
         { label: "Maximum Working Space", value: f.maxWorkingSpace },
         { label: "Access Equipment Available on Site?", value: ynDetail(f.accessEquipmentAvailable, f.accessEquipmentDescription) },
@@ -1351,7 +1380,6 @@ function drawInspectionDetailsContinuationPages(ctx: Ctx) {
     },
     {
       title: "Safety",
-      icon: "shieldCheck",
       rows: [
         { label: "Is the Site Safe for Installation?", value: ynDetail(f.siteSafeForInstall, f.siteSafeDescription) },
         { label: "Any Specific Safety Concerns?", value: ynDetail(f.safetyConcerns, f.safetyConcernsDetails) },
@@ -1360,7 +1388,6 @@ function drawInspectionDetailsContinuationPages(ctx: Ctx) {
     },
     {
       title: "Approvals",
-      icon: "fileText",
       rows: [
         { label: "Does the Store Need Special Approvals?", value: ynDetail(f.specialApprovalsNeeded, f.specialApprovalsDetails) },
         { label: "Chain Store — Central Team Approval Needed?", value: ynDetail(f.chainCentralApprovalNeeded, f.chainCentralApprovalReason) },
@@ -1394,7 +1421,7 @@ function drawOrientationPage(ctx: Ctx) {
   const categories: PhotoCategory[] = ["orientation_right", "orientation_left", "orientation_opposite"];
   const page = newPage(ctx, "Site Orientation", "grey");
   let y = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
-  y = drawSectionBand(page, ctx, "Site Orientation", contentLeft(), contentWidth(), y, ctx.data.storeName || undefined, "camera");
+  y = drawSectionBand(page, ctx, "Site Orientation", contentLeft(), contentWidth(), y, ctx.data.storeName || undefined);
 
   const gap = mm(6);
   const boxW = (contentWidth() - gap * 2) / 3;
@@ -1437,7 +1464,7 @@ function drawPhotoSurveyPages(ctx: Ctx) {
     for (const photo of list) {
       const page = newPage(ctx, eyebrow, "grey");
       let y = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
-      y = drawSectionBand(page, ctx, label, contentLeft(), contentWidth(), y, ctx.data.storeName || undefined, "camera");
+      y = drawSectionBand(page, ctx, label, contentLeft(), contentWidth(), y, ctx.data.storeName || undefined);
       drawPhotoBox(page, ctx, photo, label, contentLeft(), y, contentWidth(), y - FOOTER_HEIGHT - mm(4));
     }
   }
@@ -1535,8 +1562,10 @@ function drawFacadeDiagram(page: PDFPage, ctx: Ctx, m: SiteSurveyMeasurement, x:
 
 /**
  * One section per site: photo + Facade diagram up top, then the
- * Measurements & Material / Apple Standards tables flowing straight on
- * beneath it via drawFlowingBlocks, spilling to a same-titled "(continued)"
+ * Measurements & Material table flowing straight on beneath it via
+ * drawFlowingBlocks -- spread the full page width now that the Apple
+ * Standards block that used to sit beside it in a second column has been
+ * removed entirely (per feedback) -- spilling to a same-titled "(continued)"
  * page only if a site's own content doesn't fit. (Opportunity Information
  * used to print here too -- removed entirely, see SiteSurveyFormData's own
  * header comment.) Called once per entry in ctx.data.measurements (see
@@ -1555,7 +1584,7 @@ function drawSitePages(ctx: Ctx, m: SiteSurveyMeasurement, photo: SurveyPhotoIma
 
   const page = newPage(ctx, eyebrow, "grey");
   let y = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
-  y = drawSectionBand(page, ctx, bandTitle, contentLeft(), contentWidth(), y, ctx.data.storeName || undefined, "camera");
+  y = drawSectionBand(page, ctx, bandTitle, contentLeft(), contentWidth(), y, ctx.data.storeName || undefined);
 
   const halfW = (contentWidth() - mm(6)) / 2;
   const rowH = mm(88);
@@ -1563,29 +1592,20 @@ function drawSitePages(ctx: Ctx, m: SiteSurveyMeasurement, photo: SurveyPhotoIma
   drawFacadeDiagram(page, ctx, m, contentLeft() + halfW + mm(6), y, halfW, rowH);
   y -= rowH + mm(5);
 
-  const standardsValue = (() => {
-    if (!m.appleStandardsMet) return "";
-    const base = APPLE_STANDARDS_MET_LABEL[m.appleStandardsMet];
-    const detail = m.appleStandardsMet === "no" ? m.appleStandardsReason : m.appleStandardsMet === "modifications" ? m.appleStandardsModification : "";
-    return detail ? `${base} — ${detail}` : base;
-  })();
-
-  // The remaining two (shorter) blocks flow two-up beneath the photo/Facade
-  // row, via the same engine the Inspection Details continuation pages use
-  // -- on THIS page if there's still meaningfully room, otherwise starting
-  // a fresh
-  // "(continued)" page rather than risking either block's own table
-  // getting cut off mid-row.
+  // Per feedback, the Apple Standards block is removed entirely (its
+  // fields no longer print anywhere in the report), and the Measurements &
+  // Material block that used to sit beside it now spreads across the full
+  // page width instead of a half-width column -- see drawFlowingBlocks'
+  // `columns` param.
   const bottomLimit = FOOTER_HEIGHT + mm(6);
   const minRoomForAnotherBlock = mm(30);
 
   const blocks: ContinuationBlock[] = [
     {
       title: "Measurements & Material",
-      icon: "squareDashed",
-      // SF Pro Regular only on these two blocks, per the partner's
-      // explicit instruction on the original Measurement page -- no bold
-      // labels here, unlike Opportunity Information above.
+      // SF Pro Regular only on this block, per the partner's explicit
+      // instruction on the original Measurement page -- no bold labels
+      // here.
       labelFont: ctx.font,
       rows: [
         { label: "Visual Size (marked in green-yellow)", value: sizeLabel(m.visualWidthMm, m.visualHeightMm), icon: "squareDashed" },
@@ -1598,23 +1618,13 @@ function drawSitePages(ctx: Ctx, m: SiteSurveyMeasurement, photo: SurveyPhotoIma
         { label: "Any Important Notes", value: m.measurementNotes, icon: "clipboardList" },
       ],
     },
-    {
-      title: "Apple Standards",
-      icon: "shieldCheck",
-      labelFont: ctx.font,
-      rows: [
-        { label: "Fixings Required", value: m.fixingsRequired, icon: "wrench" },
-        { label: "Any Existing Visual Obstructions?", value: ynDetail(m.existingVisualObstructions, m.existingVisualObstructionsDescription), icon: "squareDashed" },
-        { label: "Apple Standards Met?", value: standardsValue, icon: "shieldCheck" },
-      ],
-    },
   ];
 
   const continuedEyebrow = `${eyebrow} (continued)`;
   if (y - bottomLimit > minRoomForAnotherBlock) {
-    drawFlowingBlocks(ctx, continuedEyebrow, "grey", blocks, { page, y: y - mm(3) });
+    drawFlowingBlocks(ctx, continuedEyebrow, "grey", blocks, { page, y: y - mm(3) }, 1);
   } else {
-    drawFlowingBlocks(ctx, continuedEyebrow, "grey", blocks);
+    drawFlowingBlocks(ctx, continuedEyebrow, "grey", blocks, undefined, 1);
   }
 }
 
