@@ -32,6 +32,22 @@
 // explicit clip the oversized image spills straight past the box edges and
 // over whatever is drawn next to it. That was visible as photos bleeding
 // across the Site Orientation page's 3-photo grid and past the page edge.
+//
+// Fonts: the caller may pass Apple's own SF Pro Text (fetched via
+// pdfFonts.ts, never committed to this repo -- see that file's header
+// comment) as the `fonts` param on buildSiteSurveyReportPdf below, in which
+// case it's embedded via fontkit instead of pdf-lib's built-in Helvetica.
+// Embedded WITHOUT subsetting (`subset: false`) -- SF Pro's outlines are
+// CFF-flavoured, and pdf-lib/fontkit's subsetter reliably produces a
+// corrupt embedded font for CFF outlines (confirmed against this exact
+// font: poppler refuses to parse the subsetted output, "Embedded font file
+// may be invalid" then a hard render failure, whereas the unsubsetted
+// embed renders correctly everywhere it was tested -- poppler, cairo).
+// Costs ~300-350KB extra per weight in the output PDF (fixed, once per
+// document, not per page) -- an acceptable tradeoff for a working font
+// over a broken subsetted one. If SF Pro fails to embed for any reason
+// (corrupt bytes, a future pdf-lib/fontkit incompatibility), the build
+// falls back to Helvetica rather than failing outright.
 
 import {
   PDFDocument,
@@ -47,6 +63,7 @@ import {
   type PDFImage,
   type PDFPage,
 } from "pdf-lib";
+import fontkit from "@pdf-lib/fontkit";
 import type { PhotoCategory, SiteSurveyFormData, SiteSurveyMeasurement } from "./types";
 
 const PT_PER_MM = 72 / 25.4;
@@ -686,14 +703,34 @@ function sizeLabel(w: number | null, h: number | null): string {
   return `${w ?? "—"}mm × ${h ?? "—"}mm`;
 }
 
+/**
+ * Registers fontkit and embeds the caller-supplied SF Pro Text bytes
+ * (see this file's header comment on why unsubsetted). Returns null --
+ * never throws -- when no bytes were supplied, or embedding fails for any
+ * reason, so buildSiteSurveyReportPdf's Helvetica fallback always applies
+ * cleanly either way.
+ */
+async function embedBrandFonts(doc: PDFDocument, fonts: { regular: Uint8Array; bold: Uint8Array } | null | undefined): Promise<{ font: PDFFont; bold: PDFFont } | null> {
+  if (!fonts) return null;
+  try {
+    doc.registerFontkit(fontkit);
+    const font = await doc.embedFont(fonts.regular, { subset: false });
+    const bold = await doc.embedFont(fonts.bold, { subset: false });
+    return { font, bold };
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
-export async function buildSiteSurveyReportPdf(data: SiteSurveyReportPdfData): Promise<Blob> {
+export async function buildSiteSurveyReportPdf(data: SiteSurveyReportPdfData, fonts?: { regular: Uint8Array; bold: Uint8Array } | null): Promise<Blob> {
   const doc = await PDFDocument.create();
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const embedded = await embedBrandFonts(doc, fonts);
+  const font = embedded?.font ?? (await doc.embedFont(StandardFonts.Helvetica));
+  const bold = embedded?.bold ?? (await doc.embedFont(StandardFonts.HelveticaBold));
 
   // Every photo must be embedded into THIS PDFDocument before any drawing
   // starts -- a PDFImage from a different document isn't valid here (see

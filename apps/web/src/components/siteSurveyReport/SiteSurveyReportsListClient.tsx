@@ -13,6 +13,7 @@ import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
 import { useUserRole } from "@/lib/UserRoleContext";
 import { buildSiteSurveyReportPdf, downloadBlob, type SurveyPhotoInput } from "@/lib/siteSurveyReport/pdfBuild";
+import { fetchSfProTextFontBytes } from "@/lib/pdfFonts";
 import {
   REPORT_STATUS_LABEL,
   emptyFormData,
@@ -158,18 +159,21 @@ export function SiteSurveyReportsListClient() {
   async function buildPdfForRow(rowId: string): Promise<Blob | null> {
     const data = await fetchFullReportAndPhotos(rowId);
     if (!data) return null;
-    const photoInputs = await fetchPhotoInputsForRow(rowId, data.photos);
-    return buildSiteSurveyReportPdf({
-      storeName: data.report.store_name,
-      address: data.report.address,
-      sfoId: data.report.sfo_id,
-      program: data.report.program,
-      surveyDate: data.report.survey_date ?? "",
-      surveyorName: data.report.surveyor_name,
-      formData: data.report.form_data,
-      measurement: data.report.measurement,
-      photos: photoInputs,
-    });
+    const [photoInputs, brandFonts] = await Promise.all([fetchPhotoInputsForRow(rowId, data.photos), fetchSfProTextFontBytes()]);
+    return buildSiteSurveyReportPdf(
+      {
+        storeName: data.report.store_name,
+        address: data.report.address,
+        sfoId: data.report.sfo_id,
+        program: data.report.program,
+        surveyDate: data.report.survey_date ?? "",
+        surveyorName: data.report.surveyor_name,
+        formData: data.report.form_data,
+        measurement: data.report.measurement,
+        photos: photoInputs,
+      },
+      brandFonts
+    );
   }
 
   async function handlePreview(row: ListRow) {

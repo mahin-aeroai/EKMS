@@ -17,6 +17,7 @@ import {
   type SiteEntry,
   type StorePictures,
 } from "@/lib/installationReport/pdfBuild";
+import { fetchSfProTextFontBytes } from "@/lib/pdfFonts";
 
 interface StoreMasterRow {
   id: string;
@@ -362,7 +363,8 @@ export default function InstallationReportClient() {
         storePictures,
         sites,
       };
-      const blob = await buildInstallationReportPdf(data);
+      const brandFonts = await fetchSfProTextFontBytes({ italic: true });
+      const blob = await buildInstallationReportPdf(data, brandFonts);
       const safeName = storeName.replace(/[^\w\-]+/g, "_").slice(0, 60) || "installation_report";
       downloadBlob(blob, `${safeName}_installation_report.pdf`);
       toast("success", "Report exported — download started");

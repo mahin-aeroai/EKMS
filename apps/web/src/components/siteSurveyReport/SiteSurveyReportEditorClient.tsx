@@ -18,6 +18,7 @@ import { MeasurementStep } from "./MeasurementStep";
 import { PhotosStep } from "./PhotosStep";
 import type { ReportHeaderFields } from "./ReportFormFields";
 import { buildSiteSurveyReportPdf, downloadBlob, type SurveyPhotoInput } from "@/lib/siteSurveyReport/pdfBuild";
+import { fetchSfProTextFontBytes } from "@/lib/pdfFonts";
 import {
   REPORT_STATUS_LABEL,
   emptyFormData,
@@ -289,18 +290,21 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
   // Generate (downloads it and marks the report generated) -- so the two
   // are always visually identical, built from the exact same data.
   async function buildPdfBlob(current: SiteSurveyReportRow): Promise<Blob> {
-    const photoInputs = await fetchPhotoInputs();
-    return buildSiteSurveyReportPdf({
-      storeName: current.store_name,
-      address: current.address,
-      sfoId: current.sfo_id,
-      program: current.program,
-      surveyDate: current.survey_date ?? "",
-      surveyorName: current.surveyor_name,
-      formData: current.form_data,
-      measurement: current.measurement,
-      photos: photoInputs,
-    });
+    const [photoInputs, brandFonts] = await Promise.all([fetchPhotoInputs(), fetchSfProTextFontBytes()]);
+    return buildSiteSurveyReportPdf(
+      {
+        storeName: current.store_name,
+        address: current.address,
+        sfoId: current.sfo_id,
+        program: current.program,
+        surveyDate: current.survey_date ?? "",
+        surveyorName: current.surveyor_name,
+        formData: current.form_data,
+        measurement: current.measurement,
+        photos: photoInputs,
+      },
+      brandFonts
+    );
   }
 
   async function handleGenerate() {

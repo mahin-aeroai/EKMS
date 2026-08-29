@@ -7,6 +7,16 @@
 // shapes (no external icon fonts/images needed inside a generated PDF),
 // and a photo gallery with a big adaptive hero + uniform grids. Page size
 // stays A3 landscape, matching the original reference report.
+//
+// Fonts: the caller may pass Apple's own SF Pro Text (fetched via
+// ../pdfFonts.ts, never committed to this repo -- see that file's header
+// comment) as the `fonts` param on buildInstallationReportPdf below, in
+// which case it's embedded via fontkit instead of pdf-lib's built-in
+// Helvetica. Embedded WITHOUT subsetting -- see siteSurveyReport/
+// pdfBuild.ts's matching comment for why (pdf-lib/fontkit's subsetter
+// reliably corrupts this font's CFF outlines; the unsubsetted embed was
+// confirmed to render correctly). Falls back to Helvetica/HelveticaOblique
+// if no fonts were supplied or embedding fails for any reason.
 
 import {
   PDFDocument,
@@ -27,6 +37,7 @@ import {
   clip,
   endPath,
 } from "pdf-lib";
+import fontkit from "@pdf-lib/fontkit";
 import { prepareCoverImage, getImageDimensions, type PhotoValue } from "./imaging";
 
 const PT_PER_MM = 72 / 25.4;
@@ -905,15 +916,39 @@ function siteHasCornerPhoto(site: SiteEntry): boolean {
   return Boolean(site.cornerTL || site.cornerTR || site.cornerBL || site.cornerBR);
 }
 
+/**
+ * Registers fontkit and embeds the caller-supplied SF Pro Text bytes (see
+ * this file's header comment on why unsubsetted). Returns null -- never
+ * throws -- when no bytes were supplied, or embedding fails for any
+ * reason, so buildInstallationReportPdf's Helvetica fallback always
+ * applies cleanly either way.
+ */
+async function embedBrandFonts(
+  doc: PDFDocument,
+  fonts: { regular: Uint8Array; bold: Uint8Array; italic?: Uint8Array } | null | undefined
+): Promise<{ font: PDFFont; bold: PDFFont; italic: PDFFont | null } | null> {
+  if (!fonts) return null;
+  try {
+    doc.registerFontkit(fontkit);
+    const font = await doc.embedFont(fonts.regular, { subset: false });
+    const bold = await doc.embedFont(fonts.bold, { subset: false });
+    const italic = fonts.italic ? await doc.embedFont(fonts.italic, { subset: false }) : null;
+    return { font, bold, italic };
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
-export async function buildInstallationReportPdf(data: ReportData): Promise<Blob> {
+export async function buildInstallationReportPdf(data: ReportData, fonts?: { regular: Uint8Array; bold: Uint8Array; italic?: Uint8Array } | null): Promise<Blob> {
   const doc = await PDFDocument.create();
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const italic = await doc.embedFont(StandardFonts.HelveticaOblique);
+  const embedded = await embedBrandFonts(doc, fonts);
+  const font = embedded?.font ?? (await doc.embedFont(StandardFonts.Helvetica));
+  const bold = embedded?.bold ?? (await doc.embedFont(StandardFonts.HelveticaBold));
+  const italic = embedded?.italic ?? (await doc.embedFont(StandardFonts.HelveticaOblique));
   const ctx: Ctx = {
     doc,
     font,
