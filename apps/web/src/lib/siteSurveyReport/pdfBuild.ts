@@ -116,14 +116,29 @@ const TOPBAR_DARK = rgb(0.06, 0.06, 0.07);
 // APPLE_GREY directly at each call site) purely so the topbar call sites
 // read intent, even though the colour is identical to APPLE_GREY.
 const TOPBAR_GREY = APPLE_GREY;
-// The cover page's identity/fact block was originally filled with a
-// maroon/red, then the topbar's own near-black -- a later feedback round
-// asked for this specific block (store name + SFO ID/Program/Survey
-// Date/Surveyor facts) to be grey instead, distinct from the topbar above
-// it (which stays black, or black+grey cross-cut -- see drawCoverPage),
-// so it's its own token rather than reusing TOPBAR_DARK.
-const IDENTITY_BLOCK = APPLE_GREY;
 const RED = rgb(0.64, 0.09, 0.11); // now only the obstacle-marker colour and a small decorative footer accent -- see below
+
+// Cover page identity card -- the store name/address/SFO ID/Program/Survey
+// Date/Surveyor block went through a maroon fill, then the topbar's own
+// near-black, then a solid APPLE_GREY band; this latest pass replaces that
+// solid band with a white, bordered, softly-shadowed "card" per the
+// partner's own detailed spec (exact hex values below), plus a dark
+// charcoal badge for the main location pin and pale-grey chips behind each
+// fact's icon -- a step up from the flat grey band toward a "premium ERP"
+// look. Kept as dedicated tokens (not reused from INK/MUTED/BORDER above)
+// since none of those already matched the spec's exact hex values, and
+// every other page's own typography/colours must stay exactly as they were.
+const IDENTITY_CARD_BG = rgb(1, 1, 1); // white
+const IDENTITY_CARD_BORDER = rgb(0xe1 / 255, 0xe5 / 255, 0xe9 / 255);
+const IDENTITY_CARD_SHADOW = rgb(0x15 / 255, 0x19 / 255, 0x22 / 255); // used only at low opacity, see drawCoverPage
+const IDENTITY_TITLE = rgb(0x17 / 255, 0x1a / 255, 0x20 / 255);
+const IDENTITY_SUBTITLE = rgb(0x72 / 255, 0x79 / 255, 0x83 / 255);
+const IDENTITY_LABEL = rgb(0x6b / 255, 0x70 / 255, 0x78 / 255);
+const IDENTITY_VALUE = IDENTITY_TITLE;
+const IDENTITY_DIVIDER = rgb(0xe2 / 255, 0xe6 / 255, 0xea / 255);
+const IDENTITY_PIN_BG = rgb(0x15 / 255, 0x19 / 255, 0x22 / 255);
+const IDENTITY_CHIP_BG = rgb(0xf0 / 255, 0xf2 / 255, 0xf4 / 255);
+const IDENTITY_CHIP_ICON = rgb(0x4b / 255, 0x55 / 255, 0x63 / 255);
 const INK = rgb(0.1, 0.1, 0.12);
 const INK_SECONDARY = rgb(0.34, 0.34, 0.37);
 const MUTED = rgb(0.56, 0.56, 0.6);
@@ -899,10 +914,11 @@ function titlePageDateLabel(surveyDate: string): string {
 
 const COVER_FACT_ICONS = ["idCard", "layoutGrid", "calendar", "user"];
 
-// Small rounded-corner radius shared by every card-style rectangle on this
-// page (identity block, pin badge) -- "very less radius", per feedback,
-// not the pronounced rounding Installation Report uses elsewhere.
-const CARD_RADIUS = mm(1.4);
+// Rounded-corner radius shared by the identity card and its pin badge/fact
+// chips -- ~18px in the partner's own spec, scaled to this page's mm units
+// (a step up from the very tight 1.4mm radius earlier feedback asked for
+// elsewhere, per this later spec's own more pronounced rounding).
+const CARD_RADIUS = mm(2.6);
 
 /**
  * A subtle decorative grid of small dots in the bottom-right corner of the
@@ -937,78 +953,104 @@ function drawCoverPage(ctx: Ctx) {
   drawPhotoBox(page, ctx, mainPhoto, "Main Site Photo", MARGIN, y, contentWidth(), photoH);
   y -= photoH + mm(5);
 
-  // Grey identity block (was black -- see IDENTITY_BLOCK's own comment for
-  // why it's grey now, distinct from the topbar above it), small rounded
-  // corners, with the partner's dot-grid decoration in its bottom-right
-  // corner. Text on this lighter background reads as dark ink now instead
-  // of white.
-  const blockH = mm(48);
-  drawRoundedRect(page, MARGIN, y, contentWidth(), blockH, CARD_RADIUS, { color: IDENTITY_BLOCK });
+  // White, bordered, softly-shadowed identity card -- see the
+  // IDENTITY_CARD_*/IDENTITY_TITLE etc. tokens' own header comment for why
+  // this replaced the earlier solid-grey band. "Shadow" is faked with two
+  // stacked, slightly larger, low-opacity copies of the same rounded rect
+  // offset downward -- pdf-lib has no blur primitive, so this is the
+  // closest approximation to a soft drop shadow available here.
+  const blockH = mm(52);
+  const shadowLayers: { offset: number; grow: number; opacity: number }[] = [
+    { offset: mm(2.4), grow: mm(1.4), opacity: 0.05 },
+    { offset: mm(1.2), grow: mm(0.6), opacity: 0.08 },
+  ];
+  for (const s of shadowLayers) {
+    drawRoundedRect(page, MARGIN - s.grow / 2, y - s.offset, contentWidth() + s.grow, blockH, CARD_RADIUS, {
+      color: IDENTITY_CARD_SHADOW,
+      opacity: s.opacity,
+    });
+  }
+  drawRoundedRect(page, MARGIN, y, contentWidth(), blockH, CARD_RADIUS, {
+    color: IDENTITY_CARD_BG,
+    borderColor: IDENTITY_CARD_BORDER,
+    borderWidth: 0.85,
+  });
 
   const dotCols = 5;
   const dotRows = 4;
-  const dotSpacing = mm(3);
+  const dotSpacing = mm(3.2);
   const dotGridW = (dotCols - 1) * dotSpacing;
   const dotGridH = (dotRows - 1) * dotSpacing;
   // Reserved on the right of the fact-row area below (see factColW) so this
   // never overlaps the Surveyor column's own text -- anchored off the
-  // block's own bottom-right corner (rather than its top) so the grid stays
-  // pinned to that corner even if blockH changes later.
-  const dotReserve = mm(24);
+  // card's own bottom-right corner (rather than its top) so the grid stays
+  // pinned to that corner even if blockH changes later. Light grey dots on
+  // the new white card (was white-on-grey on the old solid band).
+  const dotReserve = mm(26);
   drawDotGrid(
     page,
-    MARGIN + contentWidth() - mm(6) - dotGridW,
-    y - blockH + mm(6) + dotGridH,
+    MARGIN + contentWidth() - mm(7) - dotGridW,
+    y - blockH + mm(7) + dotGridH,
     dotCols,
     dotRows,
     dotSpacing,
-    mm(0.45),
-    WHITE,
-    0.4
+    mm(0.5),
+    IDENTITY_LABEL,
+    0.3
   );
 
-  const pinSize = mm(7.5);
-  const nameX = MARGIN + mm(5) + pinSize + mm(3);
-  drawRoundedRect(page, MARGIN + mm(5), y - mm(1), pinSize, pinSize, mm(1), { color: WHITE });
-  drawIcon(page, "mapPin", MARGIN + mm(5) + mm(1), y - mm(1.9), pinSize - mm(1.8), INK_SECONDARY);
+  // Main location badge: dark charcoal square, white pin icon (inverted
+  // from the old white-badge/dark-icon treatment), bigger and more rounded
+  // per the spec.
+  const pinSize = mm(9.2);
+  const pinPad = mm(1.9);
+  const pinX = MARGIN + mm(6);
+  const pinTopY = y - mm(6);
+  const nameX = pinX + pinSize + mm(4);
+  drawRoundedRect(page, pinX, pinTopY, pinSize, pinSize, CARD_RADIUS, { color: IDENTITY_PIN_BG });
+  drawIcon(page, "mapPin", pinX + pinPad, pinTopY - pinPad, pinSize - pinPad * 2, WHITE);
 
-  drawFauxBoldText(page, data.storeName || "Untitled Site", { x: nameX, y: y - mm(9.5), size: 19, font: ctx.bold, color: INK });
-  wrapText(ctx.font, data.address || "—", 10.5, contentWidth() * 0.55)
+  drawFauxBoldText(page, data.storeName || "Untitled Site", { x: nameX, y: y - mm(9.5), size: 20, font: ctx.bold, color: IDENTITY_TITLE });
+  wrapText(ctx.font, data.address || "—", 10, contentWidth() * 0.55)
     .slice(0, 2)
     .forEach((line, i) => {
-      page.drawText(line, { x: nameX, y: y - mm(17) - i * mm(5), size: 10.5, font: ctx.font, color: INK_SECONDARY });
+      page.drawText(line, { x: nameX, y: y - mm(17.5) - i * mm(5), size: 10, font: ctx.font, color: IDENTITY_SUBTITLE });
     });
 
-  page.drawLine({ start: { x: MARGIN + mm(5), y: y - mm(23) }, end: { x: MARGIN + contentWidth() - mm(5), y: y - mm(23) }, thickness: 0.6, color: rgb(0.35, 0.37, 0.4), opacity: 0.35 });
+  page.drawLine({ start: { x: MARGIN + mm(6), y: y - mm(24.5) }, end: { x: MARGIN + contentWidth() - mm(6), y: y - mm(24.5) }, thickness: 0.75, color: IDENTITY_DIVIDER });
 
-  // Icon-LEFT-of-stacked-label/value fact rows, matching the mockup
-  // exactly (earlier icon-above-label layout read as "small and not
-  // aligned" -- each icon is now bigger and vertically centred against its
-  // own two-line label/value pair, with a thin divider between columns).
+  // Icon-chip-LEFT-of-stacked-label/value fact rows -- each icon now sits
+  // in its own pale-grey rounded chip (was a bare icon directly on the
+  // grey band) per the spec's field-icon treatment, vertically centred
+  // against its own two-line label/value pair, with a thin divider between
+  // columns.
   const facts: [string, string][] = [
     ["SFO ID", data.sfoId || "—"],
     ["Program", data.program || "—"],
     ["Survey Date", formatDate(data.surveyDate)],
     ["Surveyor", data.surveyorName || "—"],
   ];
-  const factColW = (contentWidth() - mm(5) - dotReserve) / facts.length;
-  const factRowCenterY = y - mm(35.5);
-  const factIconSize = mm(6.5);
+  const factColW = (contentWidth() - mm(6) - dotReserve) / facts.length;
+  const factRowCenterY = y - mm(38);
+  const chipSize = mm(10.2);
+  const chipIconSize = mm(5.6);
+  const chipPad = (chipSize - chipIconSize) / 2;
   facts.forEach(([label, value], i) => {
-    const fx = MARGIN + mm(5) + i * factColW;
+    const fx = MARGIN + mm(6) + i * factColW;
     if (i > 0) {
       page.drawLine({
-        start: { x: fx - mm(4), y: factRowCenterY - mm(6) },
-        end: { x: fx - mm(4), y: factRowCenterY + mm(6) },
-        thickness: 0.6,
-        color: rgb(0.35, 0.37, 0.4),
-        opacity: 0.3,
+        start: { x: fx - mm(4.5), y: factRowCenterY - mm(7) },
+        end: { x: fx - mm(4.5), y: factRowCenterY + mm(7) },
+        thickness: 0.75,
+        color: IDENTITY_DIVIDER,
       });
     }
-    drawIcon(page, COVER_FACT_ICONS[i], fx, factRowCenterY + factIconSize / 2, factIconSize, INK_SECONDARY);
-    const labelX = fx + factIconSize + mm(2.2);
-    page.drawText(label.toUpperCase(), { x: labelX, y: factRowCenterY + mm(2.2), size: 7.5, font: ctx.bold, color: INK_SECONDARY });
-    page.drawText(value, { x: labelX, y: factRowCenterY - mm(4.4), size: 11.5, font: ctx.bold, color: INK });
+    const chipTopY = factRowCenterY + chipSize / 2;
+    drawRoundedRect(page, fx, chipTopY, chipSize, chipSize, CARD_RADIUS, { color: IDENTITY_CHIP_BG });
+    drawIcon(page, COVER_FACT_ICONS[i], fx + chipPad, chipTopY - chipPad, chipIconSize, IDENTITY_CHIP_ICON);
+    const labelX = fx + chipSize + mm(3);
+    page.drawText(label.toUpperCase(), { x: labelX, y: factRowCenterY + mm(3), size: 7.8, font: ctx.bold, color: IDENTITY_LABEL });
+    page.drawText(value, { x: labelX, y: factRowCenterY - mm(5.5), size: 12.5, font: ctx.bold, color: IDENTITY_VALUE });
   });
 }
 
