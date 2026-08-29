@@ -1,9 +1,9 @@
 "use client";
 
-import { RefreshCw } from "lucide-react";
+import { Plus, RefreshCw, Trash2 } from "lucide-react";
 import { MasterPickSelect } from "@/components/installationReport/MasterPickSelect";
 import { Button } from "@/components/ui/Button";
-import type { SiteSurveyMeasurement, YesNo } from "@/lib/siteSurveyReport/types";
+import type { SiteSurveyMeasurement, SiteSurveyPhotoRow, YesNo } from "@/lib/siteSurveyReport/types";
 
 // The reference PDF's "Site Photo and measurement" page: a Visual size (the
 // artwork itself) plus a Bleed allowance on each side (how much bigger the
@@ -23,13 +23,61 @@ import type { SiteSurveyMeasurement, YesNo } from "@/lib/siteSurveyReport/types"
 // Type/Team pickers (see supabase-site-survey-report-master-migration.sql)
 // -- a real dropdown with an inline "+ Add new" escape hatch, rather than a
 // hardcoded (and possibly wrong) enum.
+//
+// A store can have more than one opportunity worth surveying at this level
+// of detail (a second window/banner location, say) -- `measurements` is an
+// array, one editable "Site" card per entry, each with its own copy of
+// every section below plus a Site Photo picker (assigns which uploaded
+// 'measurement'-category photo -- see PhotosStep -- belongs to THIS site,
+// via measurementPhotoId; pdfBuild.ts's drawSitePages resolves it the same
+// way). "+ Add another site" appends a blank one; a site can only be
+// removed while more than one exists, so a report is never left with zero.
 
 interface Props {
-  measurement: SiteSurveyMeasurement;
-  onChange: <K extends keyof SiteSurveyMeasurement>(key: K, value: SiteSurveyMeasurement[K]) => void;
+  measurements: SiteSurveyMeasurement[];
+  onChange: <K extends keyof SiteSurveyMeasurement>(index: number, key: K, value: SiteSurveyMeasurement[K]) => void;
+  onAdd: () => void;
+  onRemove: (index: number) => void;
+  /** Uploaded photos already tagged category='measurement' on the Photos step -- the pool the Site Photo picker below chooses from. */
+  measurementPhotos: SiteSurveyPhotoRow[];
 }
 
-export function MeasurementStep({ measurement, onChange }: Props) {
+export function MeasurementStep({ measurements, onChange, onAdd, onRemove, measurementPhotos }: Props) {
+  return (
+    <div className="flex flex-col gap-6">
+      {measurements.map((measurement, index) => (
+        <SiteCard
+          key={index}
+          index={index}
+          total={measurements.length}
+          measurement={measurement}
+          onChange={(key, value) => onChange(index, key, value)}
+          onRemove={measurements.length > 1 ? () => onRemove(index) : undefined}
+          measurementPhotos={measurementPhotos}
+        />
+      ))}
+      <Button type="button" variant="secondary" onClick={onAdd} className="self-start">
+        <Plus size={14} /> Add another site
+      </Button>
+    </div>
+  );
+}
+
+function SiteCard({
+  index,
+  total,
+  measurement,
+  onChange,
+  onRemove,
+  measurementPhotos,
+}: {
+  index: number;
+  total: number;
+  measurement: SiteSurveyMeasurement;
+  onChange: <K extends keyof SiteSurveyMeasurement>(key: K, value: SiteSurveyMeasurement[K]) => void;
+  onRemove?: () => void;
+  measurementPhotos: SiteSurveyPhotoRow[];
+}) {
   function recalculateMaterial() {
     const { visualWidthMm, visualHeightMm, bleedLeftMm, bleedRightMm, bleedTopMm, bleedBottomMm } = measurement;
     if (visualWidthMm != null) {
@@ -41,8 +89,39 @@ export function MeasurementStep({ measurement, onChange }: Props) {
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <Section title="Opportunity Information">
+    <div className="overflow-hidden rounded-xl border-2 border-line-strong">
+      <div className="flex items-center justify-between gap-3 bg-surface-sunken px-4 py-2.5">
+        <h2 className="text-sm font-bold text-ink">
+          {total > 1 ? `Site ${index + 1} of ${total}` : "Site Details"}
+          {measurement.opportunityName ? ` — ${measurement.opportunityName}` : ""}
+        </h2>
+        {onRemove && (
+          <Button type="button" variant="ghost" size="sm" onClick={onRemove}>
+            <Trash2 size={13} /> Remove site
+          </Button>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-6 p-4">
+        <Section title="Site Photo">
+          <Grid>
+            <SelectField
+              label="Which uploaded photo is this site?"
+              value={measurement.measurementPhotoId ?? ""}
+              onChange={(v) => onChange("measurementPhotoId", v || null)}
+              options={[
+                ["", measurementPhotos.length === 0 ? "— None uploaded yet —" : "— Select —"],
+                ...measurementPhotos.map((p, i) => [p.id, p.caption || `Measurement Photo ${i + 1}`] as [string, string]),
+              ]}
+            />
+          </Grid>
+          <p className="mt-2 text-xs text-ink-muted">
+            Upload photos and tag them category &quot;Site Measurement&quot; on the Photos step, then pick which one belongs to
+            this site here.
+          </p>
+        </Section>
+
+        <Section title="Opportunity Information">
         <Grid>
           <TextField label="Opportunity Name" value={measurement.opportunityName} onChange={(v) => onChange("opportunityName", v)} />
           <SelectField
@@ -231,6 +310,7 @@ export function MeasurementStep({ measurement, onChange }: Props) {
           )}
         </Grid>
       </Section>
+      </div>
     </div>
   );
 }

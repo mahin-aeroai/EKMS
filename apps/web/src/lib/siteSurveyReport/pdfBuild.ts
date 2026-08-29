@@ -302,6 +302,8 @@ function drawFauxBoldText(
 // that embedded it, and buildSiteSurveyReportPdf creates its own
 // PDFDocument internally -- see the entry point below).
 export interface SurveyPhotoInput {
+  /** site_survey_photos.id -- carried through purely so a multi-site report can tell WHICH 'measurement'-category photo belongs to which site (see SiteSurveyMeasurement.measurementPhotoId / drawSitePages below). Not needed for any other category. */
+  id?: string;
   bytes: Uint8Array;
   /** "jpg" unless the source file was a PNG (site_survey_photos rows are always uploaded as JPEG -- see the upload-url route -- but PNG is supported for future extracted-from-PDF pages, which rasterize to PNG). */
   format?: "jpg" | "png";
@@ -314,6 +316,7 @@ export interface SurveyPhotoInput {
 // Internal shape once a photo's bytes have been embedded into this build's
 // PDFDocument -- what the drawing functions below actually consume.
 interface SurveyPhotoImage {
+  id?: string;
   image: PDFImage;
   category: PhotoCategory;
   caption: string | null;
@@ -328,7 +331,11 @@ export interface SiteSurveyReportPdfData {
   surveyDate: string; // yyyy-mm-dd or ""
   surveyorName: string;
   formData: SiteSurveyFormData;
-  measurement: SiteSurveyMeasurement;
+  // One entry per site/opportunity surveyed at this store -- see
+  // SiteSurveyMeasurement's own header comment. Always at least one entry
+  // in practice (emptyReportDefaults seeds one), but drawSitePages handles
+  // an empty array gracefully (draws nothing) rather than assuming.
+  measurements: SiteSurveyMeasurement[];
   photos: SurveyPhotoInput[];
 }
 
@@ -1170,6 +1177,8 @@ interface ContinuationBlock {
   title: string;
   icon?: string;
   rows: TableRow[];
+  /** Passed straight through to drawTwoColTable/measureTwoColTableHeight's own labelFont param -- ctx.bold by default, but drawSitePages below uses ctx.font (no bold) for its Measurements/Apple Standards blocks, matching that section's original no-bold instruction. */
+  labelFont?: PDFFont;
 }
 
 /**
@@ -1182,8 +1191,17 @@ interface ContinuationBlock {
  * placement never wastes much space). `eyebrow`/`variant` are passed
  * straight to newPage for each page created, so a multi-page continuation
  * reads as one consistent extension of the section it continues.
+ *
+ * `start`, when given, flows the FIRST block into an already-open page at
+ * a caller-chosen y (both columns start there) instead of always opening a
+ * fresh page -- used by drawSitePages to continue straight on from the
+ * photo + Facade diagram it draws above these blocks, so a site's whole
+ * section (photo, diagram, Opportunity/Measurements/Apple Standards
+ * tables) reads as one place rather than starting a new page immediately.
+ * Any page this still has to add beyond that first one (when a site's
+ * content doesn't all fit) opens normally via newPage, same as ever.
  */
-function drawFlowingBlocks(ctx: Ctx, eyebrow: string, variant: TopbarVariant, blocks: ContinuationBlock[]) {
+function drawFlowingBlocks(ctx: Ctx, eyebrow: string, variant: TopbarVariant, blocks: ContinuationBlock[], start?: { page: PDFPage; y: number }) {
   const colGap = mm(6);
   const colW = (contentWidth() - colGap) / 2;
   const leftX = contentLeft();
@@ -1193,13 +1211,14 @@ function drawFlowingBlocks(ctx: Ctx, eyebrow: string, variant: TopbarVariant, bl
   const bandH = mm(7);
   const gapAfter = mm(3);
 
-  let page = newPage(ctx, eyebrow, variant);
+  let page = start?.page ?? newPage(ctx, eyebrow, variant);
   let col: 0 | 1 = 0;
-  let y = [topY, topY];
+  let y = start ? [start.y, start.y] : [topY, topY];
 
   for (const block of blocks) {
     if (block.rows.length === 0) continue;
-    const blockH = bandH + measureTwoColTableHeight(ctx, block.rows, colW) + gapAfter;
+    const labelFont = block.labelFont ?? ctx.bold;
+    const blockH = bandH + measureTwoColTableHeight(ctx, block.rows, colW, labelFont) + gapAfter;
 
     if (y[col] - blockH < bottomLimit) {
       if (col === 0) {
@@ -1213,7 +1232,7 @@ function drawFlowingBlocks(ctx: Ctx, eyebrow: string, variant: TopbarVariant, bl
 
     const x = col === 0 ? leftX : rightX;
     let by = drawSectionBand(page, ctx, block.title, x, colW, y[col], undefined, block.icon);
-    by = drawTwoColTable(page, ctx, block.rows, x, colW, by);
+    by = drawTwoColTable(page, ctx, block.rows, x, colW, by, labelFont);
     y[col] = by - gapAfter;
   }
 }
@@ -1397,50 +1416,6 @@ function drawOrientationPage(ctx: Ctx) {
   });
 }
 
-/**
- * A new page (not present in the original three-page build) covering the
- * partner's later "Opportunity information" section -- what specific
- * opportunity was identified on site, distinct from the general Inspection
- * Details captured earlier. "grey" topbar variant, same family as the other
- * photo-adjacent pages (Main Site Photo/Orientation/Measurement) since this
- * sits between Orientation and the A/B/C/D photo survey in the page order
- * (see buildSiteSurveyReportPdf) -- a single full-width table, same
- * primitives as every other details table in this file.
- */
-function drawOpportunityPage(ctx: Ctx) {
-  const page = newPage(ctx, "Opportunity Information", "grey");
-  const m = ctx.data.measurement;
-  let y = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
-  y = drawSectionBand(page, ctx, "Opportunity Information", contentLeft(), contentWidth(), y, ctx.data.storeName || undefined, "tag");
-
-  const opportunityTypeValue = m.opportunityType
-    ? m.opportunityType === "other"
-      ? m.opportunityTypeOther || "Other"
-      : OPPORTUNITY_TYPE_LABEL[m.opportunityType]
-    : "";
-
-  drawTwoColTable(
-    page,
-    ctx,
-    [
-      { label: "Opportunity Name", value: m.opportunityName, icon: "tag" },
-      { label: "Opportunity Type", value: opportunityTypeValue, icon: "layoutGrid" },
-      { label: "Location", value: m.opportunityLocation, icon: "mapPin" },
-      { label: "Store / Facade Area", value: m.storeFacadeArea, icon: "squareDashed" },
-      { label: "Apple Program Position", value: m.appleProgramPosition, icon: "idCard" },
-      { label: "Description", value: m.opportunityDescription, icon: "fileText" },
-      { label: "Existing Material Type", value: m.existingMaterialType, icon: "layers" },
-      { label: "Existing Creative Condition", value: m.existingCreativeConditionForOpportunity, icon: "camera" },
-      { label: "Existing Creative Removable?", value: yesNoLabel(m.existingCreativeRemovableForOpportunity), icon: "wrench" },
-      { label: "Main Footfall Entrance Note", value: m.mainFootfallEntranceNote, icon: "users" },
-      { label: "Additional Opportunity Notes", value: m.additionalOpportunityNotes, icon: "clipboardList" },
-    ],
-    contentLeft(),
-    contentWidth(),
-    y
-  );
-}
-
 // Short topbar eyebrows (kept to "Photo Survey — A" etc, not the full
 // PHOTO_CATEGORY_LABEL parenthetical) so the right-aligned eyebrow text
 // never crowds the topbar -- the full descriptive label still appears on
@@ -1509,10 +1484,10 @@ function drawDimensionLine(page: PDFPage, x1: number, y1: number, x2: number, y2
  * here as a filled rectangle in this app's own greenish-yellow marking
  * colour (see MARK) rather than the reference's arbitrary orange, since
  * this rectangle represents the exact same area as the greenish-yellow box
- * drawn on the real photo beside it (see drawMeasurementPage).
+ * drawn on the real photo beside it (see drawSitePages).
  */
 function drawFacadeDiagram(page: PDFPage, ctx: Ctx, m: SiteSurveyMeasurement, x: number, yTop: number, w: number, h: number) {
-  // SF Pro Regular only on this page (see drawMeasurementPage) -- "Facade"
+  // SF Pro Regular only on this page (see drawSitePages) -- "Facade"
   // and the dimension labels below use ctx.font, not ctx.bold.
   page.drawText("Facade", { x, y: yTop - mm(7), size: 13, font: ctx.font, color: INK });
 
@@ -1565,58 +1540,43 @@ function drawFacadeDiagram(page: PDFPage, ctx: Ctx, m: SiteSurveyMeasurement, x:
   });
 }
 
-function drawMeasurementPage(ctx: Ctx) {
-  const page = newPage(ctx, "Site Photo & Measurement", "grey");
-  const m = ctx.data.measurement;
-  let y = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
-  y = drawSectionBand(page, ctx, "Site Photo & Measurement", contentLeft(), contentWidth(), y, ctx.data.storeName || undefined, "camera");
+/**
+ * Combines what used to be three separate, non-adjacent pages -- Opportunity
+ * Information (originally right after Orientation), Site Photo &
+ * Measurement, and its Apple Standards continuation (both originally after
+ * the A/B/C/D photo survey pages) -- into ONE section per site: photo +
+ * Facade diagram up top, then the Opportunity Information / Measurements &
+ * Material / Apple Standards tables flowing straight on beneath it via
+ * drawFlowingBlocks, spilling to a same-titled "(continued)" page only if a
+ * site's own content doesn't fit. Called once per entry in
+ * ctx.data.measurements (see buildSiteSurveyReportPdf) -- `index`/`total`
+ * label multi-site reports as "Site 1 of 2" etc.; a single-site report
+ * (the common case) reads exactly as the original one-block build did.
+ *
+ * `photo` is resolved by the caller via SiteSurveyMeasurement.measurementPhotoId
+ * (falling back to positional assignment among uploaded 'measurement'-
+ * category photos) since a multi-site report can have more than one such
+ * photo -- see buildSiteSurveyReportPdf.
+ */
+function drawSitePages(ctx: Ctx, m: SiteSurveyMeasurement, photo: SurveyPhotoImage | undefined, index: number, total: number) {
+  const eyebrow = total > 1 ? `Site Photo & Measurement — Site ${index + 1} of ${total}` : "Site Photo & Measurement";
+  const bandTitle = total > 1 ? `Site ${index + 1} of ${total}${m.opportunityName ? ` — ${m.opportunityName}` : ""}` : "Site Photo & Measurement";
 
-  const photo = ctx.photos.find((p) => p.category === "measurement");
+  const page = newPage(ctx, eyebrow, "grey");
+  let y = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
+  y = drawSectionBand(page, ctx, bandTitle, contentLeft(), contentWidth(), y, ctx.data.storeName || undefined, "camera");
+
   const halfW = (contentWidth() - mm(6)) / 2;
-  const rowH = mm(105);
+  const rowH = mm(88);
   drawPhotoBox(page, ctx, photo, "Site Measurement Photo", contentLeft(), y, halfW, rowH);
   drawFacadeDiagram(page, ctx, m, contentLeft() + halfW + mm(6), y, halfW, rowH);
   y -= rowH + mm(5);
 
-  drawTwoColTable(
-    page,
-    ctx,
-    [
-      { label: "Visual Size (marked in green-yellow)", value: sizeLabel(m.visualWidthMm, m.visualHeightMm), icon: "squareDashed" },
-      { label: "Material Size", value: `${sizeLabel(m.materialWidthMm, m.materialHeightMm)} (${bleedLabel(m)})`, icon: "tag" },
-      { label: "Material Type", value: m.materialType, icon: "layers" },
-      { label: "Installation Type", value: m.installationType, icon: "layoutGrid" },
-      { label: "Detailed Equipment Material", value: m.equipmentDetail, icon: "frame" },
-      { label: "Who Is To Source Equipment?", value: m.equipmentSource, icon: "users" },
-      { label: "Who Will Do The Installation?", value: m.installedBy, icon: "wrench" },
-      { label: "Any Important Notes", value: m.measurementNotes, icon: "clipboardList" },
-    ],
-    contentLeft(),
-    contentWidth(),
-    y,
-    // SF Pro Regular only on this page, per the partner's explicit
-    // instruction -- no bold labels here, unlike every other table.
-    ctx.font
-  );
-}
-
-/**
- * Small continuation of the Measurement page (drawMeasurementPage) for the
- * partner's later technical/Apple-standards fields that didn't fit that
- * page's original table -- fixings, existing visual obstructions, and
- * whether the opportunity meets Apple standards (with its Reason/
- * Modification detail folded in via ynDetail-style formatting, same as the
- * Inspection Details continuation pages). Only 3 rows, so a single direct
- * drawTwoColTable call rather than the flowing-pagination engine -- always
- * fits one page. Same eyebrow/"grey" variant and same ctx.font-only label
- * treatment as the page it continues, per the partner's no-bold instruction
- * on that page.
- */
-function drawMeasurementContinuationPage(ctx: Ctx) {
-  const m = ctx.data.measurement;
-  const page = newPage(ctx, "Site Photo & Measurement", "grey");
-  let y = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
-  y = drawSectionBand(page, ctx, "Apple Standards", contentLeft(), contentWidth(), y, ctx.data.storeName || undefined, "shieldCheck");
+  const opportunityTypeValue = m.opportunityType
+    ? m.opportunityType === "other"
+      ? m.opportunityTypeOther || "Other"
+      : OPPORTUNITY_TYPE_LABEL[m.opportunityType]
+    : "";
 
   const standardsValue = (() => {
     if (!m.appleStandardsMet) return "";
@@ -1625,19 +1585,79 @@ function drawMeasurementContinuationPage(ctx: Ctx) {
     return detail ? `${base} — ${detail}` : base;
   })();
 
-  drawTwoColTable(
+  // Opportunity Information stays full-width, directly under the photo/
+  // Facade row -- same table shape (and bold labels) the original
+  // Opportunity page used, just relocated here instead of a separate,
+  // non-adjacent page. A full-width table wraps far less than the same
+  // content squeezed into a half-width column, so this reads cleanly
+  // whether or not the two blocks below end up sharing this page.
+  y = drawSectionBand(page, ctx, "Opportunity Information", contentLeft(), contentWidth(), y, undefined, "tag");
+  y = drawTwoColTable(
     page,
     ctx,
     [
-      { label: "Fixings Required", value: m.fixingsRequired, icon: "wrench" },
-      { label: "Any Existing Visual Obstructions?", value: ynDetail(m.existingVisualObstructions, m.existingVisualObstructionsDescription), icon: "squareDashed" },
-      { label: "Apple Standards Met?", value: standardsValue, icon: "shieldCheck" },
+      { label: "Opportunity Name", value: m.opportunityName, icon: "tag" },
+      { label: "Opportunity Type", value: opportunityTypeValue, icon: "layoutGrid" },
+      { label: "Location", value: m.opportunityLocation, icon: "mapPin" },
+      { label: "Store / Facade Area", value: m.storeFacadeArea, icon: "squareDashed" },
+      { label: "Apple Program Position", value: m.appleProgramPosition, icon: "idCard" },
+      { label: "Description", value: m.opportunityDescription, icon: "fileText" },
+      { label: "Existing Material Type", value: m.existingMaterialType, icon: "layers" },
+      { label: "Existing Creative Condition", value: m.existingCreativeConditionForOpportunity, icon: "camera" },
+      { label: "Existing Creative Removable?", value: yesNoLabel(m.existingCreativeRemovableForOpportunity), icon: "wrench" },
+      { label: "Main Footfall Entrance Note", value: m.mainFootfallEntranceNote, icon: "users" },
+      { label: "Additional Opportunity Notes", value: m.additionalOpportunityNotes, icon: "clipboardList" },
     ],
     contentLeft(),
     contentWidth(),
-    y,
-    ctx.font
+    y
   );
+
+  // The remaining two (shorter) blocks flow two-up beneath that, via the
+  // same engine the Inspection Details continuation pages use -- on THIS
+  // page if there's still meaningfully room, otherwise starting a fresh
+  // "(continued)" page rather than risking either block's own table
+  // getting cut off mid-row.
+  const bottomLimit = FOOTER_HEIGHT + mm(6);
+  const minRoomForAnotherBlock = mm(30);
+
+  const blocks: ContinuationBlock[] = [
+    {
+      title: "Measurements & Material",
+      icon: "squareDashed",
+      // SF Pro Regular only on these two blocks, per the partner's
+      // explicit instruction on the original Measurement page -- no bold
+      // labels here, unlike Opportunity Information above.
+      labelFont: ctx.font,
+      rows: [
+        { label: "Visual Size (marked in green-yellow)", value: sizeLabel(m.visualWidthMm, m.visualHeightMm), icon: "squareDashed" },
+        { label: "Material Size", value: `${sizeLabel(m.materialWidthMm, m.materialHeightMm)} (${bleedLabel(m)})`, icon: "tag" },
+        { label: "Material Type", value: m.materialType, icon: "layers" },
+        { label: "Installation Type", value: m.installationType, icon: "layoutGrid" },
+        { label: "Detailed Equipment Material", value: m.equipmentDetail, icon: "frame" },
+        { label: "Who Is To Source Equipment?", value: m.equipmentSource, icon: "users" },
+        { label: "Who Will Do The Installation?", value: m.installedBy, icon: "wrench" },
+        { label: "Any Important Notes", value: m.measurementNotes, icon: "clipboardList" },
+      ],
+    },
+    {
+      title: "Apple Standards",
+      icon: "shieldCheck",
+      labelFont: ctx.font,
+      rows: [
+        { label: "Fixings Required", value: m.fixingsRequired, icon: "wrench" },
+        { label: "Any Existing Visual Obstructions?", value: ynDetail(m.existingVisualObstructions, m.existingVisualObstructionsDescription), icon: "squareDashed" },
+        { label: "Apple Standards Met?", value: standardsValue, icon: "shieldCheck" },
+      ],
+    },
+  ];
+
+  const continuedEyebrow = `${eyebrow} (continued)`;
+  if (y - bottomLimit > minRoomForAnotherBlock) {
+    drawFlowingBlocks(ctx, continuedEyebrow, "grey", blocks, { page, y: y - mm(3) });
+  } else {
+    drawFlowingBlocks(ctx, continuedEyebrow, "grey", blocks);
+  }
 }
 
 /** "30mm bleed across all sides" when uniform (the common case -- see MeasurementStep.tsx's default), otherwise spelled out per side -- matching the reference table's own phrasing ("30mm bleed across all sides") instead of a separate, easy-to-miss Bleed row. */
@@ -1708,6 +1728,7 @@ export async function buildSiteSurveyReportPdf(data: SiteSurveyReportPdfData, fo
   // so it all happens up front rather than per page.
   const photos: SurveyPhotoImage[] = await Promise.all(
     data.photos.map(async (p) => ({
+      id: p.id,
       image: p.format === "png" ? await doc.embedPng(p.bytes) : await doc.embedJpg(p.bytes),
       category: p.category,
       caption: p.caption,
@@ -1723,10 +1744,19 @@ export async function buildSiteSurveyReportPdf(data: SiteSurveyReportPdfData, fo
   drawInspectionDetailsContinuationPages(ctx);
   drawMainSitePhotoPages(ctx);
   drawOrientationPage(ctx);
-  drawOpportunityPage(ctx);
   drawPhotoSurveyPages(ctx);
-  drawMeasurementPage(ctx);
-  drawMeasurementContinuationPage(ctx);
+
+  // One combined Photo + Facade + Opportunity/Measurements/Apple Standards
+  // section per site (see drawSitePages) -- resolved photo is whichever
+  // 'measurement'-category upload that site's measurementPhotoId points at
+  // (set on the Measurements step), falling back to positional assignment
+  // by array order for older/legacy single-site data that predates that
+  // picker (measurementPhotoId left null).
+  const measurementPhotos = ctx.photos.filter((p) => p.category === "measurement");
+  ctx.data.measurements.forEach((m, index) => {
+    const photo = (m.measurementPhotoId && measurementPhotos.find((p) => p.id === m.measurementPhotoId)) || measurementPhotos[index];
+    drawSitePages(ctx, m, photo, index, ctx.data.measurements.length);
+  });
 
   const otherPhotos = ctx.photos.filter((p) => p.category === "other");
   if (otherPhotos.length > 0) {

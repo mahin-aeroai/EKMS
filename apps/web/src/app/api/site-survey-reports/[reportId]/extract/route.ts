@@ -554,7 +554,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ rep
       }
     }
 
-    const mergedMeasurement: SiteSurveyMeasurement = { ...emptyMeasurement(), ...report.measurement };
+    // Extraction only ever targets the primary/first site -- merge into
+    // whatever's already in slot 0 (report.measurements[0]), same as the
+    // client does with this same value once it comes back below. Any
+    // additional sites a person already added by hand are left untouched
+    // (see the update() call further down).
+    const mergedMeasurement: SiteSurveyMeasurement = { ...emptyMeasurement(), ...report.measurements?.[0] };
     for (const key of MEASUREMENT_STRING_KEYS) {
       const raw = (extracted.measurement?.[key] ?? "").trim();
       if (!raw) continue;
@@ -587,7 +592,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ rep
         survey_date: mergedHeader.surveyDate || null,
         surveyor_name: mergedHeader.surveyorName,
         form_data: mergedFormData,
-        measurement: mergedMeasurement,
+        measurements: [mergedMeasurement, ...(report.measurements ?? []).slice(1)],
         field_sources: fieldSources,
         extraction_meta: extractionMeta,
         status: "review_required",

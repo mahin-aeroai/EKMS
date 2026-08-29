@@ -281,11 +281,14 @@ export type OpportunityType =
 export type AppleStandardsMet = "yes" | "no" | "modifications" | "";
 
 // The reference PDF's "Site Photo and measurement" page -- one block per
-// report (not repeating, unlike Installation Report's per-site array, since
-// the reference report this feature was built against only ever surveys
-// one primary opportunity in this level of detail -- see
-// additionalOpportunityNotes for anything beyond it) --
-// site_survey_reports.measurement.
+// SITE/opportunity. A report can cover more than one opportunity at the
+// same store (see site_survey_reports.measurements, a jsonb ARRAY of this
+// shape -- apps/web/src/components/siteSurveyReport/MeasurementStep.tsx
+// renders one repeatable "Site N" card per array element, and
+// pdfBuild.ts's drawSitePages loops the array, each site producing its own
+// combined Photo + Facade diagram + Opportunity Information + Measurements
+// & Material + Apple Standards section rather than three separate,
+// non-adjacent pages the way the original single-measurement build did.
 export interface SiteSurveyMeasurement {
   // -- Opportunity information --
   opportunityName: string;
@@ -392,6 +395,23 @@ export function emptyMeasurement(): SiteSurveyMeasurement {
   };
 }
 
+/**
+ * Merges a loaded row's `measurements` (the jsonb array column -- see the
+ * measurements-array migration) against emptyMeasurement() per entry, same
+ * merge-with-defaults treatment every other loaded field on a report row
+ * gets, and guarantees at least one entry so the Measurements step never
+ * renders with nothing to show -- covers both a genuinely empty array and
+ * a pre-migration/never-saved row Supabase hands back as `undefined`.
+ * Shared by every place that loads a report row (the editor, the dashboard's
+ * preview/download/duplicate actions) rather than re-implemented per call
+ * site.
+ */
+export function normalizeMeasurements(raw: unknown): SiteSurveyMeasurement[] {
+  const arr = Array.isArray(raw) ? raw : [];
+  const merged = arr.map((m) => ({ ...emptyMeasurement(), ...(m as Partial<SiteSurveyMeasurement>) }));
+  return merged.length > 0 ? merged : [emptyMeasurement()];
+}
+
 // Every field name that can carry a ✓ auto-extracted / ⚠ needs confirmation
 // / ○ blank indicator in the editor -- the header columns (snake_case, same
 // as the row) plus every SiteSurveyFormData key (camelCase, same as
@@ -445,7 +465,7 @@ export interface SiteSurveyReportRow {
   source: ReportSource;
   source_pdf_relative_path: string | null;
   form_data: SiteSurveyFormData;
-  measurement: SiteSurveyMeasurement;
+  measurements: SiteSurveyMeasurement[];
   field_sources: FieldSources;
   extraction_meta: ExtractionMeta | null;
   created_by: string | null;
@@ -492,7 +512,7 @@ export function emptyReportDefaults(source: ReportSource): NewSiteSurveyReport {
     status: "draft",
     source_pdf_relative_path: null,
     form_data: emptyFormData(),
-    measurement: emptyMeasurement(),
+    measurements: [emptyMeasurement()],
     field_sources: {},
     extraction_meta: null,
     generated_at: null,

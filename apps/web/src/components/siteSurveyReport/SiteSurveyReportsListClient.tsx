@@ -18,7 +18,7 @@ import { fetchSfProTextFontBytes } from "@/lib/pdfFonts";
 import {
   REPORT_STATUS_LABEL,
   emptyFormData,
-  emptyMeasurement,
+  normalizeMeasurements,
   type ReportStatus,
   type SiteSurveyFormData,
   type SiteSurveyPhotoRow,
@@ -143,7 +143,7 @@ export function SiteSurveyReportsListClient() {
       report: {
         ...(reportData as SiteSurveyReportRow),
         form_data: { ...emptyFormData(), ...(reportData.form_data ?? {}) },
-        measurement: { ...emptyMeasurement(), ...(reportData.measurement ?? {}) },
+        measurements: normalizeMeasurements(reportData.measurements),
       },
       photos: (photoData as SiteSurveyPhotoRow[] | null) ?? [],
     };
@@ -159,7 +159,7 @@ export function SiteSurveyReportsListClient() {
           const imageRes = await fetch(signedData.url);
           if (!imageRes.ok) return null;
           const bytes = new Uint8Array(await imageRes.arrayBuffer());
-          const input: SurveyPhotoInput = { bytes, format: "jpg", category: photo.category, caption: photo.caption, annotation: photo.annotation };
+          const input: SurveyPhotoInput = { id: photo.id, bytes, format: "jpg", category: photo.category, caption: photo.caption, annotation: photo.annotation };
           return input;
         } catch {
           return null;
@@ -182,7 +182,7 @@ export function SiteSurveyReportsListClient() {
         surveyDate: data.report.survey_date ?? "",
         surveyorName: data.report.surveyor_name,
         formData: data.report.form_data,
-        measurement: data.report.measurement,
+        measurements: data.report.measurements,
         photos: photoInputs,
       },
       brandFonts
@@ -245,7 +245,7 @@ export function SiteSurveyReportsListClient() {
           survey_date: data.report.survey_date,
           surveyor_name: data.report.surveyor_name,
           form_data: data.report.form_data,
-          measurement: data.report.measurement,
+          measurements: data.report.measurements,
           field_sources: {},
           created_by: userData?.user?.id ?? null,
         })

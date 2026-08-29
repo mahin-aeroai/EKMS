@@ -23,6 +23,7 @@ import {
   REPORT_STATUS_LABEL,
   emptyFormData,
   emptyMeasurement,
+  normalizeMeasurements,
   type FieldSourceKey,
   type PhotoCategory,
   type SiteSurveyFormData,
@@ -96,7 +97,7 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
         setReport({
           ...(data as SiteSurveyReportRow),
           form_data: { ...emptyFormData(), ...(data.form_data ?? {}) },
-          measurement: { ...emptyMeasurement(), ...(data.measurement ?? {}) },
+          measurements: normalizeMeasurements(data.measurements),
           field_sources: data.field_sources ?? {},
           extraction_meta: data.extraction_meta ?? null,
         });
@@ -201,7 +202,10 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
               survey_date: data.report.survey_date,
               surveyor_name: data.report.surveyor_name,
               form_data: { ...emptyFormData(), ...data.report.form_data },
-              measurement: { ...emptyMeasurement(), ...data.report.measurement },
+              // Extraction only ever targets the primary/first site -- fold
+              // its result into slot 0, keeping any additional sites a
+              // person has already added by hand on this report.
+              measurements: [{ ...emptyMeasurement(), ...data.report.measurement }, ...prev.measurements.slice(1)],
               field_sources: data.report.field_sources,
               extraction_meta: data.report.extraction_meta,
               status: data.report.status,
@@ -233,7 +237,7 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
         survey_date: current.survey_date || null,
         surveyor_name: current.surveyor_name,
         form_data: current.form_data,
-        measurement: current.measurement,
+        measurements: current.measurements,
         field_sources: current.field_sources,
       })
       .eq("id", reportId);
@@ -251,8 +255,16 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
   function updateFormData<K extends keyof SiteSurveyFormData>(key: K, value: SiteSurveyFormData[K]) {
     setReport((prev) => (prev ? { ...prev, form_data: { ...prev.form_data, [key]: value } } : prev));
   }
-  function updateMeasurement<K extends keyof SiteSurveyMeasurement>(key: K, value: SiteSurveyMeasurement[K]) {
-    setReport((prev) => (prev ? { ...prev, measurement: { ...prev.measurement, [key]: value } } : prev));
+  function updateMeasurement<K extends keyof SiteSurveyMeasurement>(index: number, key: K, value: SiteSurveyMeasurement[K]) {
+    setReport((prev) =>
+      prev ? { ...prev, measurements: prev.measurements.map((m, i) => (i === index ? { ...m, [key]: value } : m)) } : prev
+    );
+  }
+  function addSite() {
+    setReport((prev) => (prev ? { ...prev, measurements: [...prev.measurements, emptyMeasurement()] } : prev));
+  }
+  function removeSite(index: number) {
+    setReport((prev) => (prev ? { ...prev, measurements: prev.measurements.filter((_, i) => i !== index) } : prev));
   }
   function onTouched(key: FieldSourceKey) {
     setReport((prev) => (prev ? { ...prev, field_sources: { ...prev.field_sources, [key]: "user" } } : prev));
@@ -274,6 +286,7 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
           if (!imageRes.ok) return null;
           const bytes = new Uint8Array(await imageRes.arrayBuffer());
           const input: SurveyPhotoInput = {
+            id: photo.id,
             bytes,
             format: "jpg",
             category: photo.category,
@@ -303,7 +316,7 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
         surveyDate: current.survey_date ?? "",
         surveyorName: current.surveyor_name,
         formData: current.form_data,
-        measurement: current.measurement,
+        measurements: current.measurements,
         photos: photoInputs,
       },
       brandFonts
@@ -367,7 +380,7 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
   };
 
   const detailsComplete = Boolean(report.store_name && report.sfo_id && report.surveyor_name);
-  const measurementsComplete = report.measurement.visualWidthMm != null && report.measurement.visualHeightMm != null;
+  const measurementsComplete = report.measurements.every((m) => m.visualWidthMm != null && m.visualHeightMm != null);
 
   const isPdfSourced = report.source === "pdf";
   const STEPS: StepperStep[] = [
@@ -460,7 +473,15 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
           />
         )}
         {step === "photos" && <PhotosStep reportId={reportId} photos={photos} onReload={reloadPhotos} />}
-        {step === "measurements" && <MeasurementStep measurement={report.measurement} onChange={updateMeasurement} />}
+        {step === "measurements" && (
+          <MeasurementStep
+            measurements={report.measurements}
+            onChange={updateMeasurement}
+            onAdd={addSite}
+            onRemove={removeSite}
+            measurementPhotos={photos.filter((p) => p.category === "measurement")}
+          />
+        )}
         {step === "preview" && <PreviewStep previewUrl={previewUrl} building={buildingPreview} onBuild={handlePreview} />}
         {step === "generate" && (
           <div className="flex flex-col items-center gap-3 rounded-lg border border-line py-16 text-center">
