@@ -3,7 +3,7 @@
 import { RefreshCw } from "lucide-react";
 import { MasterPickSelect } from "@/components/installationReport/MasterPickSelect";
 import { Button } from "@/components/ui/Button";
-import type { SiteSurveyMeasurement } from "@/lib/siteSurveyReport/types";
+import type { SiteSurveyMeasurement, YesNo } from "@/lib/siteSurveyReport/types";
 
 // The reference PDF's "Site Photo and measurement" page: a Visual size (the
 // artwork itself) plus a Bleed allowance on each side (how much bigger the
@@ -42,10 +42,82 @@ export function MeasurementStep({ measurement, onChange }: Props) {
 
   return (
     <div className="flex flex-col gap-6">
+      <Section title="Opportunity Information">
+        <Grid>
+          <TextField label="Opportunity Name" value={measurement.opportunityName} onChange={(v) => onChange("opportunityName", v)} />
+          <SelectField
+            label="Opportunity Type"
+            value={measurement.opportunityType}
+            onChange={(v) => onChange("opportunityType", v as SiteSurveyMeasurement["opportunityType"])}
+            options={[
+              ["", "— Select —"],
+              ["individual_window", "Individual Window"],
+              ["window_vinyl", "Window Vinyl"],
+              ["banner", "Banner"],
+              ["light_box", "Light Box"],
+              ["glass_facade", "Glass Façade"],
+              ["existing_graphic", "Existing Graphic"],
+              ["other", "Other"],
+            ]}
+          />
+          <TextField
+            label="Opportunity Type — if Other, please specify"
+            value={measurement.opportunityTypeOther}
+            onChange={(v) => onChange("opportunityTypeOther", v)}
+          />
+          <TextField label="Opportunity Location" value={measurement.opportunityLocation} onChange={(v) => onChange("opportunityLocation", v)} />
+          <TextField label="Store / Facade Area" value={measurement.storeFacadeArea} onChange={(v) => onChange("storeFacadeArea", v)} />
+          <TextField label="Apple Program Position" value={measurement.appleProgramPosition} onChange={(v) => onChange("appleProgramPosition", v)} />
+          <TextAreaField
+            label="Opportunity Description"
+            value={measurement.opportunityDescription}
+            onChange={(v) => onChange("opportunityDescription", v)}
+            className="sm:col-span-2"
+          />
+          <TextField
+            label="Existing Material Type (if a banner/graphic already exists)"
+            value={measurement.existingMaterialType}
+            onChange={(v) => onChange("existingMaterialType", v)}
+          />
+          <TextField
+            label="Existing Creative Condition"
+            value={measurement.existingCreativeConditionForOpportunity}
+            onChange={(v) => onChange("existingCreativeConditionForOpportunity", v)}
+          />
+          <YesNoField
+            label="Can existing creative be removed?"
+            value={measurement.existingCreativeRemovableForOpportunity}
+            onChange={(v) => onChange("existingCreativeRemovableForOpportunity", v as SiteSurveyMeasurement["existingCreativeRemovableForOpportunity"])}
+          />
+          <TextField
+            label="Which entrance has the main footfall? (if multiple entrances)"
+            value={measurement.mainFootfallEntranceNote}
+            onChange={(v) => onChange("mainFootfallEntranceNote", v)}
+          />
+          <TextAreaField
+            label="Additional Opportunity Notes"
+            value={measurement.additionalOpportunityNotes}
+            onChange={(v) => onChange("additionalOpportunityNotes", v)}
+            className="sm:col-span-2"
+          />
+        </Grid>
+      </Section>
+
       <Section title="Visual Size">
         <Grid>
           <NumberField label="Visual Width (mm)" value={measurement.visualWidthMm} onChange={(v) => onChange("visualWidthMm", v)} />
           <NumberField label="Visual Height (mm)" value={measurement.visualHeightMm} onChange={(v) => onChange("visualHeightMm", v)} />
+          <NumberField label="Quantity" value={measurement.visualSizeQuantity} onChange={(v) => onChange("visualSizeQuantity", v)} />
+          <SelectField
+            label="Unit of Measurement"
+            value={measurement.measurementUnit || "mm"}
+            onChange={(v) => onChange("measurementUnit", v)}
+            options={[
+              ["mm", "Millimetres (mm)"],
+              ["cm", "Centimetres (cm)"],
+              ["inch", "Inches (in)"],
+            ]}
+          />
         </Grid>
       </Section>
 
@@ -103,10 +175,26 @@ export function MeasurementStep({ measurement, onChange }: Props) {
             onChange={(v) => onChange("installedBy", v)}
           />
           <TextField
+            label="Fixing Requirements (inc. any measurements)"
+            value={measurement.fixingsRequired}
+            onChange={(v) => onChange("fixingsRequired", v)}
+            className="sm:col-span-2"
+          />
+          <TextField
             label="Equipment Required"
             value={measurement.equipmentDetail}
             onChange={(v) => onChange("equipmentDetail", v)}
             className="sm:col-span-2"
+          />
+          <YesNoField
+            label="Are there any fixed visual obstructions?"
+            value={measurement.existingVisualObstructions}
+            onChange={(v) => onChange("existingVisualObstructions", v as SiteSurveyMeasurement["existingVisualObstructions"])}
+          />
+          <TextAreaField
+            label="Description"
+            value={measurement.existingVisualObstructionsDescription}
+            onChange={(v) => onChange("existingVisualObstructionsDescription", v)}
           />
           <TextAreaField
             label="Measurement Notes"
@@ -114,6 +202,33 @@ export function MeasurementStep({ measurement, onChange }: Props) {
             onChange={(v) => onChange("measurementNotes", v)}
             className="sm:col-span-2"
           />
+        </Grid>
+      </Section>
+
+      <Section title="Apple Standards">
+        <Grid>
+          <SelectField
+            label="Does the opportunity and system meet Apple standards?"
+            value={measurement.appleStandardsMet}
+            onChange={(v) => onChange("appleStandardsMet", v as SiteSurveyMeasurement["appleStandardsMet"])}
+            options={[
+              ["", "— Select —"],
+              ["yes", "Yes"],
+              ["no", "No"],
+              ["modifications", "Only With Modifications"],
+            ]}
+          />
+          <div />
+          {measurement.appleStandardsMet === "modifications" && (
+            <>
+              <TextAreaField label="Reason" value={measurement.appleStandardsReason} onChange={(v) => onChange("appleStandardsReason", v)} />
+              <TextAreaField
+                label="Modification Required"
+                value={measurement.appleStandardsModification}
+                onChange={(v) => onChange("appleStandardsModification", v)}
+              />
+            </>
+          )}
         </Grid>
       </Section>
     </div>
@@ -193,6 +308,54 @@ function TextAreaField({
         rows={2}
         className="w-full resize-y rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
       />
+    </label>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  onChange,
+  options,
+  className,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: readonly (readonly [string, string])[];
+  className?: string;
+}) {
+  return (
+    <label className={`flex flex-col gap-1 ${className ?? ""}`}>
+      <span className="text-xs font-medium text-ink-secondary">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
+      >
+        {options.map(([v, l]) => (
+          <option key={v} value={v}>
+            {l}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function YesNoField({ label, value, onChange, className }: { label: string; value: YesNo; onChange: (v: string) => void; className?: string }) {
+  return (
+    <label className={`flex flex-col gap-1 ${className ?? ""}`}>
+      <span className="text-xs font-medium text-ink-secondary">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
+      >
+        <option value="">— Select —</option>
+        <option value="yes">Yes</option>
+        <option value="no">No</option>
+      </select>
     </label>
   );
 }

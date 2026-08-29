@@ -45,12 +45,37 @@ export const dynamic = "force-dynamic";
 //
 // POST /api/site-survey-reports/[reportId]/extract
 
-const PHOTO_CATEGORIES = ["main_site", "orientation_right", "orientation_left", "orientation_opposite", "measurement", "other"] as const;
+const PHOTO_CATEGORIES = [
+  "main_site",
+  "orientation_right",
+  "orientation_left",
+  "orientation_opposite",
+  "measurement",
+  "viewpoint_a",
+  "viewpoint_b",
+  "viewpoint_c",
+  "viewpoint_d",
+  "other",
+] as const;
 
 const HEADER_KEYS = ["storeName", "address", "sfoId", "program", "surveyDate", "surveyorName"] as const;
 const MEASUREMENT_STRING_KEYS = [
+  "opportunityName",
+  "opportunityType",
+  "opportunityTypeOther",
+  "opportunityLocation",
+  "storeFacadeArea",
+  "appleProgramPosition",
+  "opportunityDescription",
+  "existingMaterialType",
+  "existingCreativeConditionForOpportunity",
+  "existingCreativeRemovableForOpportunity",
+  "additionalOpportunityNotes",
+  "mainFootfallEntranceNote",
   "visualWidthMm",
   "visualHeightMm",
+  "visualSizeQuantity",
+  "measurementUnit",
   "materialWidthMm",
   "materialHeightMm",
   "bleedTopMm",
@@ -59,14 +84,21 @@ const MEASUREMENT_STRING_KEYS = [
   "bleedLeftMm",
   "materialType",
   "installationType",
+  "fixingsRequired",
+  "existingVisualObstructions",
+  "existingVisualObstructionsDescription",
   "equipmentDetail",
   "equipmentSource",
   "installedBy",
   "measurementNotes",
+  "appleStandardsMet",
+  "appleStandardsReason",
+  "appleStandardsModification",
 ] as const;
 const MEASUREMENT_NUMERIC_KEYS = new Set([
   "visualWidthMm",
   "visualHeightMm",
+  "visualSizeQuantity",
   "materialWidthMm",
   "materialHeightMm",
   "bleedTopMm",
@@ -97,46 +129,167 @@ const EXTRACT_TOOL: Tool = {
       },
       formData: {
         type: "object",
-        description: "One-off Q&A fields from the on-site details / site suitability / store description / installation details / additional details sections.",
+        description:
+          "One-off Q&A fields from the On-site personnel details / Store description / Installing on site / Deliveries to store / General site information / Site suitability / Site details / Safety / Graphics / Approvals sections.",
         properties: {
+          // On-site personnel details
           storePersonContacted: { type: "string" },
-          printer: { type: "string" },
-          siteVisibility: { type: "string", enum: ["yes", "no", ""], description: "Does the site have high, uninterrupted visibility?" },
-          premiumLocation: { type: "string", enum: ["yes", "no", ""], description: "Would this be considered a premium location?" },
-          potentialIssues: { type: "string", description: "Potential issues with the location." },
+          printer: { type: "string", description: "Printer / survey company." },
+          appleRepresentative: { type: "string" },
+          retailerRepresentative: { type: "string" },
+          storeContactNumber: { type: "string" },
+
+          // Store description
+          storeLocationType: { type: "string", enum: ["mall", "retail_high_street", "retail_park", "other", ""], description: "Location of store." },
+          storeLocationOther: { type: "string", description: "If storeLocationType is 'other', the free-text specification." },
+          entrancesIntoMall: { type: "string", description: "Number of store entrances into the mall. Digits only, empty if blank/not applicable." },
+          entrancesIntoStore: { type: "string", description: "Number of store entrances into the store. Digits only, empty if blank/not applicable." },
+          floorsWithinMall: { type: "string", description: "Number of floors within the mall. Digits only, empty if blank/not applicable." },
+          floorsWithinStore: { type: "string", description: "Number of floors within the store. Digits only, empty if blank/not applicable." },
+          floorApplProgramOn: { type: "string", description: "Which floor the Apple program is situated on." },
+          storeOpenPlan: { type: "string", enum: ["yes", "no", ""], description: "Is the store open plan?" },
+          openPlanLayoutDescription: { type: "string", description: "If not open plan, description of the layout." },
+          applProgramPositionEntrance: { type: "string", description: "Position of the Apple program relative to the main entrance." },
+          siteStoreAddress: {
+            type: "string",
+            description:
+              "Store address, as stated specifically in the Store Description section (this can be a DIFFERENT address than the report's own top-level header address if the document is inconsistent -- if so, keep both values as-is and add 'formData.siteStoreAddress' to flagged rather than picking one.",
+          },
+          storeContactDetails: { type: "string" },
           siliconJoinsCondition: { type: "string", description: "Condition of silicon joins and edges." },
           perspexCondition: { type: "string", description: "Condition of the Perspex cover for backlit." },
           lightingDescription: { type: "string", description: "Lighting for the location / backlit potential." },
           existingCreative: { type: "string", description: "Current artwork or store stickers on window." },
           creativeRemovable: { type: "string", enum: ["yes", "no", ""], description: "Can existing creative be removed?" },
           additionalStoreNotes: { type: "string" },
+
+          // Installing on site
+          openingTimeMon: { type: "string", description: "Store opening time, Monday." },
+          openingTimeTue: { type: "string", description: "Store opening time, Tuesday." },
+          openingTimeWed: { type: "string", description: "Store opening time, Wednesday." },
+          openingTimeThu: { type: "string", description: "Store opening time, Thursday." },
+          openingTimeFri: { type: "string", description: "Store opening time, Friday." },
+          openingTimeSat: { type: "string", description: "Store opening time, Saturday." },
+          openingTimeSun: { type: "string", description: "Store opening time, Sunday." },
+          installOutsideHours: { type: "string", enum: ["yes", "no", ""], description: "Does the install need to happen outside store opening hours?" },
+          installOutsideHoursDetails: { type: "string" },
+          retailerPreferredInstallTime: { type: "string", enum: ["yes", "no", ""], description: "Does the retailer have preferred install days/time?" },
+          retailerPreferredInstallDetails: { type: "string" },
           installationDateTime: { type: "string", description: "Time and date of installation." },
-          deliveryTimes: { type: "string", description: "Delivery times into store." },
-          permitRequired: { type: "string", enum: ["yes", "no", ""], description: "Are mall or work permits required?" },
+          permitRequired: { type: "string", enum: ["yes", "no", ""], description: "Are work permits required?" },
           permitDetails: { type: "string" },
-          generalNotes: { type: "string" },
+
+          // Deliveries to store
+          deliveryContactNameNumber: { type: "string", description: "Store contact name and number for deliveries." },
+          deliveryAddressSameAsStore: { type: "string", enum: ["yes", "no", ""], description: "Is the delivery address the same as the store?" },
+          deliveryAddress: { type: "string", description: "If delivery address differs from the store, the delivery address." },
+          deliveryTimes: { type: "string", description: "Day/time deliveries can be made." },
+          deliveryOtherComments: { type: "string" },
+
+          // General site information
+          weatherAffectsInstall: { type: "string", enum: ["yes", "no", ""], description: "Will weather conditions affect the install at this site?" },
+          weatherAffectsInstallDetails: { type: "string" },
+          allOpportunitiesSurveyed: { type: "string", enum: ["yes", "no", ""], description: "Confirm all possible opportunities have been surveyed." },
+          allOpportunitiesSurveyedReason: { type: "string", description: "If not all opportunities surveyed, the reason." },
+          generalNotes: { type: "string", description: "General other information/comments." },
+
+          // Site suitability / installation details
+          siteVisibility: { type: "string", enum: ["yes", "no", ""], description: "Is the proposed install opportunity highly visible?" },
+          siteVisibilityDescription: { type: "string" },
+          premiumLocation: { type: "string", enum: ["yes", "no", ""], description: "Is this a premium site?" },
+          premiumLocationDescription: { type: "string" },
+          installationTimeFlexible: { type: "string", enum: ["yes", "no", ""], description: "Is the installation time flexible?" },
+          installationTimeFlexibleDescription: { type: "string" },
+          potentialIssues: { type: "string", description: "Potential issues with the location." },
+
+          // Site details
+          maxWorkingSpace: { type: "string", description: "The maximum working space." },
+          accessEquipmentAvailable: { type: "string", enum: ["yes", "no", ""], description: "Is access equipment available on site?" },
+          accessEquipmentDescription: { type: "string" },
+          poweredAccessUsed: { type: "string", enum: ["yes", "no", ""], description: "Is powered access to be used?" },
+          poweredAccessDescription: { type: "string" },
+          accessIssues: { type: "string", enum: ["yes", "no", ""], description: "Are there any access issues?" },
+          accessIssuesDescription: { type: "string" },
+          siteType: { type: "string", enum: ["permanent", "temporary", ""], description: "Is the site permanent or temporary?" },
+          siteTypeDuration: { type: "string", description: "If temporary, how long the site is available." },
+          competitorAdvertising: { type: "string", enum: ["yes", "no", ""], description: "Is there competitor advertising close to the proposed install?" },
+          competitorAdvertisingDescription: { type: "string" },
+          generalInstallInfo: { type: "string", description: "General information required for a successful install." },
+
+          // Safety
+          siteSafeForInstall: { type: "string", enum: ["yes", "no", ""], description: "Is the site safe enough to do the installation?" },
+          siteSafeDescription: { type: "string" },
+          safetyConcerns: { type: "string", enum: ["yes", "no", ""], description: "Any specific safety concerns?" },
+          safetyConcernsDetails: { type: "string" },
+          safetyEquipmentRequired: { type: "string", enum: ["yes", "no", ""], description: "Any specific safety equipment/device required during installation?" },
+          safetyEquipmentDetails: { type: "string" },
+
+          // Graphics
+          graffitiRisk: { type: "string", enum: ["yes", "no", ""], description: "Does the store regard the site as being at risk from graffiti?" },
+          graffitiRiskDescription: { type: "string" },
+          extraLightingRequired: { type: "string", enum: ["yes", "no", ""], description: "Is extra lighting required for better viewing at night?" },
+          extraLightingDescription: { type: "string" },
+          graphicsCutoutRequired: { type: "string", enum: ["yes", "no", ""], description: "Is a cutout required for the graphics?" },
+          graphicsCutoutDescription: { type: "string" },
+          graphicsOtherInfo: { type: "string" },
+
+          // Approvals
+          specialApprovalsNeeded: { type: "string", enum: ["yes", "no", ""], description: "Does the store need any special approvals?" },
+          specialApprovalsDetails: { type: "string" },
+          chainCentralApprovalNeeded: { type: "string", enum: ["yes", "no", ""], description: "If chain store, does it need approval from central team?" },
+          chainCentralApprovalReason: { type: "string" },
+          approvalsOtherInfo: { type: "string" },
         },
         required: [...FORM_DATA_KEYS],
       },
       measurement: {
         type: "object",
         description:
-          "The Site Photo & Measurement page. Numeric size/bleed fields are DIGITS-ONLY STRINGS in millimetres (e.g. '5522') -- convert cm/inches to mm and add the field to `flagged` if you had to convert. Empty string for any value not found.",
+          "The Opportunity Information / Photo Survey / Measurements / Material Information / Technical Opportunity Details / Apple Standards sections, describing the single primary opportunity surveyed in detail (if the document genuinely surveys more than one opportunity to this level of detail, describe the others in additionalOpportunityNotes rather than inventing extra fields). Numeric size/bleed/quantity fields are DIGITS-ONLY STRINGS in millimetres (e.g. '5522') -- convert cm/inches to mm and add the field to `flagged` if you had to convert. Empty string for any value not found.",
         properties: {
+          opportunityName: { type: "string" },
+          opportunityType: {
+            type: "string",
+            enum: ["individual_window", "window_vinyl", "banner", "light_box", "glass_facade", "existing_graphic", "other", ""],
+          },
+          opportunityTypeOther: { type: "string", description: "If opportunityType is 'other', the free-text specification." },
+          opportunityLocation: { type: "string" },
+          storeFacadeArea: { type: "string" },
+          appleProgramPosition: { type: "string" },
+          opportunityDescription: { type: "string" },
+          existingMaterialType: {
+            type: "string",
+            description: "Type of material already in place, if a banner or graphic already exists at this opportunity (distinct from materialType below, which is for the NEW install).",
+          },
+          existingCreativeConditionForOpportunity: { type: "string" },
+          existingCreativeRemovableForOpportunity: { type: "string", enum: ["yes", "no", ""] },
+          additionalOpportunityNotes: { type: "string" },
+          mainFootfallEntranceNote: { type: "string", description: "If multiple entrances, which one carries the main footfall." },
+
           visualWidthMm: { type: "string" },
           visualHeightMm: { type: "string" },
+          visualSizeQuantity: { type: "string", description: "Quantity of this opportunity (e.g. '1' for '1 No'). Digits only." },
+          measurementUnit: { type: "string", enum: ["mm", "cm", "inch", ""], description: "Unit the ORIGINAL document states sizes in, before conversion to mm above." },
           materialWidthMm: { type: "string" },
           materialHeightMm: { type: "string" },
           bleedTopMm: { type: "string" },
           bleedRightMm: { type: "string" },
           bleedBottomMm: { type: "string" },
           bleedLeftMm: { type: "string" },
-          materialType: { type: "string" },
+
+          materialType: { type: "string", description: "Material type/specification for the NEW install." },
           installationType: { type: "string" },
-          equipmentDetail: { type: "string", description: "Equipment required for installation." },
-          equipmentSource: { type: "string" },
-          installedBy: { type: "string" },
-          measurementNotes: { type: "string" },
+          fixingsRequired: { type: "string", description: "Fixing requirements, including any measurements." },
+          existingVisualObstructions: { type: "string", enum: ["yes", "no", ""], description: "Are there any fixed visual obstructions?" },
+          existingVisualObstructionsDescription: { type: "string" },
+          equipmentDetail: { type: "string", description: "Detailed equipment required for installation." },
+          equipmentSource: { type: "string", description: "Who is to source the equipment." },
+          installedBy: { type: "string", description: "Who will carry out the installation." },
+          measurementNotes: { type: "string", description: "Important notes." },
+
+          appleStandardsMet: { type: "string", enum: ["yes", "no", "modifications", ""], description: "Does the opportunity and system meet Apple standards?" },
+          appleStandardsReason: { type: "string", description: "If only with modifications, the reason." },
+          appleStandardsModification: { type: "string", description: "If only with modifications, the modification required." },
         },
         required: [...MEASUREMENT_STRING_KEYS],
       },
@@ -171,9 +324,11 @@ Read the ENTIRE document page by page -- text, tables, and any layout cues (sect
 
 CRITICAL -- never invent or guess a value. If a field cannot be confidently read from the document, output an empty string ("") for it. Do not infer a plausible-sounding value, do not fill in a typical/default value, and do not paraphrase into something more specific than what's actually written. Preserve the document's own wording where reasonable rather than rewording it.
 
-If the same fact appears more than once with different values, or the wording is genuinely ambiguous, pick the most explicit/prominent statement and add that field's dot-path name to \`flagged\` so a person double-checks it.
+If the same fact appears more than once with different values, or the wording is genuinely ambiguous, do NOT silently pick one and discard the other -- preserve the value you consider most explicit/prominent in the field itself, and add that field's dot-path name to \`flagged\` so a person double-checks it against the discarded value. This applies in particular to header.address vs formData.siteStoreAddress: these are sometimes genuinely different addresses in the same document (e.g. a template reused from a different site than the one named in the header) -- extract both exactly as stated even when they disagree, and flag formData.siteStoreAddress when they do, rather than "fixing" one to match the other.
 
-Measurement fields are digits-only strings in millimetres. If the source states cm or inches, convert to mm and add that field to \`flagged\` so the conversion gets a human sanity check.`;
+Measurement fields are digits-only strings in millimetres. If the source states cm or inches, convert to mm and add that field to \`flagged\` so the conversion gets a human sanity check.
+
+Photo pages: the reference document's own photo-survey diagram labels four standard viewpoints -- A (an individual window/banner, showing its immediate surrounding area), B (a side angle showing the full shopfront with all windows/banners), C (a front view showing the full shopfront), and D (a reverse view, back to the shop entrance, showing what's opposite the shop). When a page's own caption or position in a labeled photo-survey layout clearly identifies it as one of these, use the matching pageHints likelyCategory ("viewpoint_a" / "viewpoint_b" / "viewpoint_c" / "viewpoint_d"); use "main_site" only for an unlabeled primary storefront photo, and "orientation_right"/"orientation_left"/"orientation_opposite" only for a page explicitly labeled that way (not as a synonym for B/C/D).`;
 
 const r2 = new S3Client({
   region: "auto",

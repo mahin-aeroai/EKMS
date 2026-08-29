@@ -66,7 +66,19 @@ import {
   type PDFPage,
 } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
-import { normalizeAnnotation, type PhotoCategory, type SiteSurveyFormData, type SiteSurveyMeasurement, type SiteSurveyPhotoAnnotation, type SiteSurveyPhotoAnnotationRaw } from "./types";
+import {
+  normalizeAnnotation,
+  APPLE_STANDARDS_MET_LABEL,
+  OPPORTUNITY_TYPE_LABEL,
+  PHOTO_CATEGORY_LABEL,
+  SITE_TYPE_LABEL,
+  STORE_LOCATION_TYPE_LABEL,
+  type PhotoCategory,
+  type SiteSurveyFormData,
+  type SiteSurveyMeasurement,
+  type SiteSurveyPhotoAnnotation,
+  type SiteSurveyPhotoAnnotationRaw,
+} from "./types";
 
 const PT_PER_MM = 72 / 25.4;
 const mm = (v: number) => v * PT_PER_MM;
@@ -616,8 +628,18 @@ function drawTwoColTable(page: PDFPage, ctx: Ctx, rows: TableRow[], x: number, w
 
   for (const row of rows) {
     const iconIndent = row.icon ? mm(6) : 0;
+    // Labels are wrapped too, not just values -- a handful of the newer
+    // continuation-page labels ("Store Entrances — Into the Mall / Into the
+    // Store", "Confirm All Possible Opportunities Surveyed", etc) run
+    // longer than every original label ever did, and an un-wrapped
+    // single-line drawText silently overflows past the label column's own
+    // border into the value column, overlapping that row's value text.
+    // Wrapping keeps every existing (short) label rendering exactly as
+    // before -- it only ever adds lines once a label doesn't fit -- so this
+    // is a latent-bug fix, not a visual change to the original design.
+    const labelLines = wrapText(font, row.label, 8.5, labelColW - pad * 2 - iconIndent);
     const valueLines = wrapText(ctx.font, row.value || "—", 9, valueColW - pad * 2);
-    const rowH = Math.max(lineH, valueLines.length * lineH) + pad * 1.2;
+    const rowH = Math.max(lineH, Math.max(labelLines.length, valueLines.length) * lineH) + pad * 1.2;
 
     page.drawRectangle({ x, y: y - rowH, width: labelColW, height: rowH, borderColor: BORDER, borderWidth: 0.6, color: WHITE });
     page.drawRectangle({
@@ -633,7 +655,9 @@ function drawTwoColTable(page: PDFPage, ctx: Ctx, rows: TableRow[], x: number, w
     if (row.icon) {
       drawIcon(page, row.icon, x + pad, y - pad - 1, mm(4.2), MUTED);
     }
-    page.drawText(row.label, { x: x + pad + iconIndent, y: y - pad - 7, size: 8.5, font, color: INK_SECONDARY });
+    labelLines.forEach((line, i) => {
+      page.drawText(line, { x: x + pad + iconIndent, y: y - pad - 7 - i * lineH, size: 8.5, font, color: INK_SECONDARY });
+    });
     valueLines.forEach((line, i) => {
       page.drawText(line, {
         x: x + labelColW + pad,
@@ -647,6 +671,31 @@ function drawTwoColTable(page: PDFPage, ctx: Ctx, rows: TableRow[], x: number, w
     y -= rowH;
   }
   return y;
+}
+
+/**
+ * The height drawTwoColTable(rows, width, ...) will occupy, without
+ * actually drawing anything -- mirrors that function's own row-height
+ * formula exactly (same labelColW/pad/lineH/wrapText call). Used by the
+ * continuation pages below to decide, before drawing a whole section band +
+ * table "block", whether it still fits in the current column or needs to
+ * move to the next column/page -- blocks are placed as a unit (never split
+ * mid-table), which every block on those pages is small enough for.
+ */
+function measureTwoColTableHeight(ctx: Ctx, rows: TableRow[], width: number, labelFont?: PDFFont): number {
+  const labelColW = width * 0.42;
+  const valueColW = width - labelColW;
+  const pad = mm(2);
+  const lineH = mm(4.6);
+  const font = labelFont ?? ctx.bold;
+  let h = 0;
+  for (const row of rows) {
+    const iconIndent = row.icon ? mm(6) : 0;
+    const labelLines = wrapText(font, row.label, 8.5, labelColW - pad * 2 - iconIndent);
+    const valueLines = wrapText(ctx.font, row.value || "—", 9, valueColW - pad * 2);
+    h += Math.max(lineH, Math.max(labelLines.length, valueLines.length) * lineH) + pad * 1.2;
+  }
+  return h;
 }
 
 /**
@@ -1057,6 +1106,217 @@ function yesNoLabel(v: string, thirdLabel = "—"): string {
   return v ? v : thirdLabel === "—" ? "—" : `— (${thirdLabel})`;
 }
 
+/** "Yes — <detail>" / "No" / "—" -- the Yes/No-plus-free-text-description pattern most of the new fields below use, so it's a one-liner at every call site instead of a ternary each time. */
+function ynDetail(value: string, detail: string): string {
+  const base = yesNoLabel(value);
+  return detail ? `${base} — ${detail}` : base;
+}
+
+// ---------------------------------------------------------------------------
+// Additional pages -- content the partner's later requirements spec asked
+// for beyond the original Cover/Details/Photo/Measurement pages, added as
+// NEW pages appended after their existing counterparts rather than
+// reworking those pages' own layout, per the partner's explicit
+// instruction: "keep the existing design and everything intact just add
+// missing information in additional pages." Every page below reuses the
+// exact same drawing primitives (newPage, drawSectionBand, drawTwoColTable,
+// drawPhotoBox) and the same per-page topbar variant convention as the
+// pages they extend, rather than introducing a new visual style.
+// ---------------------------------------------------------------------------
+
+interface ContinuationBlock {
+  title: string;
+  icon?: string;
+  rows: TableRow[];
+}
+
+/**
+ * Flows a list of section-band+table "blocks" across as many pages as
+ * needed, two columns per page (same geometry as drawDetailsPage's own
+ * two-up layout) -- fills the left column top to bottom, then the right
+ * column, then starts a new page, moving on to the next block whenever the
+ * current one doesn't fit rather than splitting a block's own rows across
+ * a column/page boundary (every block here is small enough that whole-block
+ * placement never wastes much space). `eyebrow`/`variant` are passed
+ * straight to newPage for each page created, so a multi-page continuation
+ * reads as one consistent extension of the section it continues.
+ */
+function drawFlowingBlocks(ctx: Ctx, eyebrow: string, variant: TopbarVariant, blocks: ContinuationBlock[]) {
+  const colGap = mm(6);
+  const colW = (contentWidth() - colGap) / 2;
+  const leftX = contentLeft();
+  const rightX = contentLeft() + colW + colGap;
+  const topY = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
+  const bottomLimit = FOOTER_HEIGHT + mm(6);
+  const bandH = mm(7);
+  const gapAfter = mm(3);
+
+  let page = newPage(ctx, eyebrow, variant);
+  let col: 0 | 1 = 0;
+  let y = [topY, topY];
+
+  for (const block of blocks) {
+    if (block.rows.length === 0) continue;
+    const blockH = bandH + measureTwoColTableHeight(ctx, block.rows, colW) + gapAfter;
+
+    if (y[col] - blockH < bottomLimit) {
+      if (col === 0) {
+        col = 1;
+      } else {
+        page = newPage(ctx, eyebrow, variant);
+        col = 0;
+        y = [topY, topY];
+      }
+    }
+
+    const x = col === 0 ? leftX : rightX;
+    let by = drawSectionBand(page, ctx, block.title, x, colW, y[col], undefined, block.icon);
+    by = drawTwoColTable(page, ctx, block.rows, x, colW, by);
+    y[col] = by - gapAfter;
+  }
+}
+
+/**
+ * Continues the Inspection Details page (drawDetailsPage) with every field
+ * from the partner's later spec not already shown there -- On-site
+ * personnel details/Store description fields the original page didn't
+ * capture (location type, entrances, floors, open-plan, address), then
+ * Installing on site, Deliveries to store, General site information, Site
+ * suitability descriptions, Site details, Safety, Graphics, and Approvals
+ * in full. Same "dark" topbar as the page it continues.
+ */
+function drawInspectionDetailsContinuationPages(ctx: Ctx) {
+  const f = ctx.data.formData;
+
+  const openingTimes = (
+    [
+      ["Mon", f.openingTimeMon],
+      ["Tue", f.openingTimeTue],
+      ["Wed", f.openingTimeWed],
+      ["Thu", f.openingTimeThu],
+      ["Fri", f.openingTimeFri],
+      ["Sat", f.openingTimeSat],
+      ["Sun", f.openingTimeSun],
+    ] as const
+  )
+    .filter(([, v]) => v)
+    .map(([d, v]) => `${d} ${v}`)
+    .join(" · ");
+
+  const blocks: ContinuationBlock[] = [
+    {
+      title: "On-site Personnel Details",
+      icon: "user",
+      rows: [
+        { label: "Apple Representative", value: f.appleRepresentative },
+        { label: "Retailer Representative", value: f.retailerRepresentative },
+        { label: "Store Contact Number", value: f.storeContactNumber },
+      ],
+    },
+    {
+      title: "Store Description (continued)",
+      icon: "store",
+      rows: [
+        {
+          label: "Location of Store",
+          value: f.storeLocationType ? (f.storeLocationType === "other" ? f.storeLocationOther || "Other" : STORE_LOCATION_TYPE_LABEL[f.storeLocationType]) : "",
+        },
+        { label: "Store Entrances — Into the Mall / Into the Store", value: [f.entrancesIntoMall, f.entrancesIntoStore].filter(Boolean).join(" / ") },
+        {
+          label: "Floors — Within Mall / Within Store / Apple Program Floor",
+          value: [f.floorsWithinMall, f.floorsWithinStore, f.floorApplProgramOn].filter(Boolean).join(" / "),
+        },
+        { label: "Is the Store Open Plan?", value: ynDetail(f.storeOpenPlan, f.openPlanLayoutDescription) },
+        { label: "Position of Apple Program vs. Main Entrance", value: f.applProgramPositionEntrance },
+        { label: "Store Address", value: f.siteStoreAddress },
+        { label: "Store Contact Details", value: f.storeContactDetails },
+      ],
+    },
+    {
+      title: "Installing on Site",
+      icon: "calendar",
+      rows: [
+        { label: "Store Opening Times", value: openingTimes },
+        { label: "Install Outside Store Opening Hours?", value: ynDetail(f.installOutsideHours, f.installOutsideHoursDetails) },
+        { label: "Retailer Preferred Install Days/Time?", value: ynDetail(f.retailerPreferredInstallTime, f.retailerPreferredInstallDetails) },
+        { label: "Time & Date of Installation", value: f.installationDateTime },
+        { label: "Are Work Permits Required?", value: ynDetail(f.permitRequired, f.permitDetails) },
+      ],
+    },
+    {
+      title: "Deliveries to Store",
+      icon: "tag",
+      rows: [
+        { label: "Store Contact Name and Number", value: f.deliveryContactNameNumber },
+        { label: "Delivery Address Same as Store?", value: ynDetail(f.deliveryAddressSameAsStore, f.deliveryAddress) },
+        { label: "Day/Time Deliveries Can Be Made", value: f.deliveryTimes },
+        { label: "Other Delivery Comments", value: f.deliveryOtherComments },
+      ],
+    },
+    {
+      title: "General Site Information",
+      icon: "fileText",
+      rows: [
+        { label: "Will Weather Conditions Affect the Install?", value: ynDetail(f.weatherAffectsInstall, f.weatherAffectsInstallDetails) },
+        { label: "Confirm All Possible Opportunities Surveyed", value: ynDetail(f.allOpportunitiesSurveyed, f.allOpportunitiesSurveyedReason) },
+        { label: "Other Information / Comments", value: f.generalNotes },
+      ],
+    },
+    {
+      title: "Site Suitability (continued)",
+      icon: "shieldCheck",
+      rows: [
+        { label: "High Visibility — Description", value: f.siteVisibilityDescription },
+        { label: "Premium Site — Description", value: f.premiumLocationDescription },
+        { label: "Is Installation Time Flexible?", value: ynDetail(f.installationTimeFlexible, f.installationTimeFlexibleDescription) },
+      ],
+    },
+    {
+      title: "Site Details",
+      icon: "layoutGrid",
+      rows: [
+        { label: "Maximum Working Space", value: f.maxWorkingSpace },
+        { label: "Access Equipment Available on Site?", value: ynDetail(f.accessEquipmentAvailable, f.accessEquipmentDescription) },
+        { label: "Powered Access to Be Used?", value: ynDetail(f.poweredAccessUsed, f.poweredAccessDescription) },
+        { label: "Any Access Issues?", value: ynDetail(f.accessIssues, f.accessIssuesDescription) },
+        { label: "Site Type", value: f.siteType ? `${SITE_TYPE_LABEL[f.siteType]}${f.siteType === "temporary" && f.siteTypeDuration ? ` — ${f.siteTypeDuration}` : ""}` : "" },
+        { label: "Competitor Advertising Nearby?", value: ynDetail(f.competitorAdvertising, f.competitorAdvertisingDescription) },
+        { label: "General Info for a Successful Install", value: f.generalInstallInfo },
+      ],
+    },
+    {
+      title: "Safety",
+      icon: "shieldCheck",
+      rows: [
+        { label: "Is the Site Safe for Installation?", value: ynDetail(f.siteSafeForInstall, f.siteSafeDescription) },
+        { label: "Any Specific Safety Concerns?", value: ynDetail(f.safetyConcerns, f.safetyConcernsDetails) },
+        { label: "Specific Safety Equipment Required?", value: ynDetail(f.safetyEquipmentRequired, f.safetyEquipmentDetails) },
+      ],
+    },
+    {
+      title: "Graphics",
+      icon: "camera",
+      rows: [
+        { label: "At Risk From Graffiti?", value: ynDetail(f.graffitiRisk, f.graffitiRiskDescription) },
+        { label: "Extra Lighting Required at Night?", value: ynDetail(f.extraLightingRequired, f.extraLightingDescription) },
+        { label: "Cutout Required for the Graphics?", value: ynDetail(f.graphicsCutoutRequired, f.graphicsCutoutDescription) },
+        { label: "Any Other Graphics Information", value: f.graphicsOtherInfo },
+      ],
+    },
+    {
+      title: "Approvals",
+      icon: "fileText",
+      rows: [
+        { label: "Does the Store Need Special Approvals?", value: ynDetail(f.specialApprovalsNeeded, f.specialApprovalsDetails) },
+        { label: "Chain Store — Central Team Approval Needed?", value: ynDetail(f.chainCentralApprovalNeeded, f.chainCentralApprovalReason) },
+        { label: "Any Other Approval Information", value: f.approvalsOtherInfo },
+      ],
+    },
+  ];
+
+  drawFlowingBlocks(ctx, "Inspection Details", "dark", blocks);
+}
+
 const ORIENTATION_LABELS: Record<string, string> = {
   orientation_right: "Right",
   orientation_left: "Left",
@@ -1093,6 +1353,84 @@ function drawOrientationPage(ctx: Ctx) {
     const lw = ctx.bold.widthOfTextAtSize(label, 9);
     page.drawText(label, { x: x + (boxW - lw) / 2, y: y - boxH - mm(5), size: 9, font: ctx.bold, color: INK_SECONDARY });
   });
+}
+
+/**
+ * A new page (not present in the original three-page build) covering the
+ * partner's later "Opportunity information" section -- what specific
+ * opportunity was identified on site, distinct from the general Inspection
+ * Details captured earlier. "grey" topbar variant, same family as the other
+ * photo-adjacent pages (Main Site Photo/Orientation/Measurement) since this
+ * sits between Orientation and the A/B/C/D photo survey in the page order
+ * (see buildSiteSurveyReportPdf) -- a single full-width table, same
+ * primitives as every other details table in this file.
+ */
+function drawOpportunityPage(ctx: Ctx) {
+  const page = newPage(ctx, "Opportunity Information", "grey");
+  const m = ctx.data.measurement;
+  let y = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
+  y = drawSectionBand(page, ctx, "Opportunity Information", contentLeft(), contentWidth(), y, ctx.data.storeName || undefined, "tag");
+
+  const opportunityTypeValue = m.opportunityType
+    ? m.opportunityType === "other"
+      ? m.opportunityTypeOther || "Other"
+      : OPPORTUNITY_TYPE_LABEL[m.opportunityType]
+    : "";
+
+  drawTwoColTable(
+    page,
+    ctx,
+    [
+      { label: "Opportunity Name", value: m.opportunityName, icon: "tag" },
+      { label: "Opportunity Type", value: opportunityTypeValue, icon: "layoutGrid" },
+      { label: "Location", value: m.opportunityLocation, icon: "mapPin" },
+      { label: "Store / Facade Area", value: m.storeFacadeArea, icon: "squareDashed" },
+      { label: "Apple Program Position", value: m.appleProgramPosition, icon: "idCard" },
+      { label: "Description", value: m.opportunityDescription, icon: "fileText" },
+      { label: "Existing Material Type", value: m.existingMaterialType, icon: "layers" },
+      { label: "Existing Creative Condition", value: m.existingCreativeConditionForOpportunity, icon: "camera" },
+      { label: "Existing Creative Removable?", value: yesNoLabel(m.existingCreativeRemovableForOpportunity), icon: "wrench" },
+      { label: "Main Footfall Entrance Note", value: m.mainFootfallEntranceNote, icon: "users" },
+      { label: "Additional Opportunity Notes", value: m.additionalOpportunityNotes, icon: "clipboardList" },
+    ],
+    contentLeft(),
+    contentWidth(),
+    y
+  );
+}
+
+// Short topbar eyebrows (kept to "Photo Survey — A" etc, not the full
+// PHOTO_CATEGORY_LABEL parenthetical) so the right-aligned eyebrow text
+// never crowds the topbar -- the full descriptive label still appears on
+// the page itself via drawSectionBand, same as every other photo page.
+const VIEWPOINT_PAGES: { category: PhotoCategory; eyebrow: string }[] = [
+  { category: "viewpoint_a", eyebrow: "Photo Survey — A" },
+  { category: "viewpoint_b", eyebrow: "Photo Survey — B" },
+  { category: "viewpoint_c", eyebrow: "Photo Survey — C" },
+  { category: "viewpoint_d", eyebrow: "Photo Survey — D" },
+];
+
+/**
+ * One full-bleed page per photo in each of the 4 new A/B/C/D photo-survey
+ * viewpoint categories (mirrors drawMainSitePhotoPages's own
+ * photos.length > 0 ? photos : [undefined] fallback-to-placeholder
+ * pattern), each headed by a section band carrying that viewpoint's full
+ * descriptive label (see PHOTO_CATEGORY_LABEL) -- so what A/B/C/D actually
+ * mean is always legible on the page itself, not just inferred from a
+ * short topbar eyebrow.
+ */
+function drawPhotoSurveyPages(ctx: Ctx) {
+  for (const { category, eyebrow } of VIEWPOINT_PAGES) {
+    const label = PHOTO_CATEGORY_LABEL[category];
+    const photos = ctx.photos.filter((p) => p.category === category);
+    const list = photos.length > 0 ? photos : [undefined];
+    for (const photo of list) {
+      const page = newPage(ctx, eyebrow, "grey");
+      let y = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
+      y = drawSectionBand(page, ctx, label, contentLeft(), contentWidth(), y, ctx.data.storeName || undefined, "camera");
+      drawPhotoBox(page, ctx, photo, label, contentLeft(), y, contentWidth(), y - FOOTER_HEIGHT - mm(4));
+    }
+  }
 }
 
 /**
@@ -1220,6 +1558,46 @@ function drawMeasurementPage(ctx: Ctx) {
   );
 }
 
+/**
+ * Small continuation of the Measurement page (drawMeasurementPage) for the
+ * partner's later technical/Apple-standards fields that didn't fit that
+ * page's original table -- fixings, existing visual obstructions, and
+ * whether the opportunity meets Apple standards (with its Reason/
+ * Modification detail folded in via ynDetail-style formatting, same as the
+ * Inspection Details continuation pages). Only 3 rows, so a single direct
+ * drawTwoColTable call rather than the flowing-pagination engine -- always
+ * fits one page. Same eyebrow/"grey" variant and same ctx.font-only label
+ * treatment as the page it continues, per the partner's no-bold instruction
+ * on that page.
+ */
+function drawMeasurementContinuationPage(ctx: Ctx) {
+  const m = ctx.data.measurement;
+  const page = newPage(ctx, "Site Photo & Measurement", "grey");
+  let y = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
+  y = drawSectionBand(page, ctx, "Apple Standards", contentLeft(), contentWidth(), y, ctx.data.storeName || undefined, "shieldCheck");
+
+  const standardsValue = (() => {
+    if (!m.appleStandardsMet) return "";
+    const base = APPLE_STANDARDS_MET_LABEL[m.appleStandardsMet];
+    const detail = m.appleStandardsMet === "no" ? m.appleStandardsReason : m.appleStandardsMet === "modifications" ? m.appleStandardsModification : "";
+    return detail ? `${base} — ${detail}` : base;
+  })();
+
+  drawTwoColTable(
+    page,
+    ctx,
+    [
+      { label: "Fixings Required", value: m.fixingsRequired, icon: "wrench" },
+      { label: "Any Existing Visual Obstructions?", value: ynDetail(m.existingVisualObstructions, m.existingVisualObstructionsDescription), icon: "squareDashed" },
+      { label: "Apple Standards Met?", value: standardsValue, icon: "shieldCheck" },
+    ],
+    contentLeft(),
+    contentWidth(),
+    y,
+    ctx.font
+  );
+}
+
 /** "30mm bleed across all sides" when uniform (the common case -- see MeasurementStep.tsx's default), otherwise spelled out per side -- matching the reference table's own phrasing ("30mm bleed across all sides") instead of a separate, easy-to-miss Bleed row. */
 function bleedLabel(m: SiteSurveyMeasurement): string {
   const [l, r, t, b] = [m.bleedLeftMm, m.bleedRightMm, m.bleedTopMm, m.bleedBottomMm];
@@ -1300,9 +1678,13 @@ export async function buildSiteSurveyReportPdf(data: SiteSurveyReportPdfData, fo
   drawTitlePage(ctx);
   drawCoverPage(ctx);
   drawDetailsPage(ctx);
+  drawInspectionDetailsContinuationPages(ctx);
   drawMainSitePhotoPages(ctx);
   drawOrientationPage(ctx);
+  drawOpportunityPage(ctx);
+  drawPhotoSurveyPages(ctx);
   drawMeasurementPage(ctx);
+  drawMeasurementContinuationPage(ctx);
 
   const otherPhotos = ctx.photos.filter((p) => p.category === "other");
   if (otherPhotos.length > 0) {

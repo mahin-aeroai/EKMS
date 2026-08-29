@@ -44,7 +44,18 @@ const MARK_COLOR_HEX = "#dbe83d";
 // same order of operations as every other photo-upload flow in this app
 // (see LfgSiteWorkspaceClient.handleUpload).
 
-const CATEGORY_ORDER: PhotoCategory[] = ["main_site", "orientation_right", "orientation_left", "orientation_opposite", "measurement", "other"];
+const CATEGORY_ORDER: PhotoCategory[] = [
+  "main_site",
+  "orientation_right",
+  "orientation_left",
+  "orientation_opposite",
+  "viewpoint_a",
+  "viewpoint_b",
+  "viewpoint_c",
+  "viewpoint_d",
+  "measurement",
+  "other",
+];
 
 const MAX_DIMENSION = 1600;
 const JPEG_QUALITY = 0.82;

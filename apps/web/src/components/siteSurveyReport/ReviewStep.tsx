@@ -25,7 +25,18 @@ import {
 // pixel-precise crop box, so cropping is always a person dragging a
 // rectangle over a real rendered page -- see PageCropTool below.
 
-const CATEGORY_ORDER: PhotoCategory[] = ["main_site", "orientation_right", "orientation_left", "orientation_opposite", "measurement", "other"];
+const CATEGORY_ORDER: PhotoCategory[] = [
+  "main_site",
+  "orientation_right",
+  "orientation_left",
+  "orientation_opposite",
+  "viewpoint_a",
+  "viewpoint_b",
+  "viewpoint_c",
+  "viewpoint_d",
+  "measurement",
+  "other",
+];
 
 interface PageHint {
   page: number;

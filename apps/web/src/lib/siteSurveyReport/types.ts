@@ -28,52 +28,239 @@ export type PhotoCategory =
   | "orientation_left"
   | "orientation_opposite"
   | "measurement"
+  | "viewpoint_a"
+  | "viewpoint_b"
+  | "viewpoint_c"
+  | "viewpoint_d"
   | "other";
 
 export type PhotoSource = "uploaded" | "extracted_from_pdf";
 
-// The ~15 one-off Q&A fields from the reference PDF's On-site details/Site
-// suitability/Store description/Installation details/Additional details
-// sections -- site_survey_reports.form_data. Every key present, empty
-// string/YesNo "" when unanswered (never omitted -- FIELD_SOURCE_KEYS below
-// needs every key to exist to drive the ✓/⚠/○ indicators).
+export type StoreLocationType = "mall" | "retail_high_street" | "retail_park" | "other" | "";
+export type SiteType = "permanent" | "temporary" | "";
+
+// The one-off Q&A fields from the reference PDF's On-site personnel/Store
+// description/Installing on site/Deliveries/General site information/Site
+// suitability/Site details/Safety/Graphics/Approvals sections --
+// site_survey_reports.form_data. Every key present, empty string/YesNo ""
+// when unanswered (never omitted -- FIELD_SOURCE_KEYS below needs every key
+// to exist to drive the ✓/⚠/○ indicators).
+//
+// Grouped by the reference PDF's own section headers (see the comment above
+// each block) -- this interface got a lot bigger in a later pass that added
+// the reference's full "On-site personnel details" through "Approvals"
+// sections (previously only a handful of fields from each were captured).
+// Fields already covered by the ORIGINAL smaller field set are reused
+// as-is rather than duplicated where the reference's own wording is the
+// same question under a different section heading -- see each block's
+// comment for which of the reference's questions map onto an
+// already-existing field instead of a new one.
 export interface SiteSurveyFormData {
+  // -- On-site personnel details -- (surveyorName lives on the report row
+  // itself, not here, since it's a top-level identity field -- see
+  // SiteSurveyReportRow.surveyor_name)
   storePersonContacted: string;
   printer: string;
-  siteVisibility: YesNo;
-  premiumLocation: YesNo;
-  potentialIssues: string;
+  appleRepresentative: string;
+  retailerRepresentative: string;
+  storeContactNumber: string;
+
+  // -- Store description --
+  storeLocationType: StoreLocationType;
+  storeLocationOther: string;
+  entrancesIntoMall: string;
+  entrancesIntoStore: string;
+  floorsWithinMall: string;
+  floorsWithinStore: string;
+  floorApplProgramOn: string;
+  storeOpenPlan: YesNo;
+  openPlanLayoutDescription: string;
+  applProgramPositionEntrance: string;
+  siteStoreAddress: string;
+  storeContactDetails: string;
   siliconJoinsCondition: string;
   perspexCondition: string;
   lightingDescription: string;
   existingCreative: string;
   creativeRemovable: YesNo;
   additionalStoreNotes: string;
+
+  // -- Installing on site --
+  openingTimeMon: string;
+  openingTimeTue: string;
+  openingTimeWed: string;
+  openingTimeThu: string;
+  openingTimeFri: string;
+  openingTimeSat: string;
+  openingTimeSun: string;
+  installOutsideHours: YesNo;
+  installOutsideHoursDetails: string;
+  retailerPreferredInstallTime: YesNo;
+  retailerPreferredInstallDetails: string;
   installationDateTime: string;
-  deliveryTimes: string;
+  // "Are work permits required?", from the reference's own "Installing on
+  // site" section -- reused as the same question as the original build's
+  // "Installation Details" permit fields, just re-homed under this section.
   permitRequired: YesNo;
   permitDetails: string;
+
+  // -- Deliveries to store --
+  deliveryContactNameNumber: string;
+  deliveryAddressSameAsStore: YesNo;
+  deliveryAddress: string;
+  deliveryTimes: string;
+  deliveryOtherComments: string;
+
+  // -- General site information --
+  weatherAffectsInstall: YesNo;
+  weatherAffectsInstallDetails: string;
+  allOpportunitiesSurveyed: YesNo;
+  allOpportunitiesSurveyedReason: string;
   generalNotes: string;
+
+  // -- Site suitability / installation details --
+  siteVisibility: YesNo;
+  siteVisibilityDescription: string;
+  premiumLocation: YesNo;
+  premiumLocationDescription: string;
+  installationTimeFlexible: YesNo;
+  installationTimeFlexibleDescription: string;
+  potentialIssues: string;
+
+  // -- Site details --
+  maxWorkingSpace: string;
+  accessEquipmentAvailable: YesNo;
+  accessEquipmentDescription: string;
+  poweredAccessUsed: YesNo;
+  poweredAccessDescription: string;
+  accessIssues: YesNo;
+  accessIssuesDescription: string;
+  siteType: SiteType;
+  siteTypeDuration: string;
+  competitorAdvertising: YesNo;
+  competitorAdvertisingDescription: string;
+  generalInstallInfo: string;
+
+  // -- Safety --
+  siteSafeForInstall: YesNo;
+  siteSafeDescription: string;
+  safetyConcerns: YesNo;
+  safetyConcernsDetails: string;
+  safetyEquipmentRequired: YesNo;
+  safetyEquipmentDetails: string;
+
+  // -- Graphics --
+  graffitiRisk: YesNo;
+  graffitiRiskDescription: string;
+  extraLightingRequired: YesNo;
+  extraLightingDescription: string;
+  graphicsCutoutRequired: YesNo;
+  graphicsCutoutDescription: string;
+  graphicsOtherInfo: string;
+
+  // -- Approvals --
+  specialApprovalsNeeded: YesNo;
+  specialApprovalsDetails: string;
+  chainCentralApprovalNeeded: YesNo;
+  chainCentralApprovalReason: string;
+  approvalsOtherInfo: string;
 }
 
 export function emptyFormData(): SiteSurveyFormData {
   return {
     storePersonContacted: "",
     printer: "",
-    siteVisibility: "",
-    premiumLocation: "",
-    potentialIssues: "",
+    appleRepresentative: "",
+    retailerRepresentative: "",
+    storeContactNumber: "",
+
+    storeLocationType: "",
+    storeLocationOther: "",
+    entrancesIntoMall: "",
+    entrancesIntoStore: "",
+    floorsWithinMall: "",
+    floorsWithinStore: "",
+    floorApplProgramOn: "",
+    storeOpenPlan: "",
+    openPlanLayoutDescription: "",
+    applProgramPositionEntrance: "",
+    siteStoreAddress: "",
+    storeContactDetails: "",
     siliconJoinsCondition: "",
     perspexCondition: "",
     lightingDescription: "",
     existingCreative: "",
     creativeRemovable: "",
     additionalStoreNotes: "",
+
+    openingTimeMon: "",
+    openingTimeTue: "",
+    openingTimeWed: "",
+    openingTimeThu: "",
+    openingTimeFri: "",
+    openingTimeSat: "",
+    openingTimeSun: "",
+    installOutsideHours: "",
+    installOutsideHoursDetails: "",
+    retailerPreferredInstallTime: "",
+    retailerPreferredInstallDetails: "",
     installationDateTime: "",
-    deliveryTimes: "",
     permitRequired: "",
     permitDetails: "",
+
+    deliveryContactNameNumber: "",
+    deliveryAddressSameAsStore: "",
+    deliveryAddress: "",
+    deliveryTimes: "",
+    deliveryOtherComments: "",
+
+    weatherAffectsInstall: "",
+    weatherAffectsInstallDetails: "",
+    allOpportunitiesSurveyed: "",
+    allOpportunitiesSurveyedReason: "",
     generalNotes: "",
+
+    siteVisibility: "",
+    siteVisibilityDescription: "",
+    premiumLocation: "",
+    premiumLocationDescription: "",
+    installationTimeFlexible: "",
+    installationTimeFlexibleDescription: "",
+    potentialIssues: "",
+
+    maxWorkingSpace: "",
+    accessEquipmentAvailable: "",
+    accessEquipmentDescription: "",
+    poweredAccessUsed: "",
+    poweredAccessDescription: "",
+    accessIssues: "",
+    accessIssuesDescription: "",
+    siteType: "",
+    siteTypeDuration: "",
+    competitorAdvertising: "",
+    competitorAdvertisingDescription: "",
+    generalInstallInfo: "",
+
+    siteSafeForInstall: "",
+    siteSafeDescription: "",
+    safetyConcerns: "",
+    safetyConcernsDetails: "",
+    safetyEquipmentRequired: "",
+    safetyEquipmentDetails: "",
+
+    graffitiRisk: "",
+    graffitiRiskDescription: "",
+    extraLightingRequired: "",
+    extraLightingDescription: "",
+    graphicsCutoutRequired: "",
+    graphicsCutoutDescription: "",
+    graphicsOtherInfo: "",
+
+    specialApprovalsNeeded: "",
+    specialApprovalsDetails: "",
+    chainCentralApprovalNeeded: "",
+    chainCentralApprovalReason: "",
+    approvalsOtherInfo: "",
   };
 }
 
@@ -81,24 +268,79 @@ export function emptyFormData(): SiteSurveyFormData {
 // FIELD_SOURCE_KEYS below without repeating the list a third time.
 export const FORM_DATA_KEYS = Object.keys(emptyFormData()) as (keyof SiteSurveyFormData)[];
 
+export type OpportunityType =
+  | "individual_window"
+  | "window_vinyl"
+  | "banner"
+  | "light_box"
+  | "glass_facade"
+  | "existing_graphic"
+  | "other"
+  | "";
+
+export type AppleStandardsMet = "yes" | "no" | "modifications" | "";
+
 // The reference PDF's "Site Photo and measurement" page -- one block per
-// report (not repeating, unlike Installation Report's per-site array) --
+// report (not repeating, unlike Installation Report's per-site array, since
+// the reference report this feature was built against only ever surveys
+// one primary opportunity in this level of detail -- see
+// additionalOpportunityNotes for anything beyond it) --
 // site_survey_reports.measurement.
 export interface SiteSurveyMeasurement {
+  // -- Opportunity information --
+  opportunityName: string;
+  opportunityType: OpportunityType;
+  opportunityTypeOther: string;
+  opportunityLocation: string;
+  storeFacadeArea: string;
+  appleProgramPosition: string;
+  opportunityDescription: string;
+  // Distinct from `materialType` below -- this is what's *already* on the
+  // wall/window before the new install (per the reference's "Determine and
+  // record the type material being used if there is an existing banner or
+  // graphic in place"), while `materialType` is what's being ordered for
+  // the NEW install.
+  existingMaterialType: string;
+  existingCreativeConditionForOpportunity: string;
+  existingCreativeRemovableForOpportunity: YesNo;
+  additionalOpportunityNotes: string;
+  // Which entrance (of possibly several) carries the main footfall, per the
+  // reference's photo-survey diagram instructions ("For multiple entrances
+  // indicate which entrance has main footfall").
+  mainFootfallEntranceNote: string;
+
+  // -- Measurements --
   visualWidthMm: number | null;
   visualHeightMm: number | null;
+  visualSizeQuantity: number | null;
+  measurementUnit: string;
   materialWidthMm: number | null;
   materialHeightMm: number | null;
   bleedTopMm: number | null;
   bleedRightMm: number | null;
   bleedBottomMm: number | null;
   bleedLeftMm: number | null;
+
+  // -- Material information / Technical opportunity details -- (equipment
+  // required/source/installer double as the reference's "Technical
+  // opportunity details" answers to "detailed equipment required" / "who is
+  // to source the equipment" / "who will carry out the installation" -- same
+  // questions, not duplicated as separate fields)
   materialType: string;
   installationType: string;
+  fixingsRequired: string;
+  existingVisualObstructions: YesNo;
+  existingVisualObstructionsDescription: string;
   equipmentDetail: string;
   equipmentSource: string;
   installedBy: string;
   measurementNotes: string;
+
+  // -- Apple standards --
+  appleStandardsMet: AppleStandardsMet;
+  appleStandardsReason: string;
+  appleStandardsModification: string;
+
   // FK-ish reference to the site_survey_photos row (category='measurement')
   // this measurement is drawn over -- kept here rather than solely inferred
   // from the photo's category, since a report could (rarely) have more than
@@ -108,20 +350,44 @@ export interface SiteSurveyMeasurement {
 
 export function emptyMeasurement(): SiteSurveyMeasurement {
   return {
+    opportunityName: "",
+    opportunityType: "",
+    opportunityTypeOther: "",
+    opportunityLocation: "",
+    storeFacadeArea: "",
+    appleProgramPosition: "",
+    opportunityDescription: "",
+    existingMaterialType: "",
+    existingCreativeConditionForOpportunity: "",
+    existingCreativeRemovableForOpportunity: "",
+    additionalOpportunityNotes: "",
+    mainFootfallEntranceNote: "",
+
     visualWidthMm: null,
     visualHeightMm: null,
+    visualSizeQuantity: null,
+    measurementUnit: "mm",
     materialWidthMm: null,
     materialHeightMm: null,
     bleedTopMm: 30,
     bleedRightMm: 30,
     bleedBottomMm: 30,
     bleedLeftMm: 30,
+
     materialType: "",
     installationType: "",
+    fixingsRequired: "",
+    existingVisualObstructions: "",
+    existingVisualObstructionsDescription: "",
     equipmentDetail: "",
     equipmentSource: "",
     installedBy: "",
     measurementNotes: "",
+
+    appleStandardsMet: "",
+    appleStandardsReason: "",
+    appleStandardsModification: "",
+
     measurementPhotoId: null,
   };
 }
@@ -292,7 +558,44 @@ export const PHOTO_CATEGORY_LABEL: Record<PhotoCategory, string> = {
   orientation_left: "Site Orientation — Left",
   orientation_opposite: "Site Orientation — Opposite",
   measurement: "Site Measurement",
+  // A/B/C/D photo-survey viewpoints, per the reference PDF's own diagram:
+  // A = individual window/banner (immediate surrounding area), B = side
+  // angle (full shopfront with all windows/banners), C = front view (full
+  // shopfront), D = reverse view (back to the shop entrance, what's
+  // opposite). Each can hold more than one photo, same as Main Site Photo.
+  viewpoint_a: "Photo Survey — A (Individual Window/Banner)",
+  viewpoint_b: "Photo Survey — B (Side Angle)",
+  viewpoint_c: "Photo Survey — C (Front View)",
+  viewpoint_d: "Photo Survey — D (Reverse View)",
   other: "Other",
+};
+
+export const STORE_LOCATION_TYPE_LABEL: Record<Exclude<StoreLocationType, "">, string> = {
+  mall: "Mall",
+  retail_high_street: "Retail High Street",
+  retail_park: "Retail Park",
+  other: "Other",
+};
+
+export const SITE_TYPE_LABEL: Record<Exclude<SiteType, "">, string> = {
+  permanent: "Permanent",
+  temporary: "Temporary",
+};
+
+export const OPPORTUNITY_TYPE_LABEL: Record<Exclude<OpportunityType, "">, string> = {
+  individual_window: "Individual Window",
+  window_vinyl: "Window Vinyl",
+  banner: "Banner",
+  light_box: "Light Box",
+  glass_facade: "Glass Façade",
+  existing_graphic: "Existing Graphic",
+  other: "Other",
+};
+
+export const APPLE_STANDARDS_MET_LABEL: Record<Exclude<AppleStandardsMet, "">, string> = {
+  yes: "Yes",
+  no: "No",
+  modifications: "Only With Modifications",
 };
 
 export const REPORT_STATUS_LABEL: Record<ReportStatus, string> = {

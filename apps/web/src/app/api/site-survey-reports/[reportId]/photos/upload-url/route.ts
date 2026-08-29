@@ -18,7 +18,18 @@ export const dynamic = "force-dynamic";
 // POST /api/site-survey-reports/[reportId]/photos/upload-url
 // Body: { category: PhotoCategory }
 
-const CATEGORIES = new Set(["main_site", "orientation_right", "orientation_left", "orientation_opposite", "measurement", "other"]);
+const CATEGORIES = new Set([
+  "main_site",
+  "orientation_right",
+  "orientation_left",
+  "orientation_opposite",
+  "measurement",
+  "viewpoint_a",
+  "viewpoint_b",
+  "viewpoint_c",
+  "viewpoint_d",
+  "other",
+]);
 
 const r2 = new S3Client({
   region: "auto",
