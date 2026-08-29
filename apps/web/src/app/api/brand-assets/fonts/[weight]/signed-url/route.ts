@@ -22,6 +22,13 @@ export const dynamic = "force-dynamic";
 // once, by hand, to the keys this route expects (see WEIGHT_KEYS below),
 // by someone with Cloudflare R2 access.
 //
+// Keys sit at the bucket root (sf-pro-text-*.otf, no shared-assets/fonts/
+// prefix) rather than nested under a folder like every other object in
+// this bucket -- that's simply where they landed on first upload, and
+// there's no functional reason to prefer a prefix for 3 fixed,
+// never-per-report files, so the keys were left where they are instead of
+// making someone re-upload into a folder for tidiness alone.
+//
 // GET /api/brand-assets/fonts/[weight]/signed-url, weight one of
 // "regular" | "semibold" | "italic" -- see pdfFonts.ts's FontWeight type.
 
@@ -35,15 +42,15 @@ const r2 = new S3Client({
 });
 
 // Fixed object keys (this route never accepts an arbitrary key -- weight is
-// validated against this map, not interpolated into the R2 key directly)
-// -- upload the licensed SF Pro Text .otf files here once:
-//   shared-assets/fonts/sf-pro-text-regular.otf
-//   shared-assets/fonts/sf-pro-text-semibold.otf
-//   shared-assets/fonts/sf-pro-text-italic.otf
+// validated against this map, not interpolated into the R2 key directly).
+// Uploaded, at the bucket root:
+//   sf-pro-text-regular.otf
+//   sf-pro-text-semibold.otf
+//   sf-pro-text-italic.otf
 const WEIGHT_KEYS: Record<string, string> = {
-  regular: "shared-assets/fonts/sf-pro-text-regular.otf",
-  semibold: "shared-assets/fonts/sf-pro-text-semibold.otf",
-  italic: "shared-assets/fonts/sf-pro-text-italic.otf",
+  regular: "sf-pro-text-regular.otf",
+  semibold: "sf-pro-text-semibold.otf",
+  italic: "sf-pro-text-italic.otf",
 };
 
 export async function GET(request: Request, { params }: { params: Promise<{ weight: string }> }) {
