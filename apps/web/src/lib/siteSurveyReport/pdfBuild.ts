@@ -82,13 +82,23 @@ const FOOTER_HEIGHT = mm(8);
 // Installation Report's
 // ---------------------------------------------------------------------------
 
-const DARKBAR = rgb(0.16, 0.16, 0.18); // top bar
+// Apple's own grey, exactly as specified by the partner (#a6b1b7) -- used
+// flatly for every "bar" element: the page topbar and every section-header
+// band, plus the title page's full-bleed background. Previously the topbar
+// was near-black and the section band was near-white; both now share this
+// one grey. Because it's a mid-light tone rather than a dark one, topbar
+// title/eyebrow text switches from white to dark ink to stay legible (white
+// on #a6b1b7 sits around a 2:1 contrast ratio -- too low to read well at
+// body-text sizes, even though it's fine for the title page's large bold
+// display type, which is why that page keeps white).
+const APPLE_GREY = rgb(0xa6 / 255, 0xb1 / 255, 0xb7 / 255);
+const DARKBAR = APPLE_GREY; // top bar
 const RED = rgb(0.64, 0.09, 0.11); // brand/identity accent (cover block, site name)
 const INK = rgb(0.1, 0.1, 0.12);
 const INK_SECONDARY = rgb(0.34, 0.34, 0.37);
 const MUTED = rgb(0.56, 0.56, 0.6);
 const WHITE = rgb(1, 1, 1);
-const SECTION_BAND = rgb(0.91, 0.91, 0.93);
+const SECTION_BAND = APPLE_GREY;
 const BORDER = rgb(0.8, 0.8, 0.83);
 const PLACEHOLDER_BG = rgb(0.95, 0.95, 0.96);
 
@@ -195,12 +205,12 @@ function newPage(ctx: Ctx, eyebrow: string): PDFPage {
   ctx.pageNumber += 1;
 
   page.drawRectangle({ x: 0, y: PAGE_HEIGHT - TOPBAR_HEIGHT, width: PAGE_WIDTH, height: TOPBAR_HEIGHT, color: DARKBAR });
-  page.drawText("Site Survey Report", {
+  page.drawText("Apple Site Survey Report", {
     x: MARGIN,
     y: PAGE_HEIGHT - TOPBAR_HEIGHT / 2 - 3,
     size: 10.5,
     font: ctx.bold,
-    color: WHITE,
+    color: INK,
   });
   if (eyebrow) {
     const eyebrowUpper = eyebrow.toUpperCase();
@@ -210,7 +220,7 @@ function newPage(ctx: Ctx, eyebrow: string): PDFPage {
       y: PAGE_HEIGHT - TOPBAR_HEIGHT / 2 - 3,
       size: 8.5,
       font: ctx.font,
-      color: rgb(0.85, 0.85, 0.87),
+      color: INK_SECONDARY,
     });
   }
 
@@ -220,7 +230,7 @@ function newPage(ctx: Ctx, eyebrow: string): PDFPage {
 
 function drawFooter(ctx: Ctx, page: PDFPage) {
   page.drawLine({ start: { x: MARGIN, y: FOOTER_HEIGHT }, end: { x: PAGE_WIDTH - MARGIN, y: FOOTER_HEIGHT }, thickness: 0.75, color: BORDER });
-  const left = ctx.data.storeName ? `${ctx.data.storeName}${ctx.data.sfoId ? ` — SFO ${ctx.data.sfoId}` : ""}` : "Site Survey Report";
+  const left = ctx.data.storeName ? `${ctx.data.storeName}${ctx.data.sfoId ? ` — SFO ${ctx.data.sfoId}` : ""}` : "Apple Site Survey Report";
   page.drawText(left, { x: MARGIN, y: FOOTER_HEIGHT / 2 - 2, size: 7.5, font: ctx.font, color: MUTED });
   const right = `Page ${ctx.pageNumber}`;
   const rw = ctx.font.widthOfTextAtSize(right, 7.5);
@@ -403,6 +413,55 @@ function drawPhotoBox(page: PDFPage, ctx: Ctx, photo: SurveyPhotoImage | undefin
 // ---------------------------------------------------------------------------
 // Pages
 // ---------------------------------------------------------------------------
+
+/**
+ * True page 1 -- a plain, full-bleed branded title page, matching the real
+ * reference report's own front cover: solid Apple-grey background, the
+ * "Apple" wordmark top-left, a big bold two-line title, and the survey's
+ * month/year -- rather than diving straight into the photo+facts page
+ * below (which is what page 1 used to be, before this was added).
+ *
+ * Deliberately UNNUMBERED: no topbar, no footer, and it doesn't advance
+ * ctx.pageNumber -- matching how the reference itself doesn't count its own
+ * cover slide in its page numbering, and so every later page's "Page N"
+ * still lines up with its position in the actual report content.
+ *
+ * On the Apple logo: this draws "Apple" as a text wordmark (in SF Pro,
+ * when embedded), not Apple's corporate logo mark -- redrawing that
+ * specific trademarked silhouette from scratch isn't something to do here.
+ * If there's an approved logo image file, it can be embedded as a real
+ * image instead, the same way SF Pro's own font files were supplied rather
+ * than guessed at.
+ */
+function drawTitlePage(ctx: Ctx) {
+  const page = ctx.doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+  const { data } = ctx;
+
+  page.drawRectangle({ x: 0, y: 0, width: PAGE_WIDTH, height: PAGE_HEIGHT, color: APPLE_GREY });
+
+  const leftX = MARGIN + mm(10);
+  page.drawText("Apple", { x: leftX, y: PAGE_HEIGHT - mm(28), size: 15, font: ctx.bold, color: WHITE });
+
+  const titleY = PAGE_HEIGHT * 0.52;
+  page.drawText("Custom site installations", { x: leftX, y: titleY, size: 30, font: ctx.bold, color: WHITE });
+  page.drawText("Site survey report", { x: leftX, y: titleY - mm(11), size: 22, font: ctx.bold, color: rgb(0.22, 0.25, 0.27) });
+
+  const dateLabel = titlePageDateLabel(data.surveyDate);
+  page.drawText(dateLabel, { x: leftX, y: mm(24), size: 10.5, font: ctx.font, color: rgb(0.27, 0.3, 0.32) });
+
+  const siteLine = data.storeName ? `${data.storeName}${data.sfoId ? ` — SFO ${data.sfoId}` : ""}` : "";
+  if (siteLine) {
+    page.drawText(siteLine, { x: leftX, y: mm(24) - mm(6), size: 9.5, font: ctx.font, color: rgb(0.27, 0.3, 0.32) });
+  }
+}
+
+/** "September 2026" style label for the title page -- falls back to today's month/year when no survey date is set yet (e.g. previewing a draft), same spirit as the reference's own "September 2020" cover line. */
+function titlePageDateLabel(surveyDate: string): string {
+  if (!surveyDate) return new Date().toLocaleDateString(undefined, { year: "numeric", month: "long" });
+  const d = new Date(`${surveyDate}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return surveyDate;
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "long" });
+}
 
 function drawCoverPage(ctx: Ctx) {
   const page = newPage(ctx, "");
@@ -747,6 +806,7 @@ export async function buildSiteSurveyReportPdf(data: SiteSurveyReportPdfData, fo
 
   const ctx: Ctx = { doc, font, bold, data, photos, pageNumber: 0 };
 
+  drawTitlePage(ctx);
   drawCoverPage(ctx);
   drawDetailsPage(ctx);
   drawMainSitePhotoPages(ctx);

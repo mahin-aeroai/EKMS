@@ -323,11 +323,6 @@ function PhotoCard({
               </Button>
             </>
           )}
-          {canEdit && onAnnotate && (
-            <Button variant="icon" size="sm" aria-label="Annotate" onClick={onAnnotate}>
-              <Crop size={13} />
-            </Button>
-          )}
         </div>
         {canDeletePhoto && (
           <Button variant="icon" size="sm" aria-label="Delete photo" onClick={onDelete}>
@@ -335,7 +330,21 @@ function PhotoCard({
           </Button>
         )}
       </div>
-      {photo.annotation && <p className="text-[10px] text-success">Annotated</p>}
+      {/* The marking tool used to be a bare icon button easy to miss entirely
+          (and easy to mistake for an actual crop, not a mark) -- now a
+          full-width labeled button, plus a status line either way so it's
+          obvious at a glance whether this photo still needs marking. */}
+      {canEdit && onAnnotate && (
+        <Button variant="secondary" size="sm" className="w-full justify-center" onClick={onAnnotate}>
+          <Crop size={13} /> {photo.annotation ? "Edit marked area" : "Mark installation area"}
+        </Button>
+      )}
+      {onAnnotate &&
+        (photo.annotation ? (
+          <p className="text-[10px] text-success">✓ Installation area marked</p>
+        ) : (
+          <p className="text-[10px] text-warning">Not marked yet</p>
+        ))}
     </div>
   );
 }
