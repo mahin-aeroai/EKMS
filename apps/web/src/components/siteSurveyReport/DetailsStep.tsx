@@ -20,7 +20,10 @@ interface Props {
 export function DetailsStep({ header, onHeaderChange, formData, onFormDataChange, fieldSources, onTouched }: Props) {
   return (
     <div className="flex flex-col gap-4">
-      <p className="text-sm text-ink-secondary">Fill in the site details below, matching the reference Site Survey Report layout.</p>
+      <p className="text-sm text-ink-secondary">
+        Work through the sections below at your own pace — each one opens on its own, and only what&apos;s still blank needs
+        filling in.
+      </p>
       <ReportFormFields
         header={header}
         onHeaderChange={onHeaderChange}

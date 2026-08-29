@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ClipboardCheck, Copy, Download, Eye, FileUp, PenLine, Search, Trash2 } from "lucide-react";
+import Link from "next/link";
+import { ClipboardCheck, Copy, Download, Eye, FileUp, PenLine, Search, Sparkles, Trash2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -19,6 +20,7 @@ import {
   emptyFormData,
   emptyMeasurement,
   type ReportStatus,
+  type SiteSurveyFormData,
   type SiteSurveyPhotoRow,
   type SiteSurveyReportRow,
 } from "@/lib/siteSurveyReport/types";
@@ -107,9 +109,20 @@ export function SiteSurveyReportsListClient() {
   async function startNewReport(source: "pdf" | "manual") {
     setCreating(true);
     const { data: userData } = await supabase.auth.getUser();
+    // Manually-started reports pre-fill from the saved defaults template
+    // (site_survey_report_field_defaults) so a person isn't re-typing the
+    // same standard answers on every report -- deliberately NOT done for
+    // PDF-sourced reports, which land here with empty form_data and get
+    // their first, unobstructed pass from AI extraction instead (see
+    // that migration's own header comment for why).
+    let form_data: SiteSurveyFormData | undefined;
+    if (source === "manual") {
+      const { data: defaults } = await supabase.from("site_survey_report_field_defaults").select("form_data").eq("id", true).maybeSingle();
+      if (defaults?.form_data) form_data = { ...emptyFormData(), ...(defaults.form_data as Partial<SiteSurveyFormData>) };
+    }
     const { data, error } = await supabase
       .from("site_survey_reports")
-      .insert({ source, status: "draft", created_by: userData?.user?.id ?? null })
+      .insert({ source, status: "draft", created_by: userData?.user?.id ?? null, ...(form_data ? { form_data } : {}) })
       .select("id")
       .single();
     setCreating(false);
@@ -347,9 +360,17 @@ export function SiteSurveyReportsListClient() {
             </p>
           </div>
         </div>
-        <Button onClick={() => setShowNewDialog(true)} className="w-full sm:w-auto">
-          New Report
-        </Button>
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+          <Link
+            href="/workspaces/site-survey-report/defaults"
+            className="flex items-center justify-center gap-1.5 rounded-md border border-line-strong px-3 py-2 text-sm font-medium text-ink-secondary hover:bg-surface-sunken"
+          >
+            <Sparkles size={14} /> Default Answers
+          </Link>
+          <Button onClick={() => setShowNewDialog(true)} className="w-full sm:w-auto">
+            New Report
+          </Button>
+        </div>
       </div>
 
       <div className="my-6 grid grid-cols-2 gap-4 sm:grid-cols-4">

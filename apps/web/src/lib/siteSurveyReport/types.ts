@@ -461,6 +461,25 @@ export interface SiteSurveyReportRow {
 export type NewSiteSurveyReport = Pick<SiteSurveyReportRow, "source"> &
   Partial<Omit<SiteSurveyReportRow, "id" | "created_at" | "updated_at" | "source">>;
 
+// The single saved-defaults row (site_survey_report_field_defaults --
+// always id=true, a Postgres-enforced singleton, see that migration's own
+// header comment) driving the "Default Answers" settings page and the
+// Complete Details step's "Apply saved defaults" action. `form_data` reuses
+// SiteSurveyFormData's own shape (merge with emptyFormData() the same way
+// every report row already is -- see SiteSurveyReportEditorClient.tsx's own
+// load effect) rather than a separate narrower type, since a saved default
+// is just "a form_data value most fields of which are blank".
+//
+// NOT to be confused with emptyReportDefaults() below, which builds the
+// starting values for a brand-new REPORT ROW itself (status, source, etc)
+// -- an unrelated, pre-existing concept with a similar-sounding name.
+export interface SiteSurveyFieldDefaultsRow {
+  id: true;
+  form_data: SiteSurveyFormData;
+  updated_by: string | null;
+  updated_at: string;
+}
+
 export function emptyReportDefaults(source: ReportSource): NewSiteSurveyReport {
   return {
     source,
