@@ -172,6 +172,15 @@ const SECTION_BAND = APPLE_GREY;
 const CARD_RADIUS = mm(2.6);
 const BORDER = rgb(0.8, 0.8, 0.83);
 const PLACEHOLDER_BG = rgb(0.95, 0.95, 0.96);
+// Inspection Details page + its continuation pages (drawDetailsPage,
+// drawInspectionDetailsContinuationPages) only -- per feedback's own exact
+// hex spec: headers, questions (labels) and answers (values) all read in
+// this one grey-ink colour (#656C6F) rather than the document's usual
+// INK/INK_SECONDARY pairing, and the header/row underline rules use a
+// lighter, separate grey (#90999C). Scoped to these two pages via
+// drawUnderlineHeader/drawUnderlineRows below, not applied document-wide.
+const PAGE34_TEXT = rgb(0x65 / 255, 0x6c / 255, 0x6f / 255);
+const PAGE34_RULE = rgb(0x90 / 255, 0x99 / 255, 0x9c / 255);
 
 // ---------------------------------------------------------------------------
 // Tracking (letter-spacing) -- Apple's own published values, followed
@@ -823,6 +832,77 @@ function measureTwoColTableHeight(ctx: Ctx, rows: TableRow[], width: number, lab
   return h;
 }
 
+// Row styling for drawUnderlineRows/measureUnderlineRowsHeight below -- per
+// feedback's own exact spec for the Inspection Details page and its
+// continuation pages: questions (labels) in Regular, answers (values) in
+// Bold, both 11pt and both PAGE34_TEXT, with UNDERLINE_ROW_SPACE_AFTER_PT
+// of space after each row's own rule before the next row starts ("Text
+// line spacing: After 10 Points"). Distinct enough from drawTwoColTable's
+// own boxed-table formula (built around the measurement page's card
+// treatment) to be its own pair of functions rather than more optional
+// params grafted onto that one.
+const UNDERLINE_ROW_SIZE = 11;
+const UNDERLINE_ROW_LINE_H = UNDERLINE_ROW_SIZE * 1.28;
+const UNDERLINE_ROW_SPACE_AFTER_PT = 10;
+const UNDERLINE_ROW_PAD = mm(2);
+
+/**
+ * Draws the Inspection Details page's (and its continuation pages')
+ * label/value rows per the exact type spec above -- horizontal rule only
+ * (no box, no vertical divider, matching drawTwoColTable's own `boxed:
+ * false` look), but with its own font/size/colour/rule/spacing rules
+ * rather than drawTwoColTable's. See UNDERLINE_ROW_* above for the shared
+ * constants also used by measureUnderlineRowsHeight's own pagination math.
+ */
+function drawUnderlineRows(page: PDFPage, ctx: Ctx, rows: TableRow[], x: number, width: number, yTop: number): number {
+  const labelColW = width * 0.42;
+  const valueColW = width - labelColW;
+  const tracking = sfTrackingPt(UNDERLINE_ROW_SIZE);
+  let y = yTop;
+
+  for (const row of rows) {
+    const labelLines = wrapText(ctx.font, row.label, UNDERLINE_ROW_SIZE, labelColW - UNDERLINE_ROW_PAD * 2);
+    const valueLines = wrapText(ctx.bold, row.value || "—", UNDERLINE_ROW_SIZE, valueColW - UNDERLINE_ROW_PAD * 2);
+    const lineCount = Math.max(labelLines.length, valueLines.length);
+    const baseline = y - UNDERLINE_ROW_SIZE * 0.86;
+
+    page.pushOperators(setCharacterSpacing(tracking));
+    labelLines.forEach((line, i) => {
+      page.drawText(line, { x: x + UNDERLINE_ROW_PAD, y: baseline - i * UNDERLINE_ROW_LINE_H, size: UNDERLINE_ROW_SIZE, font: ctx.font, color: PAGE34_TEXT });
+    });
+    valueLines.forEach((line, i) => {
+      page.drawText(line, {
+        x: x + labelColW + UNDERLINE_ROW_PAD,
+        y: baseline - i * UNDERLINE_ROW_LINE_H,
+        size: UNDERLINE_ROW_SIZE,
+        font: ctx.bold,
+        color: PAGE34_TEXT,
+      });
+    });
+    page.pushOperators(setCharacterSpacing(0));
+
+    const ruleY = baseline - (lineCount - 1) * UNDERLINE_ROW_LINE_H - UNDERLINE_ROW_SIZE * 0.3;
+    page.drawLine({ start: { x, y: ruleY }, end: { x: x + width, y: ruleY }, thickness: 0.75, color: PAGE34_RULE });
+
+    y = ruleY - UNDERLINE_ROW_SPACE_AFTER_PT;
+  }
+  return y;
+}
+
+/** The height drawUnderlineRows(rows, width, ...) will occupy -- mirrors that function's own formula exactly, same reason measureTwoColTableHeight exists alongside drawTwoColTable. */
+function measureUnderlineRowsHeight(rows: TableRow[], width: number, ctx: Ctx): number {
+  const labelColW = width * 0.42;
+  const valueColW = width - labelColW;
+  let h = 0;
+  for (const row of rows) {
+    const labelLines = wrapText(ctx.font, row.label, UNDERLINE_ROW_SIZE, labelColW - UNDERLINE_ROW_PAD * 2);
+    const valueLines = wrapText(ctx.bold, row.value || "—", UNDERLINE_ROW_SIZE, valueColW - UNDERLINE_ROW_PAD * 2);
+    const lineCount = Math.max(labelLines.length, valueLines.length);
+    h += lineCount * UNDERLINE_ROW_LINE_H + UNDERLINE_ROW_SPACE_AFTER_PT;
+  }
+  return h;
+}
+
 /**
  * A soft drop shadow behind a white rounded card -- two stacked, slightly
  * larger, low-opacity copies of the same rounded rect, offset downward.
@@ -880,33 +960,42 @@ function drawTableSection(
   return drawTwoColTable(page, ctx, rows, x, width, afterBand, labelFont, true, padMm);
 }
 
+// Shared between drawUnderlineHeader (the real draw) and drawFlowingBlocks'
+// own pre-measurement pass, so a continuation page's column/page-break math
+// never drifts out of sync with what actually gets drawn.
+const UNDERLINE_HEADER_SIZE = 14;
+const UNDERLINE_HEADER_H = mm(9);
+
 /**
  * Plain header treatment for the Inspection Details page and its
  * continuation pages -- per feedback, these lost their coloured band
- * entirely: just the section title in dark ink with a thin rule
- * underneath, matching a classic "form section" look rather than a
- * colour-blocked one. Returns the y to start drawing content below it.
+ * entirely: just the section title with a thin rule underneath, matching a
+ * classic "form section" look rather than a colour-blocked one. Per a
+ * later, more exact spec for these two pages specifically: Bold, 14pt,
+ * PAGE34_TEXT (#656C6F), with the rule at 0.75pt in PAGE34_RULE (#90999C)
+ * rather than the document's usual INK-on-1pt. Returns the y to start
+ * drawing content below it.
  */
 function drawUnderlineHeader(page: PDFPage, ctx: Ctx, title: string, x: number, width: number, yTop: number): number {
-  const headerH = mm(6);
-  const size = 10;
-  page.pushOperators(setCharacterSpacing(sfTrackingPt(size)));
-  page.drawText(title.toUpperCase(), { x, y: yTop - headerH + mm(2), size, font: ctx.bold, color: INK });
+  page.pushOperators(setCharacterSpacing(sfTrackingPt(UNDERLINE_HEADER_SIZE)));
+  page.drawText(title.toUpperCase(), { x, y: yTop - UNDERLINE_HEADER_H + mm(3), size: UNDERLINE_HEADER_SIZE, font: ctx.bold, color: PAGE34_TEXT });
   page.pushOperators(setCharacterSpacing(0));
-  page.drawLine({ start: { x, y: yTop - headerH }, end: { x: x + width, y: yTop - headerH }, thickness: 1, color: INK });
-  return yTop - headerH - mm(1.5);
+  page.drawLine({ start: { x, y: yTop - UNDERLINE_HEADER_H }, end: { x: x + width, y: yTop - UNDERLINE_HEADER_H }, thickness: 0.75, color: PAGE34_RULE });
+  return yTop - UNDERLINE_HEADER_H - mm(1.5);
 }
 
 /**
  * The underline-header counterpart to drawTableSection -- a plain header
- * (drawUnderlineHeader) plus an un-boxed table (drawTwoColTable's
- * `boxed: false`, horizontal rules only, no per-cell box or vertical rule),
- * no card, no shadow. Used by the Inspection Details page and its
- * continuation pages.
+ * (drawUnderlineHeader) plus rows (drawUnderlineRows), no card, no shadow.
+ * Used by the Inspection Details page and its continuation pages. No
+ * `labelFont` param (unlike drawTableSection) -- per the exact type spec
+ * these two pages now follow, questions are always Regular and answers
+ * always Bold, not caller-configurable per block the way the measurement
+ * page's card treatment is.
  */
-function drawUnderlineTableSection(page: PDFPage, ctx: Ctx, title: string, rows: TableRow[], x: number, width: number, yTop: number, labelFont?: PDFFont): number {
+function drawUnderlineTableSection(page: PDFPage, ctx: Ctx, title: string, rows: TableRow[], x: number, width: number, yTop: number): number {
   const afterHeader = drawUnderlineHeader(page, ctx, title, x, width, yTop);
-  return drawTwoColTable(page, ctx, rows, x, width, afterHeader, labelFont, false);
+  return drawUnderlineRows(page, ctx, rows, x, width, afterHeader);
 }
 
 /**
@@ -1407,7 +1496,7 @@ function drawFlowingBlocks(
   const rightX = contentLeft() + colW + colGap;
   const topY = PAGE_HEIGHT - TOPBAR_HEIGHT - mm(4);
   const bottomLimit = FOOTER_HEIGHT + mm(6);
-  const headerH = style === "card" ? mm(7) : mm(6);
+  const headerH = style === "card" ? mm(7) : UNDERLINE_HEADER_H;
   const gapAfter = mm(4);
 
   let page = start?.page ?? newPage(ctx, eyebrow, variant);
@@ -1417,7 +1506,8 @@ function drawFlowingBlocks(
   for (const block of blocks) {
     if (block.rows.length === 0) continue;
     const labelFont = block.labelFont ?? ctx.bold;
-    const blockH = headerH + measureTwoColTableHeight(ctx, block.rows, colW, labelFont, block.padMm) + gapAfter;
+    const rowsH = style === "card" ? measureTwoColTableHeight(ctx, block.rows, colW, labelFont, block.padMm) : measureUnderlineRowsHeight(block.rows, colW, ctx);
+    const blockH = headerH + rowsH + gapAfter;
 
     if (y[col] - blockH < bottomLimit) {
       if (columns === 2 && col === 0) {
@@ -1433,7 +1523,7 @@ function drawFlowingBlocks(
     const by =
       style === "card"
         ? drawTableSection(page, ctx, block.title, block.rows, x, colW, y[col], undefined, labelFont, block.padMm)
-        : drawUnderlineTableSection(page, ctx, block.title, block.rows, x, colW, y[col], labelFont);
+        : drawUnderlineTableSection(page, ctx, block.title, block.rows, x, colW, y[col]);
     y[col] = by - gapAfter;
   }
 }
