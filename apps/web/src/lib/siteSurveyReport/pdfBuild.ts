@@ -555,10 +555,14 @@ type TopbarVariant = "dark" | "grey";
  *  - "grey": solid APPLE_GREY (TOPBAR_GREY), dark ink text -- every
  *    photo-led page (Main Site Photo, Site Orientation, Site Photo &
  *    Measurement), since white-on-black tested as too heavy next to a
- *    full-bleed photo. The white logo PNG has poor contrast on this light a
- *    grey, so this variant always falls back to the plain "Apple" text
- *    wordmark instead of the image, matching how the topbar looked before
- *    the logo asset existed.
+ *    full-bleed photo. The white logo PNG has poor contrast directly on
+ *    this light a grey, so per feedback asking for the logo back on these
+ *    pages, it now sits on its own small dark chip (TOPBAR_DARK) rather
+ *    than bare on the grey bar -- reads crisply instead of washing out,
+ *    while still being the real mark rather than the plain "Apple" text
+ *    wordmark this variant used to fall back to (that fallback still
+ *    applies when the logo itself failed to embed at all -- see
+ *    embedAppleLogo -- on either variant).
  */
 function newPage(ctx: Ctx, eyebrow: string, variant: TopbarVariant = "dark"): PDFPage {
   const page = ctx.doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
@@ -575,16 +579,25 @@ function newPage(ctx: Ctx, eyebrow: string, variant: TopbarVariant = "dark"): PD
   // "dark"/"split" sit their title in the black zone -> white; "grey" has
   // no black zone at all, so it always reads dark ink.
   const titleColor = variant === "grey" ? INK : WHITE;
-  const useLogoImage = variant !== "grey" && !!ctx.logo;
 
   const logoSize = mm(6.5);
   let titleX = MARGIN;
   const titleY = PAGE_HEIGHT - TOPBAR_HEIGHT / 2 - 3.5;
-  if (useLogoImage && ctx.logo) {
+  if (ctx.logo) {
     const logoH = logoSize;
     const logoW = (ctx.logo.width / ctx.logo.height) * logoH;
-    page.drawImage(ctx.logo, { x: MARGIN, y: PAGE_HEIGHT - TOPBAR_HEIGHT / 2 - logoH / 2, width: logoW, height: logoH });
-    titleX = MARGIN + logoW + mm(3);
+    if (variant === "grey") {
+      const chipPad = mm(1.6);
+      const chipH = logoH + chipPad * 2;
+      const chipW = logoW + chipPad * 2;
+      const chipBottomY = PAGE_HEIGHT - TOPBAR_HEIGHT / 2 - chipH / 2;
+      drawRoundedRect(page, MARGIN, chipBottomY + chipH, chipW, chipH, mm(1.2), { color: TOPBAR_DARK });
+      page.drawImage(ctx.logo, { x: MARGIN + chipPad, y: chipBottomY + chipPad, width: logoW, height: logoH });
+      titleX = MARGIN + chipW + mm(3);
+    } else {
+      page.drawImage(ctx.logo, { x: MARGIN, y: PAGE_HEIGHT - TOPBAR_HEIGHT / 2 - logoH / 2, width: logoW, height: logoH });
+      titleX = MARGIN + logoW + mm(3);
+    }
   } else if (variant === "grey") {
     page.drawText("Apple", { x: MARGIN, y: PAGE_HEIGHT - TOPBAR_HEIGHT / 2 - 3.5, size: 11, font: ctx.bold, color: INK });
     titleX = MARGIN + ctx.bold.widthOfTextAtSize("Apple", 11) + mm(3);
@@ -980,7 +993,7 @@ function drawTableSection(
 // Shared between drawUnderlineHeader (the real draw) and drawFlowingBlocks'
 // own pre-measurement pass, so a continuation page's column/page-break math
 // never drifts out of sync with what actually gets drawn.
-const UNDERLINE_HEADER_SIZE = 14;
+const UNDERLINE_HEADER_SIZE = 12;
 const UNDERLINE_HEADER_H = mm(9);
 
 /**
@@ -988,12 +1001,15 @@ const UNDERLINE_HEADER_H = mm(9);
  * continuation pages -- per feedback, these lost their coloured band
  * entirely: just the section title with a thin rule underneath, matching a
  * classic "form section" look rather than a colour-blocked one. Per a
- * later, more exact spec for these two pages specifically: Bold, 14pt,
+ * later, more exact spec for these two pages specifically: Bold,
  * PAGE34_TEXT (#656C6F), in ctx.gothicBold (Apple SD Gothic Neo Bold --
  * see Ctx's own comment on its SF Pro/Helvetica fallback); the rule itself
  * uses the same document-wide RULE_COLOR/RULE_WEIGHT as every other line
  * in the report (see that constant's own comment), not a page-specific
- * weight. Returns the y to start drawing content below it.
+ * weight. Size was originally 14pt per that spec, then reduced to 12pt per
+ * later feedback -- UNDERLINE_HEADER_H (the reserved band height) was left
+ * at its original mm(9), which still reads as comfortably proportioned at
+ * the smaller size. Returns the y to start drawing content below it.
  */
 function drawUnderlineHeader(page: PDFPage, ctx: Ctx, title: string, x: number, width: number, yTop: number): number {
   page.pushOperators(setCharacterSpacing(sfTrackingPt(UNDERLINE_HEADER_SIZE)));
