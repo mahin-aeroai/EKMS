@@ -5,6 +5,13 @@
 // Report's own pdfBuild.ts), so every Apple-facing report this portal
 // produces uses Apple's own typeface rather than Helvetica.
 //
+// Also fetches Apple SD Gothic Neo (see fetchAppleSdGothicNeoFontBytes
+// below) -- Site Survey Report's Inspection Details pages specifically ask
+// for this typeface by name, per the partner's own exact type spec.
+// Apple's own system font, same "the partner's licensed copy, never
+// committed to this repo" reasoning as SF Pro -- see
+// /api/brand-assets/fonts/gothic-neo/[weight]/signed-url's header comment.
+//
 // Shared by both tools rather than living in either one's own lib folder,
 // since it's a brand asset, not report-specific data -- same reasoning as
 // this app's shared UserRoleContext/supabase helpers living outside any
@@ -20,12 +27,14 @@
 // are unset).
 
 const CACHE: Partial<Record<FontWeight, Promise<Uint8Array | null>>> = {};
+const GOTHIC_CACHE: Partial<Record<GothicWeight, Promise<Uint8Array | null>>> = {};
 
 export type FontWeight = "regular" | "semibold" | "italic";
+export type GothicWeight = "regular" | "bold";
 
-async function fetchOne(weight: FontWeight): Promise<Uint8Array | null> {
+async function fetchOne(path: string): Promise<Uint8Array | null> {
   try {
-    const res = await fetch(`/api/brand-assets/fonts/${weight}/signed-url`);
+    const res = await fetch(path);
     if (!res.ok) return null;
     const { url } = (await res.json()) as { url?: string };
     if (!url) return null;
@@ -40,14 +49,25 @@ async function fetchOne(weight: FontWeight): Promise<Uint8Array | null> {
 
 /** Fetches (and memoizes for the lifetime of the page) the raw bytes of one SF Pro Text weight. Returns null on any failure -- see file header comment. */
 function getWeight(weight: FontWeight): Promise<Uint8Array | null> {
-  if (!CACHE[weight]) CACHE[weight] = fetchOne(weight);
+  if (!CACHE[weight]) CACHE[weight] = fetchOne(`/api/brand-assets/fonts/${weight}/signed-url`);
   return CACHE[weight];
+}
+
+/** Fetches (and memoizes for the lifetime of the page) the raw bytes of one Apple SD Gothic Neo weight. Returns null on any failure -- see file header comment. */
+function getGothicWeight(weight: GothicWeight): Promise<Uint8Array | null> {
+  if (!GOTHIC_CACHE[weight]) GOTHIC_CACHE[weight] = fetchOne(`/api/brand-assets/fonts/gothic-neo/${weight}/signed-url`);
+  return GOTHIC_CACHE[weight];
 }
 
 export interface SfProTextFontBytes {
   regular: Uint8Array;
   bold: Uint8Array;
   italic?: Uint8Array;
+}
+
+export interface AppleSdGothicNeoFontBytes {
+  regular: Uint8Array;
+  bold: Uint8Array;
 }
 
 /**
@@ -64,4 +84,18 @@ export async function fetchSfProTextFontBytes(opts: { italic?: boolean } = {}): 
   if (!regular || !bold) return null;
   if (opts.italic && !italic) return null;
   return { regular, bold, italic: italic ?? undefined };
+}
+
+/**
+ * Fetches Apple SD Gothic Neo Regular + true Bold (not Semibold-as-bold --
+ * the partner's own spec for the pages that use this font explicitly says
+ * "Bold", unlike this app's general SF Pro convention). Resolves `null` --
+ * never rejects -- when either weight couldn't be loaded, so callers can
+ * pass the result straight through to buildSiteSurveyReportPdf's own
+ * `gothicNeoFonts` param and rely on its SF Pro/Helvetica fallback.
+ */
+export async function fetchAppleSdGothicNeoFontBytes(): Promise<AppleSdGothicNeoFontBytes | null> {
+  const [regular, bold] = await Promise.all([getGothicWeight("regular"), getGothicWeight("bold")]);
+  if (!regular || !bold) return null;
+  return { regular, bold };
 }

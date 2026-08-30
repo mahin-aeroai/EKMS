@@ -14,7 +14,7 @@ import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
 import { useUserRole } from "@/lib/UserRoleContext";
 import { buildSiteSurveyReportPdf, downloadBlob, type SurveyPhotoInput } from "@/lib/siteSurveyReport/pdfBuild";
-import { fetchSfProTextFontBytes } from "@/lib/pdfFonts";
+import { fetchSfProTextFontBytes, fetchAppleSdGothicNeoFontBytes } from "@/lib/pdfFonts";
 import {
   REPORT_STATUS_LABEL,
   emptyFormData,
@@ -165,7 +165,7 @@ export function SiteSurveyReportsListClient() {
   async function buildPdfForRow(rowId: string): Promise<Blob | null> {
     const data = await fetchFullReportAndPhotos(rowId);
     if (!data) return null;
-    const [photoInputs, brandFonts] = await Promise.all([fetchPhotoInputsForRow(rowId, data.photos), fetchSfProTextFontBytes()]);
+    const [photoInputs, brandFonts, gothicNeoFonts] = await Promise.all([fetchPhotoInputsForRow(rowId, data.photos), fetchSfProTextFontBytes(), fetchAppleSdGothicNeoFontBytes()]);
     return buildSiteSurveyReportPdf(
       {
         storeName: data.report.store_name,
@@ -178,7 +178,8 @@ export function SiteSurveyReportsListClient() {
         measurements: data.report.measurements,
         photos: photoInputs,
       },
-      brandFonts
+      brandFonts,
+      gothicNeoFonts
     );
   }
 
