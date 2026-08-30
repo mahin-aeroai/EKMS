@@ -455,17 +455,6 @@ interface Ctx {
   doc: PDFDocument;
   font: PDFFont;
   bold: PDFFont;
-  /**
-   * Apple SD Gothic Neo Regular/Bold, per feedback's exact type spec for
-   * the Inspection Details page and its continuation pages specifically
-   * (see drawUnderlineHeader/drawUnderlineRows) -- always populated, but
-   * falls back to the document's usual `font`/`bold` (SF Pro Text, or
-   * Helvetica if even that failed) whenever the caller didn't supply
-   * Apple SD Gothic Neo bytes or embedding them failed, so those two draw
-   * functions never need their own null-check. See embedBrandFonts.
-   */
-  gothicFont: PDFFont;
-  gothicBold: PDFFont;
   data: SiteSurveyReportPdfData;
   photos: SurveyPhotoImage[];
   pageNumber: number;
@@ -878,11 +867,15 @@ const UNDERLINE_ROW_PAD = mm(2);
  * label/value rows per the exact type spec above -- horizontal rule only
  * (no box, no vertical divider, matching drawTwoColTable's own `boxed:
  * false` look), but with its own font/size/colour/rule/spacing rules
- * rather than drawTwoColTable's. Questions use ctx.gothicFont (Apple SD
- * Gothic Neo Regular), answers ctx.gothicBold (Bold) -- see Ctx's own
- * comment on that pair's SF Pro/Helvetica fallback. See UNDERLINE_ROW_*
- * above for the shared constants also used by measureUnderlineRowsHeight's
- * own pagination math.
+ * rather than drawTwoColTable's. Questions use ctx.font (SF Pro Text
+ * Regular), answers ctx.bold (Bold) -- this page briefly used Apple SD
+ * Gothic Neo instead (per an earlier, exact type spec), but that was
+ * reverted per later feedback disliking the look; size/colour/weight
+ * pairing (Regular questions, Bold answers, PAGE34_TEXT) were kept
+ * unchanged, only the typeface moved back to this document's own SF Pro
+ * Text/Helvetica (ctx.font/ctx.bold), matching every other page. See
+ * UNDERLINE_ROW_* above for the shared constants also used by
+ * measureUnderlineRowsHeight's own pagination math.
  */
 function drawUnderlineRows(page: PDFPage, ctx: Ctx, rows: TableRow[], x: number, width: number, yTop: number): number {
   const labelColW = width * 0.42;
@@ -891,21 +884,21 @@ function drawUnderlineRows(page: PDFPage, ctx: Ctx, rows: TableRow[], x: number,
   let y = yTop;
 
   for (const row of rows) {
-    const labelLines = wrapText(ctx.gothicFont, row.label, UNDERLINE_ROW_SIZE, labelColW - UNDERLINE_ROW_PAD * 2);
-    const valueLines = wrapText(ctx.gothicBold, row.value || "—", UNDERLINE_ROW_SIZE, valueColW - UNDERLINE_ROW_PAD * 2);
+    const labelLines = wrapText(ctx.font, row.label, UNDERLINE_ROW_SIZE, labelColW - UNDERLINE_ROW_PAD * 2);
+    const valueLines = wrapText(ctx.bold, row.value || "—", UNDERLINE_ROW_SIZE, valueColW - UNDERLINE_ROW_PAD * 2);
     const lineCount = Math.max(labelLines.length, valueLines.length);
     const baseline = y - UNDERLINE_ROW_SIZE * 0.86;
 
     page.pushOperators(setCharacterSpacing(tracking));
     labelLines.forEach((line, i) => {
-      page.drawText(line, { x: x + UNDERLINE_ROW_PAD, y: baseline - i * UNDERLINE_ROW_LINE_H, size: UNDERLINE_ROW_SIZE, font: ctx.gothicFont, color: PAGE34_TEXT });
+      page.drawText(line, { x: x + UNDERLINE_ROW_PAD, y: baseline - i * UNDERLINE_ROW_LINE_H, size: UNDERLINE_ROW_SIZE, font: ctx.font, color: PAGE34_TEXT });
     });
     valueLines.forEach((line, i) => {
       page.drawText(line, {
         x: x + labelColW + UNDERLINE_ROW_PAD,
         y: baseline - i * UNDERLINE_ROW_LINE_H,
         size: UNDERLINE_ROW_SIZE,
-        font: ctx.gothicBold,
+        font: ctx.bold,
         color: PAGE34_TEXT,
       });
     });
@@ -925,8 +918,8 @@ function measureUnderlineRowsHeight(rows: TableRow[], width: number, ctx: Ctx): 
   const valueColW = width - labelColW;
   let h = 0;
   for (const row of rows) {
-    const labelLines = wrapText(ctx.gothicFont, row.label, UNDERLINE_ROW_SIZE, labelColW - UNDERLINE_ROW_PAD * 2);
-    const valueLines = wrapText(ctx.gothicBold, row.value || "—", UNDERLINE_ROW_SIZE, valueColW - UNDERLINE_ROW_PAD * 2);
+    const labelLines = wrapText(ctx.font, row.label, UNDERLINE_ROW_SIZE, labelColW - UNDERLINE_ROW_PAD * 2);
+    const valueLines = wrapText(ctx.bold, row.value || "—", UNDERLINE_ROW_SIZE, valueColW - UNDERLINE_ROW_PAD * 2);
     const lineCount = Math.max(labelLines.length, valueLines.length);
     h += lineCount * UNDERLINE_ROW_LINE_H + UNDERLINE_ROW_SPACE_AFTER_PT;
   }
@@ -1002,18 +995,22 @@ const UNDERLINE_HEADER_H = mm(9);
  * entirely: just the section title with a thin rule underneath, matching a
  * classic "form section" look rather than a colour-blocked one. Per a
  * later, more exact spec for these two pages specifically: Bold,
- * PAGE34_TEXT (#656C6F), in ctx.gothicBold (Apple SD Gothic Neo Bold --
- * see Ctx's own comment on its SF Pro/Helvetica fallback); the rule itself
- * uses the same document-wide RULE_COLOR/RULE_WEIGHT as every other line
- * in the report (see that constant's own comment), not a page-specific
- * weight. Size was originally 14pt per that spec, then reduced to 12pt per
- * later feedback -- UNDERLINE_HEADER_H (the reserved band height) was left
- * at its original mm(9), which still reads as comfortably proportioned at
- * the smaller size. Returns the y to start drawing content below it.
+ * PAGE34_TEXT (#656C6F), in ctx.bold (SF Pro Text Bold, or Helvetica --
+ * same document-wide fallback as every other page). This briefly used
+ * Apple SD Gothic Neo instead (ctx.gothicBold), per that same spec's own
+ * exact font request, but was reverted to SF Pro per later feedback that
+ * didn't like the look -- size/colour/weight were kept exactly as they
+ * were, only the typeface changed back. The rule itself uses the same
+ * document-wide RULE_COLOR/RULE_WEIGHT as every other line in the report
+ * (see that constant's own comment), not a page-specific weight. Size was
+ * originally 14pt per that spec, then reduced to 12pt per later feedback
+ * -- UNDERLINE_HEADER_H (the reserved band height) was left at its
+ * original mm(9), which still reads as comfortably proportioned at the
+ * smaller size. Returns the y to start drawing content below it.
  */
 function drawUnderlineHeader(page: PDFPage, ctx: Ctx, title: string, x: number, width: number, yTop: number): number {
   page.pushOperators(setCharacterSpacing(sfTrackingPt(UNDERLINE_HEADER_SIZE)));
-  page.drawText(title.toUpperCase(), { x, y: yTop - UNDERLINE_HEADER_H + mm(3), size: UNDERLINE_HEADER_SIZE, font: ctx.gothicBold, color: PAGE34_TEXT });
+  page.drawText(title.toUpperCase(), { x, y: yTop - UNDERLINE_HEADER_H + mm(3), size: UNDERLINE_HEADER_SIZE, font: ctx.bold, color: PAGE34_TEXT });
   page.pushOperators(setCharacterSpacing(0));
   page.drawLine({ start: { x, y: yTop - UNDERLINE_HEADER_H }, end: { x: x + width, y: yTop - UNDERLINE_HEADER_H }, thickness: RULE_WEIGHT, color: RULE_COLOR });
   return yTop - UNDERLINE_HEADER_H - mm(1.5);
@@ -1915,14 +1912,16 @@ function sizeLabel(w: number | null, h: number | null): string {
 
 /**
  * Registers fontkit and embeds a caller-supplied Regular+Bold font pack
- * (see this file's header comment on why unsubsetted) -- used for both SF
- * Pro Text and, separately, Apple SD Gothic Neo (see
- * buildSiteSurveyReportPdf's own two calls to this). Returns null -- never
- * throws -- when no bytes were supplied, or embedding fails for any
- * reason, so each caller's own fallback (Helvetica for SF Pro; SF
- * Pro/Helvetica for Apple SD Gothic Neo) always applies cleanly either
- * way. registerFontkit is idempotent, so calling this twice on the same
- * doc is safe.
+ * (see this file's header comment on why unsubsetted) -- SF Pro Text, the
+ * document's one and only brand typeface. (This briefly also embedded a
+ * second pack, Apple SD Gothic Neo, for the Inspection Details pages only
+ * -- reverted per feedback; see drawUnderlineHeader/drawUnderlineRows'
+ * own comments. fetchAppleSdGothicNeoFontBytes in pdfFonts.ts and its R2
+ * signed-url route were left in place, unused, rather than torn out --
+ * the font is already uploaded to R2, so a future page can pick this back
+ * up without redoing that.) Returns null -- never throws -- when no bytes
+ * were supplied, or embedding fails for any reason, so the caller's own
+ * Helvetica fallback always applies cleanly either way.
  */
 async function embedBrandFonts(doc: PDFDocument, fonts: { regular: Uint8Array; bold: Uint8Array } | null | undefined): Promise<{ font: PDFFont; bold: PDFFont } | null> {
   if (!fonts) return null;
@@ -1961,19 +1960,12 @@ async function embedAppleLogo(doc: PDFDocument): Promise<PDFImage | null> {
 
 export async function buildSiteSurveyReportPdf(
   data: SiteSurveyReportPdfData,
-  fonts?: { regular: Uint8Array; bold: Uint8Array } | null,
-  gothicNeoFonts?: { regular: Uint8Array; bold: Uint8Array } | null
+  fonts?: { regular: Uint8Array; bold: Uint8Array } | null
 ): Promise<Blob> {
   const doc = await PDFDocument.create();
   const embedded = await embedBrandFonts(doc, fonts);
   const font = embedded?.font ?? (await doc.embedFont(StandardFonts.Helvetica));
   const bold = embedded?.bold ?? (await doc.embedFont(StandardFonts.HelveticaBold));
-  // Apple SD Gothic Neo, for the Inspection Details pages only (see Ctx's
-  // own comment) -- falls back to whatever `font`/`bold` just resolved to
-  // (SF Pro Text, or Helvetica) when not supplied or embedding failed.
-  const embeddedGothic = await embedBrandFonts(doc, gothicNeoFonts);
-  const gothicFont = embeddedGothic?.font ?? font;
-  const gothicBold = embeddedGothic?.bold ?? bold;
   const logo = await embedAppleLogo(doc);
 
   // Every photo must be embedded into THIS PDFDocument before any drawing
@@ -1990,7 +1982,7 @@ export async function buildSiteSurveyReportPdf(
     }))
   );
 
-  const ctx: Ctx = { doc, font, bold, gothicFont, gothicBold, data, photos, pageNumber: 0, logo };
+  const ctx: Ctx = { doc, font, bold, data, photos, pageNumber: 0, logo };
 
   drawTitlePage(ctx);
   drawCoverPage(ctx);

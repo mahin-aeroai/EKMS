@@ -9,12 +9,17 @@ import type { FieldSource } from "@/lib/siteSurveyReport/types";
 // not a green check) rather than "ai" = done -- extracted fields are
 // exactly the ones the user still needs to glance at and confirm; "user"
 // (someone already edited it, whether it started as AI-filled or blank) is
-// the only state that reads as fully settled.
+// the only state that reads as fully settled. "Confirmed" uses text-info
+// (blue) rather than the more conventional text-success (green) per
+// feedback disliking the green check -- info was picked over the design
+// system's own text-ai (purple) since that token is already the app-wide
+// signal for "AI-related" elsewhere (Copilot, AI Knowledge, etc.), and
+// reusing it here for a *confirmed-by-a-human* field would read backwards.
 export function FieldIndicator({ source }: { source: FieldSource | undefined }) {
   if (!source) return null;
   if (source === "user") {
     return (
-      <span title="Confirmed" className="inline-flex items-center text-success">
+      <span title="Confirmed" className="inline-flex items-center text-info">
         <CheckCircle2 size={13} />
       </span>
     );
