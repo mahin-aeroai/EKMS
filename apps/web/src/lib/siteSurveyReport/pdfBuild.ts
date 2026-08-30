@@ -144,15 +144,8 @@ const IDENTITY_TITLE = rgb(1, 1, 1); // white, on the card's own near-black fill
 const IDENTITY_SUBTITLE = rgb(0.62, 0.65, 0.69); // light grey, for the dark card -- was a darker grey meant for the old white one
 const IDENTITY_LABEL = rgb(0.56, 0.59, 0.63); // light grey, a touch dimmer than IDENTITY_SUBTITLE for the small uppercase fact labels
 const IDENTITY_VALUE = IDENTITY_TITLE;
-const IDENTITY_DIVIDER = rgb(0.22, 0.23, 0.26); // a visible-but-subtle grey against the card's own near-black -- was a near-white line for the old white card
 const IDENTITY_PIN_BG = rgb(1, 1, 1); // white pin badge, now that the card itself is dark (was a dark charcoal badge on a white card -- inverted)
 const IDENTITY_PIN_ICON = IDENTITY_CARD_BG; // the pin icon itself goes dark to read against its own now-white badge
-// The Cover page's 4 fact chips (SFO ID/Program/Survey Date/Survey Company)
-// used to be solid pale-grey filled squares; per feedback to use "outline
-// icons instead of solid icons" there, the chip itself is now outline only
-// (no fill, just a thin border) rather than a filled tile, so nothing in
-// that row reads as a solid icon.
-const IDENTITY_CHIP_BORDER = rgb(0.62, 0.65, 0.69);
 const IDENTITY_CHIP_ICON = rgb(1, 1, 1); // white, to read against the dark card behind the now-unfilled chip
 const INK = rgb(0.1, 0.1, 0.12);
 const INK_SECONDARY = rgb(0.34, 0.34, 0.37);
@@ -170,17 +163,27 @@ const SECTION_BAND = APPLE_GREY;
 // drawTableSection) -- one radius everywhere a band or card needs rounding,
 // so a band's own corner never mismatches the card it now sits on top of.
 const CARD_RADIUS = mm(2.6);
-const BORDER = rgb(0.8, 0.8, 0.83);
 const PLACEHOLDER_BG = rgb(0.95, 0.95, 0.96);
+// Every plain divider/border rule across the whole report -- the footer
+// rule, the identity card's own internal divider and fact-chip outline,
+// every table cell border, the photo-placeholder box outline, and the
+// Inspection Details pages' header/row rules -- now shares this one line
+// weight and colour, per feedback ("keep line weight 1/2 point across
+// report, use color #90999C"). Consolidates what used to be several
+// separately-named greys at several different weights (BORDER at 0.6-1pt,
+// IDENTITY_DIVIDER, IDENTITY_CHIP_BORDER at 0.85pt) into a single pair of
+// tokens. Distinct, meaning-carrying colours -- the install-area marking
+// (MARK/MARK_TEXT), the obstacle-marker red, and the Facade diagram's own
+// dimension lines (drawn in INK_SECONDARY) -- are a different visual
+// system and are deliberately NOT part of this rule.
+const RULE_COLOR = rgb(0x90 / 255, 0x99 / 255, 0x9c / 255); // #90999C
+const RULE_WEIGHT = 0.5; // pt
 // Inspection Details page + its continuation pages (drawDetailsPage,
 // drawInspectionDetailsContinuationPages) only -- per feedback's own exact
 // hex spec: headers, questions (labels) and answers (values) all read in
 // this one grey-ink colour (#656C6F) rather than the document's usual
-// INK/INK_SECONDARY pairing, and the header/row underline rules use a
-// lighter, separate grey (#90999C). Scoped to these two pages via
-// drawUnderlineHeader/drawUnderlineRows below, not applied document-wide.
+// INK/INK_SECONDARY pairing.
 const PAGE34_TEXT = rgb(0x65 / 255, 0x6c / 255, 0x6f / 255);
-const PAGE34_RULE = rgb(0x90 / 255, 0x99 / 255, 0x9c / 255);
 
 // ---------------------------------------------------------------------------
 // Tracking (letter-spacing) -- Apple's own published values, followed
@@ -606,7 +609,7 @@ function newPage(ctx: Ctx, eyebrow: string, variant: TopbarVariant = "dark"): PD
 }
 
 function drawFooter(ctx: Ctx, page: PDFPage) {
-  page.drawLine({ start: { x: MARGIN, y: FOOTER_HEIGHT }, end: { x: PAGE_WIDTH - MARGIN, y: FOOTER_HEIGHT }, thickness: 0.75, color: BORDER });
+  page.drawLine({ start: { x: MARGIN, y: FOOTER_HEIGHT }, end: { x: PAGE_WIDTH - MARGIN, y: FOOTER_HEIGHT }, thickness: RULE_WEIGHT, color: RULE_COLOR });
 
   const iconSize = mm(3.4);
   drawIcon(page, "store", MARGIN, FOOTER_HEIGHT / 2 + mm(1.9), iconSize, MUTED);
@@ -710,7 +713,7 @@ function drawIdentityBlock(page: PDFPage, ctx: Ctx, yTop: number): number {
     page.drawText(value, { x: fx, y: yTop - mm(11), size: 12, font: ctx.bold, color: INK });
   });
 
-  page.drawLine({ start: { x: contentLeft(), y: yTop - blockH }, end: { x: contentRight(), y: yTop - blockH }, thickness: 0.75, color: BORDER });
+  page.drawLine({ start: { x: contentLeft(), y: yTop - blockH }, end: { x: contentRight(), y: yTop - blockH }, thickness: RULE_WEIGHT, color: RULE_COLOR });
   return yTop - blockH - mm(3);
 }
 
@@ -768,18 +771,18 @@ function drawTwoColTable(page: PDFPage, ctx: Ctx, rows: TableRow[], x: number, w
     const rowH = Math.max(lineH, Math.max(labelLines.length, valueLines.length) * lineH) + pad * 1.2;
 
     if (boxed) {
-      page.drawRectangle({ x, y: y - rowH, width: labelColW, height: rowH, borderColor: BORDER, borderWidth: 0.6, color: WHITE });
+      page.drawRectangle({ x, y: y - rowH, width: labelColW, height: rowH, borderColor: RULE_COLOR, borderWidth: RULE_WEIGHT, color: WHITE });
       page.drawRectangle({
         x: x + labelColW,
         y: y - rowH,
         width: valueColW,
         height: rowH,
-        borderColor: BORDER,
-        borderWidth: 0.6,
+        borderColor: RULE_COLOR,
+        borderWidth: RULE_WEIGHT,
         color: WHITE,
       });
     } else {
-      page.drawLine({ start: { x, y: y - rowH }, end: { x: x + width, y: y - rowH }, thickness: 0.6, color: BORDER });
+      page.drawLine({ start: { x, y: y - rowH }, end: { x: x + width, y: y - rowH }, thickness: RULE_WEIGHT, color: RULE_COLOR });
     }
 
     if (row.icon) {
@@ -882,7 +885,7 @@ function drawUnderlineRows(page: PDFPage, ctx: Ctx, rows: TableRow[], x: number,
     page.pushOperators(setCharacterSpacing(0));
 
     const ruleY = baseline - (lineCount - 1) * UNDERLINE_ROW_LINE_H - UNDERLINE_ROW_SIZE * 0.3;
-    page.drawLine({ start: { x, y: ruleY }, end: { x: x + width, y: ruleY }, thickness: 0.75, color: PAGE34_RULE });
+    page.drawLine({ start: { x, y: ruleY }, end: { x: x + width, y: ruleY }, thickness: RULE_WEIGHT, color: RULE_COLOR });
 
     y = ruleY - UNDERLINE_ROW_SPACE_AFTER_PT;
   }
@@ -972,15 +975,16 @@ const UNDERLINE_HEADER_H = mm(9);
  * entirely: just the section title with a thin rule underneath, matching a
  * classic "form section" look rather than a colour-blocked one. Per a
  * later, more exact spec for these two pages specifically: Bold, 14pt,
- * PAGE34_TEXT (#656C6F), with the rule at 0.75pt in PAGE34_RULE (#90999C)
- * rather than the document's usual INK-on-1pt. Returns the y to start
- * drawing content below it.
+ * PAGE34_TEXT (#656C6F); the rule itself now uses the same document-wide
+ * RULE_COLOR/RULE_WEIGHT as every other line in the report (see that
+ * constant's own comment), not a page-specific weight. Returns the y to
+ * start drawing content below it.
  */
 function drawUnderlineHeader(page: PDFPage, ctx: Ctx, title: string, x: number, width: number, yTop: number): number {
   page.pushOperators(setCharacterSpacing(sfTrackingPt(UNDERLINE_HEADER_SIZE)));
   page.drawText(title.toUpperCase(), { x, y: yTop - UNDERLINE_HEADER_H + mm(3), size: UNDERLINE_HEADER_SIZE, font: ctx.bold, color: PAGE34_TEXT });
   page.pushOperators(setCharacterSpacing(0));
-  page.drawLine({ start: { x, y: yTop - UNDERLINE_HEADER_H }, end: { x: x + width, y: yTop - UNDERLINE_HEADER_H }, thickness: 0.75, color: PAGE34_RULE });
+  page.drawLine({ start: { x, y: yTop - UNDERLINE_HEADER_H }, end: { x: x + width, y: yTop - UNDERLINE_HEADER_H }, thickness: RULE_WEIGHT, color: RULE_COLOR });
   return yTop - UNDERLINE_HEADER_H - mm(1.5);
 }
 
@@ -1077,7 +1081,7 @@ function drawPhotoBox(page: PDFPage, ctx: Ctx, photo: SurveyPhotoImage | undefin
   const boxY = yTop - h;
 
   if (!photo) {
-    page.drawRectangle({ x, y: boxY, width: w, height: h, color: PLACEHOLDER_BG, borderColor: BORDER, borderWidth: 0.75 });
+    page.drawRectangle({ x, y: boxY, width: w, height: h, color: PLACEHOLDER_BG, borderColor: RULE_COLOR, borderWidth: RULE_WEIGHT });
     const text = `${label} — not yet added`;
     const tw = ctx.font.widthOfTextAtSize(text, 8.5);
     page.drawText(text, { x: x + (w - tw) / 2, y: yTop - h / 2, size: 8.5, font: ctx.font, color: MUTED });
@@ -1091,7 +1095,7 @@ function drawPhotoBox(page: PDFPage, ctx: Ctx, photo: SurveyPhotoImage | undefin
   const imgX = x + (w - drawW) / 2;
   const imgY = boxY - (drawH - h) / 2;
 
-  page.drawRectangle({ x, y: boxY, width: w, height: h, borderColor: BORDER, borderWidth: 0.75 });
+  page.drawRectangle({ x, y: boxY, width: w, height: h, borderColor: RULE_COLOR, borderWidth: RULE_WEIGHT });
 
   page.pushOperators(pushGraphicsState(), clipRectOp(x, boxY, w, h), clipOp(), endPathOp());
   page.drawImage(img, { x: imgX, y: imgY, width: drawW, height: drawH });
@@ -1313,14 +1317,15 @@ function drawCoverPage(ctx: Ctx) {
       page.drawText(line, { x: nameX, y: y - mm(17.5) - i * mm(5), size: 10, font: ctx.font, color: IDENTITY_SUBTITLE });
     });
 
-  page.drawLine({ start: { x: MARGIN + mm(6), y: y - mm(24.5) }, end: { x: MARGIN + contentWidth() - mm(6), y: y - mm(24.5) }, thickness: 0.75, color: IDENTITY_DIVIDER });
+  page.drawLine({ start: { x: MARGIN + mm(6), y: y - mm(24.5) }, end: { x: MARGIN + contentWidth() - mm(6), y: y - mm(24.5) }, thickness: RULE_WEIGHT, color: RULE_COLOR });
 
   // Icon-chip-LEFT-of-stacked-label/value fact rows -- each icon sits in
   // its own rounded chip, vertically centred against its own two-line
   // label/value pair, with a thin divider between columns. Per feedback,
   // "Surveyor" was swapped for "Survey Company" here (see the icon list
   // below too), and the chip itself is now outline-only rather than a
-  // solid pale-grey fill (see IDENTITY_CHIP_BORDER's own comment).
+  // solid pale-grey fill, in the same RULE_COLOR/RULE_WEIGHT as every
+  // other line in the report.
   const facts: [string, string][] = [
     ["SFO ID", data.sfoId || "—"],
     ["Program", data.program || "—"],
@@ -1338,12 +1343,12 @@ function drawCoverPage(ctx: Ctx) {
       page.drawLine({
         start: { x: fx - mm(4.5), y: factRowCenterY - mm(7) },
         end: { x: fx - mm(4.5), y: factRowCenterY + mm(7) },
-        thickness: 0.75,
-        color: IDENTITY_DIVIDER,
+        thickness: RULE_WEIGHT,
+        color: RULE_COLOR,
       });
     }
     const chipTopY = factRowCenterY + chipSize / 2;
-    drawRoundedRect(page, fx, chipTopY, chipSize, chipSize, CARD_RADIUS, { borderColor: IDENTITY_CHIP_BORDER, borderWidth: 0.85 });
+    drawRoundedRect(page, fx, chipTopY, chipSize, chipSize, CARD_RADIUS, { borderColor: RULE_COLOR, borderWidth: RULE_WEIGHT });
     drawIcon(page, COVER_FACT_ICONS[i], fx + chipPad, chipTopY - chipPad, chipIconSize, IDENTITY_CHIP_ICON);
     const labelX = fx + chipSize + mm(3);
     page.drawText(label.toUpperCase(), { x: labelX, y: factRowCenterY + mm(3), size: 7.8, font: ctx.bold, color: IDENTITY_LABEL });
