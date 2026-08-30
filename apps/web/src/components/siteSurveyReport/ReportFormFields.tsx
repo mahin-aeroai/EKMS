@@ -34,18 +34,24 @@ import { APPLE_PROGRAM_OPTIONS, DELIVERY_TIMING_LABEL, emptyFormData } from "@/l
 // first, so the whole form is "visible in one shot" as a stack of card
 // headers with a filled-count badge. Inside an open card, every field is
 // one compact, landscape (label-left, control-right) ROW rather than a
-// multi-column grid. A Yes/No question and its "if Yes/No, give details"
-// follow-up are ONE row: real radio buttons (native <input type="radio">,
-// tinted via accent-color) plus the detail input inline. A single-choice
-// "pick one of these" question (Entrances & Floors, the two position
-// markers) is a ButtonGroupRow -- small pill buttons, single-select.
-// Several small, short-answer fields that are genuinely independent (the
-// Apple Representative's Name/Mobile/Email) are grouped into one
-// MiniFieldsRow instead -- a single compact row holding 2-4 small labeled
-// inputs side by side, matching this app's own "Store Opening Times"
-// day-grid pattern. Field labels/inputs stay small (text-[11px]/text-xs)
-// and tightly padded throughout, matching this app's own existing compact
-// patterns
+// multi-column grid. Rows themselves are borderless and simply share ONE
+// line with their neighbour via the card body's own `divide-y` (per
+// feedback that a full 4-sided box per row, stacked tightly, read as "too
+// many lines") -- Row no longer draws its own border/rounded box, and the
+// two field-group panels that used to (MiniFieldsRow, the Store Opening
+// Times day-grid) dropped theirs too, so nothing nested inside the
+// divide-y list doubles up a line against it. A Yes/No question and its
+// "if Yes/No, give details" follow-up are ONE row: real radio buttons
+// (native <input type="radio">, tinted via accent-color) plus the detail
+// input inline. A single-choice "pick one of these" question (Entrances &
+// Floors, the two position markers) is a ButtonGroupRow -- small pill
+// buttons, single-select. Several small, short-answer fields that are
+// genuinely independent (the Apple Representative's Name/Mobile/Email)
+// are grouped into one MiniFieldsRow instead -- a single compact row
+// holding 2-4 small labeled inputs side by side, matching this app's own
+// "Store Opening Times" day-grid pattern. Field labels/inputs stay small
+// (text-[11px]/text-xs) and tightly padded throughout, matching this
+// app's own existing compact patterns
 // (Comments.tsx, WorkflowTimeline.tsx, etc).
 
 export interface ReportHeaderFields {
@@ -418,7 +424,7 @@ export function FormDataFields({
         open={!!openSections.install}
         onToggle={onToggleSection}
       >
-        <div className="flex flex-col rounded-lg border border-line bg-surface px-2.5 py-1.5">
+        <div className="flex flex-col px-0.5 py-2.5">
           <span className="mb-1 text-[11px] font-medium text-ink-secondary">Store Opening Times</span>
           <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4 lg:grid-cols-7">
             {(
@@ -784,14 +790,21 @@ function SurveyCard({
         </span>
         <ChevronDown size={14} className={`shrink-0 text-ink-muted transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
-      {open && <div className="flex flex-col gap-1.5 border-t border-line p-2.5">{children}</div>}
+      {open && <div className="flex flex-col divide-y divide-line border-t border-line px-2.5">{children}</div>}
     </div>
   );
 }
 
-/** Shared landscape row shell: label column left, control(s) fill the rest. Wraps on narrow screens, one compact line on desktop. */
+/**
+ * Shared landscape row shell: label column left, control(s) fill the rest.
+ * Wraps on narrow screens, one compact line on desktop. Borderless --
+ * SurveyCard's own `divide-y` gives each row exactly one shared line
+ * against its neighbour, rather than every row drawing its own 4-sided
+ * box (the previous look, which read as a dense grid of lines once a
+ * section had more than a couple of fields).
+ */
 function Row({ children }: { children: React.ReactNode }) {
-  return <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-line bg-surface px-2.5 py-1.5 sm:flex-nowrap">{children}</div>;
+  return <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-0.5 py-2.5 sm:flex-nowrap">{children}</div>;
 }
 
 function RowLabel({ label, source }: { label: string; source?: FieldSources[FieldSourceKey] }) {
@@ -930,7 +943,7 @@ function MiniFieldsRow({
   fields: { key: string; label: string; value: string; onChange: (v: string) => void; source?: FieldSources[FieldSourceKey] }[];
 }) {
   return (
-    <div className="flex flex-col rounded-lg border border-line bg-surface px-2.5 py-1.5">
+    <div className="flex flex-col px-0.5 py-2.5">
       <span className="mb-1 text-[11px] font-medium text-ink-secondary">{title}</span>
       <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
         {fields.map((fld) => (
