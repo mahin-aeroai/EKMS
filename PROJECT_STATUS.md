@@ -1,17 +1,22 @@
 # MMDI ONE — Project Status
 
-Last updated: 22 August 2026 (session: a separate Cowork chat, web-only —
-`apps/web` — building an entirely new surface, the Customer Portal
-(`/portal/*`, item 80). Distinct from, and non-overlapping with, both
-earlier sessions this file already describes: item 79's mobile Cost Sheet
-GP work (**still not confirmed on-device-rebuilt** — see that item) and
+Last updated: 31 August 2026 (session: a separate Cowork chat, web-only —
+`apps/web` — a UI/PDF refinement round on the **Site Survey Report
+Creator** tool, item 81 below. That tool's own original build (schema,
+milestones, editor stepper, PDF generation) happened across one or more
+earlier Cowork/Claude Code sessions that were never logged in this file —
+a real documentation gap, not a claim the tool doesn't exist; it is live
+and in daily use (see item 81 for what's actually confirmed about it).
+Distinct from, and non-overlapping with, every other session this file
+already describes: item 80's Customer Portal (**schema not yet run,
+nothing in it live — see item 80's own "not yet done" list**), item 79's
+mobile Cost Sheet GP work (**still not confirmed on-device-rebuilt**), and
 items 73-78's BOM Master work (**`supabase-bom-template-line-
 alternatives-dedupe-migration.sql` and `supabase-bom-templates-sort-
-order-migration.sql` still not confirmed run**). Neither of those is
-touched by this session — see item 80 below for what actually changed,
-and OPERATIONS.md section 8 for the exact setup checklist to bring the
-Customer Portal live (nothing in it is live yet — see item 80's own
-"not yet done" list).
+order-migration.sql` still not confirmed run**). None of those is touched
+by this session. **Start with item 81's own "Next up" list below** for
+where this specific work left off — the mid-file "Next up" section
+further down is stale (it's about the Cost Sheet items, 73-78).
 
 This file exists so a new chat session (or a new contributor) can pick up this
 project without re-deriving context. Read this before making changes.
@@ -2612,3 +2617,155 @@ order:
       "impersonate this customer" preview mode, just their own admin
       session on the same pages a customer sees; failed/refunded payments
       are a manual reconciliation today, not a built flow.
+
+81. **Site Survey Report Creator — UI/PDF refinement round, plus a real
+    Vercel Preview-environment deployment fix.** Branch
+    `portal-customer-ordering-site` (same branch item 80's Customer Portal
+    work sat on — the branch name is a holdover from that earlier work and
+    does NOT reflect what this round actually touched; nothing in this
+    item changed anything portal-related). This tool itself (the
+    Site-Survey counterpart to the existing Installation Report Creator —
+    upload or manually fill a site survey, step through Complete
+    Details/Photos/Measurements/Preview/Generate, export a PDF matching
+    Apple's own Site Inspection Report format) was already fully built and
+    in real use before this session started (confirmed via the Vercel
+    deployments list: 15+ prior "Site Survey Report..." commits already
+    deployed to Production going back over a day) — but no earlier session
+    ever added an entry for it to this file. That gap is not closed by
+    this entry either: this item covers only what THIS round actually did,
+    not the tool's original build.
+    - **UI feedback, all scoped to `/workspaces/site-survey-report/*`
+      only** (confirmed via a clarifying question — explicitly NOT applied
+      app-wide):
+      - Font: new `apps/web/src/app/workspaces/site-survey-report/
+        layout.tsx` scopes `Roboto_Condensed` (via `next/font/google`) to
+        just this tool's route subtree, on top of the app's existing
+        global Roboto — a nested-layout pattern with no prior precedent
+        elsewhere in this app. Could not be visually verified in-sandbox
+        (no network access to Google Fonts here; silently falls back to a
+        system font locally, works correctly once built on Vercel, which
+        does have network access).
+      - Text size bumped one step throughout `ReportFormFields.tsx`
+        (`text-[10px]`→`text-[11px]`, `text-[11px]`→`text-[12px]`,
+        `text-xs`→`text-[13px]`, 18 replacements).
+      - Card corner radius reduced (`rounded-[20px]`→`rounded-2xl` on
+        `SurveyCard`).
+      - Per-section color theming added: `SECTION_COLOR_CLASSES` in
+        `ReportFormFields.tsx` gained `headerBg`/`headerBorder` (pale
+        tinted header band + matching border) alongside the pre-existing
+        `chipBg`/`chipText` (now solid-colored instead of tinted, for
+        contrast against the newly-tinted header). Uses this app's
+        existing `--primary/--info/--success/--warning/--danger/--ai`
+        design tokens — reused the existing "ai" (purple) token for
+        Deliveries rather than inventing a new color, since that token is
+        otherwise reserved app-wide for AI-related UI (Copilot, AI
+        Knowledge) and there was a real question about whether reusing it
+        here would blur that meaning; judged acceptable since this is a
+        section-color palette, not an "AI-generated" indicator.
+      - Field-confirmation checkmark color changed from green
+        (`text-success`) to blue (`text-info`) in `FieldIndicator.tsx`,
+        deliberately NOT purple/`text-ai` (reserved for AI surfaces, see
+        above) — user's original ask was "blue or flashy purple," blue was
+        chosen for that reason.
+      - Photo card width increased in `PhotosStep.tsx`: first pass used
+        `w-40` (the literal "+25%" requested), but empirical testing
+        against the actual longest category label ("Site Orientation —
+        Opposite") showed it still wrapped to two lines — widened further
+        to `w-56` based on what the label actually needs, not the literal
+        percentage figure (documented in-code).
+      - PDF font reverted: `pdfBuild.ts`, `SiteSurveyReportEditorClient.tsx`,
+        `SiteSurveyReportsListClient.tsx` — removed all Apple SD Gothic
+        Neo usage from the Inspection Details PDF pages (a prior session's
+        change the user disliked — "SD gothic is not nice"), back to SF
+        Pro Text throughout, size/color/weight preserved. The
+        Gothic-Neo-fetching R2 route/helper function was deliberately left
+        in place, just unused, since the font bytes are already uploaded
+        to R2 — not worth ripping out for a revert that could get asked
+        for again.
+    - Delivered as `site-survey-theme-refresh.bundle` (commits `8d3a248`,
+      `02751bc`) — the user hit the same recurring bundle-apply mistake as
+      past sessions (`git pull <bundle> <branch-name>` instead of `git pull
+      <bundle> HEAD`, since a bundle's ref is always literally `HEAD`, not
+      the branch name it was cut from — see OPERATIONS.md section 2, worth
+      re-reading before the next bundle handoff since this keeps recurring
+      across sessions). Corrected, then applied and pushed cleanly to
+      `origin/portal-customer-ordering-site` at `02751bc`.
+    - **A real, unrelated production-config gap was found and fixed along
+      the way**: the Preview deployment 500'd on every request
+      (`MIDDLEWARE_INVOCATION_FAILED`) because `NEXT_PUBLIC_SUPABASE_URL`
+      and `NEXT_PUBLIC_SUPABASE_ANON_KEY` were scoped to Production only in
+      Vercel, never Preview — `src/lib/supabase-middleware.ts` constructs
+      its Supabase client with `?? ""` fallbacks, so a missing value
+      crashes client construction on literally every request, not just
+      auth-related ones. Not caused by anything in this round's code.
+      - **New operational finding, worth knowing for any future session**:
+        this Vercel project has a team/account policy that locks new
+        environment variables to Type "Secret" in the dashboard UI — the
+        "Config" radio option is disabled even for a brand-new variable,
+        not just an already-saved one as the dashboard's own tooltip
+        implies. A `NEXT_PUBLIC_`-prefixed variable saved as Type "Secret"
+        then hits a hard validation blocker on Save ("Remove the public
+        framework prefix... If that's safe, change the variable to
+        Config") that cannot be dismissed from the dashboard. The
+        Vercel CLI does NOT have this restriction — `vercel env add
+        <NAME>` prompts interactively and, for a `NEXT_PUBLIC_`-prefixed
+        name, offers a real 3-way choice ("Keep private: rename and use
+        Secret" / "Expose to anyone visiting your site: keep `<NAME>` as
+        Config" / "Enter a different value") — picking the second option
+        saves it as Config with the name intact, no dashboard blocker.
+        This is now the established path for adding any `NEXT_PUBLIC_*`
+        env var to this project — see OPERATIONS.md section 3 for the
+        exact command sequence, added there this session.
+      - Fixed via CLI (`vercel env add NEXT_PUBLIC_SUPABASE_URL` /
+        `NEXT_PUBLIC_SUPABASE_ANON_KEY`, both added as Type Config,
+        scoped to Preview, all branches) after one false start (a first
+        attempt at `NEXT_PUBLIC_SUPABASE_URL` was accidentally saved
+        renamed to plain `SUPABASE_URL`/Secret by picking the wrong CLI
+        menu option — caught, removed with `vercel env rm SUPABASE_URL
+        preview`, redone correctly). Confirmed via `vercel env ls`: both
+        vars now show Type Config, Environment Preview, alongside the
+        pre-existing Production-only Secret entries for the same two
+        names (both entries coexist without conflict — Vercel picks the
+        one matching the deployment's own environment).
+      - The `02751bc` Preview deployment was then redeployed (Vercel
+        dashboard → ⋯ → Redeploy) to pick up the new env vars — confirmed
+        the middleware crash is gone (the report editor now loads).
+    - **Not yet confirmed as of this handoff**: whether the actual visual
+      fixes (blue checkmarks, per-section header tinting, reduced card
+      radius, wider photo cards, SF Pro on the Inspection Details PDF
+      pages) render correctly on the now-working preview. Every check so
+      far in this session accidentally landed on `app.mmdi.in`
+      (**Production** — this branch's work was never merged there) rather
+      than the actual preview URL, so nothing about the visual fixes has
+      actually been confirmed yet, only that the deployment itself no
+      longer crashes. The real preview URL for this deployment is
+      `https://ekms-r9w6k3hat-mahin-aeroais-projects.vercel.app` (or the
+      branch-tracking alias `ekms-git-portal-customer-ordering-site-
+      mahin-aeroais-projects.vercel.app` — both are gated behind Vercel's
+      own login/SSO for anyone without dashboard access, including this
+      session's own browser-automation tools, which could not get past
+      that wall). User was mid-navigation to the "Vijay Sales @ Marthalli
+      - Bangalore" report's Complete Details screen on that URL, logged in
+      via the correct link, when this session ended.
+    - Nothing in this item has been merged to `main`/Production
+      (`app.mmdi.in`) yet — still sits on `portal-customer-ordering-site`
+      only. A PR link was previously surfaced by Vercel:
+      `https://github.com/mahin-aeroai/EKMS/pull/new/portal-customer-ordering-site`.
+
+    **Next up (start here)**:
+    1. Confirm the visual fixes on the real preview URL above (blue
+       checkmarks, tinted section headers, reduced radius, wider photo
+       cards) — this was the very next step when the session ended, not
+       yet done.
+    2. Generate a PDF from the editor's Generate step on that same preview
+       and confirm the Inspection Details pages render in SF Pro Text, not
+       Apple SD Gothic Neo — the code change is done and pushed but has
+       never actually been visually checked in a generated PDF.
+    3. Once both are confirmed, merge `portal-customer-ordering-site` into
+       `main` (the PR link above) to ship this to Production/`app.mmdi.in`
+       — not done yet, and not something to do before the visual checks
+       above, in case anything needs another round of fixes first.
+    4. Longer-term hygiene, not blocking: consider renaming this branch (or
+       starting the next round of work on a fresh one) now that it no
+       longer has anything to do with the Customer Portal — the current
+       name is actively misleading about what's on it.

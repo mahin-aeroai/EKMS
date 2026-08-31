@@ -104,6 +104,25 @@ After step 2, macOS remembers it — you won't be prompted again unless the toke
   - `ANTHROPIC_API_KEY` (server-only — powers the AI Copilot's `/api/ai-copilot` route; the app returns a clean 503 if it's missing rather than crashing)
   - Google OAuth client ID/secret (Gmail search/draft feature)
 - **Verifying a deploy:** Vercel dashboard → Deployments tab shows build status per commit. If a build fails, check the log there first — `next build` runs cleanly in Vercel's environment even though some AI sandboxes hit an ARM64 "Bus error" on `@next/swc-linux-*` that's specific to the sandbox, not the code.
+- **A Preview deployment can crash on every request with `MIDDLEWARE_INVOCATION_FAILED` / "This Routing Middleware has crashed"** even when the build itself succeeded. Cause, confirmed 31 Aug 2026: `src/lib/supabase-middleware.ts` builds its Supabase client from `process.env.NEXT_PUBLIC_SUPABASE_URL ?? ""` / `...ANON_KEY ?? ""` — if either var is scoped to Production only (not Preview) in Vercel, every Preview request crashes the client construction before anything else runs. Check Project → Environment Variables → each var's "Environments" column covers Preview, not just Production.
+- **Adding a `NEXT_PUBLIC_*` env var via the Vercel dashboard can get permanently stuck.** This project has a team/account policy that locks a new variable's Type to "Secret" in the dashboard UI (the "Config" radio option shows disabled even for a brand-new, never-saved variable — not just an already-saved one, despite what the dashboard's own tooltip implies). A `NEXT_PUBLIC_`-prefixed var saved as Secret then hits a hard, un-dismissable validation blocker on Save ("Remove the public framework prefix... If that's safe, change the variable to Config"). **Fix: use the Vercel CLI instead, which doesn't have this restriction:**
+  ```bash
+  npm i -g vercel                 # once, if not already installed
+  cd apps/web                     # the actual Vercel project root, not the repo root
+  vercel link                     # once per machine, links this checkout to the EKMS project
+  vercel env add NEXT_PUBLIC_SUPABASE_URL
+  # prompts: Value? -> paste it
+  # prompts: Environments? -> select Preview (and/or Production) with spacebar
+  # prompts: Git branch? -> leave blank (Enter) to apply to all branches of that environment
+  # prompts (NEXT_PUBLIC_* only): "How should this variable be stored?"
+  #   -> pick "Expose to anyone visiting your site: keep <NAME> as Config"
+  #      (NOT the first option, "rename to <NAME-without-prefix> and use Secret" —
+  #      that silently renames the var, which breaks any code reading the
+  #      NEXT_PUBLIC_-prefixed name; use `vercel env rm <wrong-name> <env>` to
+  #      undo if this happens, then re-add correctly)
+  ```
+  Verify with `vercel env ls` — look for the var listed with Type `Config` and the environment(s) you selected. A Production-scoped Secret entry for the same name can coexist with a Preview-scoped Config entry for it without conflict; Vercel picks whichever matches the deployment's own environment.
+- **Env var changes never apply to an already-built deployment.** After adding/fixing a var, use Deployments → the deployment's `⋯` menu → **Redeploy** to pick up the change — pushing a new commit isn't required.
 
 ---
 
