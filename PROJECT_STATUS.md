@@ -1,5 +1,10 @@
 # MMDI ONE — Project Status
 
+Last updated: 1 September 2026 (item 81's round merged to Production and
+survived a same-day deployment incident — see item 81's update and
+OPERATIONS.md section 3a. Header below otherwise unchanged from the
+31 August entry.)
+
 Last updated: 31 August 2026 (session: a separate Cowork chat, web-only —
 `apps/web` — a UI/PDF refinement round on the **Site Survey Report
 Creator** tool, item 81 below. That tool's own original build (schema,
@@ -2730,42 +2735,46 @@ order:
       - The `02751bc` Preview deployment was then redeployed (Vercel
         dashboard → ⋯ → Redeploy) to pick up the new env vars — confirmed
         the middleware crash is gone (the report editor now loads).
-    - **Not yet confirmed as of this handoff**: whether the actual visual
-      fixes (blue checkmarks, per-section header tinting, reduced card
-      radius, wider photo cards, SF Pro on the Inspection Details PDF
-      pages) render correctly on the now-working preview. Every check so
-      far in this session accidentally landed on `app.mmdi.in`
-      (**Production** — this branch's work was never merged there) rather
-      than the actual preview URL, so nothing about the visual fixes has
-      actually been confirmed yet, only that the deployment itself no
-      longer crashes. The real preview URL for this deployment is
-      `https://ekms-r9w6k3hat-mahin-aeroais-projects.vercel.app` (or the
-      branch-tracking alias `ekms-git-portal-customer-ordering-site-
-      mahin-aeroais-projects.vercel.app` — both are gated behind Vercel's
-      own login/SSO for anyone without dashboard access, including this
-      session's own browser-automation tools, which could not get past
-      that wall). User was mid-navigation to the "Vijay Sales @ Marthalli
-      - Bangalore" report's Complete Details screen on that URL, logged in
-      via the correct link, when this session ended.
-    - Nothing in this item has been merged to `main`/Production
-      (`app.mmdi.in`) yet — still sits on `portal-customer-ordering-site`
-      only. A PR link was previously surfaced by Vercel:
-      `https://github.com/mahin-aeroai/EKMS/pull/new/portal-customer-ordering-site`.
+    - **UPDATE, 1 Sept 2026 — merged to Production, then a real deployment
+      incident, now resolved.** `portal-customer-ordering-site` was merged
+      into `main` via PR #57 (`ba9f3f1`), followed by a further merge commit
+      (`0993896`) and two small unrelated auth-flow fixes (`d952936`,
+      `388661c`, "Fix LFG/Portal/staff invite & reset links"). This item's
+      own visual fixes (blue checkmarks, per-section header tinting,
+      reduced card radius, wider photo cards) were never explicitly
+      re-confirmed screenshot-by-screenshot in chat after merging, but the
+      code is live in Production as of this update — the PDF font check
+      (SF Pro vs Gothic Neo on the Inspection Details pages) specifically
+      is still unconfirmed, see "Next up" below.
+    - **A real production incident happened right after merging, unrelated
+      to this item's own code** — see OPERATIONS.md section 3a for the
+      full writeup. Short version: `app.mmdi.in` briefly served a
+      months-old build (missing the Home/Tools/LFG Connect nav entirely)
+      because a deploy run from a stale local machine overwrote Production
+      with old code, while the real latest `main` commit sat stuck
+      **Blocked**. Fixed by promoting the last-known-good deployment back
+      to Production via Vercel's dashboard — confirmed working again via a
+      fresh Private Browsing check. Root cause of the Blocked status
+      itself (possibly related to the GitHub repo being briefly toggled
+      private→public around the same time) was not fully confirmed — worth
+      a look at Project Settings → Git if deploys start landing Blocked
+      again.
 
     **Next up (start here)**:
-    1. Confirm the visual fixes on the real preview URL above (blue
-       checkmarks, tinted section headers, reduced radius, wider photo
-       cards) — this was the very next step when the session ended, not
-       yet done.
-    2. Generate a PDF from the editor's Generate step on that same preview
-       and confirm the Inspection Details pages render in SF Pro Text, not
-       Apple SD Gothic Neo — the code change is done and pushed but has
-       never actually been visually checked in a generated PDF.
-    3. Once both are confirmed, merge `portal-customer-ordering-site` into
-       `main` (the PR link above) to ship this to Production/`app.mmdi.in`
-       — not done yet, and not something to do before the visual checks
-       above, in case anything needs another round of fixes first.
-    4. Longer-term hygiene, not blocking: consider renaming this branch (or
+    1. Generate a PDF from the editor's Generate step in Production and
+       confirm the Inspection Details pages render in SF Pro Text, not
+       Apple SD Gothic Neo — the code change is live but has never actually
+       been visually checked in a generated PDF.
+    2. Spot-check the other visual fixes on a real report in Production
+       (blue checkmarks, tinted section headers, reduced card radius, wider
+       photo cards) — likely fine since the code is live and the site is
+       confirmed otherwise working, but never explicitly re-confirmed after
+       the merge + incident above.
+    3. Longer-term hygiene, not blocking: consider renaming this branch (or
        starting the next round of work on a fresh one) now that it no
        longer has anything to do with the Customer Portal — the current
        name is actively misleading about what's on it.
+    4. Also not blocking: double-check every local machine's EKMS clone is
+       up to date with `origin/main` before it's ever used for a manual
+       `vercel` deploy again — see OPERATIONS.md section 3a for exactly why
+       this matters now.

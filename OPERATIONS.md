@@ -124,6 +124,20 @@ After step 2, macOS remembers it — you won't be prompted again unless the toke
   Verify with `vercel env ls` — look for the var listed with Type `Config` and the environment(s) you selected. A Production-scoped Secret entry for the same name can coexist with a Preview-scoped Config entry for it without conflict; Vercel picks whichever matches the deployment's own environment.
 - **Env var changes never apply to an already-built deployment.** After adding/fixing a var, use Deployments → the deployment's `⋯` menu → **Redeploy** to pick up the change — pushing a new commit isn't required.
 
+### 3a. Incident, 1 Sept 2026 — Production silently rolled back to a months-old build
+
+**Symptom:** `app.mmdi.in` was missing entire nav sections that had existed for a long time (Home, Tools, LFG Connect) and instead showed the old "Design System Home/Foundations/Components" sidebar — a layout that predates a nav rewrite from long before this date. Confirmed it wasn't a browser/cache issue (reproduced in a fresh Private Browsing window with zero prior state for the site).
+
+**Root cause, pieced together from the Deployments list:** the real latest `main` commit (a merge of the day's work) showed status **Blocked** and never went live. Instead, the deployment actually serving Production was a genuinely old commit from long before the nav rewrite — its build had been (re-)deployed and promoted to Production, overwriting everything newer. Best working theory: a `vercel --prod` (or equivalent) deploy was run from a **stale local clone on a different machine** that hadn't been kept in sync with GitHub — deploying whatever old code was sitting in that folder straight to Production, bypassing `main`'s real state entirely. (Separately, the GitHub repo had also briefly been toggled private→public around this time, which may have disrupted Vercel's GitHub App connection and contributed to the real latest commit landing Blocked instead of deploying normally — not confirmed as the definite cause, but worth checking Project Settings → Git if this recurs.)
+
+**Fix used:** in Vercel → Deployments, found the last known-good deployment (the one confirmed to have the correct nav/features, from before the bad deploy) and used **Promote to Production** on it directly — no rebuild needed, just re-pointing which existing build serves traffic. Confirmed fixed via a fresh Private Browsing check at `app.mmdi.in`.
+
+**Lessons for next time:**
+- **Never run `vercel`/`vercel --prod` from a local clone you haven't just confirmed is up to date** (`git log -1` compared against `git log -1 origin/main` after a fresh fetch). A CLI deploy ships exactly what's in that folder, git history or no — it can silently roll Production back to something ancient. Prefer letting `git push` to `main` trigger the normal GitHub-integration deploy instead of a manual CLI deploy, unless you've just verified the local folder's state.
+- **A "Blocked" deployment status is a red flag, not a quiet failure** — it means the actual latest commit did NOT go live, so whatever WAS serving Production before it is still there (or, worse, something else got promoted in its place). Always check what's actually live (the blue "Production" badge in the Deployments list) after any deploy, not just whether the newest commit built successfully.
+- **The fastest recovery from a bad Production deploy is `⋯` → Promote to Production on the last-known-good deployment row** — it's instant (no rebuild) and doesn't require figuring out the root cause first. Root-cause it after the site is back up, not before.
+- If toggling a GitHub repo's visibility (private ↔ public) is ever needed again, check Vercel → Project Settings → Git immediately after to confirm the connection is still healthy, before assuming the next push will deploy normally.
+
 ---
 
 ## 4. Supabase — database
