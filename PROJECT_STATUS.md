@@ -2809,7 +2809,7 @@ order:
       this codebase was wrong.
     - **Fix**: stop depending on the single-use link being clicked exactly
       once by exactly the right party. Supabase's `verifyOtp()` accepts the
-      same plain 6-digit code the email's `{{ .Token }}` template variable
+      same plain code the email's `{{ .Token }}` template variable
       already carries — typing that in by hand can't be prefetched or
       scanned, since nothing but a human "clicks" a text field. All three
       login pages (`src/app/login/page.tsx`, `src/app/lfg/login/page.tsx`,
@@ -2835,13 +2835,42 @@ order:
       this from actually working**: the "Reset Password" and "Invite user"
       email templates in Supabase must be edited to actually show
       `{{ .Token }}` in the email body. Supabase's default templates only
-      render the `{{ .ConfirmationURL }}` link — the 6-digit code is
+      render the `{{ .ConfirmationURL }}` link — the code is
       generated either way, but never appears in the email unless the
       template is edited to print it. See OPERATIONS.md section 4a for the
       exact snippet to add to each template. **Nothing in this item works
       end-to-end until that dashboard edit is made.**
-    - **Not yet tested end-to-end**: no real code-entry attempt has been
-      confirmed working yet — this needs the template edit above first,
-      then a real "Forgot password" → code → set-password round trip on
-      `lfgconnect.mmdi.in` to close this out.
-    - Delivered as `lfg-otp-code-reset.bundle`.
+    - **Tested against `lfgconnect.mmdi.in`, 1 Sept 2026 — a real bug found
+      and fixed during the test; full round trip not yet reconfirmed after
+      the fix.** The template edit (section 4a) was made in Supabase;
+      sending the reset email revealed two more things:
+      - **The email itself was slow to arrive** (several minutes) — traced
+        to `smtp.gmail.com` being used as the custom SMTP provider, which
+        Supabase's own dashboard flags with a warning ("designed for
+        sending personal rather than transactional email... deliverability
+        may be impacted"). Not a code issue, and not fixed here — Gmail
+        SMTP works but isn't reliable for this, and it's still the SMTP
+        provider in use. **Recommended next step, not yet done:** swap to
+        a real transactional provider (Resend/Postmark/Brevo/SendGrid all
+        have a usable free tier).
+      - **A real bug this round introduced**: the code input fields
+        (`maxLength={6}` and every `.slice(0, 6)` on the recovery/invite
+        code state) assumed Supabase's `{{ .Token }}` is always 6 digits —
+        it's actually 8 digits on this project. The field was silently
+        truncating whatever was typed to 6 characters, so no code could
+        ever verify. Fixed: `maxLength={8}`, `.slice(0, 8)`, and the
+        submit-button guard loosened from `code.length !== 6` to
+        `code.length < 6` (accepts 6-8 so it isn't newly brittle if
+        Supabase's token length ever changes again) — same change applied
+        identically to all three files' recovery-code and invite-code
+        inputs. The MFA authenticator-code input (a separate, genuinely
+        6-digit TOTP system, staff login only) was deliberately left
+        untouched. User-facing copy that said "6-digit code" was also
+        loosened to just "code" for the same reason. `tsc --noEmit` and
+        `eslint` clean after the fix.
+    - **Not yet re-tested after the digit-length fix above** — this bundle
+      needs to be applied/pushed/deployed, then a fresh "Forgot password"
+      → code entry → set-password round trip run on `lfgconnect.mmdi.in`
+      to actually confirm the fix closes this out.
+    - Delivered as `lfg-otp-code-reset.bundle`, fixup delivered as
+      `lfg-otp-code-length-fix.bundle`.

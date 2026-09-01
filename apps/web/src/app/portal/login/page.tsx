@@ -50,7 +50,7 @@ function PortalLoginForm() {
   // from a link on the plain sign-in screen instead of via the hash.
   const [showInviteCode, setShowInviteCode] = useState(false);
   const [code, setCode] = useState("");
-  // True once a typed 6-digit code (recovery or invite) has been verified
+  // True once a typed code (recovery or invite) has been verified
   // via handleVerifyCode below and a real session established that way,
   // as opposed to via the emailed link's hash tokens (mode === "set-
   // password"). Both paths land on the same set-password form -- see
@@ -155,7 +155,7 @@ function PortalLoginForm() {
     setResetSent(true);
   }
 
-  // Verifies a 6-digit code typed in by hand instead of relying on the
+  // Verifies a code typed in by hand instead of relying on the
   // emailed link's one-time hash tokens. Added 1 Sep 2026: links kept
   // arriving "already used" (Supabase error otp_expired) even right after
   // sending, with no set-password screen ever showing -- something (a mail
@@ -290,7 +290,7 @@ function PortalLoginForm() {
           resetSent ? (
             <form onSubmit={handleVerifyCode} className="flex flex-col gap-4">
               <p className="text-sm text-ink-secondary">
-                We sent a 6-digit code to <span className="font-medium text-ink">{email}</span>. Enter it below —
+                We sent a code to <span className="font-medium text-ink">{email}</span>. Enter it below —
                 it&apos;s more reliable than the link in the same email, which some mail apps can open
                 automatically before you ever click it.
               </p>
@@ -304,17 +304,17 @@ function PortalLoginForm() {
                   inputMode="numeric"
                   autoComplete="one-time-code"
                   required
-                  maxLength={6}
+                  maxLength={8}
                   value={code}
-                  onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 8))}
                   className="rounded-md border border-line-strong bg-surface px-3 py-2 text-center text-lg tracking-[0.4em] text-ink focus:border-primary focus:outline-none"
-                  placeholder="000000"
+                  placeholder="00000000"
                 />
               </div>
               {error && (
                 <p className="rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">{error}</p>
               )}
-              <Button type="submit" loading={loading} className="mt-2" disabled={code.length !== 6}>
+              <Button type="submit" loading={loading} className="mt-2" disabled={code.length < 6}>
                 Verify code
               </Button>
               <button
@@ -379,7 +379,7 @@ function PortalLoginForm() {
         ) : showInviteCode ? (
           <form onSubmit={handleVerifyCode} className="flex flex-col gap-4">
             <p className="text-sm text-ink-secondary">
-              Enter the email your invite was sent to and the 6-digit code from that email.
+              Enter the email your invite was sent to and the code from that email.
             </p>
             <div className="flex flex-col gap-1.5">
               <label htmlFor="inviteCodeEmail" className="text-sm font-medium text-ink-secondary">
@@ -406,17 +406,17 @@ function PortalLoginForm() {
                 inputMode="numeric"
                 autoComplete="one-time-code"
                 required
-                maxLength={6}
+                maxLength={8}
                 value={code}
-                onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 8))}
                 className="rounded-md border border-line-strong bg-surface px-3 py-2 text-center text-lg tracking-[0.4em] text-ink focus:border-primary focus:outline-none"
-                placeholder="000000"
+                placeholder="00000000"
               />
             </div>
             {error && (
               <p className="rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">{error}</p>
             )}
-            <Button type="submit" loading={loading} className="mt-2" disabled={code.length !== 6 || !email}>
+            <Button type="submit" loading={loading} className="mt-2" disabled={code.length < 6 || !email}>
               Verify code
             </Button>
             <button
