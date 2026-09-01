@@ -207,6 +207,7 @@ export function getVisibleNav(role: UserRole | null, allowedGroups: string[] | n
 export function AppShell({
   children,
   onPortalHost = false,
+  onLfgHost = false,
 }: {
   children: React.ReactNode;
   /**
@@ -218,6 +219,23 @@ export function AppShell({
    * rather than toward accidentally hiding the internal app's own chrome.
    */
   onPortalHost?: boolean;
+  /**
+   * Same idea as onPortalHost, for lfgconnect.mmdi.in -- see RootLayout,
+   * which computes this via lfg-host-server.ts's getOnLfgHost(). Bug fixed
+   * here (1 Sept 2026): RootLayout has always unconditionally wrapped
+   * every route in <AppShell>, with onPortalHost as the one documented
+   * escape hatch -- when the LFG Connect partner surface was added later,
+   * mirroring the portal's own "completely separate, invite-only surface"
+   * treatment (see src/app/lfg/(app)/layout.tsx's header comment), nobody
+   * added the matching bypass here. The result: every LFG partner login
+   * saw the full internal 36-workspace sidebar (Job Orders, Production,
+   * Finance, Administration, ...) wrapped around their own compact LFG
+   * layout's content -- a real internal-navigation leak to an external
+   * account, caught live by an actual partner test login. Also defaults
+   * to false for the same fail-open-toward-existing-behavior reason as
+   * onPortalHost above.
+   */
+  onLfgHost?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -307,20 +325,29 @@ export function AppShell({
   // avatar menu in TopNav, not a workspace someone navigates to directly.
   const activeId = NAV.flatMap((s) => s.items).find((i) => i.href === pathname)?.id ?? "";
 
-  // The customer portal is a completely separate, compact surface with its
-  // own top bar (PortalTopBar) — it must never render wrapped in the
+  // The customer portal and the LFG Connect partner portal are both
+  // completely separate, compact surfaces with their own top bars
+  // (PortalTopBar / LfgTopBar) — neither must ever render wrapped in the
   // internal 36-workspace sidebar. Three ways a request can land here as a
-  // portal page, all needing the same bypass:
-  //  - portal.mmdi.in's own bare paths (any path at all — the middleware
-  //    rewrite that gives this host clean URLs is invisible to
-  //    usePathname(), so onPortalHost, computed server-side from the
-  //    actual Host header, is the only way to know)
-  //  - /portal/* on another host (app.mmdi.in during the transition
-  //    window, ekms.vercel.app, a Vercel preview) — staff previewing
-  //    exactly what a customer sees, or a not-yet-canonicalized old link
-  //  - /login and /portal/login, the two sign-in pages, which already
-  //    render their own full-page layout
-  if (onPortalHost || pathname.startsWith("/portal") || pathname === "/login") {
+  // portal (or LFG) page, all needing the same bypass:
+  //  - portal.mmdi.in's / lfgconnect.mmdi.in's own bare paths (any path at
+  //    all — the middleware rewrite that gives these hosts clean URLs is
+  //    invisible to usePathname(), so onPortalHost/onLfgHost, computed
+  //    server-side from the actual Host header, is the only way to know)
+  //  - /portal/* or /lfg/* on another host (app.mmdi.in during the
+  //    transition window, ekms.vercel.app, a Vercel preview) — staff
+  //    previewing exactly what a customer/partner sees, or a
+  //    not-yet-canonicalized old link
+  //  - /login, the shared staff sign-in page, which already renders its
+  //    own full-page layout (/portal/login and /lfg/login are covered by
+  //    the startsWith checks below)
+  if (
+    onPortalHost ||
+    onLfgHost ||
+    pathname.startsWith("/portal") ||
+    pathname.startsWith("/lfg") ||
+    pathname === "/login"
+  ) {
     return <>{children}</>;
   }
 

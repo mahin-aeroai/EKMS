@@ -2908,3 +2908,57 @@ order:
       `lfg-otp-code-length-fix.bundle`. The link-removal and SMTP-provider
       changes were both made directly in the Supabase/Resend dashboards —
       no further code bundle needed for those.
+
+83. **Security: LFG Connect partner logins saw the full internal
+    36-workspace admin sidebar — found live testing item 82, fixed
+    same day (1 Sept 2026).** Reported directly by Srinivas testing a
+    partner login on `lfgconnect.mmdi.in`: after signing in, the page
+    showed the LFG-specific "Your Sites" content correctly, but wrapped
+    in MMDI ONE's entire internal sidebar — Job Orders, Production,
+    Machines, Materials, Inventory, Procurement, Suppliers, Costing,
+    People, Finance, Compliance, Administration, all of it, alongside
+    the LFG content rather than in place of the intended compact
+    LFG-only chrome.
+    - **Root cause**: `src/app/layout.tsx` (`RootLayout`) unconditionally
+      wraps every route in `<AppShell>`. The one documented escape hatch
+      was `onPortalHost` (computed server-side from the `Host` header,
+      passed down so AppShell renders bare `{children}` with no sidebar
+      on `portal.mmdi.in`) — added when the Customer Portal was built.
+      When the LFG Connect partner portal was added later as the same
+      kind of "completely separate, invite-only surface" (see
+      `src/app/lfg/(app)/layout.tsx`'s own header comment, which already
+      says exactly that), nobody added the matching `onLfgHost` bypass.
+      A helper for it (`lfg-host-server.ts`'s `getOnLfgHost()`) already
+      existed in the codebase — it was just never actually wired into
+      `RootLayout` or `AppShell`. Every `/lfg/*` request fell through to
+      AppShell's default internal-chrome path.
+    - **Scope**: this is a navigation/UI leak, not a confirmed data leak
+      — the actual pages behind those internal sidebar links still sit
+      behind this app's normal role-based RLS, which is a separate
+      question from what's fixed here. But an external partner account
+      seeing the internal app's full structure and labels at all is a
+      real problem on its own, and it's not verified here whether every
+      individual internal page also independently guards against a
+      non-staff role before rendering its own content — worth a
+      follow-up pass if time allows, now that the obvious way to reach
+      them (the sidebar itself) is gone for LFG accounts.
+    - **Fix**: mirrored the existing `onPortalHost` treatment for LFG,
+      end to end:
+      - `AppShell.tsx`: new `onLfgHost` prop; the early-return that skips
+        internal chrome now also fires on `onLfgHost` or any
+        `/lfg`-prefixed pathname (previously only `onPortalHost` /
+        `/portal` / `/login`).
+      - `layout.tsx`: `RootLayout` now also calls `getOnLfgHost()` and
+        passes `onLfgHost` to `AppShell`; the PWA-install branding gate
+        (manifest/appleWebApp metadata, `InstallPrompt`/`IosInstallHint`,
+        `ServiceWorkerRegister`'s unregister-only mode) that previously
+        only checked `onPortalHost` now checks `onPortalHost || onLfgHost`
+        — an LFG partner was getting the same stray "Install MMDI ONE"
+        native browser prompt a customer would have, before this fix.
+      - `npx tsc --noEmit` and `npx eslint` on both changed files: clean.
+    - **Not yet re-tested against `lfgconnect.mmdi.in` after this fix** —
+      needs the same partner-login round trip as item 82 (sign in on
+      `lfgconnect.mmdi.in`, confirm the compact LFG top bar and content
+      render with no internal sidebar at all) to actually confirm this
+      closes it out.
+    - Delivered as `lfg-appshell-host-leak-fix.bundle`.
