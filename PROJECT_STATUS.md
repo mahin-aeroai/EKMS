@@ -2868,9 +2868,43 @@ order:
         untouched. User-facing copy that said "6-digit code" was also
         loosened to just "code" for the same reason. `tsc --noEmit` and
         `eslint` clean after the fix.
-    - **Not yet re-tested after the digit-length fix above** — this bundle
-      needs to be applied/pushed/deployed, then a fresh "Forgot password"
-      → code entry → set-password round trip run on `lfgconnect.mmdi.in`
-      to actually confirm the fix closes this out.
+    - **SMTP provider swapped from Gmail to Resend — done, not just
+      recommended.** Gmail's inconsistent delivery timing (instant some
+      sends, several minutes on others) was traced to `smtp.gmail.com`
+      being unsuited for automated transactional mail (per Supabase's own
+      dashboard warning above), not to any app-side rate limiting or
+      config. Signed up for Resend under `srinivas@mmdi.in`, added and
+      fully DNS-verified the `mmdi.in` sending domain (DKIM, MX, SPF all
+      green), and pointed Supabase's SMTP Settings at `smtp.resend.com`
+      (port 465, username `resend`, password = Resend API key; sender
+      address kept as `noreply@mmdi.in`). This is config-only, entirely in
+      Supabase/Resend's dashboards — no app code involved.
+    - **Second real bug found post-fix, now also resolved: the emailed
+      link was still silently invalidating the code.** Even after the
+      digit-length fix and the Resend swap, a guaranteed-fresh, single,
+      correctly-typed 8-digit code still failed with "Token has expired or
+      is invalid" — confirmed by cross-checking the inbox (exactly one
+      email, the code entered matched it exactly, so this wasn't stale
+      test data). Root cause: Supabase's `{{ .ConfirmationURL }}` link and
+      `{{ .Token }}` code are two representations of the *same* single-use
+      token record — consuming either one invalidates both. The original
+      `otp_expired` symptom that started this whole item (something
+      auto-visiting the link before the user's real click, most likely
+      automated link-scanning on the recipient's corporate mail system)
+      was still happening in the background on every send, silently
+      burning the token before the code could ever be used — the digit
+      fix and SMTP swap were both real, worthwhile fixes, but neither
+      touched this. **Fix**: removed the `{{ .ConfirmationURL }}` link
+      entirely from both the "Reset Password" and "Invite user" templates
+      in Supabase, leaving only the `{{ .Token }}` line — since the app no
+      longer depends on the link being clicked at all, it doesn't need to
+      be in the email, and as long as it was there anything that
+      auto-visits links kept quietly invalidating the code too.
+    - **Confirmed working end-to-end, 1 Sept 2026**: fresh "Forgot
+      password" → link-free email → code entered immediately → password
+      reset → successful sign-in on `lfgconnect.mmdi.in`. This item is
+      closed.
     - Delivered as `lfg-otp-code-reset.bundle`, fixup delivered as
-      `lfg-otp-code-length-fix.bundle`.
+      `lfg-otp-code-length-fix.bundle`. The link-removal and SMTP-provider
+      changes were both made directly in the Supabase/Resend dashboards —
+      no further code bundle needed for those.

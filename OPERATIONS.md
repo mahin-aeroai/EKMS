@@ -148,24 +148,26 @@ After step 2, macOS remembers it — you won't be prompted again unless the toke
 - **Before writing any migration:** validate it against a real local Postgres if at all possible (this project has used `@electric-sql/pglite` for that in AI sandbox sessions — no Docker/root needed) rather than trusting it untested against production.
 - **Backups:** free tier, no point-in-time recovery — take an explicit `create table ... as select * from ...` snapshot before any UPDATE/DELETE migration that touches real data.
 
-### 4a. Email templates must show `{{ .Token }}` — required for the OTP-code login flow to work (1 Sept 2026)
+### 4a. Email templates: show `{{ .Token }}` and, critically, remove `{{ .ConfirmationURL }}` entirely — required for the OTP-code login flow to actually work (1 Sept 2026, updated same day)
 
-`/login`, `/lfg/login`, and `/portal/login` now offer a code alternative to the emailed invite/reset link (see PROJECT_STATUS.md item 82) — added because single-use links kept arriving already-consumed (Supabase error `otp_expired`) before the real user ever clicked them, most likely due to a mail app or security scanner silently pre-visiting the link. A typed code isn't clickable, so nothing but a human can consume it.
+`/login`, `/lfg/login`, and `/portal/login` now offer a code alternative to the emailed invite/reset link (see PROJECT_STATUS.md item 82) — added because single-use links kept arriving already-consumed (Supabase error `otp_expired`) before the real user ever clicked them, most likely due to a mail app or security scanner silently pre-visiting the link. A typed code isn't clickable, so nothing but a human can consume it — **but only if the link isn't in the email at all.**
 
-**This only works once the email templates actually print the code.** Supabase generates `{{ .Token }}` for every email type regardless, but the default templates never render it — they only show the `{{ .ConfirmationURL }}` button. Without this step, the code-entry screens in the app will have nothing for the user to type in.
+**Important, learned the hard way**: Supabase's `{{ .ConfirmationURL }}` link and `{{ .Token }}` code are two representations of the *same* single-use token record — consuming either one invalidates both. Leaving the link in "as a fallback" alongside the code (the original guidance here) does not work: whatever silently pre-visits the link keeps doing so on every send, burning the token before the code can ever be used, even though the code renders correctly in the email and the app is otherwise doing everything right. The fix is to remove the link, not keep it alongside the code.
 
-Do this once, in Supabase Dashboard → **Authentication → Email Templates**:
+Do this once, in Supabase Dashboard → **Authentication → Emails**:
 
-1. Open **Reset Password**. Add a line showing the code, e.g. right after the existing "Reset Password" button:
+1. Open **Reset Password**. Delete the "Reset Password" button/link (`{{ .ConfirmationURL }}`) entirely. Leave only:
    ```html
    <p>Or enter this code on the reset page: <strong>{{ .Token }}</strong></p>
    ```
-2. Open **Invite user**. Add the same style of line after its existing "Accept the invite" button:
+2. Open **Invite user**. Delete the "Accept the invite" button/link (`{{ .ConfirmationURL }}`) entirely. Leave only:
    ```html
    <p>Or, on the login page, choose "Have an invite code from your email?" and enter this code: <strong>{{ .Token }}</strong></p>
    ```
-3. Save both. Leave the existing `{{ .ConfirmationURL }}` button/link in place in both templates — the old link-based flow still works as a fallback for anyone whose link doesn't get pre-consumed, this just adds the code as a second, more reliable option.
-4. Test end-to-end: on `lfgconnect.mmdi.in/login`, use "Forgot password", check the email for the code, and enter it on the code-entry screen that now appears instead of "check your inbox."
+3. Save both, and confirm neither template's Source view contains `{{ .ConfirmationURL }}` anywhere — not as a button, not as plain text (some mail-security scanners fetch any URL-shaped text, not just real `<a href>` links).
+4. Test end-to-end: on `lfgconnect.mmdi.in/login`, use "Forgot password", check the email (should now show only the code, no link), and enter that code immediately on the code-entry screen. Confirmed working 1 Sept 2026.
+
+SMTP note: the sender is Resend (`smtp.resend.com`), not Gmail — see PROJECT_STATUS.md item 82 for why Gmail SMTP was replaced.
 
 ---
 
