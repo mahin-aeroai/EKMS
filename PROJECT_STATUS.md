@@ -1,5 +1,11 @@
 # MMDI ONE — Project Status
 
+Last updated: 1 September 2026, later the same day (item 82 below — an
+OTP-code-based password reset/invite flow for `/login`, `/lfg/login`, and
+`/portal/login`, replacing reliance on the emailed link's one-time hash
+tokens. **Requires a Supabase email-template edit before it works — see
+item 82 and OPERATIONS.md section 4a.**)
+
 Last updated: 1 September 2026 (item 81's round merged to Production and
 survived a same-day deployment incident — see item 81's update and
 OPERATIONS.md section 3a. Header below otherwise unchanged from the
@@ -2778,3 +2784,64 @@ order:
        up to date with `origin/main` before it's ever used for a manual
        `vercel` deploy again — see OPERATIONS.md section 3a for exactly why
        this matters now.
+
+82. **OTP-code-based password reset/invite, `/login` + `/lfg/login` +
+    `/portal/login` — fixes a real, separate bug found while chasing a
+    stuck LFG Connect partner login.** Built on top of item 81's branch,
+    based fresh off `origin/main` (so it already includes `d952936` and
+    `388661c`, the `flowType`/`detectSessionInUrl` fixes from a separate
+    session, referenced in item 81's update).
+    - **Symptom**: an LFG Connect partner requested "Forgot password"
+      repeatedly and was always bounced straight back to the plain sign-in
+      screen — never the set-password screen — even after the two fixes
+      above were confirmed live in Production. Eventually reproduced a
+      concrete Supabase error in the URL: `error_code=otp_expired`,
+      `error_description=Email link is invalid or has expired`, seconds
+      after requesting a fresh reset email.
+    - **Root cause**: Supabase recovery/invite links are single-use — the
+      moment *anything* loads that URL, the token is permanently consumed.
+      Something other than the user's own deliberate click was very likely
+      visiting the link first (a Mail app's link preview/prefetch, a
+      security link-scanner, or simply opening the email twice), so by the
+      time the user actually clicked it, it was already dead. This class of
+      bug is invisible from the app's own logs — Supabase correctly
+      rejects the second "click" with a real, specific error; nothing in
+      this codebase was wrong.
+    - **Fix**: stop depending on the single-use link being clicked exactly
+      once by exactly the right party. Supabase's `verifyOtp()` accepts the
+      same plain 6-digit code the email's `{{ .Token }}` template variable
+      already carries — typing that in by hand can't be prefetched or
+      scanned, since nothing but a human "clicks" a text field. All three
+      login pages (`src/app/login/page.tsx`, `src/app/lfg/login/page.tsx`,
+      `src/app/portal/login/page.tsx` — near-identical mirrors, edited the
+      same way in each) gained:
+      - After "Forgot password" → "Send reset code", the UI now shows a
+        code-entry form instead of just "check your inbox", calling
+        `supabase.auth.verifyOtp({ email, token: code, type: "recovery" })`
+        on submit. Success establishes a real session and drops straight
+        into the existing set-password form.
+      - A new "Have an invite code from your email?" link on the plain
+        sign-in screen opens the same code-entry UI (email + code) for
+        someone whose invite link already went stale the same way, calling
+        `verifyOtp(..., type: "invite")`.
+      - The emailed link itself is left fully intact and untouched as a
+        fallback (`mode === "set-password"`, unchanged from before) — for
+        anyone whose link genuinely still works, nothing changes. The code
+        path is additive, tracked by a new `otpVerified` state that now
+        also satisfies `isInvite` alongside the existing `mode` check.
+      - `npx tsc --noEmit` and `npx eslint` on all three changed files:
+        clean.
+    - **Not yet done — a real Supabase Dashboard step, not code, blocks
+      this from actually working**: the "Reset Password" and "Invite user"
+      email templates in Supabase must be edited to actually show
+      `{{ .Token }}` in the email body. Supabase's default templates only
+      render the `{{ .ConfirmationURL }}` link — the 6-digit code is
+      generated either way, but never appears in the email unless the
+      template is edited to print it. See OPERATIONS.md section 4a for the
+      exact snippet to add to each template. **Nothing in this item works
+      end-to-end until that dashboard edit is made.**
+    - **Not yet tested end-to-end**: no real code-entry attempt has been
+      confirmed working yet — this needs the template edit above first,
+      then a real "Forgot password" → code → set-password round trip on
+      `lfgconnect.mmdi.in` to close this out.
+    - Delivered as `lfg-otp-code-reset.bundle`.

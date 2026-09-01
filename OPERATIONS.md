@@ -148,6 +148,25 @@ After step 2, macOS remembers it — you won't be prompted again unless the toke
 - **Before writing any migration:** validate it against a real local Postgres if at all possible (this project has used `@electric-sql/pglite` for that in AI sandbox sessions — no Docker/root needed) rather than trusting it untested against production.
 - **Backups:** free tier, no point-in-time recovery — take an explicit `create table ... as select * from ...` snapshot before any UPDATE/DELETE migration that touches real data.
 
+### 4a. Email templates must show `{{ .Token }}` — required for the OTP-code login flow to work (1 Sept 2026)
+
+`/login`, `/lfg/login`, and `/portal/login` now offer a 6-digit-code alternative to the emailed invite/reset link (see PROJECT_STATUS.md item 82) — added because single-use links kept arriving already-consumed (Supabase error `otp_expired`) before the real user ever clicked them, most likely due to a mail app or security scanner silently pre-visiting the link. A typed code isn't clickable, so nothing but a human can consume it.
+
+**This only works once the email templates actually print the code.** Supabase generates `{{ .Token }}` for every email type regardless, but the default templates never render it — they only show the `{{ .ConfirmationURL }}` button. Without this step, the code-entry screens in the app will have nothing for the user to type in.
+
+Do this once, in Supabase Dashboard → **Authentication → Email Templates**:
+
+1. Open **Reset Password**. Add a line showing the code, e.g. right after the existing "Reset Password" button:
+   ```html
+   <p>Or enter this code on the reset page: <strong>{{ .Token }}</strong></p>
+   ```
+2. Open **Invite user**. Add the same style of line after its existing "Accept the invite" button:
+   ```html
+   <p>Or, on the login page, choose "Have an invite code from your email?" and enter this code: <strong>{{ .Token }}</strong></p>
+   ```
+3. Save both. Leave the existing `{{ .ConfirmationURL }}` button/link in place in both templates — the old link-based flow still works as a fallback for anyone whose link doesn't get pre-consumed, this just adds the code as a second, more reliable option.
+4. Test end-to-end: on `lfgconnect.mmdi.in/login`, use "Forgot password", check the email for the code, and enter it on the code-entry screen that now appears instead of "check your inbox."
+
 ---
 
 ## 5. Mobile app — Expo / EAS / Apple

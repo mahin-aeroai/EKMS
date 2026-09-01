@@ -52,6 +52,18 @@ function LoginForm() {
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [resetSent, setResetSent] = useState(false);
   const [registerSubmitted, setRegisterSubmitted] = useState(false);
+  // A second entry point into the same code-entry UI as resetSent below,
+  // for someone who has an invite email but whose link already stopped
+  // working (see the code comment above handleVerifyCode) -- reachable
+  // from a link on the plain sign-in screen instead of via the hash.
+  const [showInviteCode, setShowInviteCode] = useState(false);
+  const [code, setCode] = useState("");
+  // True once a typed 6-digit code (recovery or invite) has been verified
+  // via handleVerifyCode below and a real session established that way,
+  // as opposed to via the emailed link's hash tokens (mode === "set-
+  // password"). Both paths land on the same set-password form -- see
+  // isInvite.
+  const [otpVerified, setOtpVerified] = useState(false);
 
   // Non-null once a password sign-in (or an already-established session
   // caught by the mount check below) needs a TOTP code before it's fully
@@ -284,7 +296,45 @@ function LoginForm() {
       return;
     }
 
+    setCode("");
     setResetSent(true);
+  }
+
+  // Verifies a 6-digit code typed in by hand instead of relying on the
+  // emailed link's one-time hash tokens. Added 1 Sep 2026: links kept
+  // arriving "already used" (Supabase error otp_expired) even right after
+  // sending, with no set-password screen ever showing -- something (a mail
+  // app's link preview/prefetch, a security scanner, opening the email
+  // twice) was silently visiting and burning the single-use link before
+  // the real click. A typed code has no clickable URL for anything but a
+  // human to consume, so it isn't vulnerable to that. Requires the
+  // Reset Password / Invite user email templates in Supabase to actually
+  // show `{{ .Token }}` -- see OPERATIONS.md.
+  //
+  // Handles both the "forgot password" code (resetSent) and the invite
+  // code (showInviteCode) -- same UI, different `type` passed to
+  // verifyOtp, since that's the only thing Supabase needs to tell them
+  // apart.
+  async function handleVerifyCode(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+
+    const { data, error: verifyError } = await supabase.auth.verifyOtp({
+      email,
+      token: code,
+      type: resetSent ? "recovery" : "invite",
+    });
+
+    setLoading(false);
+
+    if (verifyError || !data.session) {
+      setError(verifyError?.message ?? "That code didn't work. Double-check it and try again.");
+      return;
+    }
+
+    setInviteEmail(data.session.user?.email ?? email);
+    setOtpVerified(true);
   }
 
   async function handleSetPassword(e: FormEvent) {
@@ -313,12 +363,14 @@ function LoginForm() {
     router.refresh();
   }
 
-  const isInvite = mode === "set-password";
+  const isInvite = mode === "set-password" || otpVerified;
   // Only shown on the plain landing state -- switching "who am I" mid a
   // deep sub-flow (MFA code entry, password reset, an invite/recovery
-  // link) doesn't make sense and risks discarding it; same gating the
-  // existing "New accounts start as read-only" caption below already uses.
-  const showAudienceSwitcher = !isInvite && !mfaPending && !checkingSession && !showForgotPassword && authView === "sign-in";
+  // link, the code-entry form) doesn't make sense and risks discarding
+  // it; same gating the existing "New accounts start as read-only"
+  // caption below already uses.
+  const showAudienceSwitcher =
+    !isInvite && !mfaPending && !checkingSession && !showForgotPassword && !showInviteCode && authView === "sign-in";
 
   let heading: string;
   if (isInvite) {
@@ -326,7 +378,9 @@ function LoginForm() {
   } else if (mfaPending) {
     heading = "Enter your verification code";
   } else if (showForgotPassword) {
-    heading = resetSent ? "Check your inbox" : "Reset your password";
+    heading = resetSent ? "Enter your code" : "Reset your password";
+  } else if (showInviteCode) {
+    heading = "Enter your invite code";
   } else if (authView === "register") {
     heading = registerSubmitted ? "Check your inbox" : "Create your account";
   } else {
@@ -450,24 +504,63 @@ function LoginForm() {
           </form>
         ) : showForgotPassword ? (
           resetSent ? (
-            <div className="flex flex-col gap-4">
+            <form onSubmit={handleVerifyCode} className="flex flex-col gap-4">
               <p className="text-sm text-ink-secondary">
-                If an account exists for <span className="font-medium text-ink">{email}</span>,
-                we&apos;ve sent a password reset link to it. Follow that link to set a new
-                password.
+                We sent a 6-digit code to <span className="font-medium text-ink">{email}</span>. Enter it below —
+                it&apos;s more reliable than the link in the same email, which some mail apps can open
+                automatically before you ever click it.
               </p>
-              <Button
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="resetCode" className="text-sm font-medium text-ink-secondary">
+                  Verification code
+                </label>
+                <input
+                  id="resetCode"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  required
+                  maxLength={6}
+                  value={code}
+                  onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  className="rounded-md border border-line-strong bg-surface px-3 py-2 text-center text-lg tracking-[0.4em] text-ink focus:border-primary focus:outline-none"
+                  placeholder="000000"
+                />
+              </div>
+
+              {error && (
+                <p className="rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
+                  {error}
+                </p>
+              )}
+
+              <Button type="submit" loading={loading} className="mt-2" disabled={code.length !== 6}>
+                Verify code
+              </Button>
+              <button
                 type="button"
-                variant="secondary"
+                onClick={() => {
+                  setResetSent(false);
+                  setCode("");
+                  setError(null);
+                }}
+                className="text-center text-sm text-ink-muted hover:text-ink"
+              >
+                Didn&apos;t get it? Send again
+              </button>
+              <button
+                type="button"
                 onClick={() => {
                   setShowForgotPassword(false);
                   setResetSent(false);
+                  setCode("");
                   setError(null);
                 }}
+                className="text-center text-sm text-ink-muted hover:text-ink"
               >
                 Back to sign in
-              </Button>
-            </div>
+              </button>
+            </form>
           ) : (
             <form onSubmit={handleForgotPassword} className="flex flex-col gap-4">
               <div className="flex flex-col gap-1.5">
@@ -493,7 +586,7 @@ function LoginForm() {
               )}
 
               <Button type="submit" loading={loading} className="mt-2">
-                Send reset link
+                Send reset code
               </Button>
               <button
                 type="button"
@@ -507,6 +600,63 @@ function LoginForm() {
               </button>
             </form>
           )
+        ) : showInviteCode ? (
+          <form onSubmit={handleVerifyCode} className="flex flex-col gap-4">
+            <p className="text-sm text-ink-secondary">
+              Enter the email your invite was sent to and the 6-digit code from that email.
+            </p>
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="inviteCodeEmail" className="text-sm font-medium text-ink-secondary">
+                Email
+              </label>
+              <input
+                id="inviteCodeEmail"
+                type="email"
+                required
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
+                placeholder="you@mmdi.in"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="inviteCode" className="text-sm font-medium text-ink-secondary">
+                Verification code
+              </label>
+              <input
+                id="inviteCode"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                required
+                maxLength={6}
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                className="rounded-md border border-line-strong bg-surface px-3 py-2 text-center text-lg tracking-[0.4em] text-ink focus:border-primary focus:outline-none"
+                placeholder="000000"
+              />
+            </div>
+            {error && (
+              <p className="rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-sm text-danger">
+                {error}
+              </p>
+            )}
+            <Button type="submit" loading={loading} className="mt-2" disabled={code.length !== 6 || !email}>
+              Verify code
+            </Button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowInviteCode(false);
+                setCode("");
+                setError(null);
+              }}
+              className="text-center text-sm text-ink-muted hover:text-ink"
+            >
+              Back to sign in
+            </button>
+          </form>
         ) : authView === "register" ? (
           registerSubmitted ? (
             <div className="flex flex-col gap-4">
@@ -656,6 +806,16 @@ function LoginForm() {
             <button
               type="button"
               onClick={() => {
+                setShowInviteCode(true);
+                setError(null);
+              }}
+              className="text-center text-sm text-ink-muted hover:text-ink"
+            >
+              Have an invite code from your email?
+            </button>
+            <button
+              type="button"
+              onClick={() => {
                 setAuthView("register");
                 setError(null);
                 setPassword("");
@@ -667,7 +827,7 @@ function LoginForm() {
           </form>
         )}
 
-        {!isInvite && !mfaPending && !checkingSession && !showForgotPassword && authView === "sign-in" && (
+        {!isInvite && !mfaPending && !checkingSession && !showForgotPassword && !showInviteCode && authView === "sign-in" && (
           <p className="mt-6 text-center text-xs text-ink-muted">
             New accounts start as read-only (viewer) until an admin grants further access.
           </p>
