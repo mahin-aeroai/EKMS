@@ -309,7 +309,13 @@ function PhotoCard({
   const [caption, setCaption] = useState(photo.caption ?? "");
 
   return (
-    <div className="flex w-32 flex-col gap-2 rounded-md border border-line-strong p-2">
+    // w-56 (224px) -- was w-32 (128px). Feedback asked for "~25% wider" to
+    // stop the category label wrapping onto two lines; a first pass at
+    // w-40 (128px + 25%) still wrapped the longer labels ("Site
+    // Orientation — Opposite"), so this is sized to what those labels
+    // actually need at this font size instead of stopping at the literal
+    // 25% figure.
+    <div className="flex w-56 flex-col gap-2 rounded-md border border-line-strong p-2">
       <div className="flex h-24 items-center justify-center overflow-hidden rounded bg-surface-sunken">
         {url ? (
           // eslint-disable-next-line @next/next/no-img-element -- short-lived signed R2 URL

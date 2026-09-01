@@ -50,7 +50,7 @@ import { APPLE_PROGRAM_OPTIONS, DELIVERY_TIMING_LABEL, emptyFormData } from "@/l
 // are grouped into one MiniFieldsRow instead -- a single compact row
 // holding 2-4 small labeled inputs side by side, matching this app's own
 // "Store Opening Times" day-grid pattern. Field labels/inputs stay small
-// (text-[11px]/text-xs) and tightly padded throughout, matching this
+// (text-[12px]/text-[13px]) and tightly padded throughout, matching this
 // app's own existing compact patterns
 // (Comments.tsx, WorkflowTimeline.tsx, etc).
 
@@ -122,7 +122,7 @@ export function ReportFormFields({ header, onHeaderChange, formData, onFormDataC
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-surface-sunken px-3 py-2">
-        <p className="text-[11px] text-ink-secondary">
+        <p className="text-[12px] text-ink-secondary">
           Tap a card to open it — only what&apos;s still blank needs your input. Set up your{" "}
           <a href="/workspaces/site-survey-report/defaults" target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline">
             saved defaults
@@ -321,7 +321,7 @@ export function FormDataFields({
               f("appleRepresentativeEmail", contact.email);
               e.target.value = "";
             }}
-            className="min-w-[10rem] flex-1 rounded border border-line-strong bg-surface px-2 py-1 text-xs text-ink focus:border-primary focus:outline-none"
+            className="min-w-[10rem] flex-1 rounded border border-line-strong bg-surface px-2 py-1 text-[13px] text-ink focus:border-primary focus:outline-none"
           >
             <option value="">{asmContacts.length ? "— Choose from LFG Connect —" : "No ASM records found yet"}</option>
             {asmContacts.map((c, i) => (
@@ -425,7 +425,7 @@ export function FormDataFields({
         onToggle={onToggleSection}
       >
         <div className="flex flex-col px-0.5 py-2.5">
-          <span className="mb-1 text-[11px] font-medium text-ink-secondary">Store Opening Times</span>
+          <span className="mb-1 text-[12px] font-medium text-ink-secondary">Store Opening Times</span>
           <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4 lg:grid-cols-7">
             {(
               [
@@ -439,11 +439,11 @@ export function FormDataFields({
               ] as const
             ).map(([key, day]) => (
               <label key={key} className="flex flex-col gap-0.5">
-                <span className="text-[10px] font-medium text-ink-muted">{day}</span>
+                <span className="text-[11px] font-medium text-ink-muted">{day}</span>
                 <input
                   value={formData[key]}
                   onChange={(e) => f(key, e.target.value)}
-                  className="w-full rounded border border-line-strong bg-surface px-1.5 py-1 text-[11px] text-ink focus:border-primary focus:outline-none"
+                  className="w-full rounded border border-line-strong bg-surface px-1.5 py-1 text-[12px] text-ink focus:border-primary focus:outline-none"
                 />
               </label>
             ))}
@@ -734,25 +734,35 @@ function set<K extends keyof SiteSurveyFormData>(
 
 type SectionColor = "primary" | "info" | "success" | "warning" | "danger" | "ai";
 
-const SECTION_COLOR_CLASSES: Record<SectionColor, { chipBg: string; chipText: string }> = {
-  primary: { chipBg: "bg-primary-tint", chipText: "text-primary" },
-  info: { chipBg: "bg-info-tint", chipText: "text-info" },
-  success: { chipBg: "bg-success-tint", chipText: "text-success" },
-  warning: { chipBg: "bg-warning-tint", chipText: "text-warning" },
-  danger: { chipBg: "bg-danger-tint", chipText: "text-danger" },
-  ai: { chipBg: "bg-ai-tint", chipText: "text-ai" },
+// Each section's header now carries its own colour (light tint background,
+// a solid-colour icon chip for contrast against that tint) rather than a
+// neutral bg-surface-sunken bar with only a small coloured icon square --
+// per feedback wanting the screen to read as more thematically colourful.
+// headerBorder tints the card's outer ring too, so a collapsed card still
+// visibly carries its section's colour, not just its (now-hidden) header.
+const SECTION_COLOR_CLASSES: Record<SectionColor, { chipBg: string; chipText: string; headerBg: string; headerBorder: string }> = {
+  primary: { chipBg: "bg-primary", chipText: "text-on-brand", headerBg: "bg-primary-tint", headerBorder: "border-primary/25" },
+  info: { chipBg: "bg-info", chipText: "text-on-brand", headerBg: "bg-info-tint", headerBorder: "border-info/25" },
+  success: { chipBg: "bg-success", chipText: "text-on-brand", headerBg: "bg-success-tint", headerBorder: "border-success/25" },
+  warning: { chipBg: "bg-warning", chipText: "text-on-brand", headerBg: "bg-warning-tint", headerBorder: "border-warning/25" },
+  danger: { chipBg: "bg-danger", chipText: "text-on-brand", headerBg: "bg-danger-tint", headerBorder: "border-danger/25" },
+  ai: { chipBg: "bg-ai", chipText: "text-on-brand", headerBg: "bg-ai-tint", headerBorder: "border-ai/25" },
 };
 
 /**
  * A collapsible, rounded "card" per section -- LFG Connect's own card look
- * (see LfgSiteCardGrid.tsx: rounded-[20px] border shadow-2). The header row
- * (colour chip + icon, title, X/Y filled badge, chevron) is always visible
- * even collapsed, so the WHOLE form reads as a compact stack of card
- * headers at a glance; only the section actually being worked on expands
- * and takes up vertical space. Controlled (open/onToggle), not self-managed
- * state, so a parent "Expand all"/"Collapse all" control can drive every
- * card at once. Direct children are rendered as a stack of compact
- * landscape ROWS (label-left, control-right), not a wrapping grid -- see
+ * (see LfgSiteCardGrid.tsx: rounded-[20px] border shadow-2), with the
+ * radius pulled in a step (rounded-2xl, 16px) and each header tinted by
+ * its own SECTION_COLOR_CLASSES entry -- both per feedback wanting a
+ * tighter corner radius and a more colourful screen than the original
+ * neutral-everywhere treatment. The header row (colour chip + icon, title,
+ * X/Y filled badge, chevron) is always visible even collapsed, so the
+ * WHOLE form reads as a compact stack of card headers at a glance; only
+ * the section actually being worked on expands and takes up vertical
+ * space. Controlled (open/onToggle), not self-managed state, so a parent
+ * "Expand all"/"Collapse all" control can drive every card at once. Direct
+ * children are rendered as a stack of compact landscape ROWS (label-left,
+ * control-right), not a wrapping grid -- see
  * Row/TextRow/YesNoRow/MiniFieldsRow/PositionMarkerRow etc below.
  */
 function SurveyCard({
@@ -779,13 +789,13 @@ function SurveyCard({
   const c = SECTION_COLOR_CLASSES[color];
   const complete = total > 0 && filled === total;
   return (
-    <div className="overflow-hidden rounded-[20px] border border-line bg-surface shadow-1 transition-shadow hover:shadow-2">
-      <button type="button" onClick={() => onToggle(sectionKey)} className="flex w-full items-center gap-2 bg-surface-sunken px-3.5 py-2.5 text-left">
+    <div className={`overflow-hidden rounded-2xl border ${c.headerBorder} bg-surface shadow-1 transition-shadow hover:shadow-2`}>
+      <button type="button" onClick={() => onToggle(sectionKey)} className={`flex w-full items-center gap-2 ${c.headerBg} px-3.5 py-2.5 text-left`}>
         <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${c.chipBg} ${c.chipText}`}>
           <Icon size={13} />
         </span>
-        <span className="flex-1 text-[11px] font-semibold uppercase tracking-wide text-ink-secondary">{title}</span>
-        <span className={`text-[10px] font-medium tabular-nums ${complete ? "text-success" : "text-ink-muted"}`}>
+        <span className="flex-1 text-[12px] font-semibold uppercase tracking-wide text-ink-secondary">{title}</span>
+        <span className={`text-[11px] font-medium tabular-nums ${complete ? "text-success" : "text-ink-muted"}`}>
           {filled}/{total}
         </span>
         <ChevronDown size={14} className={`shrink-0 text-ink-muted transition-transform ${open ? "rotate-180" : ""}`} />
@@ -809,7 +819,7 @@ function Row({ children }: { children: React.ReactNode }) {
 
 function RowLabel({ label, source }: { label: string; source?: FieldSources[FieldSourceKey] }) {
   return (
-    <span className="flex w-full shrink-0 items-center gap-1 text-[11px] font-medium leading-tight text-ink-secondary sm:w-[240px]">
+    <span className="flex w-full shrink-0 items-center gap-1 text-[12px] font-medium leading-tight text-ink-secondary sm:w-[240px]">
       {label}
       <FieldIndicator source={source} />
     </span>
@@ -836,7 +846,7 @@ function TextRow({
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="min-w-[10rem] flex-1 rounded border border-line-strong bg-surface px-2 py-1 text-xs text-ink focus:border-primary focus:outline-none"
+        className="min-w-[10rem] flex-1 rounded border border-line-strong bg-surface px-2 py-1 text-[13px] text-ink focus:border-primary focus:outline-none"
       />
     </Row>
   );
@@ -861,7 +871,7 @@ function SelectRow({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="min-w-[10rem] flex-1 rounded border border-line-strong bg-surface px-2 py-1 text-xs text-ink focus:border-primary focus:outline-none"
+        className="min-w-[10rem] flex-1 rounded border border-line-strong bg-surface px-2 py-1 text-[13px] text-ink focus:border-primary focus:outline-none"
       >
         {options.map(([v, l]) => (
           <option key={v} value={v}>
@@ -906,7 +916,7 @@ function YesNoRow({
       <RowLabel label={label} source={source} />
       <div className="flex shrink-0 items-center gap-3">
         {options.map((opt) => (
-          <label key={opt.value} className="flex cursor-pointer items-center gap-1.5 text-[11px] text-ink">
+          <label key={opt.value} className="flex cursor-pointer items-center gap-1.5 text-[12px] text-ink">
             <input type="radio" name={name} checked={value === opt.value} onChange={() => onChange(opt.value)} className="h-3.5 w-3.5 accent-primary" />
             {opt.label}
           </label>
@@ -918,7 +928,7 @@ function YesNoRow({
             value={detail.value}
             onChange={(e) => detail.onChange(e.target.value)}
             placeholder={detail.placeholder}
-            className="min-w-[10rem] flex-1 rounded border border-line-strong bg-surface px-2 py-1 text-xs text-ink focus:border-primary focus:outline-none"
+            className="min-w-[10rem] flex-1 rounded border border-line-strong bg-surface px-2 py-1 text-[13px] text-ink focus:border-primary focus:outline-none"
           />
           <FieldIndicator source={detail.source} />
         </>
@@ -944,18 +954,18 @@ function MiniFieldsRow({
 }) {
   return (
     <div className="flex flex-col px-0.5 py-2.5">
-      <span className="mb-1 text-[11px] font-medium text-ink-secondary">{title}</span>
+      <span className="mb-1 text-[12px] font-medium text-ink-secondary">{title}</span>
       <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
         {fields.map((fld) => (
           <label key={fld.key} className="flex flex-col gap-0.5">
-            <span className="flex items-center gap-1 text-[10px] font-medium text-ink-muted">
+            <span className="flex items-center gap-1 text-[11px] font-medium text-ink-muted">
               {fld.label}
               <FieldIndicator source={fld.source} />
             </span>
             <input
               value={fld.value}
               onChange={(e) => fld.onChange(e.target.value)}
-              className="w-full rounded border border-line-strong bg-surface px-1.5 py-1 text-[11px] text-ink focus:border-primary focus:outline-none"
+              className="w-full rounded border border-line-strong bg-surface px-1.5 py-1 text-[12px] text-ink focus:border-primary focus:outline-none"
             />
           </label>
         ))}
@@ -995,7 +1005,7 @@ function ButtonGroupRow<T extends string>({
             type="button"
             onClick={() => onChange((value === opt.value ? "" : opt.value) as T)}
             className={cn(
-              "rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
+              "rounded-full border px-2.5 py-1 text-[12px] font-medium transition-colors",
               value === opt.value ? "border-primary bg-primary text-on-brand" : "border-line-strong bg-surface text-ink-secondary hover:bg-surface-sunken"
             )}
           >

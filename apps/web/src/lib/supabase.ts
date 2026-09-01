@@ -39,5 +39,24 @@ const FALLBACK_SUPABASE_ANON_KEY = "placeholder-anon-key";
  */
 export const supabase = createBrowserClient(
   supabaseUrl || FALLBACK_SUPABASE_URL,
-  supabaseAnonKey || FALLBACK_SUPABASE_ANON_KEY
+  supabaseAnonKey || FALLBACK_SUPABASE_ANON_KEY,
+  {
+    auth: {
+      // @supabase/ssr's createBrowserClient defaults flowType to "pkce",
+      // which expects invite/recovery links to carry a `?code=` query param
+      // that the app then exchanges server-side via exchangeCodeForSession.
+      // Nothing in this codebase implements that exchange -- every login
+      // page (/login, /portal/login, /lfg/login) instead reads the OLDER
+      // implicit-flow hash fragment directly (`#access_token=...&type=
+      // recovery`, see e.g. initialModeFromUrl() and the manual setSession()
+      // fallback in each of those files). Under the pkce default, an
+      // invite/recovery link either arrives with no hash at all (nothing to
+      // detect, so those pages fall straight through to plain sign-in with
+      // no error -- the exact "never got a chance to set a password" bug
+      // this fixes) or with a hash the client isn't configured to auto-
+      // process. Forcing "implicit" here makes the client's behavior match
+      // what every one of those pages was already written to expect.
+      flowType: "implicit",
+    },
+  }
 );

@@ -104,6 +104,25 @@ After step 2, macOS remembers it — you won't be prompted again unless the toke
   - `ANTHROPIC_API_KEY` (server-only — powers the AI Copilot's `/api/ai-copilot` route; the app returns a clean 503 if it's missing rather than crashing)
   - Google OAuth client ID/secret (Gmail search/draft feature)
 - **Verifying a deploy:** Vercel dashboard → Deployments tab shows build status per commit. If a build fails, check the log there first — `next build` runs cleanly in Vercel's environment even though some AI sandboxes hit an ARM64 "Bus error" on `@next/swc-linux-*` that's specific to the sandbox, not the code.
+- **A Preview deployment can crash on every request with `MIDDLEWARE_INVOCATION_FAILED` / "This Routing Middleware has crashed"** even when the build itself succeeded. Cause, confirmed 31 Aug 2026: `src/lib/supabase-middleware.ts` builds its Supabase client from `process.env.NEXT_PUBLIC_SUPABASE_URL ?? ""` / `...ANON_KEY ?? ""` — if either var is scoped to Production only (not Preview) in Vercel, every Preview request crashes the client construction before anything else runs. Check Project → Environment Variables → each var's "Environments" column covers Preview, not just Production.
+- **Adding a `NEXT_PUBLIC_*` env var via the Vercel dashboard can get permanently stuck.** This project has a team/account policy that locks a new variable's Type to "Secret" in the dashboard UI (the "Config" radio option shows disabled even for a brand-new, never-saved variable — not just an already-saved one, despite what the dashboard's own tooltip implies). A `NEXT_PUBLIC_`-prefixed var saved as Secret then hits a hard, un-dismissable validation blocker on Save ("Remove the public framework prefix... If that's safe, change the variable to Config"). **Fix: use the Vercel CLI instead, which doesn't have this restriction:**
+  ```bash
+  npm i -g vercel                 # once, if not already installed
+  cd apps/web                     # the actual Vercel project root, not the repo root
+  vercel link                     # once per machine, links this checkout to the EKMS project
+  vercel env add NEXT_PUBLIC_SUPABASE_URL
+  # prompts: Value? -> paste it
+  # prompts: Environments? -> select Preview (and/or Production) with spacebar
+  # prompts: Git branch? -> leave blank (Enter) to apply to all branches of that environment
+  # prompts (NEXT_PUBLIC_* only): "How should this variable be stored?"
+  #   -> pick "Expose to anyone visiting your site: keep <NAME> as Config"
+  #      (NOT the first option, "rename to <NAME-without-prefix> and use Secret" —
+  #      that silently renames the var, which breaks any code reading the
+  #      NEXT_PUBLIC_-prefixed name; use `vercel env rm <wrong-name> <env>` to
+  #      undo if this happens, then re-add correctly)
+  ```
+  Verify with `vercel env ls` — look for the var listed with Type `Config` and the environment(s) you selected. A Production-scoped Secret entry for the same name can coexist with a Preview-scoped Config entry for it without conflict; Vercel picks whichever matches the deployment's own environment.
+- **Env var changes never apply to an already-built deployment.** After adding/fixing a var, use Deployments → the deployment's `⋯` menu → **Redeploy** to pick up the change — pushing a new commit isn't required.
 
 ---
 
@@ -206,6 +225,32 @@ setup, in order:
      instead of customer ones. Both were missed when each subdomain was
      first set up; check both are present any time an invite link doesn't
      behave.
+     **This redirect-URL entry is necessary but, as of 1 Sep 2026, not
+     sufficient on its own** — see the `flowType` note immediately below
+     for a second, separate bug that produces the identical symptom even
+     once this entry is correctly in place.
+   - **Client `flowType` must be `"implicit"`, not the `@supabase/ssr`
+     default of `"pkce"`** (`src/lib/supabase.ts`). Found 1 Sep 2026
+     diagnosing an LFG partner stuck exactly like the redirect-URL bug
+     above (invite/reset link lands on plain sign-in, no error, no
+     password prompt) even *after* confirming the redirect entry above
+     was present. Root cause: every login page (`/login`, `/portal/login`,
+     `/lfg/login`) reads the invite/recovery token from the URL's hash
+     fragment (`#access_token=...&type=recovery`) — the older "implicit"
+     auth flow. But `createBrowserClient` from `@supabase/ssr` defaults to
+     `flowType: "pkce"`, which expects a `?code=` query param instead, and
+     nothing in this codebase implements the corresponding
+     `exchangeCodeForSession` step. Under that default, an invite/recovery
+     link arrives with no hash the pages know how to read, so they fall
+     straight through to a plain sign-in screen — no error, easy to
+     mistake for the redirect-URL issue since the symptom is identical.
+     Fixed by passing `auth: { flowType: "implicit" }` explicitly in
+     `src/lib/supabase.ts`'s `createBrowserClient` call — see that file's
+     comment for the full explanation. This is the only
+     `createBrowserClient` call in the codebase, so the one change covers
+     all three login surfaces. If a future `@supabase/ssr` upgrade or a
+     new login surface ever silently drops this option, this exact bug
+     comes back.
    - **Emails → SMTP Settings**: point it at a real mail sender —
      Supabase's own built-in mailer is heavily rate-limited (a handful of
      emails/hour) and not meant for actual customer invites. Sender
