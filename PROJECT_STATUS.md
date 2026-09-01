@@ -2956,9 +2956,52 @@ order:
         — an LFG partner was getting the same stray "Install MMDI ONE"
         native browser prompt a customer would have, before this fix.
       - `npx tsc --noEmit` and `npx eslint` on both changed files: clean.
-    - **Not yet re-tested against `lfgconnect.mmdi.in` after this fix** —
-      needs the same partner-login round trip as item 82 (sign in on
-      `lfgconnect.mmdi.in`, confirm the compact LFG top bar and content
-      render with no internal sidebar at all) to actually confirm this
-      closes it out.
+    - **Confirmed fixed, 1 Sept 2026**: re-tested on `lfgconnect.mmdi.in`
+      after deploy — the compact LFG top bar and "Your Sites" content now
+      render with no internal sidebar at all. This item is closed.
     - Delivered as `lfg-appshell-host-leak-fix.bundle`.
+
+84. **`lfg_sites.active does not exist` — the LFG partner Site Master
+    (`/lfg`, "Your Sites") never finished loading, at all, for anyone.
+    Found live testing right after item 83, fixed same day (1 Sept
+    2026).** With the sidebar leak fixed, the underlying "Your Sites" page
+    itself was still stuck on "Loading sites…" forever, `Showing` and
+    `Needs Attention` stuck on `…` — this bug predates today's session
+    entirely (visible in Srinivas's very first screenshot of `lfgconnect.
+    mmdi.in`, before any of today's other fixes).
+    - **Diagnosis**: Safari's Web Inspector Network tab, requested live —
+      the actual `lfg_sites` REST response was a real Postgres error:
+      `{"code":"42703","message":"column lfg_sites.active does not
+      exist"}`. The page's fetch effect did catch this (`hadError`), so
+      the "Couldn't load your sites from Supabase" toast was in fact
+      firing every time — it's just brief and easy to miss, which is why
+      this took a Network-tab screenshot rather than the Console to pin
+      down. 42703 is Postgres's undefined-column error, not an RLS
+      rejection (RLS returns zero rows, not an error).
+    - **Root cause**: `src/app/lfg/(app)/page.tsx`'s fetch `.select(...)`
+      asked for `active` as if it were a real column on `lfg_sites` — it
+      isn't; that table only has `site_status` (whose own enum has an
+      `'active'` value among its other states, e.g. `'deactivated'`,
+      `'deactivation_requested'`). The staff-facing Site Master
+      (`workspaces/lfg/page.tsx`, this partner page's own explicit model
+      per its header comment: "Same debounced search + status filter
+      shape as the staff Site Master") already solved exactly this — it
+      never selects `active` from the database at all, deriving it
+      client-side instead as `site_status === "active"`. The partner page
+      just never got the same treatment when it was built, so every
+      single load of it failed outright.
+    - **Fix**: `active` removed from the Supabase `.select(...)` string;
+      the raw fetched-row type (`RawPartnerSiteRow`, via `Omit<...,
+      "active">`) reflects what's actually queried, and `active` is added
+      back after the fetch as `site_status === "active"` — same pattern,
+      same derivation, as the staff page. `Badge`/column rendering
+      (`r.active ? "Yes" : "No"`) is unchanged; only where `active` comes
+      from changed. Checked the rest of the codebase for any other place
+      selecting `active` off `lfg_sites` — this was the only one; the
+      site-detail page (`sites/[siteId]/page.tsx`) never selected it.
+      `npx tsc --noEmit` and `npx eslint` clean.
+    - **Not yet re-tested against `lfgconnect.mmdi.in` after this fix** —
+      needs a fresh partner-login round trip (sign in, confirm "Your
+      Sites" actually lists the 61 sites instead of hanging on "Loading
+      sites…") to confirm this closes it out.
+    - Delivered as `lfg-sites-active-column-fix.bundle`.

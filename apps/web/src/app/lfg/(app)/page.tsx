@@ -53,6 +53,22 @@ interface PartnerSiteRow {
   lfg_partners: { name: string } | { name: string }[] | null;
 }
 
+// Bug fixed here (1 Sept 2026): `active` was being selected straight from
+// `lfg_sites` as if it were a real column -- it isn't (there's no `active`
+// boolean on this table, only `site_status`, whose own enum already has an
+// 'active' value among its other states). Every load of this page failed
+// outright with Postgres error 42703 ("column lfg_sites.active does not
+// exist"), caught live testing an LFG partner login: the page never got
+// past "Loading sites…". The staff Site Master
+// (workspaces/lfg/page.tsx) already solved this correctly -- it never
+// selects `active`, it derives it client-side as `site_status ===
+// "active"` -- this page just never got the same treatment. Fixed the
+// same way here: `RawPartnerSiteRow` is what's actually selected from
+// Supabase (no `active`), `PartnerSiteRow` (used everywhere else in this
+// file, including the table's own row type) adds it back as a derived
+// field once the raw rows come back.
+type RawPartnerSiteRow = Omit<PartnerSiteRow, "active">;
+
 function partnerName(row: PartnerSiteRow): string {
   const p = Array.isArray(row.lfg_partners) ? row.lfg_partners[0] : row.lfg_partners;
   return p?.name ?? "—";
@@ -87,14 +103,14 @@ export default function LfgPartnerSitesPage() {
       // actually return that many rows.
       (async () => {
         const pageSize = 1000;
-        const all: PartnerSiteRow[] = [];
+        const all: RawPartnerSiteRow[] = [];
         let hadError = false;
 
         for (let from = 0; ; from += pageSize) {
           let q = supabase
             .from("lfg_sites")
             .select(
-              "id, site_id, outlet_name, sfo_id, city, region, material, mat_code, width, height, bleed, active, format, site_status, number_of_sites, lfg_partners(name)"
+              "id, site_id, outlet_name, sfo_id, city, region, material, mat_code, width, height, bleed, format, site_status, number_of_sites, lfg_partners(name)"
             )
             .order("sfo_id", { ascending: true, nullsFirst: false })
             .range(from, from + pageSize - 1);
@@ -113,7 +129,7 @@ export default function LfgPartnerSitesPage() {
             break;
           }
           if (!data || data.length === 0) break;
-          all.push(...((data as unknown as PartnerSiteRow[]) ?? []));
+          all.push(...((data as unknown as RawPartnerSiteRow[]) ?? []));
           if (data.length < pageSize) break;
         }
 
@@ -121,7 +137,7 @@ export default function LfgPartnerSitesPage() {
           toast("danger", "Couldn't load your sites from Supabase");
           return;
         }
-        setRows(all);
+        setRows(all.map((r) => ({ ...r, active: r.site_status === "active" })));
       })();
     }, 250);
     return () => clearTimeout(handle);
