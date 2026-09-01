@@ -225,6 +225,32 @@ setup, in order:
      instead of customer ones. Both were missed when each subdomain was
      first set up; check both are present any time an invite link doesn't
      behave.
+     **This redirect-URL entry is necessary but, as of 1 Sep 2026, not
+     sufficient on its own** — see the `flowType` note immediately below
+     for a second, separate bug that produces the identical symptom even
+     once this entry is correctly in place.
+   - **Client `flowType` must be `"implicit"`, not the `@supabase/ssr`
+     default of `"pkce"`** (`src/lib/supabase.ts`). Found 1 Sep 2026
+     diagnosing an LFG partner stuck exactly like the redirect-URL bug
+     above (invite/reset link lands on plain sign-in, no error, no
+     password prompt) even *after* confirming the redirect entry above
+     was present. Root cause: every login page (`/login`, `/portal/login`,
+     `/lfg/login`) reads the invite/recovery token from the URL's hash
+     fragment (`#access_token=...&type=recovery`) — the older "implicit"
+     auth flow. But `createBrowserClient` from `@supabase/ssr` defaults to
+     `flowType: "pkce"`, which expects a `?code=` query param instead, and
+     nothing in this codebase implements the corresponding
+     `exchangeCodeForSession` step. Under that default, an invite/recovery
+     link arrives with no hash the pages know how to read, so they fall
+     straight through to a plain sign-in screen — no error, easy to
+     mistake for the redirect-URL issue since the symptom is identical.
+     Fixed by passing `auth: { flowType: "implicit" }` explicitly in
+     `src/lib/supabase.ts`'s `createBrowserClient` call — see that file's
+     comment for the full explanation. This is the only
+     `createBrowserClient` call in the codebase, so the one change covers
+     all three login surfaces. If a future `@supabase/ssr` upgrade or a
+     new login surface ever silently drops this option, this exact bug
+     comes back.
    - **Emails → SMTP Settings**: point it at a real mail sender —
      Supabase's own built-in mailer is heavily rate-limited (a handful of
      emails/hour) and not meant for actual customer invites. Sender
