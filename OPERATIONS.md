@@ -251,6 +251,40 @@ setup, in order:
      all three login surfaces. If a future `@supabase/ssr` upgrade or a
      new login surface ever silently drops this option, this exact bug
      comes back.
+   - **Client `detectSessionInUrl` must be `false`** (same file, same
+     `auth` config object as `flowType` above) — a THIRD bug, also found
+     1 Sep 2026, that produces the identical symptom even with both fixes
+     above in place. Confirmed via Supabase's own Authentication → Logs:
+     every single recovery attempt showed a `login` event firing reliably
+     ~6-10 seconds after the `user_recovery_requested` event (proving a
+     session genuinely was being created from the token, every time) but
+     never a subsequent `user_updated` event — the set-password form was
+     just never reached, with no error anywhere. Root cause: with
+     `detectSessionInUrl` at its default of `true`, the client
+     automatically parses and consumes any access_token/refresh_token in
+     the URL hash the instant it's constructed, and clears the hash from
+     the address bar (`history.replaceState`) as soon as it succeeds.
+     Every login page ALSO does its own manual hash handling
+     (`initialModeFromUrl()` reading `window.location.hash` to decide
+     sign-in vs. set-password, plus a manual `setSession()` call — see
+     e.g. `lfg/login/page.tsx`'s own comment on why that manual path
+     exists in the first place: "for in-app browsers that don't auto-
+     detect the hash"). The two were racing over the same one-time hash,
+     and the automatic path was consistently winning — quietly
+     establishing the session (hence `login` firing every time) and
+     wiping the hash before each page's own lazy-state read of
+     `window.location.hash` ever ran, so `mode` always resolved to
+     `"sign-in"` regardless of a perfectly valid token having just been
+     consumed a moment earlier. Fixed by adding `detectSessionInUrl:
+     false` to the same `auth` config — every login page's manual
+     handling was already complete and correct on its own (that's the
+     whole point of the existing "for browsers that don't auto-detect"
+     fallback code), so this just removes the competing automatic
+     listener entirely, leaving the manual code as the only thing that
+     ever touches the hash. Confirmed nothing else in the codebase uses
+     `signInWithOAuth`/`signInWithOtp` or otherwise depends on the
+     automatic behavior — password sign-in, invite, and recovery (all
+     handled manually already) are the only auth flows this app has.
    - **Emails → SMTP Settings**: point it at a real mail sender —
      Supabase's own built-in mailer is heavily rate-limited (a handful of
      emails/hour) and not meant for actual customer invites. Sender

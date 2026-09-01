@@ -57,6 +57,39 @@ export const supabase = createBrowserClient(
       // process. Forcing "implicit" here makes the client's behavior match
       // what every one of those pages was already written to expect.
       flowType: "implicit",
+
+      // A second, separate bug found alongside the flowType one, 1 Sep
+      // 2026: even with flowType set correctly above, invite/recovery
+      // links STILL fell through to plain sign-in with no password
+      // prompt -- confirmed via Supabase's own auth logs, which showed a
+      // "login" event firing reliably ~6-10 seconds after every single
+      // recovery request (proving a session WAS being established from
+      // the token every time) but never a subsequent "user_updated"
+      // (password change) event, across many repeated attempts.
+      //
+      // Cause: by default (detectSessionInUrl: true), the client
+      // automatically parses and consumes any access_token/refresh_token
+      // in the URL hash the moment it's constructed -- and, on success,
+      // immediately strips the hash from the address bar via
+      // history.replaceState. Every login page ALSO does its own manual
+      // hash handling (initialModeFromUrl() reading window.location.hash
+      // to decide whether to show sign-in vs. set-password, plus a manual
+      // setSession() call -- see e.g. lfg/login/page.tsx's comment on why
+      // that manual path exists: "for in-app browsers that don't auto-
+      // detect the hash"). Both of these were racing to read the same
+      // one-time hash. The library's automatic version was consistently
+      // winning -- quietly creating the session (hence "login" firing
+      // every time) and clearing the hash before each page's own
+      // initialModeFromUrl() lazy-state read ever ran, so mode always
+      // resolved to "sign-in" instead of "set-password" despite a
+      // perfectly valid token having just been consumed.
+      //
+      // Fix: turn off the automatic version entirely. Every login page's
+      // manual handling is already complete and correct on its own (it
+      // was written to not depend on the automatic path in the first
+      // place) -- this just removes the competing automatic listener so
+      // the manual code is the only thing that ever touches the hash.
+      detectSessionInUrl: false,
     },
   }
 );
