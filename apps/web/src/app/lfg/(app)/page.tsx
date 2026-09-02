@@ -123,6 +123,58 @@ export default function LfgPartnerSitesPage() {
       .then(({ data }) => setPrograms((data as ProgramOption[]) ?? []));
   }, []);
 
+  // Seeds every filter + the Cards/List and My/All Sites toggles from the
+  // URL on mount, then keeps the URL in sync as they change -- identical
+  // pattern to workspaces/lfg/page.tsx's own mount/sync effect pair (see
+  // its comment for the full "went to pen and edit and coming back... keep
+  // the same filter" history). This page never got the same treatment:
+  // every filter/view toggle lived in plain useState with nothing writing
+  // it back to the URL, so any refresh (or a click into a site and Back)
+  // landed back on a blank "Your Sites" with the Cards view and every
+  // filter cleared, no matter what was selected before (Srinivas: "whenever
+  // i am refreshing... it resets whole view instead of staying the current
+  // view"). Read/written via window.location directly rather than
+  // useSearchParams, same reasoning as the staff page: this route is
+  // already fully client-rendered, so this avoids the Suspense-boundary
+  // requirement useSearchParams imposes for no benefit here.
+  const [hydratedFromUrl, setHydratedFromUrl] = useState(false);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const q = params.get("q");
+    const status = params.get("status");
+    const programId = params.get("program_id");
+    const format = params.get("format");
+    const all = params.get("all");
+    const viewParam = params.get("view");
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (q) setQuery(q);
+    if (status) setStatusFilter(status);
+    if (programId) setProgramIdFilter(programId);
+    if (format) setFormatFilter(format);
+    if (all === "1") setViewingAllSites(true);
+    if (viewParam === "list" || viewParam === "cards") setView(viewParam);
+    setHydratedFromUrl(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hydratedFromUrl) return;
+    const handle = setTimeout(() => {
+      const params = new URLSearchParams();
+      const trimmed = query.trim();
+      if (trimmed) params.set("q", trimmed);
+      if (statusFilter) params.set("status", statusFilter);
+      if (programIdFilter) params.set("program_id", programIdFilter);
+      if (formatFilter) params.set("format", formatFilter);
+      if (viewingAllSites) params.set("all", "1");
+      if (view !== "cards") params.set("view", view);
+      const qs = params.toString();
+      const base = lfgHref("/", onLfgHost);
+      router.replace(qs ? `${base}?${qs}` : base, { scroll: false });
+    }, 300);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydratedFromUrl, query, statusFilter, programIdFilter, formatFilter, viewingAllSites, view]);
+
   useEffect(() => {
     if (!identity) return;
     const scopedToOwn = !identity.isStaff && !viewingAllSites;
