@@ -174,6 +174,7 @@ export function LfgPartnerSiteSurveyReportBridge({ reportId }: { reportId: strin
     <SiteSurveyReportEditorClient
       reportId={reportId}
       basePath={lfgHref("/site-survey-reports", onLfgHost)}
+      homeHref={lfgHref("/", onLfgHost)}
       hideDefaultsLink
       onGenerated={onGenerated}
     />

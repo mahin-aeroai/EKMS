@@ -95,5 +95,12 @@ export function LfgPartnerInstallationReportBridge({ site }: { site: LockedInsta
     router.push(lfgHref(`/sites/${site.id}`, onLfgHost));
   }
 
-  return <InstallationReportClient lockedSite={site} onSavedForSite={onSavedForSite} />;
+  return (
+    <InstallationReportClient
+      lockedSite={site}
+      onSavedForSite={onSavedForSite}
+      homeHref={lfgHref("/", onLfgHost)}
+      backHref={lfgHref(`/sites/${site.id}`, onLfgHost)}
+    />
+  );
 }

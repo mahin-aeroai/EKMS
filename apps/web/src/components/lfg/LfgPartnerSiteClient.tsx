@@ -12,6 +12,7 @@ import { Timeline, type TimelineEntry } from "@/components/ui/Timeline";
 import { useToast } from "@/components/ui/Notifications";
 import { useLfgUser } from "@/lib/LfgUserContext";
 import { useLfgHost, lfgHref } from "@/lib/lfg-links";
+import { safeBack } from "@/lib/safe-back";
 import { formatDecimal, formatMm } from "@/lib/lfg-units";
 import { supabase } from "@/lib/supabase";
 import {
@@ -361,9 +362,14 @@ export function LfgPartnerSiteClient({
 
   return (
     <div>
-      {/* Landing here is always from the partner "Your Sites" / "All
-          Sites" list -- router.back() returns there (task #56). */}
-      <Button variant="ghost" size="sm" className="mb-3" onClick={() => router.back()}>
+      {/* Usually landing here is from the partner "Your Sites" / "All
+          Sites" list -- router.back() returns there, preserving whatever
+          filters/scroll position it had (task #56). But a bare
+          router.back() silently no-ops when there's no in-tab history to
+          go back to at all (a bookmarked/shared link, a fresh tab, a
+          refresh) -- safeBack() falls back to Home in that case instead
+          of leaving this button looking like it does nothing. */}
+      <Button variant="ghost" size="sm" className="mb-3" onClick={safeBack(router, lfgHref("/", onLfgHost))}>
         <ArrowLeft size={14} className="mr-1.5" /> Back
       </Button>
 

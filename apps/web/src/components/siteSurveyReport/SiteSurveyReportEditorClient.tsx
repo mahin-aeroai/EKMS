@@ -53,11 +53,19 @@ export function SiteSurveyReportEditorClient({
   // bridge (LfgPartnerSiteSurveyReportBridge.tsx) is the only other
   // caller and always passes both explicitly.
   basePath = "/workspaces/site-survey-report",
+  homeHref = "/",
   hideDefaultsLink = false,
   onGenerated,
 }: {
   reportId: string;
   basePath?: string;
+  // Additive/optional, same reasoning as basePath above -- the
+  // Breadcrumbs' "Home" item was hardcoded to "/" until this was added,
+  // which is wrong on the LFG partner portal's own subdomain (a bare "/"
+  // there only resolves correctly via the host-rewrite middleware when
+  // the request actually hit lfgconnect.mmdi.in itself). The LFG partner
+  // bridge always passes lfgHref("/", onLfgHost) here explicitly.
+  homeHref?: string;
   hideDefaultsLink?: boolean;
   /** Fired right after a successful Generate, with the just-generated PDF and the report row as it now stands (status: "generated"). See LfgPartnerSiteSurveyReportBridge.tsx for the partner-only "create a site from this survey" logic this drives. */
   onGenerated?: (args: { report: SiteSurveyReportRow; pdfBlob: Blob }) => Promise<void> | void;
@@ -295,7 +303,11 @@ export function SiteSurveyReportEditorClient({
   return (
     <div>
       <Breadcrumbs
-        items={[{ label: "Home", href: "/" }, { label: "Site Survey Reports", href: basePath }, { label: report.store_name || "Untitled report" }]}
+        items={[
+          { label: "Home", href: homeHref },
+          { label: "Site Survey Reports", href: basePath },
+          { label: report.store_name || "Untitled report" },
+        ]}
       />
 
       <div className="mt-4 flex flex-col gap-4 border-b border-line pb-6 sm:flex-row sm:items-start sm:justify-between">

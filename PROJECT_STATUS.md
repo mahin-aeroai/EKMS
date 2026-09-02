@@ -3279,3 +3279,46 @@ order:
       as before. After running it, confirm the `lfg_partners` row is
       actually named `MMDI` (matches what the portal header shows) —
       the closing `UPDATE` only flips the flag for an exact name match.
+
+89. **Consistent, robust "Back" buttons across every LFG partner page —
+    Srinivas reported some pages felt "stuck, nowhere to go."** Root
+    cause was two-fold: (a) `InstallationReportClient.tsx`'s
+    locked-to-one-site flow (the partner Installation Report Creator,
+    item 86) had NO back-navigation at all beyond the persistent top nav
+    — no Back button, and its Breadcrumbs' "Home" item was hardcoded to
+    `"/"` regardless of caller; (b) even where a "Back" button already
+    existed (Site 360's, `LfgPartnerSiteClient.tsx`, `router.back()`
+    only, task #56), it silently did nothing when there was no in-tab
+    history to go back to at all — a bookmarked/shared link, a page
+    refresh, or a fresh tab all leave `window.history` empty, so the
+    button was visibly there but produced no visible result, which reads
+    exactly like "stuck."
+    - New `src/lib/safe-back.ts`: `safeBack(router, fallbackHref)` —
+      prefers `router.back()` when there IS history to return to
+      (preserves whatever state the previous page had — a card grid's
+      filters, a list's search), falls back to `router.push(fallbackHref)`
+      otherwise, so a Back button always does *something*.
+    - `LfgPartnerSiteClient.tsx` (Site 360): its existing Back button now
+      goes through `safeBack(router, lfgHref("/", onLfgHost))` instead of
+      a bare `router.back()`.
+    - `SiteSurveyReportsListClient.tsx`: gained a matching top-left
+      "← Back" button (`safeBack(router, homeHref)`) — previously only
+      had the "Home" breadcrumb (which did already work, via `homeHref`
+      from item 86, just wasn't as discoverable/consistent as a real
+      Back button).
+    - `SiteSurveyReportEditorClient.tsx`: gained a `homeHref` prop
+      (default `"/"`, same additive pattern as `basePath`) fixing the
+      hardcoded Breadcrumbs "Home" link — its existing "Back to Site
+      Survey Reports" link (a plain href, always works regardless of
+      history) was left as-is.
+    - `InstallationReportClient.tsx`: gained `homeHref`/`backHref` props
+      — when `backHref` is passed (only the LFG partner bridge does),
+      renders the same `safeBack()` "← Back" button as every other page,
+      pointing at the site it's locked to. `undefined` (the staff route's
+      default) hides the button entirely — no change for staff, which
+      already has its own sidebar nav.
+    - Both bridges (`LfgPartnerSiteSurveyReportBridge.tsx`,
+      `LfgPartnerInstallationReportBridge.tsx`) now pass these new
+      host-aware `lfgHref(...)`-built hrefs down.
+    - `npx tsc --noEmit` and `npx eslint` across every changed file:
+      clean. No SQL — code-only change.
