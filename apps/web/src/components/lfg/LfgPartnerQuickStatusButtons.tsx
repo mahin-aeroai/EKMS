@@ -8,26 +8,36 @@ import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
 import { LFG_STATUSES, lfgStatusLabel, type LfgStatus } from "@/lib/lfgStatus";
 
-// One-tap Delivered/Installed buttons for the LFG partner home page's Cards
-// view (see LfgSiteCardGrid's renderQuickActions prop). Mirrors
-// StatusSwapControl's already-established pattern (workspaces/lfg/status-
-// sheet/page.tsx) -- calls lfg_change_site_status directly, no confirm
-// dialog, reports back via onChanged for an immediate in-place card update,
-// no refetch. Deliberately narrower than StatusSwapControl's full 18-status
-// picker: only the two transitions a partner is already allowed to make on
-// their own site without MMDI (verified directly against
-// lfg_sites_guard_partner_update() in supabase-lfg-site-management-
-// schema.sql -- it blocks a partner from touching creative_received_at/by
-// or setting production_pending/in_production/ready_for_dispatch/
-// dispatched/in_transit, but not 'delivered' or any installation_* status).
-// No new RLS/trigger changes needed for these two calls to work.
+// One-tap Delivered/Installed buttons for a site card's Cards view (see
+// LfgSiteCardGrid's renderQuickActions prop) -- despite the filename/
+// "Partner" in the name, not partner-only: the LFG partner home page
+// (app/lfg/(app)/page.tsx) was its first caller, but the staff Site Master
+// (app/workspaces/lfg/page.tsx) wires it in too, gated on `editable`
+// (canWrite(role)) there instead of ownership. Mirrors StatusSwapControl's
+// already-established pattern (workspaces/lfg/status-sheet/page.tsx) --
+// calls lfg_change_site_status directly, reports back via onChanged for an
+// immediate in-place card update, no refetch. Deliberately narrower than
+// StatusSwapControl's full 18-status picker: only the two transitions
+// closest to "done" (Delivered, then Installed) -- everything earlier
+// (creative receipt, production, dispatch) is staff/full-lifecycle-partner
+// territory handled via the site's own Change Status dropdown, not a card
+// shortcut. showDelivered is gated on the Shipped benchmark already being
+// crossed (rank >= "dispatched") specifically so this button never jumps
+// ahead of the benchmark checklist shown right above it on the same card.
+// For a REGULAR (non-full-lifecycle) partner this also happens to line up
+// with lfg_sites_guard_partner_update() in supabase-lfg-site-management-
+// schema.sql, which blocks that account from setting production_pending/
+// in_production/ready_for_dispatch/dispatched/in_transit anyway -- but for
+// staff and full-lifecycle-partner callers the gating here is a UI choice
+// (keep this one button "last-mile only"), not something the trigger
+// itself would reject if it did offer earlier transitions.
 //
-// Only ever rendered by the caller for the viewer's OWN sites (see
-// apps/web/src/app/lfg/(app)/page.tsx's renderQuickActions wiring) -- this
-// component itself doesn't re-check ownership, since lfg_sites_update's RLS
-// (partner_id = lfg_partner_id()) would reject a write to someone else's
-// site anyway; the caller-side check just avoids showing a button that
-// would visibly fail.
+// Only ever rendered by the caller for a site the viewer may write to --
+// the partner page checks ownership, the staff page checks `editable` --
+// this component itself doesn't re-check either, since lfg_sites_update's
+// RLS (and the guard trigger above, for a restricted partner) would reject
+// a write it isn't allowed to make anyway; the caller-side check just
+// avoids showing a button that would visibly fail.
 export function LfgPartnerQuickStatusButtons({
   siteId,
   siteCode,

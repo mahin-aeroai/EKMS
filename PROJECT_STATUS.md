@@ -3403,3 +3403,28 @@ order:
     via Change Status on the site's own page). `showInstalled`'s own gate
     (`rank >= deliveredRank`) was already correct, unchanged. `npx tsc
     --noEmit` / `npx eslint`: clean. No SQL — code-only change.
+
+93. **Staff Site Master (app.mmdi.in) never had the Mark Delivered/Mark
+    Installed quick-action button — it was partner-only by wiring, not
+    by design.** Srinivas, from an app.mmdi.in screenshot of the Program
+    Dashboard's card grid: "Aptronix @ Malabar" sitting at Delivered with
+    every earlier benchmark crossed, showing no button at all — "the
+    button missing here!!" Root cause: `LfgSiteCardGrid`'s
+    `renderQuickActions` prop (what actually renders
+    `LfgPartnerQuickStatusButtons`) was only ever passed by the LFG
+    partner home page (`app/lfg/(app)/page.tsx`); the staff Site Master
+    (`app/workspaces/lfg/page.tsx`) called `<LfgSiteCardGrid rows={rows}
+    />` with nothing for it, so the button never rendered there at all,
+    for any staff account, at any stage. `LfgPartnerQuickStatusButtons`
+    was never actually partner-specific despite its name/location — no
+    ownership check inside it, it just calls `lfg_change_site_status`
+    (staff already passes `lfg_sites_guard_partner_update()`
+    unconditionally, that trigger only restricts partner-role callers).
+    Fixed by wiring the same component into the staff page too, gated on
+    `editable` (`canWrite(role)`) instead of ownership, with the same
+    in-place `handleStatusChanged` row update the partner page already
+    had. Updated the header comments on `LfgPartnerQuickStatusButtons.tsx`
+    and `LfgSiteCardGrid.tsx`'s own quick-actions block to stop claiming
+    "partner-only"/"staff never passes this" now that it's not true. No
+    behavior change for the partner page itself. `npx tsc --noEmit` /
+    `npx eslint`: clean. No SQL — code-only change.

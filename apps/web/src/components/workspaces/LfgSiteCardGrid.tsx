@@ -628,12 +628,15 @@ function SiteCard({
           <LfgBenchmarkStrip status={row.site_status} creativeReceivedAt={row.creative_received_at} />
         </div>
 
-        {/* Partner-only one-tap Delivered/Installed buttons (see
-            LfgPartnerQuickStatusButtons) -- null/absent for the staff Site
-            Master, which never passes renderQuickActions. Sits between the
-            read-only benchmark strip above (what's already happened) and
-            the document buttons below (view what's on file) -- this is the
-            one interactive "make something happen" row on the card. */}
+        {/* One-tap Delivered/Installed buttons (see
+            LfgPartnerQuickStatusButtons -- not actually partner-only
+            despite the name/file location, see the staff Site Master's own
+            import comment) -- null/absent wherever the caller doesn't pass
+            renderQuickActions (a viewer with no write access, or a surface
+            that's read-only by design). Sits between the read-only
+            benchmark strip above (what's already happened) and the
+            document buttons below (view what's on file) -- this is the one
+            interactive "make something happen" row on the card. */}
         {quickActions && <div className="mt-3.5" onClick={(e) => e.stopPropagation()}>{quickActions}</div>}
 
         {/* Always-visible, no-click-required shipping status, right under
