@@ -3428,3 +3428,24 @@ order:
     "partner-only"/"staff never passes this" now that it's not true. No
     behavior change for the partner page itself. `npx tsc --noEmit` /
     `npx eslint`: clean. No SQL — code-only change.
+
+94. **LFG partner home page: added the "Programs" summary tiles card.**
+    Srinivas: "Also i need programs summary update card on top" (after a
+    screenshot of the staff Site Master's own Programs tile row —
+    per-format Active/Printed/Shipped/Delivered/Installed counts,
+    `LfgProgramSummaryCard`). That card was staff-only — never imported
+    on `app/lfg/(app)/page.tsx` at all. Added it there too, in the same
+    position the staff page uses (right after the stat/filter row, above
+    the site cards/list), wired to the same `programIdFilter` state this
+    page already had (now URL-synced by item 91's mount/sync effect, so
+    picking a season here survives a refresh same as every other filter).
+    `LfgProgramSummaryCard` gained one new optional prop, `partnerId` --
+    its own site-row fetch was unconditionally global (every site, every
+    partner, no scoping at all) since its only caller was staff, who
+    should see that. A genuine partner's tiles now scope to their own
+    `partner_id` whenever "My Sites" is the active view, matching the
+    same scoping the page's own row fetch already applies -- only actually
+    shows company-wide numbers once "All Sites" is toggled on (or for a
+    staff sign-in, unaffected, `partnerId` left unset there exactly as
+    before). `npx tsc --noEmit` / `npx eslint`: clean. No SQL — code-only
+    change.

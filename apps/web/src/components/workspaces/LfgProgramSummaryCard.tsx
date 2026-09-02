@@ -70,9 +70,21 @@ interface LfgProgramSummaryCardProps {
   // "" = All Sites (no program filter).
   selectedProgramId: string;
   onSelectProgram: (id: string, name: string) => void;
+  // Additive -- the staff Site Master leaves this unset (every site, same
+  // as before). The LFG partner home page passes its own partner_id
+  // whenever the "My Sites" toggle (not "All Sites") is the active view,
+  // so a genuine partner's tiles only ever total up their own program
+  // numbers, not every other partner's -- same scoping the page's own
+  // site-row fetch already applies for the exact same reason, just
+  // mirrored into this card's separate self-contained fetch. Any signed-in
+  // partner COULD read every site's data via "All Sites" already (RLS
+  // grants that), but this tile row shouldn't default to showing
+  // company-wide numbers just because it has its own fetch that forgot to
+  // ask.
+  partnerId?: string | null;
 }
 
-export function LfgProgramSummaryCard({ selectedProgramId, onSelectProgram }: LfgProgramSummaryCardProps) {
+export function LfgProgramSummaryCard({ selectedProgramId, onSelectProgram, partnerId }: LfgProgramSummaryCardProps) {
   const [programs, setPrograms] = useState<ProgramOption[] | null>(null);
   const [siteRows, setSiteRows] = useState<SiteFormatRow[] | null>(null);
 
@@ -88,10 +100,12 @@ export function LfgProgramSummaryCard({ selectedProgramId, onSelectProgram }: Lf
       .order("created_at", { ascending: false })
       .then(({ data }) => setPrograms((data as ProgramOption[] | null) ?? []));
 
-    fetchAllRows<SiteFormatRow>((from, to) =>
-      supabase.from("lfg_sites").select("program_id, format, site_status, creative_received_at, store_id").range(from, to)
-    ).then(setSiteRows);
-  }, []);
+    fetchAllRows<SiteFormatRow>((from, to) => {
+      let q = supabase.from("lfg_sites").select("program_id, format, site_status, creative_received_at, store_id").range(from, to);
+      if (partnerId) q = q.eq("partner_id", partnerId);
+      return q;
+    }).then(setSiteRows);
+  }, [partnerId]);
 
   if (programs === null || siteRows === null) return null;
 

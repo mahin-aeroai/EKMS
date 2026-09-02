@@ -14,6 +14,7 @@ import { LFG_STATUSES, lfgStatusLabel, lfgStatusBadge } from "@/lib/lfgStatus";
 import { formatMm, formatSizeInches, formatDecimal } from "@/lib/lfg-units";
 import { useLfgDistinctValues } from "@/lib/useLfgDistinctValues";
 import { LfgSiteCardGrid } from "@/components/workspaces/LfgSiteCardGrid";
+import { LfgProgramSummaryCard } from "@/components/workspaces/LfgProgramSummaryCard";
 import { LfgPartnerQuickStatusButtons } from "@/components/lfg/LfgPartnerQuickStatusButtons";
 
 // Real LFG partner Site Master (task #19) -- replaces the earlier
@@ -419,6 +420,24 @@ export default function LfgPartnerSitesPage() {
           </div>
         </div>
       </div>
+
+      {/* Programs summary tiles (Active/Printed/Shipped/Delivered/
+          Installed per format) -- same card the staff Site Master already
+          shows right below its own stat/filter row (Srinivas: "i need
+          programs summary update card on top"). The Season dropdown here
+          is the same controlled selectedProgramId/onSelectProgram wiring
+          as the staff page's, driving this page's own programIdFilter
+          (and now URL-synced by the mount/sync effect above) rather than
+          keeping its own separate state. Scoped to the partner's own
+          sites whenever "My Sites" is the active view (unscoped, i.e.
+          every partner's numbers, only once "All Sites" is toggled on --
+          see the component's own partnerId prop comment for why this
+          matters here specifically). */}
+      <LfgProgramSummaryCard
+        selectedProgramId={programIdFilter}
+        onSelectProgram={(id) => setProgramIdFilter(id)}
+        partnerId={identity && !identity.isStaff && !viewingAllSites ? identity.partnerId : null}
+      />
 
       {rows === null ? (
         <div className="rounded-lg border border-line bg-surface p-4">
