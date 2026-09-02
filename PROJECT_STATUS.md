@@ -3356,3 +3356,50 @@ order:
       dropdown) is untouched and still says "In Production".
     - `npx tsc --noEmit` and `npx eslint` across every changed file:
       clean. No SQL — code-only change.
+
+91. **LFG partner home: search/filters/view now survive a refresh.**
+    Srinivas: "whenever i am refreshing are coming to home page it resets
+    whole view instead of staying the current view." Every filter
+    (search text, status/program/format) plus the My Sites/All Sites
+    toggle and the Cards/List view lived in plain `useState` on
+    `app/lfg/(app)/page.tsx`, with nothing writing any of it back to the
+    URL — a refresh, or clicking into a site and Back, always landed on
+    a blank "Your Sites" with everything cleared. Exactly the same
+    complaint the staff Site Master (`app/workspaces/lfg/page.tsx`) had
+    already been fixed for earlier ("went to pen and edit and coming
+    back... keep the same filter") — this page just never got the same
+    treatment. Fixed by copying that page's own mount/sync effect pair
+    verbatim: seed every filter/toggle from `window.location.search` on
+    mount, then debounce-sync them back into the URL (`?q=&status=&
+    program_id=&format=&all=1&view=`) via `router.replace(..., {scroll:
+    false})` as they change. Read via `window.location` directly rather
+    than `useSearchParams()`, same reasoning as the staff page: this
+    route is already fully client-rendered, so this sidesteps the
+    Suspense-boundary requirement for no benefit here. `npx tsc --noEmit`
+    / `npx eslint`: clean. No SQL — code-only change.
+
+92. **Site card quick-status button: fixed showing "Mark Delivered" on a
+    brand new site.** Srinivas, from a screenshot of three sites all
+    sitting at "Site Survey Completed" (only that one benchmark green):
+    "next step supose to be creative receipt but instead the update
+    button shows as delivery update!!" `LfgPartnerQuickStatusButtons.tsx`
+    computed `showDelivered` as `rank < deliveredRank` — true for every
+    status before Delivered, Survey Completed included, so "Mark
+    Delivered" appeared as the very first action on a new site, skipping
+    Creative Received/Printed/Shipped entirely. Those three steps were
+    never this component's job to begin with (creative receipt is a
+    toggle on the Survey tab; Printed/Shipped are `site_status`
+    transitions a regular partner can't set at all — see
+    `LFG_PARTNER_RESTRICTED_STATUSES` — and a full-lifecycle partner like
+    MMDI's own login sets them via the site's own Change Status dropdown,
+    unlocked in item 88). Fixed by gating `showDelivered` on the site
+    having actually reached the Shipped benchmark first: `rank >=
+    LFG_STATUSES.indexOf("dispatched")` (the Shipped benchmark's own
+    `throughStatus` in `lfgStatus.ts`) `&& rank < deliveredRank` — so the
+    quick-action button never shows a step that contradicts the
+    benchmark checklist already on the same card. A site earlier than
+    Shipped now shows no quick-action button at all (the benchmark
+    checklist is still the status indicator; earlier transitions happen
+    via Change Status on the site's own page). `showInstalled`'s own gate
+    (`rank >= deliveredRank`) was already correct, unchanged. `npx tsc
+    --noEmit` / `npx eslint`: clean. No SQL — code-only change.

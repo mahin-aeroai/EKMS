@@ -50,9 +50,27 @@ export function LfgPartnerQuickStatusButtons({
   const [confirming, setConfirming] = useState<LfgStatus | null>(null);
 
   const rank = LFG_STATUSES.indexOf(status as LfgStatus);
+  // Bug fixed here (Srinivas, screenshot of "iPlanet @ ByPass" etc.: "the
+  // green updates are showing as site survey completed so next step
+  // supose to be creative receipt but instead the update button shows as
+  // delivery update"): this used to be `rank < deliveredRank`, which is
+  // true for EVERY status before Delivered -- Survey Completed included --
+  // so "Mark Delivered" showed as the very first action on a brand new
+  // site, skipping Creative Received/Printed/Shipped entirely. Those three
+  // steps aren't this component's business (creative receipt is a toggle
+  // on the Survey tab; Printed/Shipped are site_status transitions a
+  // regular partner is blocked from setting at all -- see
+  // LFG_PARTNER_RESTRICTED_STATUSES -- and a full-lifecycle partner sets
+  // via the site's own Change Status dropdown, which already lists every
+  // status). "Mark Delivered" only belongs here once Shipped is the last
+  // benchmark actually crossed -- i.e. rank has reached "dispatched" (the
+  // Shipped benchmark's own throughStatus in lfgStatus.ts) -- matching the
+  // same benchmark checklist already shown on the card, so the one quick
+  // button here never contradicts it.
+  const shippedRank = LFG_STATUSES.indexOf("dispatched");
   const deliveredRank = LFG_STATUSES.indexOf("delivered");
   const installedRank = LFG_STATUSES.indexOf("installation_completed");
-  const showDelivered = rank >= 0 && rank < deliveredRank;
+  const showDelivered = rank >= shippedRank && rank < deliveredRank;
   const showInstalled = rank >= deliveredRank && rank < installedRank;
 
   if (!showDelivered && !showInstalled) return null;
