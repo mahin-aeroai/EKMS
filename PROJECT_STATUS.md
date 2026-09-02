@@ -3188,3 +3188,25 @@ order:
       vars are set, tracking a real AWB. See the plan's own Verification
       section for the full checklist.
     - Delivered as `lfg-partner-format-bluedart-report-creators.bundle`.
+
+87. **"Track via Blue Dart" moved onto the site card itself** (`LfgSiteCardGrid.tsx`,
+    shared by staff Site Master and the LFG partner home page) — Srinivas
+    wanted it reachable straight from the Cards grid instead of requiring a
+    click into Site 360's Shipment tab first. The grid's existing
+    per-site shipment lookup (already fetching the latest AWB for the
+    card's "AWB" row) now also pulls `id`/`courier`; the card shows the
+    same "Track via Blue Dart" button (same
+    `/api/lfg/shipments/[shipmentId]/track` route, same
+    `/blue\s*dart/i` courier-name check) as `LfgSiteWorkspaceClient.tsx`'s
+    Shipment tab, right under the AWB line, whenever the site's latest
+    shipment has both an AWB and a Blue Dart-looking courier. The card has
+    nowhere to show the event timeline, so a toast is the only feedback —
+    the full timeline still lives on the Shipment tab. `npx tsc --noEmit`
+    and `npx eslint` on the changed file: clean.
+    - Also confirmed via a live screenshot from Srinivas: the partner-facing
+      Site Survey Reports page (item 86) hit `403`s from Supabase on
+      `site_survey_reports` — expected, since
+      `supabase-lfg-site-survey-reports-partner-migration.sql` (also
+      shipped in item 86's bundle) hadn't been run yet in the Supabase SQL
+      Editor. Not a code bug — flagged to Srinivas to run that migration;
+      no code change needed for this part.
