@@ -316,7 +316,13 @@ export interface LfgBenchmark {
 export const LFG_BENCHMARKS: LfgBenchmark[] = [
   { key: "survey_completed", label: "Site Survey Completed", throughStatus: "survey_completed" },
   { key: "creative_received", label: "Creative Received (New)", throughStatus: "production_pending" },
-  { key: "in_production", label: "In Production", throughStatus: "in_production" },
+  // Label is "Printed" here (Srinivas's own wording for this checkpoint)
+  // while LFG_STATUS_LABEL.in_production stays "In Production" -- this is
+  // a separate, display-only checklist label keyed to the same
+  // `in_production` status; the actual site_status value, the Production
+  // tab, and the Change Status dropdown are unaffected and still say "In
+  // Production".
+  { key: "in_production", label: "Printed", throughStatus: "in_production" },
   { key: "shipped", label: "Shipped", throughStatus: "dispatched" },
   { key: "delivered", label: "Delivered", throughStatus: "delivered" },
   { key: "installed", label: "Installed", throughStatus: "installation_completed" },

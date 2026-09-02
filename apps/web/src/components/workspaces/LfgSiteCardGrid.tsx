@@ -7,7 +7,7 @@ import { Badge, type BadgeStatus } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
-import { lfgStatusLabel, lfgStatusBadge } from "@/lib/lfgStatus";
+import { LFG_STATUSES, type LfgStatus, lfgStatusLabel, lfgStatusBadge, shipmentStatusLabel, shipmentStatusBadge } from "@/lib/lfgStatus";
 import { formatSizeMm } from "@/lib/lfg-units";
 import { formatPlaceholderColor, isLightColor } from "@/lib/lfg-format-colors";
 import { LfgBenchmarkStrip } from "./LfgBenchmarkStrip";
@@ -161,20 +161,45 @@ interface DocRef {
   file_type: string | null;
 }
 
-// The one thing this grid needs from a site's latest shipment -- just
-// enough to show the AWB and, when the courier looks like Blue Dart, a
-// "Track via Blue Dart" button right on the card (same
+// The one thing this grid needs from a site's latest shipment -- enough
+// to show the AWB and, when the courier looks like Blue Dart, a "Track
+// via Blue Dart" button right on the card (same
 // /api/lfg/shipments/[shipmentId]/track route and courier-name regex the
 // Shipment tab's own button uses -- see LfgSiteWorkspaceClient.tsx's
-// isBlueDart/handleTrackViaBlueDart).
+// isBlueDart/handleTrackViaBlueDart), plus current_status for the
+// always-visible "Tracking" line below the quick-status button (see
+// trackingSummary() below).
 interface CardShipmentRef {
   id: string;
   awb_number: string;
   courier: string | null;
+  current_status: string | null;
 }
 
 function isBlueDartCourier(courier: string | null): boolean {
   return /blue\s*dart/i.test(courier ?? "");
+}
+
+// A one-line, no-click-required answer to "where is this, shipping-wise"
+// -- sits right under the Mark Delivered/Mark Installed quick-action
+// button (Srinivas's request). Once the SITE itself has reached
+// Delivered (or gone past it, e.g. Installed), this always reads
+// "Delivered" regardless of what the shipment row's own current_status
+// happens to say -- the site's status (which the partner controls
+// directly via the quick-action button, RLS-enforced) is the more
+// authoritative signal than a courier-fed field that may lag or never
+// get touched for a manually-delivered site. Below that rank, it falls
+// back to the shipment's own current_status (courier-fed, or manually
+// logged on the Shipment tab) when a shipment is on file at all.
+function trackingSummary(row: LfgSiteCardRow, shipment: CardShipmentRef | null): { label: string; badge: BadgeStatus } {
+  const rank = LFG_STATUSES.indexOf(row.site_status as LfgStatus);
+  if (rank >= LFG_STATUSES.indexOf("delivered")) {
+    return { label: "Delivered", badge: "success" };
+  }
+  if (shipment?.current_status) {
+    return { label: shipmentStatusLabel(shipment.current_status), badge: shipmentStatusBadge(shipment.current_status) };
+  }
+  return { label: "Not shipped yet", badge: "neutral" };
 }
 
 // Shape of one row the /track route hands back (lfg_shipment_events,
@@ -274,16 +299,18 @@ export function LfgSiteCardGrid({
 
     supabase
       .from("lfg_shipments")
-      .select("id, site_id, awb_number, courier, created_at")
+      .select("id, site_id, awb_number, courier, current_status, created_at")
       .in("site_id", ids)
       .not("awb_number", "is", null)
       .order("created_at", { ascending: false })
       .then(({ data }) => {
         if (cancelled) return;
         const map: Record<string, CardShipmentRef> = {};
-        for (const row of (data as { id: string; site_id: string; awb_number: string | null; courier: string | null }[]) ?? []) {
+        for (const row of (data as
+          | { id: string; site_id: string; awb_number: string | null; courier: string | null; current_status: string | null }[]
+          | null) ?? []) {
           if (row.awb_number && !map[row.site_id]) {
-            map[row.site_id] = { id: row.id, awb_number: row.awb_number, courier: row.courier };
+            map[row.site_id] = { id: row.id, awb_number: row.awb_number, courier: row.courier, current_status: row.current_status };
           }
         }
         setAwbBySite(map);
@@ -511,6 +538,7 @@ function SiteCard({
   const placeholderColor = formatPlaceholderColor(row.format);
   const iconStroke = isLightColor(placeholderColor) ? "#1E252B" : "#fff";
   const href = buildHref ? buildHref(row.id) : `/workspaces/lfg/sites/${row.id}`;
+  const shipStatus = trackingSummary(row, shipment);
 
   return (
     <div
@@ -607,6 +635,20 @@ function SiteCard({
             the document buttons below (view what's on file) -- this is the
             one interactive "make something happen" row on the card. */}
         {quickActions && <div className="mt-3.5" onClick={(e) => e.stopPropagation()}>{quickActions}</div>}
+
+        {/* Always-visible, no-click-required shipping status, right under
+            the quick-action button (Srinivas's request) -- once the site
+            itself reaches Delivered/Installed this always reads
+            "Delivered" (see trackingSummary()'s own comment for why it
+            trusts site_status over the shipment's own current_status at
+            that point); below that it falls back to the shipment's own
+            current_status when one is on file. The detailed AWB / "Track
+            via Blue Dart" section further down the card still exists
+            unchanged for pulling a fresh courier update. */}
+        <div className="mt-3.5 flex items-center gap-2">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-secondary">Tracking</span>
+          <Badge status={shipStatus.badge}>{shipStatus.label}</Badge>
+        </div>
 
         <div className="my-4 h-px bg-line" />
 

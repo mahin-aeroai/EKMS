@@ -3322,3 +3322,37 @@ order:
       host-aware `lfgHref(...)`-built hrefs down.
     - `npx tsc --noEmit` and `npx eslint` across every changed file:
       clean. No SQL — code-only change.
+
+90. **Site card quick-status: confirm-before-apply, and an always-visible
+    "Tracking" line.** Srinivas confirmed the benchmark checklist and
+    single-button pattern he was describing (item 85's
+    `LfgBenchmarkStrip` + `LfgPartnerQuickStatusButtons`) already existed
+    — what was actually new, after clarifying with him: (1) tapping
+    "Mark Delivered"/"Mark Installed" should ask for confirmation before
+    it applies, not undo-after; (2) a simple always-visible shipping
+    status line under that button, not a click-required one.
+    - `LfgPartnerQuickStatusButtons.tsx`: a tap now sets `confirming`
+      instead of calling `setStatus()` directly; a `Dialog` ("Mark as
+      {status}? ... Cancel here first if you're not sure") gates the
+      actual `lfg_change_site_status` RPC call behind Confirm. Cancel
+      applies nothing.
+    - `LfgSiteCardGrid.tsx`: new `trackingSummary(row, shipment)` — reads
+      "Delivered" once the site itself has reached Delivered or later
+      (trusts `site_status`, which the confirm-gated button above
+      controls directly, over the shipment's own possibly-stale
+      `current_status`), else the shipment's own `current_status` via the
+      existing `shipmentStatusLabel`/`shipmentStatusBadge` helpers when a
+      shipment is on file, else "Not shipped yet". Rendered as a
+      `Tracking: <status>` line directly under the quick-action button —
+      no click needed. The existing AWB / "Track via Blue Dart"
+      button+results panel further down the card is unchanged, still
+      there for pulling a fresh courier update on demand. Needed
+      `lfg_shipments.current_status` added to the grid's existing
+      per-site shipment fetch.
+    - `lfgStatus.ts`: `LFG_BENCHMARKS`' `in_production` checkpoint label
+      changed from "In Production" to "Printed" (Srinivas's own wording
+      for that checkpoint) — display-only; `LFG_STATUS_LABEL.in_production`
+      (the real site_status label, Production tab, Change Status
+      dropdown) is untouched and still says "In Production".
+    - `npx tsc --noEmit` and `npx eslint` across every changed file:
+      clean. No SQL — code-only change.

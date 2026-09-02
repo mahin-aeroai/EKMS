@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Check, Truck } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { Dialog } from "@/components/ui/Dialog";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
 import { LFG_STATUSES, lfgStatusLabel, type LfgStatus } from "@/lib/lfgStatus";
@@ -42,6 +43,11 @@ export function LfgPartnerQuickStatusButtons({
 }) {
   const { toast } = useToast();
   const [saving, setSaving] = useState<LfgStatus | null>(null);
+  // A tap is a proposal, not the change itself -- confirming (Srinivas's
+  // request: "before anyone press the update button there should be a
+  // way to go back") is what actually fires setStatus() below. null =
+  // no confirmation dialog open.
+  const [confirming, setConfirming] = useState<LfgStatus | null>(null);
 
   const rank = LFG_STATUSES.indexOf(status as LfgStatus);
   const deliveredRank = LFG_STATUSES.indexOf("delivered");
@@ -67,6 +73,12 @@ export function LfgPartnerQuickStatusButtons({
     toast("success", `${outletName} → ${lfgStatusLabel(target)}`);
   }
 
+  function handleConfirm() {
+    const target = confirming;
+    setConfirming(null);
+    if (target) void setStatus(target);
+  }
+
   return (
     <div className="flex gap-2">
       {showDelivered && (
@@ -76,7 +88,7 @@ export function LfgPartnerQuickStatusButtons({
           className="flex-1"
           loading={saving === "delivered"}
           disabled={saving !== null}
-          onClick={() => setStatus("delivered")}
+          onClick={() => setConfirming("delivered")}
         >
           <Truck size={14} className="mr-1.5" />
           Mark Delivered
@@ -89,12 +101,22 @@ export function LfgPartnerQuickStatusButtons({
           className="flex-1"
           loading={saving === "installation_completed"}
           disabled={saving !== null}
-          onClick={() => setStatus("installation_completed")}
+          onClick={() => setConfirming("installation_completed")}
         >
           <Check size={14} className="mr-1.5" />
           Mark Installed
         </Button>
       )}
+      <Dialog
+        open={confirming !== null}
+        onClose={() => setConfirming(null)}
+        title={confirming ? `Mark as ${lfgStatusLabel(confirming)}?` : ""}
+        onConfirm={handleConfirm}
+        confirmLabel="Confirm"
+      >
+        {outletName} ({siteCode}) will move to {confirming ? lfgStatusLabel(confirming) : ""}. This updates the site
+        right away — Cancel here first if you&rsquo;re not sure.
+      </Dialog>
     </div>
   );
 }
