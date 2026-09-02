@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ClipboardCheck, Copy, Download, Eye, Search, Sparkles, Trash2 } from "lucide-react";
+import { ArrowLeft, ClipboardCheck, Copy, Download, Eye, Search, Sparkles, Trash2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -11,6 +11,7 @@ import { Dialog } from "@/components/ui/Dialog";
 import { StatCard } from "@/components/ui/Card";
 import { Table, type TableColumn } from "@/components/ui/Table";
 import { useToast } from "@/components/ui/Notifications";
+import { safeBack } from "@/lib/safe-back";
 import { supabase } from "@/lib/supabase";
 import { useUserRole } from "@/lib/UserRoleContext";
 import { buildSiteSurveyReportPdf, downloadBlob, type SurveyPhotoInput } from "@/lib/siteSurveyReport/pdfBuild";
@@ -350,6 +351,13 @@ export function SiteSurveyReportsListClient({
 
   return (
     <div>
+      {/* Same safeBack() pattern as Site 360's own Back button
+          (LfgPartnerSiteClient.tsx) -- router.back() when there's
+          history to return to, homeHref otherwise (a direct/bookmarked
+          link into this page, or a refresh, has none). */}
+      <Button variant="ghost" size="sm" className="mb-3" onClick={safeBack(router, homeHref)}>
+        <ArrowLeft size={14} className="mr-1.5" /> Back
+      </Button>
       <Breadcrumbs items={[{ label: "Home", href: homeHref }, { label: "Site Survey Reports" }]} />
 
       <div className="mt-4 flex flex-col gap-4 border-b border-line pb-6 sm:flex-row sm:items-start sm:justify-between">

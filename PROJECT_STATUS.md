@@ -3199,10 +3199,18 @@ order:
     `/api/lfg/shipments/[shipmentId]/track` route, same
     `/blue\s*dart/i` courier-name check) as `LfgSiteWorkspaceClient.tsx`'s
     Shipment tab, right under the AWB line, whenever the site's latest
-    shipment has both an AWB and a Blue Dart-looking courier. The card has
-    nowhere to show the event timeline, so a toast is the only feedback —
-    the full timeline still lives on the Shipment tab. `npx tsc --noEmit`
-    and `npx eslint` on the changed file: clean.
+    shipment has both an AWB and a Blue Dart-looking courier. `npx tsc
+    --noEmit` and `npx eslint` on the changed file: clean.
+    - **Follow-up same item**: Srinivas asked for the tracking *results*
+      to show on the card too, not just a toast. The route already
+      returns the full event list (newest first); the card now keeps the
+      top 3 in local state after a click and renders them inline right
+      below the button (status, location, timestamp) — deliberately not
+      the full `Timeline` component the Shipment tab uses (no room on a
+      card), plus a small "View full timeline" button that navigates to
+      the site's own Shipment tab for the rest. Nothing is pre-fetched on
+      load; the panel only appears after a click on that card. `npx tsc
+      --noEmit` / `npx eslint`: clean.
     - Also confirmed via a live screenshot from Srinivas: the partner-facing
       Site Survey Reports page (item 86) hit `403`s from Supabase on
       `site_survey_reports` — expected, since
@@ -3210,3 +3218,253 @@ order:
       shipped in item 86's bundle) hadn't been run yet in the Supabase SQL
       Editor. Not a code bug — flagged to Srinivas to run that migration;
       no code change needed for this part.
+
+88. **"Full-lifecycle partner" flag — MMDI's own LFG Connect login can now
+    do creative/production/dispatch too, not just survey/shipping/
+    installation.** Srinivas pointed out MMDI is both the staff org
+    running this app AND its own `lfg_partners` row (the installation
+    partner on its own sites) — he wanted Creative Received, Production,
+    and dispatch-status buttons reachable from the same
+    `lfgconnect.mmdi.in` login he already uses, instead of switching to
+    the internal staff tool for those stages. Those three were previously
+    hard-blocked for ANY partner account (including MMDI's own) by
+    `lfg_sites_guard_partner_update()` (the restriction predates this
+    session — see `supabase-lfg-workflow-automation-migration.sql`) and
+    by `lfg_production_write_staff` having no partner clause at all —
+    both deliberately, per an earlier task ("Creative
+    received has to be updated by the users MMDI" / "Shipped will be
+    updated by MMDI once printed and shipped"), and that trigger has no
+    way to tell MMDI's own partner login apart from a genuinely external
+    installation partner who might sign into the same portal — so a
+    blanket unblock for every partner was never on the table.
+    - New `supabase-lfg-full-lifecycle-partner-migration.sql`: adds
+      `lfg_partners.is_full_lifecycle_partner` (default `false` — every
+      other partner, present or future, stays exactly as restricted as
+      before unless explicitly flagged) and a new
+      `lfg_partner_is_full_lifecycle()` helper (same style as
+      `is_lfg_partner_user()`/`lfg_partner_id()`). Re-declares
+      `lfg_sites_guard_partner_update()` to skip the Creative Received
+      and production/shipping-status checks only when that flag is set —
+      the ownership/outlet-name/format/SFO-ID restriction stays
+      unconditional for every partner. Re-declares
+      `lfg_production_write_staff` to also grant a flagged partner write
+      access to their own sites' `lfg_production` row (upsert, same
+      pattern the existing "Start Production"/"Mark Completed" buttons
+      already use). Closing statement flips the flag on for the
+      `lfg_partners` row named `'MMDI'` specifically.
+    - Code: `lfg-auth.ts`'s `LfgIdentity` gains `isFullLifecyclePartner`
+      (sourced from the same query, always `false` on a staff sign-in —
+      staff already get everything via `isStaff`/`staffRole`).
+      `LfgPartnerSiteClient.tsx`: `canWriteProduction` and
+      `canMarkCreative` are now `isStaff ? editable : isFullLifecycle`
+      (previously hard `false`/`isStaff && editable`), and the "Change
+      Status" dropdown's `LFG_PARTNER_RESTRICTED_STATUSES` filter now
+      also lets a full-lifecycle partner pick
+      production_pending/in_production/ready_for_dispatch/dispatched/
+      in_transit. Deliberately NOT touched: Site Survey approval
+      (`canApprove`) — that's a separate QC step, admin/editor-only at
+      the RLS level with no partner clause, out of scope for what was
+      asked.
+    - Not yet done (mention if it comes up): quick-action buttons on the
+      site CARDS (`LfgPartnerQuickStatusButtons.tsx`) are still only
+      "Mark Delivered"/"Mark Installed" — a full-lifecycle partner gets
+      the new production/dispatch controls via the Production tab and the
+      Change Status dropdown, not a one-tap card button yet. Easy
+      follow-up if Srinivas wants it.
+    - `npx tsc --noEmit` and `npx eslint` across every changed file:
+      clean. New `.sql` file validated with `pglast.parse_sql`: clean.
+    - **Requires running `supabase-lfg-full-lifecycle-partner-
+      migration.sql` in the Supabase SQL Editor** before any of this
+      does anything — until then the trigger/policy still reject exactly
+      as before. After running it, confirm the `lfg_partners` row is
+      actually named `MMDI` (matches what the portal header shows) —
+      the closing `UPDATE` only flips the flag for an exact name match.
+
+89. **Consistent, robust "Back" buttons across every LFG partner page —
+    Srinivas reported some pages felt "stuck, nowhere to go."** Root
+    cause was two-fold: (a) `InstallationReportClient.tsx`'s
+    locked-to-one-site flow (the partner Installation Report Creator,
+    item 86) had NO back-navigation at all beyond the persistent top nav
+    — no Back button, and its Breadcrumbs' "Home" item was hardcoded to
+    `"/"` regardless of caller; (b) even where a "Back" button already
+    existed (Site 360's, `LfgPartnerSiteClient.tsx`, `router.back()`
+    only, task #56), it silently did nothing when there was no in-tab
+    history to go back to at all — a bookmarked/shared link, a page
+    refresh, or a fresh tab all leave `window.history` empty, so the
+    button was visibly there but produced no visible result, which reads
+    exactly like "stuck."
+    - New `src/lib/safe-back.ts`: `safeBack(router, fallbackHref)` —
+      prefers `router.back()` when there IS history to return to
+      (preserves whatever state the previous page had — a card grid's
+      filters, a list's search), falls back to `router.push(fallbackHref)`
+      otherwise, so a Back button always does *something*.
+    - `LfgPartnerSiteClient.tsx` (Site 360): its existing Back button now
+      goes through `safeBack(router, lfgHref("/", onLfgHost))` instead of
+      a bare `router.back()`.
+    - `SiteSurveyReportsListClient.tsx`: gained a matching top-left
+      "← Back" button (`safeBack(router, homeHref)`) — previously only
+      had the "Home" breadcrumb (which did already work, via `homeHref`
+      from item 86, just wasn't as discoverable/consistent as a real
+      Back button).
+    - `SiteSurveyReportEditorClient.tsx`: gained a `homeHref` prop
+      (default `"/"`, same additive pattern as `basePath`) fixing the
+      hardcoded Breadcrumbs "Home" link — its existing "Back to Site
+      Survey Reports" link (a plain href, always works regardless of
+      history) was left as-is.
+    - `InstallationReportClient.tsx`: gained `homeHref`/`backHref` props
+      — when `backHref` is passed (only the LFG partner bridge does),
+      renders the same `safeBack()` "← Back" button as every other page,
+      pointing at the site it's locked to. `undefined` (the staff route's
+      default) hides the button entirely — no change for staff, which
+      already has its own sidebar nav.
+    - Both bridges (`LfgPartnerSiteSurveyReportBridge.tsx`,
+      `LfgPartnerInstallationReportBridge.tsx`) now pass these new
+      host-aware `lfgHref(...)`-built hrefs down.
+    - `npx tsc --noEmit` and `npx eslint` across every changed file:
+      clean. No SQL — code-only change.
+
+90. **Site card quick-status: confirm-before-apply, and an always-visible
+    "Tracking" line.** Srinivas confirmed the benchmark checklist and
+    single-button pattern he was describing (item 85's
+    `LfgBenchmarkStrip` + `LfgPartnerQuickStatusButtons`) already existed
+    — what was actually new, after clarifying with him: (1) tapping
+    "Mark Delivered"/"Mark Installed" should ask for confirmation before
+    it applies, not undo-after; (2) a simple always-visible shipping
+    status line under that button, not a click-required one.
+    - `LfgPartnerQuickStatusButtons.tsx`: a tap now sets `confirming`
+      instead of calling `setStatus()` directly; a `Dialog` ("Mark as
+      {status}? ... Cancel here first if you're not sure") gates the
+      actual `lfg_change_site_status` RPC call behind Confirm. Cancel
+      applies nothing.
+    - `LfgSiteCardGrid.tsx`: new `trackingSummary(row, shipment)` — reads
+      "Delivered" once the site itself has reached Delivered or later
+      (trusts `site_status`, which the confirm-gated button above
+      controls directly, over the shipment's own possibly-stale
+      `current_status`), else the shipment's own `current_status` via the
+      existing `shipmentStatusLabel`/`shipmentStatusBadge` helpers when a
+      shipment is on file, else "Not shipped yet". Rendered as a
+      `Tracking: <status>` line directly under the quick-action button —
+      no click needed. The existing AWB / "Track via Blue Dart"
+      button+results panel further down the card is unchanged, still
+      there for pulling a fresh courier update on demand. Needed
+      `lfg_shipments.current_status` added to the grid's existing
+      per-site shipment fetch.
+    - `lfgStatus.ts`: `LFG_BENCHMARKS`' `in_production` checkpoint label
+      changed from "In Production" to "Printed" (Srinivas's own wording
+      for that checkpoint) — display-only; `LFG_STATUS_LABEL.in_production`
+      (the real site_status label, Production tab, Change Status
+      dropdown) is untouched and still says "In Production".
+    - `npx tsc --noEmit` and `npx eslint` across every changed file:
+      clean. No SQL — code-only change.
+
+91. **LFG partner home: search/filters/view now survive a refresh.**
+    Srinivas: "whenever i am refreshing are coming to home page it resets
+    whole view instead of staying the current view." Every filter
+    (search text, status/program/format) plus the My Sites/All Sites
+    toggle and the Cards/List view lived in plain `useState` on
+    `app/lfg/(app)/page.tsx`, with nothing writing any of it back to the
+    URL — a refresh, or clicking into a site and Back, always landed on
+    a blank "Your Sites" with everything cleared. Exactly the same
+    complaint the staff Site Master (`app/workspaces/lfg/page.tsx`) had
+    already been fixed for earlier ("went to pen and edit and coming
+    back... keep the same filter") — this page just never got the same
+    treatment. Fixed by copying that page's own mount/sync effect pair
+    verbatim: seed every filter/toggle from `window.location.search` on
+    mount, then debounce-sync them back into the URL (`?q=&status=&
+    program_id=&format=&all=1&view=`) via `router.replace(..., {scroll:
+    false})` as they change. Read via `window.location` directly rather
+    than `useSearchParams()`, same reasoning as the staff page: this
+    route is already fully client-rendered, so this sidesteps the
+    Suspense-boundary requirement for no benefit here. `npx tsc --noEmit`
+    / `npx eslint`: clean. No SQL — code-only change.
+
+92. **Site card quick-status button: fixed showing "Mark Delivered" on a
+    brand new site.** Srinivas, from a screenshot of three sites all
+    sitting at "Site Survey Completed" (only that one benchmark green):
+    "next step supose to be creative receipt but instead the update
+    button shows as delivery update!!" `LfgPartnerQuickStatusButtons.tsx`
+    computed `showDelivered` as `rank < deliveredRank` — true for every
+    status before Delivered, Survey Completed included, so "Mark
+    Delivered" appeared as the very first action on a new site, skipping
+    Creative Received/Printed/Shipped entirely. Those three steps were
+    never this component's job to begin with (creative receipt is a
+    toggle on the Survey tab; Printed/Shipped are `site_status`
+    transitions a regular partner can't set at all — see
+    `LFG_PARTNER_RESTRICTED_STATUSES` — and a full-lifecycle partner like
+    MMDI's own login sets them via the site's own Change Status dropdown,
+    unlocked in item 88). Fixed by gating `showDelivered` on the site
+    having actually reached the Shipped benchmark first: `rank >=
+    LFG_STATUSES.indexOf("dispatched")` (the Shipped benchmark's own
+    `throughStatus` in `lfgStatus.ts`) `&& rank < deliveredRank` — so the
+    quick-action button never shows a step that contradicts the
+    benchmark checklist already on the same card. A site earlier than
+    Shipped now shows no quick-action button at all (the benchmark
+    checklist is still the status indicator; earlier transitions happen
+    via Change Status on the site's own page). `showInstalled`'s own gate
+    (`rank >= deliveredRank`) was already correct, unchanged. `npx tsc
+    --noEmit` / `npx eslint`: clean. No SQL — code-only change.
+
+93. **Staff Site Master (app.mmdi.in) never had the Mark Delivered/Mark
+    Installed quick-action button — it was partner-only by wiring, not
+    by design.** Srinivas, from an app.mmdi.in screenshot of the Program
+    Dashboard's card grid: "Aptronix @ Malabar" sitting at Delivered with
+    every earlier benchmark crossed, showing no button at all — "the
+    button missing here!!" Root cause: `LfgSiteCardGrid`'s
+    `renderQuickActions` prop (what actually renders
+    `LfgPartnerQuickStatusButtons`) was only ever passed by the LFG
+    partner home page (`app/lfg/(app)/page.tsx`); the staff Site Master
+    (`app/workspaces/lfg/page.tsx`) called `<LfgSiteCardGrid rows={rows}
+    />` with nothing for it, so the button never rendered there at all,
+    for any staff account, at any stage. `LfgPartnerQuickStatusButtons`
+    was never actually partner-specific despite its name/location — no
+    ownership check inside it, it just calls `lfg_change_site_status`
+    (staff already passes `lfg_sites_guard_partner_update()`
+    unconditionally, that trigger only restricts partner-role callers).
+    Fixed by wiring the same component into the staff page too, gated on
+    `editable` (`canWrite(role)`) instead of ownership, with the same
+    in-place `handleStatusChanged` row update the partner page already
+    had. Updated the header comments on `LfgPartnerQuickStatusButtons.tsx`
+    and `LfgSiteCardGrid.tsx`'s own quick-actions block to stop claiming
+    "partner-only"/"staff never passes this" now that it's not true. No
+    behavior change for the partner page itself. `npx tsc --noEmit` /
+    `npx eslint`: clean. No SQL — code-only change.
+
+94. **LFG partner home page: added the "Programs" summary tiles card.**
+    Srinivas: "Also i need programs summary update card on top" (after a
+    screenshot of the staff Site Master's own Programs tile row —
+    per-format Active/Printed/Shipped/Delivered/Installed counts,
+    `LfgProgramSummaryCard`). That card was staff-only — never imported
+    on `app/lfg/(app)/page.tsx` at all. Added it there too, in the same
+    position the staff page uses (right after the stat/filter row, above
+    the site cards/list), wired to the same `programIdFilter` state this
+    page already had (now URL-synced by item 91's mount/sync effect, so
+    picking a season here survives a refresh same as every other filter).
+    `LfgProgramSummaryCard` gained one new optional prop, `partnerId` --
+    its own site-row fetch was unconditionally global (every site, every
+    partner, no scoping at all) since its only caller was staff, who
+    should see that. A genuine partner's tiles now scope to their own
+    `partner_id` whenever "My Sites" is the active view, matching the
+    same scoping the page's own row fetch already applies -- only actually
+    shows company-wide numbers once "All Sites" is toggled on (or for a
+    staff sign-in, unaffected, `partnerId` left unset there exactly as
+    before). `npx tsc --noEmit` / `npx eslint`: clean. No SQL — code-only
+    change.
+
+95. **One-time backfill: Fall 2026 sites with a saved survey report,
+    caught up to "Site Survey Completed."** Srinivas: "update os the Fall
+    026 sites if site survey report available then mark as site survey
+    completed then it follow the sequence." Confirmed with him: a
+    one-time data catch-up (not a standing rule) for the existing Fall
+    2026 program's sites. New file `supabase-lfg-fall2026-survey-
+    completed-backfill.sql` -- STEP 1 previews every site in the "Fall
+    2026" program still sitting at `new`/`survey_pending` that already
+    has a saved survey report on file (`lfg_site_documents.category =
+    'survey'`, the exact same signal the card's own "Site Survey"/"Report
+    Not Saved" button reads -- not the separate `site_survey_reports`
+    drafts table); STEP 2 sets those sites' `site_status` to
+    `survey_completed`. Never touches a site already at Survey Completed
+    or any later stage -- forward catch-up only, no regression possible.
+    `lfg_site_status_history` logs each change automatically via its own
+    existing trigger, no separate insert needed. Validated with
+    `pglast.parse_sql` -- clean. Srinivas needs to run STEP 1, read the
+    result, then run STEP 2 himself in the Supabase SQL Editor.

@@ -14,6 +14,7 @@ import { LFG_STATUSES, lfgStatusLabel, lfgStatusBadge } from "@/lib/lfgStatus";
 import { formatMm, formatSizeInches, formatDecimal } from "@/lib/lfg-units";
 import { useLfgDistinctValues } from "@/lib/useLfgDistinctValues";
 import { LfgSiteCardGrid } from "@/components/workspaces/LfgSiteCardGrid";
+import { LfgProgramSummaryCard } from "@/components/workspaces/LfgProgramSummaryCard";
 import { LfgPartnerQuickStatusButtons } from "@/components/lfg/LfgPartnerQuickStatusButtons";
 
 // Real LFG partner Site Master (task #19) -- replaces the earlier
@@ -122,6 +123,58 @@ export default function LfgPartnerSitesPage() {
       .order("name")
       .then(({ data }) => setPrograms((data as ProgramOption[]) ?? []));
   }, []);
+
+  // Seeds every filter + the Cards/List and My/All Sites toggles from the
+  // URL on mount, then keeps the URL in sync as they change -- identical
+  // pattern to workspaces/lfg/page.tsx's own mount/sync effect pair (see
+  // its comment for the full "went to pen and edit and coming back... keep
+  // the same filter" history). This page never got the same treatment:
+  // every filter/view toggle lived in plain useState with nothing writing
+  // it back to the URL, so any refresh (or a click into a site and Back)
+  // landed back on a blank "Your Sites" with the Cards view and every
+  // filter cleared, no matter what was selected before (Srinivas: "whenever
+  // i am refreshing... it resets whole view instead of staying the current
+  // view"). Read/written via window.location directly rather than
+  // useSearchParams, same reasoning as the staff page: this route is
+  // already fully client-rendered, so this avoids the Suspense-boundary
+  // requirement useSearchParams imposes for no benefit here.
+  const [hydratedFromUrl, setHydratedFromUrl] = useState(false);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const q = params.get("q");
+    const status = params.get("status");
+    const programId = params.get("program_id");
+    const format = params.get("format");
+    const all = params.get("all");
+    const viewParam = params.get("view");
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (q) setQuery(q);
+    if (status) setStatusFilter(status);
+    if (programId) setProgramIdFilter(programId);
+    if (format) setFormatFilter(format);
+    if (all === "1") setViewingAllSites(true);
+    if (viewParam === "list" || viewParam === "cards") setView(viewParam);
+    setHydratedFromUrl(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hydratedFromUrl) return;
+    const handle = setTimeout(() => {
+      const params = new URLSearchParams();
+      const trimmed = query.trim();
+      if (trimmed) params.set("q", trimmed);
+      if (statusFilter) params.set("status", statusFilter);
+      if (programIdFilter) params.set("program_id", programIdFilter);
+      if (formatFilter) params.set("format", formatFilter);
+      if (viewingAllSites) params.set("all", "1");
+      if (view !== "cards") params.set("view", view);
+      const qs = params.toString();
+      const base = lfgHref("/", onLfgHost);
+      router.replace(qs ? `${base}?${qs}` : base, { scroll: false });
+    }, 300);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydratedFromUrl, query, statusFilter, programIdFilter, formatFilter, viewingAllSites, view]);
 
   useEffect(() => {
     if (!identity) return;
@@ -367,6 +420,24 @@ export default function LfgPartnerSitesPage() {
           </div>
         </div>
       </div>
+
+      {/* Programs summary tiles (Active/Printed/Shipped/Delivered/
+          Installed per format) -- same card the staff Site Master already
+          shows right below its own stat/filter row (Srinivas: "i need
+          programs summary update card on top"). The Season dropdown here
+          is the same controlled selectedProgramId/onSelectProgram wiring
+          as the staff page's, driving this page's own programIdFilter
+          (and now URL-synced by the mount/sync effect above) rather than
+          keeping its own separate state. Scoped to the partner's own
+          sites whenever "My Sites" is the active view (unscoped, i.e.
+          every partner's numbers, only once "All Sites" is toggled on --
+          see the component's own partnerId prop comment for why this
+          matters here specifically). */}
+      <LfgProgramSummaryCard
+        selectedProgramId={programIdFilter}
+        onSelectProgram={(id) => setProgramIdFilter(id)}
+        partnerId={identity && !identity.isStaff && !viewingAllSites ? identity.partnerId : null}
+      />
 
       {rows === null ? (
         <div className="rounded-lg border border-line bg-surface p-4">

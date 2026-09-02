@@ -66,6 +66,18 @@ export interface LfgIdentity {
   partnerName: string;
   isStaff: boolean;
   staffRole: "admin" | "editor" | "viewer" | null;
+  // "MMDI" itself is registered as an lfg_partners row (the installation
+  // partner on its own sites) but is ALSO the org that runs creative,
+  // production, and dispatch for every site as staff -- this flag (set
+  // via supabase-lfg-full-lifecycle-partner-migration.sql's closing
+  // UPDATE, on lfg_partners.is_full_lifecycle_partner) lets that one
+  // partner login do those stages from LFG Connect too, without opening
+  // the same access to any other, genuinely external installation
+  // partner. Always false for a staff sign-in (case 2 above) -- staff
+  // already get everything via isStaff/staffRole, this field is only
+  // meaningful on the real-partner branch. See LfgPartnerSiteClient.tsx's
+  // canWriteProduction/canMarkCreative and its status-picker filter.
+  isFullLifecyclePartner: boolean;
 }
 
 export const getLfgIdentity = cache(async function getLfgIdentity(
@@ -80,7 +92,7 @@ export const getLfgIdentity = cache(async function getLfgIdentity(
 
   const { data } = await client
     .from("lfg_partner_users")
-    .select("id, full_name, partner_id, lfg_partners(name)")
+    .select("id, full_name, partner_id, lfg_partners(name, is_full_lifecycle_partner)")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -98,6 +110,7 @@ export const getLfgIdentity = cache(async function getLfgIdentity(
       partnerName: (partner as { name?: string } | null)?.name ?? "",
       isStaff: false,
       staffRole: null,
+      isFullLifecyclePartner: (partner as { is_full_lifecycle_partner?: boolean } | null)?.is_full_lifecycle_partner ?? false,
     };
   }
 
@@ -120,6 +133,7 @@ export const getLfgIdentity = cache(async function getLfgIdentity(
       partnerName: "MMDI Staff",
       isStaff: true,
       staffRole: profile.role,
+      isFullLifecyclePartner: false,
     };
   }
 

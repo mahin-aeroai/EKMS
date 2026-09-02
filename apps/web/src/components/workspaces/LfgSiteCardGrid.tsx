@@ -7,7 +7,7 @@ import { Badge, type BadgeStatus } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
-import { lfgStatusLabel, lfgStatusBadge } from "@/lib/lfgStatus";
+import { LFG_STATUSES, type LfgStatus, lfgStatusLabel, lfgStatusBadge, shipmentStatusLabel, shipmentStatusBadge } from "@/lib/lfgStatus";
 import { formatSizeMm } from "@/lib/lfg-units";
 import { formatPlaceholderColor, isLightColor } from "@/lib/lfg-format-colors";
 import { LfgBenchmarkStrip } from "./LfgBenchmarkStrip";
@@ -161,20 +161,57 @@ interface DocRef {
   file_type: string | null;
 }
 
-// The one thing this grid needs from a site's latest shipment -- just
-// enough to show the AWB and, when the courier looks like Blue Dart, a
-// "Track via Blue Dart" button right on the card (same
+// The one thing this grid needs from a site's latest shipment -- enough
+// to show the AWB and, when the courier looks like Blue Dart, a "Track
+// via Blue Dart" button right on the card (same
 // /api/lfg/shipments/[shipmentId]/track route and courier-name regex the
 // Shipment tab's own button uses -- see LfgSiteWorkspaceClient.tsx's
-// isBlueDart/handleTrackViaBlueDart).
+// isBlueDart/handleTrackViaBlueDart), plus current_status for the
+// always-visible "Tracking" line below the quick-status button (see
+// trackingSummary() below).
 interface CardShipmentRef {
   id: string;
   awb_number: string;
   courier: string | null;
+  current_status: string | null;
 }
 
 function isBlueDartCourier(courier: string | null): boolean {
   return /blue\s*dart/i.test(courier ?? "");
+}
+
+// A one-line, no-click-required answer to "where is this, shipping-wise"
+// -- sits right under the Mark Delivered/Mark Installed quick-action
+// button (Srinivas's request). Once the SITE itself has reached
+// Delivered (or gone past it, e.g. Installed), this always reads
+// "Delivered" regardless of what the shipment row's own current_status
+// happens to say -- the site's status (which the partner controls
+// directly via the quick-action button, RLS-enforced) is the more
+// authoritative signal than a courier-fed field that may lag or never
+// get touched for a manually-delivered site. Below that rank, it falls
+// back to the shipment's own current_status (courier-fed, or manually
+// logged on the Shipment tab) when a shipment is on file at all.
+function trackingSummary(row: LfgSiteCardRow, shipment: CardShipmentRef | null): { label: string; badge: BadgeStatus } {
+  const rank = LFG_STATUSES.indexOf(row.site_status as LfgStatus);
+  if (rank >= LFG_STATUSES.indexOf("delivered")) {
+    return { label: "Delivered", badge: "success" };
+  }
+  if (shipment?.current_status) {
+    return { label: shipmentStatusLabel(shipment.current_status), badge: shipmentStatusBadge(shipment.current_status) };
+  }
+  return { label: "Not shipped yet", badge: "neutral" };
+}
+
+// Shape of one row the /track route hands back (lfg_shipment_events,
+// newest first) -- same fields LfgSiteWorkspaceClient.tsx's own
+// ShipmentEventRow reads, just the subset this card's compact result
+// list actually displays.
+interface CardTrackEvent {
+  id: string;
+  event_status: string;
+  event_time: string;
+  location: string | null;
+  source: "manual" | "api";
 }
 
 interface PreviewState {
@@ -262,16 +299,18 @@ export function LfgSiteCardGrid({
 
     supabase
       .from("lfg_shipments")
-      .select("id, site_id, awb_number, courier, created_at")
+      .select("id, site_id, awb_number, courier, current_status, created_at")
       .in("site_id", ids)
       .not("awb_number", "is", null)
       .order("created_at", { ascending: false })
       .then(({ data }) => {
         if (cancelled) return;
         const map: Record<string, CardShipmentRef> = {};
-        for (const row of (data as { id: string; site_id: string; awb_number: string | null; courier: string | null }[]) ?? []) {
+        for (const row of (data as
+          | { id: string; site_id: string; awb_number: string | null; courier: string | null; current_status: string | null }[]
+          | null) ?? []) {
           if (row.awb_number && !map[row.site_id]) {
-            map[row.site_id] = { id: row.id, awb_number: row.awb_number, courier: row.courier };
+            map[row.site_id] = { id: row.id, awb_number: row.awb_number, courier: row.courier, current_status: row.current_status };
           }
         }
         setAwbBySite(map);
@@ -420,6 +459,7 @@ function SiteCard({
   const [pictureUrl, setPictureUrl] = useState<string | null>(null);
   const [openingDocId, setOpeningDocId] = useState<string | null>(null);
   const [tracking, setTracking] = useState(false);
+  const [trackedEvents, setTrackedEvents] = useState<CardTrackEvent[] | null>(null);
 
   // Only fetched when the site actually has a picture on file -- the
   // route 404s otherwise (see its own header comment), so skipping the
@@ -468,8 +508,10 @@ function SiteCard({
   // Same route/behavior as the Shipment tab's own "Track via Blue Dart"
   // button (LfgSiteWorkspaceClient.tsx's handleTrackViaBlueDart) -- just
   // reachable straight from the card instead of requiring a click into
-  // Site 360 + the Shipment tab first. No event-timeline UI here (the
-  // card has nowhere to show it); the toast is the only feedback.
+  // Site 360 + the Shipment tab first. Unlike the Shipment tab, this
+  // shows the result right here: the route already returns every event
+  // for the shipment (newest first), so the top few render inline below
+  // the button rather than only surfacing as a toast.
   async function handleTrackViaBlueDart(e: MouseEvent) {
     e.stopPropagation();
     if (!shipment) return;
@@ -481,6 +523,7 @@ function SiteCard({
         toast("danger", data.message || data.error || "Couldn't fetch tracking updates");
         return;
       }
+      setTrackedEvents(((data.events ?? []) as CardTrackEvent[]).slice(0, 3));
       toast("success", "Tracking updated from Blue Dart");
     } catch {
       toast("danger", "Couldn't reach the tracking service");
@@ -495,6 +538,7 @@ function SiteCard({
   const placeholderColor = formatPlaceholderColor(row.format);
   const iconStroke = isLightColor(placeholderColor) ? "#1E252B" : "#fff";
   const href = buildHref ? buildHref(row.id) : `/workspaces/lfg/sites/${row.id}`;
+  const shipStatus = trackingSummary(row, shipment);
 
   return (
     <div
@@ -584,13 +628,30 @@ function SiteCard({
           <LfgBenchmarkStrip status={row.site_status} creativeReceivedAt={row.creative_received_at} />
         </div>
 
-        {/* Partner-only one-tap Delivered/Installed buttons (see
-            LfgPartnerQuickStatusButtons) -- null/absent for the staff Site
-            Master, which never passes renderQuickActions. Sits between the
-            read-only benchmark strip above (what's already happened) and
-            the document buttons below (view what's on file) -- this is the
-            one interactive "make something happen" row on the card. */}
+        {/* One-tap Delivered/Installed buttons (see
+            LfgPartnerQuickStatusButtons -- not actually partner-only
+            despite the name/file location, see the staff Site Master's own
+            import comment) -- null/absent wherever the caller doesn't pass
+            renderQuickActions (a viewer with no write access, or a surface
+            that's read-only by design). Sits between the read-only
+            benchmark strip above (what's already happened) and the
+            document buttons below (view what's on file) -- this is the one
+            interactive "make something happen" row on the card. */}
         {quickActions && <div className="mt-3.5" onClick={(e) => e.stopPropagation()}>{quickActions}</div>}
+
+        {/* Always-visible, no-click-required shipping status, right under
+            the quick-action button (Srinivas's request) -- once the site
+            itself reaches Delivered/Installed this always reads
+            "Delivered" (see trackingSummary()'s own comment for why it
+            trusts site_status over the shipment's own current_status at
+            that point); below that it falls back to the shipment's own
+            current_status when one is on file. The detailed AWB / "Track
+            via Blue Dart" section further down the card still exists
+            unchanged for pulling a fresh courier update. */}
+        <div className="mt-3.5 flex items-center gap-2">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-secondary">Tracking</span>
+          <Badge status={shipStatus.badge}>{shipStatus.label}</Badge>
+        </div>
 
         <div className="my-4 h-px bg-line" />
 
@@ -637,11 +698,44 @@ function SiteCard({
         </div>
 
         {shipment && isBlueDartCourier(shipment.courier) && (
-          <div className="mt-2.5">
+          <div className="mt-2.5" onClick={(e) => e.stopPropagation()}>
             <Button variant="secondary" size="sm" className="w-full" loading={tracking} onClick={handleTrackViaBlueDart}>
               <RefreshCw size={14} className="mr-1.5" />
               Track via Blue Dart
             </Button>
+            {/* Compact result list -- appears only after a click on this
+                card (never pre-fetched on load), showing the newest
+                events first. Deliberately not the full Timeline
+                component used on the Shipment tab -- a card has no room
+                for it; this is the top 3 only, with a link to the full
+                history on Site 360 when there's more. */}
+            {trackedEvents && (
+              <div className="mt-2 rounded-lg border border-line bg-surface-sunken p-2.5">
+                {trackedEvents.length === 0 ? (
+                  <p className="text-xs text-ink-muted">No tracking events yet.</p>
+                ) : (
+                  <ul className="flex flex-col gap-2">
+                    {trackedEvents.map((ev) => (
+                      <li key={ev.id} className="text-xs">
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="font-semibold text-ink">{ev.event_status}</span>
+                          <span className="shrink-0 text-[11px] text-ink-muted">{new Date(ev.event_time).toLocaleString()}</span>
+                        </div>
+                        {ev.location && <div className="text-ink-secondary">{ev.location}</div>}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="mt-1.5 h-6 w-full text-[11px]"
+                  onClick={() => router.push(href)}
+                >
+                  View full timeline
+                </Button>
+              </div>
+            )}
           </div>
         )}
 

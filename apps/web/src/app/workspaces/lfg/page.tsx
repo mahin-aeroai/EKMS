@@ -32,6 +32,12 @@ import { useLfgDistinctValues } from "@/lib/useLfgDistinctValues";
 import { LfgSiteCardGrid } from "@/components/workspaces/LfgSiteCardGrid";
 import { LfgProgramSummaryCard } from "@/components/workspaces/LfgProgramSummaryCard";
 import { LfgConnectHeader } from "@/components/workspaces/LfgConnectHeader";
+// Not actually partner-specific despite the name -- LfgPartnerQuickStatusButtons
+// just calls lfg_change_site_status via siteId/status/onChanged props, no
+// partner-only identity check inside it. Staff (admin/editor) is already
+// unconditionally allowed past lfg_sites_guard_partner_update() (that
+// trigger only restricts partner-role callers), so this works here as-is.
+import { LfgPartnerQuickStatusButtons } from "@/components/lfg/LfgPartnerQuickStatusButtons";
 
 // Stat-strip pill (task: header/menu redesign) -- a colored circular icon
 // badge + value/label pair, used for the four summary stats (Total Sites/
@@ -330,6 +336,14 @@ export default function LfgSiteListPage() {
     setRows((prev) => prev?.filter((r) => r.id !== deleteTarget.id) ?? prev);
     setTotalCount((prev) => (prev === null ? prev : prev - 1));
     setDeleteTarget(null);
+  }
+
+  // Same in-place row update the LFG partner home page's own
+  // LfgPartnerQuickStatusButtons.onChanged already does (app/lfg/(app)/
+  // page.tsx) -- no refetch needed, the RPC already succeeded by the time
+  // this fires.
+  function handleStatusChanged(id: string, newStatus: string) {
+    setRows((prev) => prev?.map((r) => (r.id === id ? { ...r, site_status: newStatus, active: newStatus === "active" } : r)) ?? prev);
   }
 
   useEffect(() => {
@@ -881,7 +895,22 @@ export default function LfgSiteListPage() {
         {rows === null ? (
           <p className="py-6 text-center text-sm text-ink-muted">Loading sites…</p>
         ) : view === "cards" ? (
-          <LfgSiteCardGrid rows={rows} />
+          <LfgSiteCardGrid
+            rows={rows}
+            renderQuickActions={
+              editable
+                ? (row) => (
+                    <LfgPartnerQuickStatusButtons
+                      siteId={row.id}
+                      siteCode={row.site_id}
+                      outletName={row.outlet_name}
+                      status={row.site_status}
+                      onChanged={handleStatusChanged}
+                    />
+                  )
+                : undefined
+            }
+          />
         ) : rows.length === 0 ? (
           <p className="py-6 text-center text-sm text-ink-muted">No sites match your search.</p>
         ) : (

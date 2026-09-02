@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ClipboardList, Download, FilePlus2, Plus, Settings, Search, Trash2 } from "lucide-react";
+import { ArrowLeft, ClipboardList, Download, FilePlus2, Plus, Settings, Search, Trash2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Notifications";
+import { safeBack } from "@/lib/safe-back";
 import { supabase } from "@/lib/supabase";
 import { ImageSlot } from "@/components/installationReport/ImageSlot";
 import { MasterPickSelect } from "@/components/installationReport/MasterPickSelect";
@@ -175,11 +177,23 @@ export interface LockedInstallationSite {
 export default function InstallationReportClient({
   lockedSite,
   onSavedForSite,
+  homeHref = "/",
+  // Only the LFG partner bridge passes this (lfgHref(`/sites/${site.id}`,
+  // onLfgHost)) -- the staff route never did and still doesn't get a
+  // "Back" button here (it already has its own sidebar nav; this tool
+  // only lacked any way back at all in the partner's locked-to-one-site
+  // flow, which has no sidebar). Undefined hides the button entirely,
+  // same "additive/optional, defaults reproduce today's staff behavior"
+  // pattern as lockedSite/onSavedForSite above.
+  backHref,
 }: {
   lockedSite?: LockedInstallationSite;
   onSavedForSite?: (args: { pdfBlob: Blob; storeName: string; installationDate: string; sites: SiteEntry[] }) => Promise<void> | void;
+  homeHref?: string;
+  backHref?: string;
 } = {}) {
   const { toast } = useToast();
+  const router = useRouter();
 
   const [storeName, setStoreName] = useState(lockedSite?.outletName ?? "");
   const [address, setAddress] = useState(lockedSite?.address ?? "");
@@ -409,7 +423,16 @@ export default function InstallationReportClient({
 
   return (
     <div>
-      <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "Operations" }, { label: "Installation Report" }]} />
+      {/* Same safeBack() pattern as Site 360's Back button
+          (LfgPartnerSiteClient.tsx) and the Site Survey Reports list --
+          previously this locked-to-one-site flow had NO way back at all
+          beyond the top nav, which is what made it feel stuck. */}
+      {backHref && (
+        <Button variant="ghost" size="sm" className="mb-3" onClick={safeBack(router, backHref)}>
+          <ArrowLeft size={14} className="mr-1.5" /> Back
+        </Button>
+      )}
+      <Breadcrumbs items={[{ label: "Home", href: homeHref }, { label: "Operations" }, { label: "Installation Report" }]} />
 
       <div className="mt-4 flex flex-col gap-4 border-b border-line pb-6 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-4">
