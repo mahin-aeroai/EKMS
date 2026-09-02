@@ -3506,3 +3506,14 @@ order:
       `handleStatusChanged`.
     - `npx tsc --noEmit` / `npx eslint`: clean. No SQL — code-only
       change.
+
+97. **Fall 2026 backfill widened to "every site in the program," report
+    no longer required.** Srinivas: "lets refresh th eFall 2026 program
+    as default site survey" -- confirmed this replaces item 95's
+    report-required version: `supabase-lfg-fall2026-survey-completed-
+    backfill.sql` now moves every Fall 2026 program site still at
+    `new`/`survey_pending` straight to `survey_completed`, no
+    `lfg_site_documents` check at all. Same STEP 1 preview / STEP 2
+    update shape, same forward-only guarantee (never touches a site
+    already at survey_completed or later). Validated with
+    `pglast.parse_sql` -- clean.
