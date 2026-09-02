@@ -3449,3 +3449,22 @@ order:
     staff sign-in, unaffected, `partnerId` left unset there exactly as
     before). `npx tsc --noEmit` / `npx eslint`: clean. No SQL — code-only
     change.
+
+95. **One-time backfill: Fall 2026 sites with a saved survey report,
+    caught up to "Site Survey Completed."** Srinivas: "update os the Fall
+    026 sites if site survey report available then mark as site survey
+    completed then it follow the sequence." Confirmed with him: a
+    one-time data catch-up (not a standing rule) for the existing Fall
+    2026 program's sites. New file `supabase-lfg-fall2026-survey-
+    completed-backfill.sql` -- STEP 1 previews every site in the "Fall
+    2026" program still sitting at `new`/`survey_pending` that already
+    has a saved survey report on file (`lfg_site_documents.category =
+    'survey'`, the exact same signal the card's own "Site Survey"/"Report
+    Not Saved" button reads -- not the separate `site_survey_reports`
+    drafts table); STEP 2 sets those sites' `site_status` to
+    `survey_completed`. Never touches a site already at Survey Completed
+    or any later stage -- forward catch-up only, no regression possible.
+    `lfg_site_status_history` logs each change automatically via its own
+    existing trigger, no separate insert needed. Validated with
+    `pglast.parse_sql` -- clean. Srinivas needs to run STEP 1, read the
+    result, then run STEP 2 himself in the Supabase SQL Editor.
