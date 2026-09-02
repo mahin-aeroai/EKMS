@@ -3468,3 +3468,41 @@ order:
     existing trigger, no separate insert needed. Validated with
     `pglast.parse_sql` -- clean. Srinivas needs to run STEP 1, read the
     result, then run STEP 2 himself in the Supabase SQL Editor.
+
+96. **Quick-action button now covers the whole sequence, not just
+    Delivered/Installed.** Srinivas, after the previous fix correctly
+    hid "Mark Delivered" on early-stage sites: "the update button is
+    missing some times and status in green color stil same" -- hiding
+    the button on an early-stage site fixed the wrong-stage bug but left
+    those sites with no way to advance at all from the card, which isn't
+    what "at any point of time there is only one button with update"
+    (his own framing, twice now) meant. `LfgPartnerQuickStatusButtons`
+    rewritten to compute the single true next step across the full
+    benchmark sequence -- Creative Received -> Printed -> Shipped ->
+    Delivered -> Installed -- using the same crossed/uncrossed logic
+    `LFG_BENCHMARKS`/`lfgBenchmarkStatus()` already uses for the checklist
+    shown right above it on the card, so the button can never contradict
+    what the checklist shows. Two write shapes behind one button now:
+    Creative Received is a direct `creative_received_at`/`by` UPDATE
+    (same one `LfgSiteWorkspaceClient`'s Survey tab
+    `handleMarkCreativeReceived` already does); Printed/Shipped/Delivered/
+    Installed go through `lfg_change_site_status` targeting each
+    benchmark's own `throughStatus` (in_production/dispatched/delivered/
+    installation_completed).
+    - New `canAdvanceEarlyStages` prop gates the first three steps only
+      (Delivered/Installed stay available to everyone this renders for,
+      unchanged) -- mirrors `lfg_sites_guard_partner_update()` exactly:
+      `true` for staff (`app/workspaces/lfg/page.tsx`, unconditionally --
+      rendering is already gated on `editable`) and for a full-lifecycle
+      partner (`app/lfg/(app)/page.tsx`, `identity?.isFullLifecyclePartner`),
+      `false` for a regular partner, who now sees no button at all until
+      someone else gets the site to Shipped -- same end state as before,
+      just reached honestly instead of via an always-hidden set of
+      earlier buttons.
+    - New `onCreativeReceived` callback (mirrors `onChanged`) lets both
+      callers update their row's `creative_received_at` in place after a
+      successful mark, no refetch -- both pages got a
+      `handleCreativeReceived` matching their existing
+      `handleStatusChanged`.
+    - `npx tsc --noEmit` / `npx eslint`: clean. No SQL — code-only
+      change.
