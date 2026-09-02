@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { MapPin, FileText, ExternalLink, X } from "lucide-react";
 import { Badge, type BadgeStatus } from "@/components/ui/Badge";
@@ -58,6 +58,12 @@ export interface LfgSiteCardRow {
   // Feeds the benchmark checklist (LfgBenchmarkStrip) -- see
   // lfgBenchmarkStatus()'s own header comment in lfgStatus.ts.
   creative_received_at: string | null;
+  // Optional -- only needed by callers that pass renderQuickActions below
+  // (the LFG partner home page, to tell a viewer's own sites apart from
+  // another partner's when the "All Sites" toggle is on). The staff Site
+  // Master's own select doesn't include this column and doesn't need to;
+  // left undefined there is fine since it never passes renderQuickActions.
+  partner_id?: string | null;
 }
 
 // Groups the (already filtered) row set by store_id and numbers each
@@ -171,7 +177,28 @@ interface PreviewState {
 // way to see/act on the entire filtered set at once.
 const PAGE_SIZE = 12;
 
-export function LfgSiteCardGrid({ rows }: { rows: LfgSiteCardRow[] }) {
+export function LfgSiteCardGrid({
+  rows,
+  buildHref,
+  renderQuickActions,
+}: {
+  rows: LfgSiteCardRow[];
+  // Where clicking/Enter-ing a card navigates. Defaults to the staff Site
+  // 360 route (unchanged behavior for the staff Site Master, which never
+  // passes this) -- the LFG partner home page passes its own host-aware
+  // lfgHref()-built path instead, since /workspaces/lfg/sites/[id] isn't
+  // reachable from a genuine partner login (it's outside /lfg/*, so the
+  // routing middleware bounces a partner account straight back to their
+  // own home -- see supabase-middleware.ts's isLfgPath check).
+  buildHref?: (id: string) => string;
+  // Rendered inside each card, right after the benchmark strip, when
+  // provided. The staff Site Master never passes this -- it stays exactly
+  // as it was. The LFG partner home page uses it for the one-tap
+  // Delivered/Installed quick-status buttons (LfgPartnerQuickStatusButtons),
+  // deciding per-row whether to render them at all (only on the viewer's
+  // own sites) -- this component itself stays ownership-agnostic.
+  renderQuickActions?: (row: LfgSiteCardRow) => ReactNode;
+}) {
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const visible = rows.slice(0, visibleCount);
   const idsKey = visible.map((r) => r.id).join(",");
@@ -292,6 +319,8 @@ export function LfgSiteCardGrid({ rows }: { rows: LfgSiteCardRow[] }) {
             installationStatus={installStatusBySite[row.id] ?? "pending"}
             ordinal={ordinals[row.id] ?? null}
             onPreview={setPreview}
+            buildHref={buildHref}
+            quickActions={renderQuickActions?.(row) ?? null}
           />
         ))}
       </div>
@@ -355,6 +384,8 @@ function SiteCard({
   installationStatus,
   ordinal,
   onPreview,
+  buildHref,
+  quickActions,
 }: {
   row: LfgSiteCardRow;
   awb: string | null;
@@ -363,6 +394,8 @@ function SiteCard({
   installationStatus: string;
   ordinal: { index: number; total: number } | null;
   onPreview: (p: PreviewState) => void;
+  buildHref?: (id: string) => string;
+  quickActions: ReactNode;
 }) {
   const router = useRouter();
   const { toast } = useToast();
@@ -418,14 +451,15 @@ function SiteCard({
   const address = [row.city && row.region ? `${row.city}, ${row.region}` : row.city, row.store_address].filter(Boolean).join(" -- ");
   const placeholderColor = formatPlaceholderColor(row.format);
   const iconStroke = isLightColor(placeholderColor) ? "#1E252B" : "#fff";
+  const href = buildHref ? buildHref(row.id) : `/workspaces/lfg/sites/${row.id}`;
 
   return (
     <div
       role="button"
       tabIndex={0}
-      onClick={() => router.push(`/workspaces/lfg/sites/${row.id}`)}
+      onClick={() => router.push(href)}
       onKeyDown={(e) => {
-        if (e.key === "Enter") router.push(`/workspaces/lfg/sites/${row.id}`);
+        if (e.key === "Enter") router.push(href);
       }}
       className="flex cursor-pointer flex-col rounded-[20px] border border-line bg-surface p-3 shadow-2 transition-shadow hover:shadow-3"
     >
@@ -506,6 +540,14 @@ function SiteCard({
         <div className="mt-3.5">
           <LfgBenchmarkStrip status={row.site_status} creativeReceivedAt={row.creative_received_at} />
         </div>
+
+        {/* Partner-only one-tap Delivered/Installed buttons (see
+            LfgPartnerQuickStatusButtons) -- null/absent for the staff Site
+            Master, which never passes renderQuickActions. Sits between the
+            read-only benchmark strip above (what's already happened) and
+            the document buttons below (view what's on file) -- this is the
+            one interactive "make something happen" row on the card. */}
+        {quickActions && <div className="mt-3.5" onClick={(e) => e.stopPropagation()}>{quickActions}</div>}
 
         <div className="my-4 h-px bg-line" />
 

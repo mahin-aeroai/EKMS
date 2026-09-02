@@ -3000,8 +3000,84 @@ order:
       selecting `active` off `lfg_sites` — this was the only one; the
       site-detail page (`sites/[siteId]/page.tsx`) never selected it.
       `npx tsc --noEmit` and `npx eslint` clean.
-    - **Not yet re-tested against `lfgconnect.mmdi.in` after this fix** —
-      needs a fresh partner-login round trip (sign in, confirm "Your
-      Sites" actually lists the 61 sites instead of hanging on "Loading
-      sites…") to confirm this closes it out.
+    - **Confirmed fixed, 1 Sept 2026**: re-tested on `lfgconnect.mmdi.in`
+      — "Your Sites" now loads fully (Total Sites 61, Showing 61, Needs
+      Attention 0, table populated). This item is closed.
     - Delivered as `lfg-sites-active-column-fix.bundle`.
+
+85. **LFG partner home page brought to parity with the staff Site
+    Master — Cards view, Program filter, "My Sites / All Sites" toggle,
+    one-tap Delivered/Installed buttons (2 Sept 2026).** Requested by
+    Srinivas directly: the partner home page's whole job is letting an
+    installation partner track their sites' status at a glance and move
+    them through delivery/installation without staff involvement for
+    every step — the plain searchable table it had didn't serve that.
+    Full plan: `/root/.claude/plans/reactive-singing-abelson.md`.
+    - **Cards view** (default, matches the staff Site Master): reuses
+      `LfgSiteCardGrid` as-is via two new *optional* props —
+      `buildHref` (so cards link to `/lfg/sites/:id` instead of the
+      staff-only `/workspaces/lfg/sites/:id` route) and
+      `renderQuickActions` (renders the new quick-status buttons inside
+      the card, right after the existing benchmark strip). Neither prop
+      is passed by the staff Site Master, so its own behavior is
+      unchanged — verified via `npx tsc --noEmit`/`npx eslint` across
+      every changed file together.
+    - **Program filter**: a plain `<select>` populated from
+      `lfg_programs` (`active = true`), applied to the row query as
+      `.eq("program_id", programIdFilter)` — same pattern as the
+      existing status filter.
+    - **"My Sites / All Sites" toggle**: new, defaults to "My Sites" (a
+      partner's own sites stay the primary view, per the product
+      decision). Switching to "All Sites" lifts the existing
+      `.eq("partner_id", ...)` scoping on both the count and row-fetch
+      queries — but that scoping was only ever a belt-and-braces
+      convenience on top of RLS, which previously hard-blocked a partner
+      account from ever reading another partner's row at all. Widening
+      what "All Sites" can actually return required a real RLS change:
+      see `supabase-lfg-partner-view-all-sites-migration.sql` —
+      **must be run once in the Supabase SQL Editor**, the same kind of
+      manual step as the OTP email-template fix (item 82). Only the
+      `lfg_sites_select` policy is touched; every write policy, the
+      partner-update guard trigger, and every child table's own RLS
+      (surveys, documents, shipments, installation photos, issues,
+      status history) are untouched and still scope strictly to the
+      owning partner — so opening another partner's site from "All
+      Sites" shows its master fields but every other tab loads empty.
+      That's an intentional scope boundary, not a bug.
+    - **One-tap Delivered / Installed buttons**: new
+      `LfgPartnerQuickStatusButtons` component, only ever rendered for a
+      partner's own sites (`row.partner_id === identity.partnerId`,
+      checked by the page before rendering it at all — never shown on
+      another partner's card even in "All Sites" view). Calls the same
+      `lfg_change_site_status` RPC every other status-change control in
+      this app already uses, no confirmation dialog (mirrors
+      `StatusSwapControl`'s established one-tap pattern), updates the
+      card in place via a callback with no refetch. Deliberately limited
+      to exactly the two transitions a partner is already allowed to
+      make without staff involvement — verified directly against
+      `lfg_sites_guard_partner_update()`, which blocks a partner from
+      setting `production_pending`/`in_production`/
+      `ready_for_dispatch`/`dispatched`/`in_transit` or touching
+      `creative_received_at`/`_by`, but not `delivered` or any
+      `installation_*` status. No trigger/write-policy change needed for
+      these two buttons to work.
+    - Files: `apps/web/src/app/lfg/(app)/page.tsx` (rewrite),
+      `apps/web/src/components/workspaces/LfgSiteCardGrid.tsx` (additive
+      props only), `apps/web/src/components/lfg/
+      LfgPartnerQuickStatusButtons.tsx` (new),
+      `supabase-lfg-partner-view-all-sites-migration.sql` (new).
+    - `npx tsc --noEmit` and `npx eslint` across all three changed/new
+      `.tsx` files together: clean. Migration validated with
+      `pglast.parse_sql`: clean.
+    - **Explicitly deferred to a separate future plan** (confirmed with
+      Srinivas): linking the already-built Site Survey Report Creator
+      and Installation Report Creator tools into this partner flow —
+      neither tool has a real connection to `lfg_sites` today, and a
+      genuine partner login can't currently reach either tool's route at
+      all (blocked by the same host/role-based routing item 83 tightened).
+    - **Not yet tested against `lfgconnect.mmdi.in` after deploy** — needs
+      a partner-login round trip (`snandipa@apple.com`) to confirm Cards
+      view, the Program filter, the My/All Sites toggle, and the
+      Delivered/Installed buttons all behave as designed. See the plan's
+      own Verification section for the full checklist.
+    - Delivered as `lfg-partner-home-cards-filters-quickstatus.bundle`.
