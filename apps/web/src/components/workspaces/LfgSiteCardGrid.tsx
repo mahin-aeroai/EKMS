@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { MapPin, FileText, ExternalLink, X } from "lucide-react";
+import { MapPin, FileText, ExternalLink, X, RefreshCw } from "lucide-react";
 import { Badge, type BadgeStatus } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Notifications";
@@ -161,6 +161,22 @@ interface DocRef {
   file_type: string | null;
 }
 
+// The one thing this grid needs from a site's latest shipment -- just
+// enough to show the AWB and, when the courier looks like Blue Dart, a
+// "Track via Blue Dart" button right on the card (same
+// /api/lfg/shipments/[shipmentId]/track route and courier-name regex the
+// Shipment tab's own button uses -- see LfgSiteWorkspaceClient.tsx's
+// isBlueDart/handleTrackViaBlueDart).
+interface CardShipmentRef {
+  id: string;
+  awb_number: string;
+  courier: string | null;
+}
+
+function isBlueDartCourier(courier: string | null): boolean {
+  return /blue\s*dart/i.test(courier ?? "");
+}
+
 interface PreviewState {
   name: string;
   url: string;
@@ -204,7 +220,7 @@ export function LfgSiteCardGrid({
   const idsKey = visible.map((r) => r.id).join(",");
   const ordinals = useMemo(() => siteOrdinals(rows), [rows]);
 
-  const [awbBySite, setAwbBySite] = useState<Record<string, string>>({});
+  const [awbBySite, setAwbBySite] = useState<Record<string, CardShipmentRef>>({});
   const [surveyDocBySite, setSurveyDocBySite] = useState<Record<string, DocRef>>({});
   const [installReportDocBySite, setInstallReportDocBySite] = useState<Record<string, DocRef>>({});
   const [installStatusBySite, setInstallStatusBySite] = useState<Record<string, string>>({});
@@ -246,15 +262,17 @@ export function LfgSiteCardGrid({
 
     supabase
       .from("lfg_shipments")
-      .select("site_id, awb_number, created_at")
+      .select("id, site_id, awb_number, courier, created_at")
       .in("site_id", ids)
       .not("awb_number", "is", null)
       .order("created_at", { ascending: false })
       .then(({ data }) => {
         if (cancelled) return;
-        const map: Record<string, string> = {};
-        for (const row of (data as { site_id: string; awb_number: string | null }[]) ?? []) {
-          if (row.awb_number && !map[row.site_id]) map[row.site_id] = row.awb_number;
+        const map: Record<string, CardShipmentRef> = {};
+        for (const row of (data as { id: string; site_id: string; awb_number: string | null; courier: string | null }[]) ?? []) {
+          if (row.awb_number && !map[row.site_id]) {
+            map[row.site_id] = { id: row.id, awb_number: row.awb_number, courier: row.courier };
+          }
         }
         setAwbBySite(map);
       });
@@ -313,7 +331,7 @@ export function LfgSiteCardGrid({
           <SiteCard
             key={row.id}
             row={row}
-            awb={awbBySite[row.id] ?? null}
+            shipment={awbBySite[row.id] ?? null}
             surveyDoc={surveyDocBySite[row.id] ?? null}
             installReportDoc={installReportDocBySite[row.id] ?? null}
             installationStatus={installStatusBySite[row.id] ?? "pending"}
@@ -378,7 +396,7 @@ export function LfgSiteCardGrid({
 
 function SiteCard({
   row,
-  awb,
+  shipment,
   surveyDoc,
   installReportDoc,
   installationStatus,
@@ -388,7 +406,7 @@ function SiteCard({
   quickActions,
 }: {
   row: LfgSiteCardRow;
-  awb: string | null;
+  shipment: CardShipmentRef | null;
   surveyDoc: DocRef | null;
   installReportDoc: DocRef | null;
   installationStatus: string;
@@ -401,6 +419,7 @@ function SiteCard({
   const { toast } = useToast();
   const [pictureUrl, setPictureUrl] = useState<string | null>(null);
   const [openingDocId, setOpeningDocId] = useState<string | null>(null);
+  const [tracking, setTracking] = useState(false);
 
   // Only fetched when the site actually has a picture on file -- the
   // route 404s otherwise (see its own header comment), so skipping the
@@ -443,6 +462,30 @@ function SiteCard({
       }
     } finally {
       setOpeningDocId(null);
+    }
+  }
+
+  // Same route/behavior as the Shipment tab's own "Track via Blue Dart"
+  // button (LfgSiteWorkspaceClient.tsx's handleTrackViaBlueDart) -- just
+  // reachable straight from the card instead of requiring a click into
+  // Site 360 + the Shipment tab first. No event-timeline UI here (the
+  // card has nowhere to show it); the toast is the only feedback.
+  async function handleTrackViaBlueDart(e: MouseEvent) {
+    e.stopPropagation();
+    if (!shipment) return;
+    setTracking(true);
+    try {
+      const res = await fetch(`/api/lfg/shipments/${shipment.id}/track`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        toast("danger", data.message || data.error || "Couldn't fetch tracking updates");
+        return;
+      }
+      toast("success", "Tracking updated from Blue Dart");
+    } catch {
+      toast("danger", "Couldn't reach the tracking service");
+    } finally {
+      setTracking(false);
     }
   }
 
@@ -590,8 +633,17 @@ function SiteCard({
 
         <div className="flex items-center justify-between">
           <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-secondary">AWB</span>
-          <span className="text-xs tabular-nums text-ink-muted">{awb ?? "—"}</span>
+          <span className="text-xs tabular-nums text-ink-muted">{shipment?.awb_number ?? "—"}</span>
         </div>
+
+        {shipment && isBlueDartCourier(shipment.courier) && (
+          <div className="mt-2.5">
+            <Button variant="secondary" size="sm" className="w-full" loading={tracking} onClick={handleTrackViaBlueDart}>
+              <RefreshCw size={14} className="mr-1.5" />
+              Track via Blue Dart
+            </Button>
+          </div>
+        )}
 
         <div className="mt-3.5 flex items-center gap-2">
           <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-secondary">Installation</span>
