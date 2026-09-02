@@ -3199,10 +3199,18 @@ order:
     `/api/lfg/shipments/[shipmentId]/track` route, same
     `/blue\s*dart/i` courier-name check) as `LfgSiteWorkspaceClient.tsx`'s
     Shipment tab, right under the AWB line, whenever the site's latest
-    shipment has both an AWB and a Blue Dart-looking courier. The card has
-    nowhere to show the event timeline, so a toast is the only feedback —
-    the full timeline still lives on the Shipment tab. `npx tsc --noEmit`
-    and `npx eslint` on the changed file: clean.
+    shipment has both an AWB and a Blue Dart-looking courier. `npx tsc
+    --noEmit` and `npx eslint` on the changed file: clean.
+    - **Follow-up same item**: Srinivas asked for the tracking *results*
+      to show on the card too, not just a toast. The route already
+      returns the full event list (newest first); the card now keeps the
+      top 3 in local state after a click and renders them inline right
+      below the button (status, location, timestamp) — deliberately not
+      the full `Timeline` component the Shipment tab uses (no room on a
+      card), plus a small "View full timeline" button that navigates to
+      the site's own Shipment tab for the rest. Nothing is pre-fetched on
+      load; the panel only appears after a click on that card. `npx tsc
+      --noEmit` / `npx eslint`: clean.
     - Also confirmed via a live screenshot from Srinivas: the partner-facing
       Site Survey Reports page (item 86) hit `403`s from Supabase on
       `site_survey_reports` — expected, since

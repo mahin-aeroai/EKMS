@@ -177,6 +177,18 @@ function isBlueDartCourier(courier: string | null): boolean {
   return /blue\s*dart/i.test(courier ?? "");
 }
 
+// Shape of one row the /track route hands back (lfg_shipment_events,
+// newest first) -- same fields LfgSiteWorkspaceClient.tsx's own
+// ShipmentEventRow reads, just the subset this card's compact result
+// list actually displays.
+interface CardTrackEvent {
+  id: string;
+  event_status: string;
+  event_time: string;
+  location: string | null;
+  source: "manual" | "api";
+}
+
 interface PreviewState {
   name: string;
   url: string;
@@ -420,6 +432,7 @@ function SiteCard({
   const [pictureUrl, setPictureUrl] = useState<string | null>(null);
   const [openingDocId, setOpeningDocId] = useState<string | null>(null);
   const [tracking, setTracking] = useState(false);
+  const [trackedEvents, setTrackedEvents] = useState<CardTrackEvent[] | null>(null);
 
   // Only fetched when the site actually has a picture on file -- the
   // route 404s otherwise (see its own header comment), so skipping the
@@ -468,8 +481,10 @@ function SiteCard({
   // Same route/behavior as the Shipment tab's own "Track via Blue Dart"
   // button (LfgSiteWorkspaceClient.tsx's handleTrackViaBlueDart) -- just
   // reachable straight from the card instead of requiring a click into
-  // Site 360 + the Shipment tab first. No event-timeline UI here (the
-  // card has nowhere to show it); the toast is the only feedback.
+  // Site 360 + the Shipment tab first. Unlike the Shipment tab, this
+  // shows the result right here: the route already returns every event
+  // for the shipment (newest first), so the top few render inline below
+  // the button rather than only surfacing as a toast.
   async function handleTrackViaBlueDart(e: MouseEvent) {
     e.stopPropagation();
     if (!shipment) return;
@@ -481,6 +496,7 @@ function SiteCard({
         toast("danger", data.message || data.error || "Couldn't fetch tracking updates");
         return;
       }
+      setTrackedEvents(((data.events ?? []) as CardTrackEvent[]).slice(0, 3));
       toast("success", "Tracking updated from Blue Dart");
     } catch {
       toast("danger", "Couldn't reach the tracking service");
@@ -637,11 +653,44 @@ function SiteCard({
         </div>
 
         {shipment && isBlueDartCourier(shipment.courier) && (
-          <div className="mt-2.5">
+          <div className="mt-2.5" onClick={(e) => e.stopPropagation()}>
             <Button variant="secondary" size="sm" className="w-full" loading={tracking} onClick={handleTrackViaBlueDart}>
               <RefreshCw size={14} className="mr-1.5" />
               Track via Blue Dart
             </Button>
+            {/* Compact result list -- appears only after a click on this
+                card (never pre-fetched on load), showing the newest
+                events first. Deliberately not the full Timeline
+                component used on the Shipment tab -- a card has no room
+                for it; this is the top 3 only, with a link to the full
+                history on Site 360 when there's more. */}
+            {trackedEvents && (
+              <div className="mt-2 rounded-lg border border-line bg-surface-sunken p-2.5">
+                {trackedEvents.length === 0 ? (
+                  <p className="text-xs text-ink-muted">No tracking events yet.</p>
+                ) : (
+                  <ul className="flex flex-col gap-2">
+                    {trackedEvents.map((ev) => (
+                      <li key={ev.id} className="text-xs">
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="font-semibold text-ink">{ev.event_status}</span>
+                          <span className="shrink-0 text-[11px] text-ink-muted">{new Date(ev.event_time).toLocaleString()}</span>
+                        </div>
+                        {ev.location && <div className="text-ink-secondary">{ev.location}</div>}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="mt-1.5 h-6 w-full text-[11px]"
+                  onClick={() => router.push(href)}
+                >
+                  View full timeline
+                </Button>
+              </div>
+            )}
           </div>
         )}
 
