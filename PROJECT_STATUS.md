@@ -3218,3 +3218,64 @@ order:
       shipped in item 86's bundle) hadn't been run yet in the Supabase SQL
       Editor. Not a code bug — flagged to Srinivas to run that migration;
       no code change needed for this part.
+
+88. **"Full-lifecycle partner" flag — MMDI's own LFG Connect login can now
+    do creative/production/dispatch too, not just survey/shipping/
+    installation.** Srinivas pointed out MMDI is both the staff org
+    running this app AND its own `lfg_partners` row (the installation
+    partner on its own sites) — he wanted Creative Received, Production,
+    and dispatch-status buttons reachable from the same
+    `lfgconnect.mmdi.in` login he already uses, instead of switching to
+    the internal staff tool for those stages. Those three were previously
+    hard-blocked for ANY partner account (including MMDI's own) by
+    `lfg_sites_guard_partner_update()` (the restriction predates this
+    session — see `supabase-lfg-workflow-automation-migration.sql`) and
+    by `lfg_production_write_staff` having no partner clause at all —
+    both deliberately, per an earlier task ("Creative
+    received has to be updated by the users MMDI" / "Shipped will be
+    updated by MMDI once printed and shipped"), and that trigger has no
+    way to tell MMDI's own partner login apart from a genuinely external
+    installation partner who might sign into the same portal — so a
+    blanket unblock for every partner was never on the table.
+    - New `supabase-lfg-full-lifecycle-partner-migration.sql`: adds
+      `lfg_partners.is_full_lifecycle_partner` (default `false` — every
+      other partner, present or future, stays exactly as restricted as
+      before unless explicitly flagged) and a new
+      `lfg_partner_is_full_lifecycle()` helper (same style as
+      `is_lfg_partner_user()`/`lfg_partner_id()`). Re-declares
+      `lfg_sites_guard_partner_update()` to skip the Creative Received
+      and production/shipping-status checks only when that flag is set —
+      the ownership/outlet-name/format/SFO-ID restriction stays
+      unconditional for every partner. Re-declares
+      `lfg_production_write_staff` to also grant a flagged partner write
+      access to their own sites' `lfg_production` row (upsert, same
+      pattern the existing "Start Production"/"Mark Completed" buttons
+      already use). Closing statement flips the flag on for the
+      `lfg_partners` row named `'MMDI'` specifically.
+    - Code: `lfg-auth.ts`'s `LfgIdentity` gains `isFullLifecyclePartner`
+      (sourced from the same query, always `false` on a staff sign-in —
+      staff already get everything via `isStaff`/`staffRole`).
+      `LfgPartnerSiteClient.tsx`: `canWriteProduction` and
+      `canMarkCreative` are now `isStaff ? editable : isFullLifecycle`
+      (previously hard `false`/`isStaff && editable`), and the "Change
+      Status" dropdown's `LFG_PARTNER_RESTRICTED_STATUSES` filter now
+      also lets a full-lifecycle partner pick
+      production_pending/in_production/ready_for_dispatch/dispatched/
+      in_transit. Deliberately NOT touched: Site Survey approval
+      (`canApprove`) — that's a separate QC step, admin/editor-only at
+      the RLS level with no partner clause, out of scope for what was
+      asked.
+    - Not yet done (mention if it comes up): quick-action buttons on the
+      site CARDS (`LfgPartnerQuickStatusButtons.tsx`) are still only
+      "Mark Delivered"/"Mark Installed" — a full-lifecycle partner gets
+      the new production/dispatch controls via the Production tab and the
+      Change Status dropdown, not a one-tap card button yet. Easy
+      follow-up if Srinivas wants it.
+    - `npx tsc --noEmit` and `npx eslint` across every changed file:
+      clean. New `.sql` file validated with `pglast.parse_sql`: clean.
+    - **Requires running `supabase-lfg-full-lifecycle-partner-
+      migration.sql` in the Supabase SQL Editor** before any of this
+      does anything — until then the trigger/policy still reject exactly
+      as before. After running it, confirm the `lfg_partners` row is
+      actually named `MMDI` (matches what the portal header shows) —
+      the closing `UPDATE` only flips the flag for an exact name match.

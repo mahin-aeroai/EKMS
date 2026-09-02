@@ -93,9 +93,13 @@ export function LfgPartnerSiteClient({
   const identity = useLfgUser();
   const isStaff = identity?.isStaff ?? false;
   const staffRole = identity?.staffRole ?? null;
+  // MMDI's own partner login (see lfg-auth.ts's isFullLifecyclePartner
+  // doc comment and supabase-lfg-full-lifecycle-partner-migration.sql) --
+  // false for every other, genuinely external installation partner.
+  const isFullLifecycle = identity?.isFullLifecyclePartner ?? false;
   // See the header comment above for the RLS mapping behind each of these.
   const editable = isStaff ? staffRole === "admin" || staffRole === "editor" : true;
-  const canWriteProduction = isStaff ? editable : false;
+  const canWriteProduction = isStaff ? editable : isFullLifecycle;
   const canApprove = isStaff ? editable : false;
   const canDelete = isStaff && staffRole === "admin";
   // Read-only display for the partner -- moving a site between seasonal
@@ -290,10 +294,12 @@ export function LfgPartnerSiteClient({
             siteVerifiedAt={site.site_verified_at}
             editable={editable}
             canApprove={canApprove}
-            // Creative Received is MMDI-only -- a real partner never gets
-            // the control; a staff account reusing this component (isStaff)
-            // keeps it, same as editable already does elsewhere in this file.
-            canMarkCreative={isStaff && editable}
+            // Creative Received is MMDI-only -- an ordinary partner never
+            // gets the control; a staff account reusing this component
+            // (isStaff) keeps it, same as editable already does elsewhere
+            // in this file, and so does MMDI's own full-lifecycle partner
+            // login.
+            canMarkCreative={isStaff ? editable : isFullLifecycle}
             onChanged={() => router.refresh()}
           />
         </div>
@@ -392,16 +398,18 @@ export function LfgPartnerSiteClient({
             className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
           >
             {/* Production/shipping statuses are MMDI-only (see
-                LFG_PARTNER_RESTRICTED_STATUSES) -- left out of a real
-                partner's own picker entirely, except when the site is
-                already sitting at one (so the dropdown can still show
-                its current value; the database itself would reject
+                LFG_PARTNER_RESTRICTED_STATUSES) -- left out of an
+                ordinary partner's own picker entirely, except when the
+                site is already sitting at one (so the dropdown can still
+                show its current value; the database itself would reject
                 trying to set any OTHER restricted status regardless of
                 what's shown here). A staff account reusing this same
                 component (isStaff -- see this file's own header comment)
-                still sees every status, same as the internal Site 360. */}
+                still sees every status, same as the internal Site 360 --
+                and so does MMDI's own full-lifecycle partner login
+                (isFullLifecycle). */}
             {LFG_STATUSES.filter(
-              (s) => isStaff || s === site.site_status || !LFG_PARTNER_RESTRICTED_STATUSES.includes(s)
+              (s) => isStaff || isFullLifecycle || s === site.site_status || !LFG_PARTNER_RESTRICTED_STATUSES.includes(s)
             ).map((s) => (
               <option key={s} value={s}>
                 {lfgStatusLabel(s)}
