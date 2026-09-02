@@ -282,6 +282,10 @@ export default function LfgPartnerSitesPage() {
     setRows((prev) => prev?.map((r) => (r.id === id ? { ...r, site_status: newStatus, active: newStatus === "active" } : r)) ?? prev);
   }
 
+  function handleCreativeReceived(id: string) {
+    setRows((prev) => prev?.map((r) => (r.id === id ? { ...r, creative_received_at: new Date().toISOString() } : r)) ?? prev);
+  }
+
   return (
     <div>
       <h1 className="text-lg font-semibold text-ink">{headingAll ? "All Sites" : "Your Sites"}</h1>
@@ -454,7 +458,10 @@ export default function LfgPartnerSitesPage() {
                 siteCode={row.site_id}
                 outletName={row.outlet_name}
                 status={row.site_status}
+                creativeReceivedAt={row.creative_received_at}
+                canAdvanceEarlyStages={identity?.isFullLifecyclePartner ?? false}
                 onChanged={handleStatusChanged}
+                onCreativeReceived={handleCreativeReceived}
               />
             ) : null
           }

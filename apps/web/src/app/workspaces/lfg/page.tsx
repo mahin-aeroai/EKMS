@@ -346,6 +346,10 @@ export default function LfgSiteListPage() {
     setRows((prev) => prev?.map((r) => (r.id === id ? { ...r, site_status: newStatus, active: newStatus === "active" } : r)) ?? prev);
   }
 
+  function handleCreativeReceived(id: string) {
+    setRows((prev) => prev?.map((r) => (r.id === id ? { ...r, creative_received_at: new Date().toISOString() } : r)) ?? prev);
+  }
+
   useEffect(() => {
     supabase
       .from("lfg_sites")
@@ -905,7 +909,10 @@ export default function LfgSiteListPage() {
                       siteCode={row.site_id}
                       outletName={row.outlet_name}
                       status={row.site_status}
+                      creativeReceivedAt={row.creative_received_at}
+                      canAdvanceEarlyStages
                       onChanged={handleStatusChanged}
+                      onCreativeReceived={handleCreativeReceived}
                     />
                   )
                 : undefined
