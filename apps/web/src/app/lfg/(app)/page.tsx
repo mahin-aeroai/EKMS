@@ -12,6 +12,7 @@ import { useLfgHost, lfgHref } from "@/lib/lfg-links";
 import { supabase } from "@/lib/supabase";
 import { LFG_STATUSES, lfgStatusLabel, lfgStatusBadge } from "@/lib/lfgStatus";
 import { formatMm, formatSizeInches, formatDecimal } from "@/lib/lfg-units";
+import { useLfgDistinctValues } from "@/lib/useLfgDistinctValues";
 import { LfgSiteCardGrid } from "@/components/workspaces/LfgSiteCardGrid";
 import { LfgPartnerQuickStatusButtons } from "@/components/lfg/LfgPartnerQuickStatusButtons";
 
@@ -97,6 +98,8 @@ export default function LfgPartnerSitesPage() {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [programIdFilter, setProgramIdFilter] = useState<string>("");
+  const [formatFilter, setFormatFilter] = useState<string>("");
+  const formatOptions = useLfgDistinctValues("format");
   const [programs, setPrograms] = useState<ProgramOption[]>([]);
   // Only meaningful for a genuine partner account (identity.isStaff already
   // sees every site unconditionally, toggle not shown to them at all) --
@@ -155,6 +158,7 @@ export default function LfgPartnerSitesPage() {
 
           if (statusFilter) q = q.eq("site_status", statusFilter);
           if (programIdFilter) q = q.eq("program_id", programIdFilter);
+          if (formatFilter) q = q.eq("format", formatFilter);
 
           const trimmed = query.trim();
           if (trimmed) {
@@ -180,7 +184,7 @@ export default function LfgPartnerSitesPage() {
     }, 250);
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [identity, query, statusFilter, programIdFilter, viewingAllSites]);
+  }, [identity, query, statusFilter, programIdFilter, formatFilter, viewingAllSites]);
 
   // True once a partner (never staff, who already see this unconditionally)
   // is either genuinely staff or has toggled to "All Sites" -- drives the
@@ -245,7 +249,7 @@ export default function LfgPartnerSitesPage() {
           label="Showing"
           value={rows === null ? "…" : String(rows.length)}
           trend="flat"
-          trendLabel={query.trim() || statusFilter || programIdFilter ? "Filtered" : "All"}
+          trendLabel={query.trim() || statusFilter || programIdFilter || formatFilter ? "Filtered" : "All"}
         />
         <StatCard
           label="Needs Attention"
@@ -287,6 +291,18 @@ export default function LfgPartnerSitesPage() {
             {programs.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={formatFilter}
+            onChange={(e) => setFormatFilter(e.target.value)}
+            className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
+          >
+            <option value="">All formats</option>
+            {formatOptions.map((f) => (
+              <option key={f} value={f}>
+                {f}
               </option>
             ))}
           </select>

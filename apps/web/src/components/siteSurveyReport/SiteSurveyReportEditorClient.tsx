@@ -45,7 +45,23 @@ const STATUS_BADGE: Record<SiteSurveyReportRow["status"], "neutral" | "info" | "
 
 type StepId = "details" | "photos" | "measurements" | "preview" | "generate";
 
-export function SiteSurveyReportEditorClient({ reportId }: { reportId: string }) {
+export function SiteSurveyReportEditorClient({
+  reportId,
+  // Both new props are additive and optional -- omitted entirely by the
+  // staff route (SiteSurveyReportEditorPageClient.tsx), so their defaults
+  // below reproduce today's staff behavior exactly. The LFG partner
+  // bridge (LfgPartnerSiteSurveyReportBridge.tsx) is the only other
+  // caller and always passes both explicitly.
+  basePath = "/workspaces/site-survey-report",
+  hideDefaultsLink = false,
+  onGenerated,
+}: {
+  reportId: string;
+  basePath?: string;
+  hideDefaultsLink?: boolean;
+  /** Fired right after a successful Generate, with the just-generated PDF and the report row as it now stands (status: "generated"). See LfgPartnerSiteSurveyReportBridge.tsx for the partner-only "create a site from this survey" logic this drives. */
+  onGenerated?: (args: { report: SiteSurveyReportRow; pdfBlob: Blob }) => Promise<void> | void;
+}) {
   const { toast } = useToast();
   const [report, setReport] = useState<SiteSurveyReportRow | null>(null);
   const [photos, setPhotos] = useState<SiteSurveyPhotoRow[]>([]);
@@ -215,10 +231,14 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
 
       const generated_at = new Date().toISOString();
       const { error } = await supabase.from("site_survey_reports").update({ status: "generated", generated_at }).eq("id", reportId);
+      const updatedReport: SiteSurveyReportRow = error ? report : { ...report, status: "generated", generated_at };
       if (!error) {
-        setReport((prev) => (prev ? { ...prev, status: "generated", generated_at } : prev));
+        setReport(updatedReport);
       }
       toast("success", "PDF generated and downloaded");
+      if (onGenerated) {
+        await onGenerated({ report: updatedReport, pdfBlob: blob });
+      }
     } catch {
       toast("danger", "Couldn't generate the PDF");
     } finally {
@@ -275,7 +295,7 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
   return (
     <div>
       <Breadcrumbs
-        items={[{ label: "Home", href: "/" }, { label: "Site Survey Reports", href: "/workspaces/site-survey-report" }, { label: report.store_name || "Untitled report" }]}
+        items={[{ label: "Home", href: "/" }, { label: "Site Survey Reports", href: basePath }, { label: report.store_name || "Untitled report" }]}
       />
 
       <div className="mt-4 flex flex-col gap-4 border-b border-line pb-6 sm:flex-row sm:items-start sm:justify-between">
@@ -293,7 +313,7 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
           </div>
         </div>
         <Link
-          href="/workspaces/site-survey-report"
+          href={basePath}
           className="flex w-full items-center justify-center gap-1.5 rounded-md border border-line-strong px-3 py-2 text-sm font-medium text-ink-secondary hover:bg-surface-sunken sm:w-auto"
         >
           <ArrowLeft size={14} /> Back to Site Survey Reports
@@ -313,6 +333,7 @@ export function SiteSurveyReportEditorClient({ reportId }: { reportId: string })
             onFormDataChange={updateFormData}
             fieldSources={report.field_sources}
             onTouched={onTouched}
+            defaultsHref={hideDefaultsLink ? undefined : `${basePath}/defaults`}
           />
         )}
         {step === "photos" && <PhotosStep reportId={reportId} photos={photos} onReload={reloadPhotos} />}

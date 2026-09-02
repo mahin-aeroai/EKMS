@@ -71,9 +71,19 @@ interface Props {
   fieldSources: FieldSources;
   /** Marks a field "user"-sourced the moment it's touched, once extraction exists. */
   onTouched: (key: FieldSourceKey) => void;
+  /**
+   * Where the "saved defaults" link points. Defaults to the staff-only
+   * /workspaces/site-survey-report/defaults page. The LFG partner bridge
+   * (LfgPartnerSiteSurveyReportBridge.tsx) passes undefined explicitly via
+   * its own prop chain to hide the link entirely -- that page is an
+   * MMDI-side configuration screen a partner account can't reach anyway
+   * (middleware bounces any /workspaces/* request from a partner role
+   * straight back to /lfg).
+   */
+  defaultsHref?: string;
 }
 
-export function ReportFormFields({ header, onHeaderChange, formData, onFormDataChange, fieldSources, onTouched }: Props) {
+export function ReportFormFields({ header, onHeaderChange, formData, onFormDataChange, fieldSources, onTouched, defaultsHref }: Props) {
   const { toast } = useToast();
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({ site: true });
   const defaultsRef = useRef<SiteSurveyFormData | null>(null);
@@ -123,11 +133,17 @@ export function ReportFormFields({ header, onHeaderChange, formData, onFormDataC
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-surface-sunken px-3 py-2">
         <p className="text-[12px] text-ink-secondary">
-          Tap a card to open it — only what&apos;s still blank needs your input. Set up your{" "}
-          <a href="/workspaces/site-survey-report/defaults" target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline">
-            saved defaults
-          </a>{" "}
-          once and most of this fills itself in.
+          Tap a card to open it — only what&apos;s still blank needs your input.
+          {defaultsHref && (
+            <>
+              {" "}
+              Set up your{" "}
+              <a href={defaultsHref} target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline">
+                saved defaults
+              </a>{" "}
+              once and most of this fills itself in.
+            </>
+          )}
         </p>
         <div className="flex shrink-0 items-center gap-1.5">
           {defaultsAvailable && (

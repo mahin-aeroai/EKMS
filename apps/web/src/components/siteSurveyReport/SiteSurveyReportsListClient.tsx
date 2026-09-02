@@ -58,7 +58,19 @@ const STATUS_BADGE: Record<ReportStatus, "neutral" | "info" | "warning" | "succe
 
 const STATUS_OPTIONS: ReportStatus[] = ["draft", "extracting", "review_required", "ready", "generated"];
 
-export function SiteSurveyReportsListClient() {
+export function SiteSurveyReportsListClient({
+  // Additive/optional, all default to today's staff behavior -- the
+  // staff route (workspaces/site-survey-report/page.tsx) omits all
+  // three. The LFG partner page (lfg/(app)/site-survey-reports/page.tsx)
+  // passes basePath/homeHref via lfgHref() and hideDefaultsLink=true.
+  basePath = "/workspaces/site-survey-report",
+  homeHref = "/",
+  hideDefaultsLink = false,
+}: {
+  basePath?: string;
+  homeHref?: string;
+  hideDefaultsLink?: boolean;
+} = {}) {
   const router = useRouter();
   const { toast } = useToast();
   const role = useUserRole();
@@ -123,7 +135,7 @@ export function SiteSurveyReportsListClient() {
       toast("danger", "Couldn't create a new report");
       return;
     }
-    router.push(`/workspaces/site-survey-report/${data.id}`);
+    router.push(`${basePath}/${data.id}`);
   }
 
   async function fetchFullReportAndPhotos(rowId: string): Promise<{ report: SiteSurveyReportRow; photos: SiteSurveyPhotoRow[] } | null> {
@@ -269,7 +281,7 @@ export function SiteSurveyReportsListClient() {
       }
       toast("success", "Report duplicated");
       loadRows();
-      router.push(`/workspaces/site-survey-report/${inserted.id}`);
+      router.push(`${basePath}/${inserted.id}`);
     } catch {
       toast("danger", "Couldn't duplicate this report");
     } finally {
@@ -338,7 +350,7 @@ export function SiteSurveyReportsListClient() {
 
   return (
     <div>
-      <Breadcrumbs items={[{ label: "Home", href: "/" }, { label: "Site Survey Reports" }]} />
+      <Breadcrumbs items={[{ label: "Home", href: homeHref }, { label: "Site Survey Reports" }]} />
 
       <div className="mt-4 flex flex-col gap-4 border-b border-line pb-6 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-4">
@@ -351,12 +363,14 @@ export function SiteSurveyReportsListClient() {
           </div>
         </div>
         <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-          <Link
-            href="/workspaces/site-survey-report/defaults"
-            className="flex items-center justify-center gap-1.5 rounded-md border border-line-strong px-3 py-2 text-sm font-medium text-ink-secondary hover:bg-surface-sunken"
-          >
-            <Sparkles size={14} /> Default Answers
-          </Link>
+          {!hideDefaultsLink && (
+            <Link
+              href={`${basePath}/defaults`}
+              className="flex items-center justify-center gap-1.5 rounded-md border border-line-strong px-3 py-2 text-sm font-medium text-ink-secondary hover:bg-surface-sunken"
+            >
+              <Sparkles size={14} /> Default Answers
+            </Link>
+          )}
           <Button onClick={() => startNewReport()} loading={creating} className="w-full sm:w-auto">
             New Report
           </Button>
@@ -463,7 +477,7 @@ export function SiteSurveyReportsListClient() {
             {rows?.length ? "No reports match your search/filters." : "No Site Survey Reports yet — click “New Report” to create the first one."}
           </p>
         ) : (
-          <Table columns={COLUMNS} rows={filtered} onRowClick={(r) => router.push(`/workspaces/site-survey-report/${r.id}`)} />
+          <Table columns={COLUMNS} rows={filtered} onRowClick={(r) => router.push(`${basePath}/${r.id}`)} />
         )}
       </div>
 

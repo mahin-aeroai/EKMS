@@ -211,6 +211,8 @@ it — treat it as the checklist before ever asking "do we have X."
 | `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | Creating Razorpay Orders + verifying the Checkout.js success signature | Vercel env vars (`KEY_ID` is also sent to the browser to open Checkout — that's expected, only `KEY_SECRET` is sensitive) | From the Razorpay Dashboard → Settings → API Keys. Use test-mode keys until go-live, then switch to live-mode keys (same env var names) |
 | `RAZORPAY_WEBHOOK_SECRET` | Verifying the Razorpay webhook's signature | Vercel env vars only | Set when creating the webhook (Razorpay Dashboard → Settings → Webhooks → add `https://app.mmdi.in/api/portal/razorpay-webhook`, subscribe to `payment.captured`, set a secret) — paste that same secret here |
 | Apple Developer account | EAS local iOS builds | Srinivas's own Apple ID / Keychain, used implicitly by `eas build --local` | Individual enrollment — see section 5 for what that limits |
+| `BLUEDART_CONSUMER_KEY` / `BLUEDART_CONSUMER_SECRET` | Blue Dart JWT auth for LFG Connect's live shipment tracking (`/api/lfg/shipments/[shipmentId]/track`, `src/lib/blueDart.ts`) | Vercel env vars only | From Blue Dart / DHL eCommerce India's developer portal (developer.dhl.com) — Srinivas already has an account with these |
+| `BLUEDART_LOGIN_ID` / `BLUEDART_LICENSE_KEY` | Blue Dart tracking API query params (`loginid`/`lickey`) | Vercel env vars only | Same account/portal as the two above |
 
 ---
 

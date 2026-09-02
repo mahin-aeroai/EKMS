@@ -452,6 +452,11 @@ export interface ExtractionMeta {
 // site_survey_reports -- one row per report.
 export interface SiteSurveyReportRow {
   id: string;
+  // Nullable FK to lfg_sites -- null for a freestanding draft (started
+  // before any site exists, the partner "create a new site from this
+  // survey" case), set once the report is attached to a real site. Added
+  // by supabase-lfg-site-survey-reports-partner-migration.sql.
+  site_id: string | null;
   store_name: string;
   address: string;
   sfo_id: string;

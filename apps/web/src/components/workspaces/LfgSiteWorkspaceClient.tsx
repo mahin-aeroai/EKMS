@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { MapPin, Pencil, FileText, Lock, Upload, Eye, Trash2, Truck, ArrowLeft, X, ExternalLink } from "lucide-react";
+import { MapPin, Pencil, FileText, Lock, Upload, Eye, Trash2, Truck, ArrowLeft, X, ExternalLink, RefreshCw } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -1724,6 +1724,33 @@ function ShipmentCard({
   const [uploadingPod, setUploadingPod] = useState(false);
   const podInputRef = useRef<HTMLInputElement | null>(null);
 
+  const [tracking, setTracking] = useState(false);
+
+  // Shown only for a Blue Dart shipment with an AWB on file -- calls the
+  // new /track route (apps/web/src/lib/blueDart.ts), which inserts any
+  // new lfg_shipment_events rows with source: "api" (the ev.source ===
+  // "api" branch below already existed, previously dead code) and
+  // refreshes current_status from the latest scan.
+  const isBlueDart = /blue\s*dart/i.test(shipment.courier ?? "");
+  async function handleTrackViaBlueDart() {
+    setTracking(true);
+    try {
+      const res = await fetch(`/api/lfg/shipments/${shipment.id}/track`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        toast("danger", data.message || data.error || "Couldn't fetch tracking updates");
+        return;
+      }
+      setEvents(data.events ?? []);
+      toast("success", "Tracking updated from Blue Dart");
+      onChanged();
+    } catch {
+      toast("danger", "Couldn't reach the tracking service");
+    } finally {
+      setTracking(false);
+    }
+  }
+
   async function loadEvents() {
     setLoadingEvents(true);
     const { data, error } = await supabase
@@ -1988,11 +2015,19 @@ function ShipmentCard({
           <div>
             <div className="mb-2 flex items-center justify-between">
               <h4 className="text-xs font-semibold text-ink-secondary">Tracking Timeline</h4>
-              {editable && (
-                <Button size="sm" variant="secondary" onClick={() => setShowEventForm((s) => !s)}>
-                  {showEventForm ? "Cancel" : "Log Event"}
-                </Button>
-              )}
+              <div className="flex items-center gap-2">
+                {isBlueDart && shipment.awb_number && (
+                  <Button size="sm" variant="secondary" loading={tracking} onClick={handleTrackViaBlueDart}>
+                    <RefreshCw size={14} className="mr-1.5" />
+                    Track via Blue Dart
+                  </Button>
+                )}
+                {editable && (
+                  <Button size="sm" variant="secondary" onClick={() => setShowEventForm((s) => !s)}>
+                    {showEventForm ? "Cancel" : "Log Event"}
+                  </Button>
+                )}
+              </div>
             </div>
 
             {showEventForm && (

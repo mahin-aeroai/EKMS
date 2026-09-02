@@ -15,9 +15,11 @@ interface Props {
   onFormDataChange: <K extends keyof SiteSurveyFormData>(key: K, value: SiteSurveyFormData[K]) => void;
   fieldSources: FieldSources;
   onTouched: (key: FieldSourceKey) => void;
+  /** See ReportFormFields' own prop of the same name. */
+  defaultsHref?: string;
 }
 
-export function DetailsStep({ header, onHeaderChange, formData, onFormDataChange, fieldSources, onTouched }: Props) {
+export function DetailsStep({ header, onHeaderChange, formData, onFormDataChange, fieldSources, onTouched, defaultsHref }: Props) {
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-ink-secondary">
@@ -31,6 +33,7 @@ export function DetailsStep({ header, onHeaderChange, formData, onFormDataChange
         onFormDataChange={onFormDataChange}
         fieldSources={fieldSources}
         onTouched={onTouched}
+        defaultsHref={defaultsHref}
       />
     </div>
   );

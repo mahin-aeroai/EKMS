@@ -2,7 +2,8 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Upload, Eye, ArrowLeft } from "lucide-react";
+import Link from "next/link";
+import { Upload, Eye, ArrowLeft, ClipboardCheck, Wrench } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
@@ -273,19 +274,29 @@ export function LfgPartnerSiteClient({
       id: "survey",
       label: "Survey",
       content: (
-        <SurveyTab
-          siteId={site.id}
-          initialSurveys={initialSurveys}
-          creativeReceivedAt={site.creative_received_at}
-          siteVerifiedAt={site.site_verified_at}
-          editable={editable}
-          canApprove={canApprove}
-          // Creative Received is MMDI-only -- a real partner never gets
-          // the control; a staff account reusing this component (isStaff)
-          // keeps it, same as editable already does elsewhere in this file.
-          canMarkCreative={isStaff && editable}
-          onChanged={() => router.refresh()}
-        />
+        <div className="flex flex-col gap-3">
+          {!isStaff && (
+            <Link
+              href={lfgHref(`/sites/${site.id}/site-survey-report`, onLfgHost)}
+              className="flex w-fit items-center gap-1.5 rounded-md border border-line-strong bg-surface px-3 py-2 text-sm font-medium text-ink-secondary hover:bg-surface-sunken"
+            >
+              <ClipboardCheck size={14} /> Generate Site Survey Report
+            </Link>
+          )}
+          <SurveyTab
+            siteId={site.id}
+            initialSurveys={initialSurveys}
+            creativeReceivedAt={site.creative_received_at}
+            siteVerifiedAt={site.site_verified_at}
+            editable={editable}
+            canApprove={canApprove}
+            // Creative Received is MMDI-only -- a real partner never gets
+            // the control; a staff account reusing this component (isStaff)
+            // keeps it, same as editable already does elsewhere in this file.
+            canMarkCreative={isStaff && editable}
+            onChanged={() => router.refresh()}
+          />
+        </div>
       ),
     },
     {
@@ -306,15 +317,25 @@ export function LfgPartnerSiteClient({
       id: "installation",
       label: "Installation",
       content: (
-        <InstallationTab
-          siteId={site.id}
-          initial={initialInstallation}
-          initialPhotos={initialInstallationPhotos}
-          editable={editable}
-          canDeletePhotos={canDelete}
-          onChanged={() => router.refresh()}
-          partnerName={partner?.name}
-        />
+        <div className="flex flex-col gap-3">
+          {!isStaff && (
+            <Link
+              href={lfgHref(`/sites/${site.id}/installation-report`, onLfgHost)}
+              className="flex w-fit items-center gap-1.5 rounded-md border border-line-strong bg-surface px-3 py-2 text-sm font-medium text-ink-secondary hover:bg-surface-sunken"
+            >
+              <Wrench size={14} /> Generate Installation Report
+            </Link>
+          )}
+          <InstallationTab
+            siteId={site.id}
+            initial={initialInstallation}
+            initialPhotos={initialInstallationPhotos}
+            editable={editable}
+            canDeletePhotos={canDelete}
+            onChanged={() => router.refresh()}
+            partnerName={partner?.name}
+          />
+        </div>
       ),
     },
     {

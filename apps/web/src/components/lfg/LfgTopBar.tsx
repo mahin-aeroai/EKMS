@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LogOut, MapPin } from "lucide-react";
+import { LogOut, MapPin, ClipboardCheck } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/cn";
 import { useLfgHost, lfgHref } from "@/lib/lfg-links";
@@ -14,7 +14,10 @@ import { useLfgHost, lfgHref } from "@/lib/lfg-links";
 // same Survey/Production/Shipment/Installation/Documents tab components as
 // the staff workspace. Add more entries here (Account/etc.) as those land,
 // mirroring PortalTopBar's NAV.
-const NAV = [{ href: "/", label: "Sites", icon: MapPin }];
+const NAV = [
+  { href: "/", label: "Sites", icon: MapPin },
+  { href: "/site-survey-reports", label: "Site Surveys", icon: ClipboardCheck },
+];
 
 export function LfgTopBar({
   partnerName,

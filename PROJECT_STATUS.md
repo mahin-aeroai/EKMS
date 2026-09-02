@@ -3081,3 +3081,110 @@ order:
       Delivered/Installed buttons all behave as designed. See the plan's
       own Verification section for the full checklist.
     - Delivered as `lfg-partner-home-cards-filters-quickstatus.bundle`.
+
+86. **Format filter, Blue Dart live tracking, and partner-facing Site
+    Survey / Installation Report creators (2 Sept 2026).** Srinivas asked
+    for four more things on the LFG partner side: a store-format filter;
+    Blue Dart live shipment tracking; the (already-built, staff-only)
+    Site Survey Report Creator and Installation Report Creator tools made
+    available to partners; a completed site survey able to create a
+    brand-new site with the survey attached; and a generated installation
+    report that automatically shows up on the site's card. Full plan:
+    `/root/.claude/plans/reactive-singing-abelson.md`.
+    - **Format filter**: `apps/web/src/app/lfg/(app)/page.tsx` gained a
+      third `<select>` (`useLfgDistinctValues("format")`), mirroring the
+      staff Site Master's own pattern exactly. No SQL.
+    - **Site Survey Report Creator for partners**: retrofitted the
+      existing, previously staff-only `site_survey_reports` tool with a
+      nullable `site_id` FK to `lfg_sites` and new partner RLS
+      (`supabase-lfg-site-survey-reports-partner-migration.sql` —
+      **must be run once in the Supabase SQL Editor**). New partner
+      routes under `/lfg/(app)/site-survey-reports*` reuse
+      `SiteSurveyReportEditorClient`/`SiteSurveyReportsListClient`
+      unchanged via new *optional* props (`basePath`, `hideDefaultsLink`,
+      `onGenerated`) — the staff tool's own behavior is untouched (every
+      new prop defaults to reproducing it exactly). New
+      `LfgPartnerSiteSurveyReportBridge.tsx`: on Generate, if the report
+      has no site yet, creates a new `lfg_stores`/`lfg_sites` row from
+      the survey's own header fields (reusing an existing store by SFO
+      ID for that partner first, same match-before-insert logic as the
+      staff New Site form) and attaches the report to it; either way,
+      uploads the generated PDF as the site's `lfg_site_documents`
+      "survey" document and advances `site_status` to
+      `survey_completed` (rank-guarded, never regresses a
+      further-along site) via the same `lfg_change_site_status` RPC
+      every other status change in this app uses. Also patched
+      `/api/site-survey-reports/[reportId]/photos/upload-url` (was
+      staff-only) to allow a partner who created the report or owns its
+      attached site. A "Generate Site Survey Report" button was added to
+      the partner Site 360's Survey tab
+      (`LfgPartnerSiteClient.tsx`), and "Site Surveys" was added to the
+      LFG top nav (`LfgTopBar.tsx`).
+    - **Installation Report Creator for partners**: no new tables/RLS at
+      all — the standalone tool (`InstallationReportClient.tsx`) never
+      actually persisted anything before this (`handleExport()` only
+      ever downloaded a PDF locally; its own `installation_reports*`
+      tables were committed but unused). Gave it two new optional props
+      (`lockedSite`, `onSavedForSite`) that lock it to one already-known
+      `lfg_sites` row (bypassing the cross-partner Store Master search
+      entirely) and bridge its output into tables a partner can already
+      write: `lfg_installations` (upserted `installation_status:
+      "completed"` unconditionally, per Srinivas's decision — the
+      report's own per-site status field is a different, report-level
+      vocabulary and is never mapped onto this one) and
+      `lfg_site_documents` (category `"installation"`, via the same
+      already-partner-aware upload route Feature 2 uses), then the same
+      rank-guarded `site_status` advance to `installation_completed`.
+      New `LfgPartnerInstallationReportBridge.tsx` + a new "Generate
+      Installation Report" button on the partner Site 360's
+      Installation tab. The site card's Installation badge and "Install
+      Report" document button already read live off exactly these two
+      tables (see item 85's card work) — no card-side change needed.
+    - **Blue Dart live tracking**: new `src/lib/blueDart.ts` (JWT auth +
+      AWB tracking against Blue Dart/DHL eCommerce India's gateway,
+      XML response parsed via the new `fast-xml-parser` dependency) and
+      a new route, `/api/lfg/shipments/[shipmentId]/track`, mirroring
+      the existing POD-upload route's exact staff-or-owning-partner auth
+      check. On a successful call it inserts new `lfg_shipment_events`
+      rows with `source: "api"` (that table was explicitly designed as
+      this integration's plug-point — this is the first thing that ever
+      writes `source: "api"` to it; the UI's `ev.source === "api"`
+      branch already existed and was dead code until now) and updates
+      the shipment's `current_status`. A "Track via Blue Dart" button
+      appears on `ShipmentCard` (shared by staff and partner) whenever
+      the courier field looks like Blue Dart and an AWB is on file. No
+      RLS change needed — `lfg_shipments`/`lfg_shipment_events` already
+      grant the calling user's own session write access to their own
+      site. Optional migration
+      `supabase-lfg-shipments-last-tracked-migration.sql` adds a
+      `last_tracked_at` column for a future "last checked" UI hint; the
+      route works without it (retries the update with that field
+      dropped if the column doesn't exist yet).
+      **Requires 4 Vercel env vars** (`BLUEDART_CONSUMER_KEY`,
+      `BLUEDART_CONSUMER_SECRET`, `BLUEDART_LOGIN_ID`,
+      `BLUEDART_LICENSE_KEY` — Srinivas already has a Blue Dart/DHL
+      eCommerce India developer account; see `OPERATIONS.md` section 6)
+      before this does anything beyond a `503 not_configured` response.
+      **Not verifiable end-to-end from this sandbox** — no network path
+      to a real Blue Dart account here, so the exact auth-endpoint path,
+      tracking query parameters, and scan-status vocabulary in
+      `blueDart.ts` are this session's best-gathered understanding from
+      Blue Dart's own developer portal, not something exercised against
+      a live response. `mapBlueDartStatusToLfg` is written defensively
+      (an unrecognized scan code falls through to `"in_transit"`, never
+      silently no-ops) precisely because of this.
+    - `npx tsc --noEmit` and `npx eslint` across every changed/new file
+      in this item together (19 files): clean. Both new `.sql` files
+      validated with `pglast.parse_sql`: clean. `npm run build -w
+      apps/web` could not be run to completion in this sandbox (fails
+      on a pre-existing, unrelated limitation — no network access to
+      fetch Google Fonts for `next/font` — not caused by this change).
+    - **Not yet tested against `lfgconnect.mmdi.in` after deploy** —
+      needs a partner-login round trip (`snandipa@apple.com`) covering:
+      the format filter; creating a site survey report for a
+      not-yet-existing site end-to-end; launching a survey report from
+      an existing site; generating an installation report and
+      confirming the card/status update; and, once the Blue Dart env
+      vars are set, tracking a real AWB. See the plan's own Verification
+      section for the full checklist.
+    - Delivered as `lfg-partner-format-bluedart-report-creators.bundle`.

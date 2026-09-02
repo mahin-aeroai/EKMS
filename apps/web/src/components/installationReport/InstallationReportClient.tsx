@@ -141,6 +141,16 @@ function emptyStorePictures(): StorePictures {
   };
 }
 
+export interface LockedInstallationSite {
+  id: string;
+  outletName: string;
+  address: string | null;
+  sfoId: string | null;
+  format: string | null;
+  asmName: string | null;
+  asmMobile: string | null;
+}
+
 /**
  * Installation Report tool — a page inside MMDI ONE that does its real work
  * entirely in the browser, in the same spirit as the Cut File Tool. Photos
@@ -151,16 +161,32 @@ function emptyStorePictures(): StorePictures {
  * being retyped on every report — that's the whole point of the Store
  * Master / Creative Master lookups below. The final multi-page PDF is
  * assembled client-side by src/lib/installationReport/pdfBuild.ts.
+ *
+ * `lockedSite`/`onSavedForSite` are additive and optional -- omitted
+ * entirely by the staff route (installation-report/page.tsx), so every
+ * default below reproduces today's staff behavior exactly. The LFG
+ * partner bridge (LfgPartnerInstallationReportBridge.tsx) is the only
+ * other caller: it always passes both, locking this tool to one already-
+ * known lfg_sites row (bypassing the Store Master search, which a
+ * partner has no business browsing -- it's a cross-partner, RLS-gated
+ * staff table) and persisting the result into lfg_installations/
+ * lfg_site_documents on save, which this component itself never touches.
  */
-export default function InstallationReportClient() {
+export default function InstallationReportClient({
+  lockedSite,
+  onSavedForSite,
+}: {
+  lockedSite?: LockedInstallationSite;
+  onSavedForSite?: (args: { pdfBlob: Blob; storeName: string; installationDate: string; sites: SiteEntry[] }) => Promise<void> | void;
+} = {}) {
   const { toast } = useToast();
 
-  const [storeName, setStoreName] = useState("");
-  const [address, setAddress] = useState("");
-  const [sfoId, setSfoId] = useState("");
-  const [program, setProgram] = useState("");
-  const [asmName, setAsmName] = useState("");
-  const [asmContact, setAsmContact] = useState("");
+  const [storeName, setStoreName] = useState(lockedSite?.outletName ?? "");
+  const [address, setAddress] = useState(lockedSite?.address ?? "");
+  const [sfoId, setSfoId] = useState(lockedSite?.sfoId ?? "");
+  const [program, setProgram] = useState(lockedSite?.format ?? "");
+  const [asmName, setAsmName] = useState(lockedSite?.asmName ?? "");
+  const [asmContact, setAsmContact] = useState(lockedSite?.asmMobile ?? "");
 
   // Report-level — chosen once, applies to every site in the report.
   const [seasonProgram, setSeasonProgram] = useState("");
@@ -203,6 +229,7 @@ export default function InstallationReportClient() {
   // LFG site. Runs once on mount, then strips the params via replaceState
   // so refreshing doesn't re-seed them.
   useEffect(() => {
+    if (lockedSite) return; // already initialized from lockedSite above
     const params = new URLSearchParams(window.location.search);
     const hasAny = ["store", "address", "sfo", "program", "asm", "asmContact"].some((k) => params.has(k));
     if (!hasAny) return;
@@ -214,6 +241,7 @@ export default function InstallationReportClient() {
     if (params.get("program")) setProgram(params.get("program")!);
     if (params.get("asm")) setAsmName(params.get("asm")!);
     if (params.get("asmContact")) setAsmContact(params.get("asmContact")!);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only by design; lockedSite is a stable prop reference for this component's lifetime
   }, []);
 
   useEffect(() => {
@@ -367,7 +395,11 @@ export default function InstallationReportClient() {
       const blob = await buildInstallationReportPdf(data, brandFonts);
       const safeName = storeName.replace(/[^\w\-]+/g, "_").slice(0, 60) || "installation_report";
       downloadBlob(blob, `${safeName}_installation_report.pdf`);
-      toast("success", "Report exported — download started");
+      if (onSavedForSite) {
+        await onSavedForSite({ pdfBlob: blob, storeName, installationDate, sites });
+      } else {
+        toast("success", "Report exported — download started");
+      }
     } catch (err) {
       toast("danger", err instanceof Error ? err.message : "Couldn't build the report PDF");
     } finally {
@@ -400,17 +432,21 @@ export default function InstallationReportClient() {
             label wrapping to two cramped lines -- stacking full-width reads
             far better than a squeezed row that never actually overflows. */}
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Link
-            href="/workspaces/installation-report/master-data"
-            className="flex w-full items-center justify-center gap-1.5 rounded-md border border-line-strong px-3 py-2 text-sm font-medium text-ink-secondary hover:bg-surface-sunken sm:w-auto"
-          >
-            <Settings size={14} /> Manage Master Data
-          </Link>
-          <Button variant="secondary" onClick={startNewReport} className="w-full sm:w-auto">
-            <FilePlus2 size={14} className="mr-1.5" /> New Report
-          </Button>
+          {!lockedSite && (
+            <>
+              <Link
+                href="/workspaces/installation-report/master-data"
+                className="flex w-full items-center justify-center gap-1.5 rounded-md border border-line-strong px-3 py-2 text-sm font-medium text-ink-secondary hover:bg-surface-sunken sm:w-auto"
+              >
+                <Settings size={14} /> Manage Master Data
+              </Link>
+              <Button variant="secondary" onClick={startNewReport} className="w-full sm:w-auto">
+                <FilePlus2 size={14} className="mr-1.5" /> New Report
+              </Button>
+            </>
+          )}
           <Button onClick={handleExport} loading={exporting} className="w-full sm:w-auto">
-            <Download size={14} className="mr-1.5" /> Export PDF
+            <Download size={14} className="mr-1.5" /> {lockedSite ? "Generate & Save" : "Export PDF"}
           </Button>
         </div>
       </div>
@@ -420,50 +456,60 @@ export default function InstallationReportClient() {
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-muted">Store information</h3>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div ref={storeBoxRef} className="relative flex flex-col gap-1.5 sm:col-span-2">
-              <label className="text-sm font-medium text-ink-secondary">
-                Store name
-                <span className="ml-1 font-normal text-ink-muted">— search Store Master to autofill, or type a new one</span>
-              </label>
-              <div className="flex items-center gap-2 rounded-md border border-line-strong bg-surface px-2">
-                <Search size={14} className="text-ink-muted" />
-                <input
-                  type="text"
-                  value={storeName}
-                  onChange={(e) => {
-                    setStoreName(e.target.value);
-                    setStoreQuery(e.target.value);
-                    setStoreOpen(true);
-                  }}
-                  onFocus={() => setStoreOpen(true)}
-                  placeholder="e.g. Aptronix - Malabar Vijayawada"
-                  className="h-9 w-full bg-transparent text-sm text-ink outline-none placeholder:text-ink-muted"
-                />
+            {lockedSite ? (
+              <div className="flex flex-col gap-1 rounded-md border border-line-strong bg-surface-sunken px-3 py-2 sm:col-span-2">
+                <span className="text-sm font-medium text-ink-secondary">Installing at</span>
+                <span className="text-sm text-ink">
+                  {lockedSite.outletName || "Untitled site"}
+                  {lockedSite.sfoId ? ` · SFO ${lockedSite.sfoId}` : ""}
+                </span>
               </div>
-              {storeOpen && storeResults && storeResults.length > 0 && (
-                <div className="absolute top-full z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-line bg-surface-overlay p-1 shadow-3">
-                  {storeResults.map((row) => (
-                    <button
-                      key={row.id}
-                      type="button"
-                      onClick={() => applyStore(row)}
-                      className="flex w-full flex-col rounded-md px-2 py-1.5 text-left text-sm hover:bg-surface-sunken"
-                    >
-                      <span className="text-ink">{row.store_name}</span>
-                      <span className="text-xs text-ink-muted">
-                        {row.sfo_id ? `SFO ${row.sfo_id}` : ""} {row.program ? `· ${row.program}` : ""}
-                      </span>
-                    </button>
-                  ))}
+            ) : (
+              <div ref={storeBoxRef} className="relative flex flex-col gap-1.5 sm:col-span-2">
+                <label className="text-sm font-medium text-ink-secondary">
+                  Store name
+                  <span className="ml-1 font-normal text-ink-muted">— search Store Master to autofill, or type a new one</span>
+                </label>
+                <div className="flex items-center gap-2 rounded-md border border-line-strong bg-surface px-2">
+                  <Search size={14} className="text-ink-muted" />
+                  <input
+                    type="text"
+                    value={storeName}
+                    onChange={(e) => {
+                      setStoreName(e.target.value);
+                      setStoreQuery(e.target.value);
+                      setStoreOpen(true);
+                    }}
+                    onFocus={() => setStoreOpen(true)}
+                    placeholder="e.g. Aptronix - Malabar Vijayawada"
+                    className="h-9 w-full bg-transparent text-sm text-ink outline-none placeholder:text-ink-muted"
+                  />
                 </div>
-              )}
-              {storeOpen && storeResults && storeResults.length === 0 && (
-                <div className="absolute top-full z-20 mt-1 w-full rounded-md border border-line bg-surface-overlay p-3 text-xs text-ink-muted shadow-3">
-                  No matches in Store Master. Fill in the fields below and add it via Manage Master Data to reuse it
-                  next time.
-                </div>
-              )}
-            </div>
+                {storeOpen && storeResults && storeResults.length > 0 && (
+                  <div className="absolute top-full z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-line bg-surface-overlay p-1 shadow-3">
+                    {storeResults.map((row) => (
+                      <button
+                        key={row.id}
+                        type="button"
+                        onClick={() => applyStore(row)}
+                        className="flex w-full flex-col rounded-md px-2 py-1.5 text-left text-sm hover:bg-surface-sunken"
+                      >
+                        <span className="text-ink">{row.store_name}</span>
+                        <span className="text-xs text-ink-muted">
+                          {row.sfo_id ? `SFO ${row.sfo_id}` : ""} {row.program ? `· ${row.program}` : ""}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {storeOpen && storeResults && storeResults.length === 0 && (
+                  <div className="absolute top-full z-20 mt-1 w-full rounded-md border border-line bg-surface-overlay p-3 text-xs text-ink-muted shadow-3">
+                    No matches in Store Master. Fill in the fields below and add it via Manage Master Data to reuse it
+                    next time.
+                  </div>
+                )}
+              </div>
+            )}
 
             <label className="flex flex-col gap-1.5 text-sm font-medium text-ink-secondary">
               SFO ID
