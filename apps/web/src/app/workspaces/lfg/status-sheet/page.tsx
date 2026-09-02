@@ -159,19 +159,30 @@ function sortRows(rows: StatusSheetRow[]): StatusSheetRow[] {
 // other logic worth centralizing; computed over the full filtered `rows`
 // set so the "N" total stays accurate regardless of which program group a
 // particular site's row happens to render under.
+//
+// Bug fixed here (see LfgSiteCardGrid.tsx's siteOrdinals for the full
+// writeup): this used to number by `rows` arrival order with no
+// tiebreaker, so two same-store sites tied on sfo_id (as sortRows() above
+// sorts by) could get numbered in either order depending on how the query
+// happened to return them -- and could disagree with Cards' own ordinal
+// for the identical two sites, since each page's `rows` comes from its
+// own separate query. Sorting by site_id (assigned once at creation,
+// never changes) before numbering matches the identical fix there, so
+// "Site 2 of 2" now means the same physical site on both pages.
 function siteOrdinals(rows: StatusSheetRow[]): Record<string, { index: number; total: number }> {
-  const byStore = new Map<string, string[]>();
+  const byStore = new Map<string, StatusSheetRow[]>();
   for (const r of rows) {
     if (!r.store_id) continue;
     const list = byStore.get(r.store_id) ?? [];
-    list.push(r.id);
+    list.push(r);
     byStore.set(r.store_id, list);
   }
   const map: Record<string, { index: number; total: number }> = {};
-  for (const ids of byStore.values()) {
-    if (ids.length < 2) continue;
-    ids.forEach((id, i) => {
-      map[id] = { index: i + 1, total: ids.length };
+  for (const group of byStore.values()) {
+    if (group.length < 2) continue;
+    const sorted = [...group].sort((a, b) => a.site_id.localeCompare(b.site_id));
+    sorted.forEach((r, i) => {
+      map[r.id] = { index: i + 1, total: sorted.length };
     });
   }
   return map;
