@@ -67,26 +67,47 @@ export interface LfgSiteCardRow {
 }
 
 // Groups the (already filtered) row set by store_id and numbers each
-// member "1 of N", "2 of N", ... in the order they appear in `rows` --
-// stores with only one site on file get no entry (nothing to number).
-// Deliberately computed from the currently-loaded/filtered `rows`, not a
-// separate full-table query -- the table's sibling-count badge already
-// does that full lookup for the same store_ids when the table view is
-// active; duplicating it here for a value that's cosmetic on Cards isn't
-// worth another round trip.
+// member "1 of N", "2 of N", ... -- stores with only one site on file get
+// no entry (nothing to number). Deliberately computed from the
+// currently-loaded/filtered `rows`, not a separate full-table query -- the
+// table's sibling-count badge already does that full lookup for the same
+// store_ids when the table view is active; duplicating it here for a
+// value that's cosmetic on Cards isn't worth another round trip.
+//
+// Bug fixed here (Srinivas: two screenshots of the same store's "Site 2 of
+// 2" -- one from this page's own Cards view, one from the staff status
+// sheet -- showing completely different statuses, "Delivered" vs. "Survey
+// Completed"): this used to number each site in the order it happened to
+// appear in `rows`, with no tiebreaker. Two sites at the same store
+// commonly share the same sfo_id, so every query that sorts by sfo_id
+// (this page's own fetch, the status sheet's sortRows()) ties on them --
+// and an unordered tie has no guaranteed order from Postgres, so which
+// physical site landed first (and got called "Site 1" vs "Site 2") could
+// flip between page loads, and could easily disagree between THIS page
+// and the status sheet's own separate siteOrdinals copy, which sees rows
+// in whatever order ITS OWN query/sort produced. The two sites' real
+// data was never actually wrong -- the "Site 1 of 2"/"Site 2 of 2" LABEL
+// was just unstable, so the same physical site could get called a
+// different ordinal depending on which page you looked at, reading as if
+// one site's status had two different answers. Sorting each store's
+// group by site_id (LFG-000165 etc. -- assigned once at creation, never
+// changes) before numbering makes the ordinal deterministic and, since
+// the status sheet's own copy below gets the identical fix, consistent
+// between the two pages.
 function siteOrdinals(rows: LfgSiteCardRow[]): Record<string, { index: number; total: number }> {
-  const byStore = new Map<string, string[]>();
+  const byStore = new Map<string, LfgSiteCardRow[]>();
   for (const r of rows) {
     if (!r.store_id) continue;
     const list = byStore.get(r.store_id) ?? [];
-    list.push(r.id);
+    list.push(r);
     byStore.set(r.store_id, list);
   }
   const map: Record<string, { index: number; total: number }> = {};
-  for (const ids of byStore.values()) {
-    if (ids.length < 2) continue;
-    ids.forEach((id, i) => {
-      map[id] = { index: i + 1, total: ids.length };
+  for (const group of byStore.values()) {
+    if (group.length < 2) continue;
+    const sorted = [...group].sort((a, b) => a.site_id.localeCompare(b.site_id));
+    sorted.forEach((r, i) => {
+      map[r.id] = { index: i + 1, total: sorted.length };
     });
   }
   return map;

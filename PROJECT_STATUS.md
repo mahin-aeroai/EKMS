@@ -3506,3 +3506,40 @@ order:
       `handleStatusChanged`.
     - `npx tsc --noEmit` / `npx eslint`: clean. No SQL — code-only
       change.
+
+97. **Fall 2026 backfill widened to "every site in the program," report
+    no longer required.** Srinivas: "lets refresh th eFall 2026 program
+    as default site survey" -- confirmed this replaces item 95's
+    report-required version: `supabase-lfg-fall2026-survey-completed-
+    backfill.sql` now moves every Fall 2026 program site still at
+    `new`/`survey_pending` straight to `survey_completed`, no
+    `lfg_site_documents` check at all. Same STEP 1 preview / STEP 2
+    update shape, same forward-only guarantee (never touches a site
+    already at survey_completed or later). Validated with
+    `pglast.parse_sql` -- clean.
+
+98. **Fixed "Site X of N" ordinal mislabeling — the same store's two
+    sites could get numbered differently on different pages.** Srinivas
+    sent two screenshots of what looked like the same site ("Aptronix @
+    Malabar", "SITE 2 OF 2", SFO 1606231) showing two different
+    statuses — "Delivered" on the LFG partner home page's Cards view,
+    "Survey Completed" on the staff status sheet. Root cause:
+    `LfgSiteCardGrid.tsx`'s `siteOrdinals()` and the status sheet's own
+    separate local copy both numbered a store's sites purely by the order
+    they happened to arrive in that page's own `rows` array, with no
+    tiebreaker. Two sites at the same store commonly share an sfo_id, so
+    every query sorting by sfo_id (both pages do) ties on them — an
+    unordered tie has no guaranteed order from Postgres, so which
+    physical site got called "Site 1" vs "Site 2" could flip between
+    page loads and easily disagree between the two pages (each running
+    its own separate query). The underlying data was never actually
+    wrong — one real site genuinely is at Delivered, the other genuinely
+    is at Survey Completed, updated 6 days apart — the ordinal LABEL was
+    just unstable, so the same number could point at different physical
+    sites depending on which page you looked at, reading as if one
+    site's status had two different answers. Fixed by sorting each
+    store's group by `site_id` (LFG-000165 etc. — assigned once at
+    creation, never changes) before numbering, in both copies, so the
+    ordinal is deterministic and consistent between the two pages.
+    `npx tsc --noEmit` / `npx eslint`: clean. No SQL — code-only change,
+    and no data needed correcting.
