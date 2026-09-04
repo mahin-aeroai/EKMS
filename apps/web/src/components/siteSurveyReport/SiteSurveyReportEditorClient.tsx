@@ -198,6 +198,8 @@ export function SiteSurveyReportEditorClient({
             category: photo.category,
             caption: photo.caption,
             annotation: photo.annotation,
+            cropOffsetX: photo.crop_offset_x,
+            cropOffsetY: photo.crop_offset_y,
           };
           return input;
         } catch {

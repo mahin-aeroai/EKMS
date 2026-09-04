@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Crop, Plus, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Crop, Move, Plus, RefreshCw, Target, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
@@ -82,7 +82,9 @@ export function PhotosStep({ reportId, photos, onReload }: Props) {
   // upload control that would fail server-side anyway.
   const canUpload = canWrite(role);
   const [uploadingCategory, setUploadingCategory] = useState<PhotoCategory | null>(null);
+  const [replacingId, setReplacingId] = useState<string | null>(null);
   const [annotatingId, setAnnotatingId] = useState<string | null>(null);
+  const [repositioningId, setRepositioningId] = useState<string | null>(null);
   const fileInputs = useRef<Partial<Record<PhotoCategory, HTMLInputElement | null>>>({});
 
   async function resizeToJpeg(file: File): Promise<Uint8Array> {
@@ -149,6 +151,64 @@ export function PhotosStep({ reportId, photos, onReload }: Props) {
     }
   }
 
+  // Swaps an already-uploaded photo's image for a new file, keeping its
+  // id/category/sort_order/caption in place -- an alternative to
+  // delete-then-re-add that doesn't lose the photo's position within its
+  // category or require re-typing its caption. Reuses the same
+  // upload-url route as a fresh upload (a new R2 key each time, same
+  // convention as every other replace/re-upload flow in this app -- the
+  // old R2 object is simply orphaned, not explicitly deleted). Resets
+  // crop_offset_x/y back to centred and clears any installation-area
+  // annotation, since neither one means anything against a different
+  // photo.
+  async function handleReplace(photo: SiteSurveyPhotoRow, file: File) {
+    setReplacingId(photo.id);
+    try {
+      const jpegBytes = await resizeToJpeg(file);
+
+      const uploadRes = await fetch(`/api/site-survey-reports/${reportId}/photos/upload-url`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ category: photo.category }),
+      });
+      const uploadData = await uploadRes.json();
+      if (!uploadRes.ok) {
+        toast("danger", uploadData.message || uploadData.error || "Couldn't get an upload link");
+        return;
+      }
+
+      const putRes = await fetch(uploadData.url, {
+        method: "PUT",
+        headers: { "Content-Type": "image/jpeg" },
+        body: jpegBytes as unknown as BodyInit,
+      });
+      if (!putRes.ok) {
+        toast("danger", "Upload to storage failed");
+        return;
+      }
+
+      const { error: updateError } = await supabase
+        .from("site_survey_photos")
+        .update({
+          relative_path: uploadData.relative_path,
+          crop_offset_x: 50,
+          crop_offset_y: 50,
+          annotation: null,
+        })
+        .eq("id", photo.id);
+      if (updateError) {
+        toast("danger", `Uploaded, but couldn't save it to this photo: ${updateError.message}`);
+        return;
+      }
+      toast("success", "Photo replaced");
+      onReload();
+    } catch {
+      toast("danger", "Couldn't process that image");
+    } finally {
+      setReplacingId(null);
+    }
+  }
+
   async function handleDelete(photoId: string) {
     const { error } = await supabase.from("site_survey_photos").delete().eq("id", photoId);
     if (error) {
@@ -188,6 +248,15 @@ export function PhotosStep({ reportId, photos, onReload }: Props) {
     const { error } = await supabase.from("site_survey_photos").update({ annotation }).eq("id", photoId);
     if (error) toast("danger", "Couldn't save the annotation");
     else toast("success", annotation ? "Annotation saved" : "Annotation cleared");
+    onReload();
+  }
+
+  async function handleSaveCropOffset(photoId: string, cropOffsetX: number, cropOffsetY: number) {
+    const { error } = await supabase
+      .from("site_survey_photos")
+      .update({ crop_offset_x: cropOffsetX, crop_offset_y: cropOffsetY })
+      .eq("id", photoId);
+    if (error) toast("danger", "Couldn't save the photo's position");
     onReload();
   }
 
@@ -247,6 +316,9 @@ export function PhotosStep({ reportId, photos, onReload }: Props) {
                     onCaptionChange={(v) => handleCaptionChange(photo.id, v)}
                     onCategoryChange={(v) => handleCategoryChange(photo, v)}
                     onAnnotate={category === "measurement" ? () => setAnnotatingId(photo.id) : undefined}
+                    onReplace={(file) => handleReplace(photo, file)}
+                    replacing={replacingId === photo.id}
+                    onReposition={() => setRepositioningId(photo.id)}
                     canDeletePhoto={canDeletePhoto}
                     canEdit={canUpload}
                   />
@@ -259,6 +331,14 @@ export function PhotosStep({ reportId, photos, onReload }: Props) {
 
       {annotatingId && (
         <AnnotationEditor photo={photos.find((p) => p.id === annotatingId)!} onClose={() => setAnnotatingId(null)} onSave={handleSaveAnnotation} />
+      )}
+
+      {repositioningId && (
+        <PositionEditor
+          photo={photos.find((p) => p.id === repositioningId)!}
+          onClose={() => setRepositioningId(null)}
+          onSave={handleSaveCropOffset}
+        />
       )}
     </div>
   );
@@ -290,6 +370,9 @@ function PhotoCard({
   onCaptionChange,
   onCategoryChange,
   onAnnotate,
+  onReplace,
+  replacing,
+  onReposition,
   canDeletePhoto,
   canEdit,
 }: {
@@ -301,12 +384,16 @@ function PhotoCard({
   onCaptionChange: (v: string) => void;
   onCategoryChange: (v: PhotoCategory) => void;
   onAnnotate?: () => void;
+  onReplace: (file: File) => void;
+  replacing: boolean;
+  onReposition: () => void;
   canDeletePhoto: boolean;
-  /** site_survey_photos' UPDATE policy is admin/editor -- move/recategorize/caption/annotate all fail RLS for a viewer, so those controls render read-only for one. */
+  /** site_survey_photos' UPDATE policy is admin/editor -- move/recategorize/caption/annotate/replace/reposition all fail RLS for a viewer, so those controls render read-only for one. */
   canEdit: boolean;
 }) {
   const url = useSignedPhotoUrl(photo);
   const [caption, setCaption] = useState(photo.caption ?? "");
+  const replaceInput = useRef<HTMLInputElement | null>(null);
 
   return (
     // w-56 (224px) -- was w-32 (128px). Feedback asked for "~25% wider" to
@@ -319,7 +406,12 @@ function PhotoCard({
       <div className="flex h-24 items-center justify-center overflow-hidden rounded bg-surface-sunken">
         {url ? (
           // eslint-disable-next-line @next/next/no-img-element -- short-lived signed R2 URL
-          <img src={url} alt={photo.caption ?? "Site survey photo"} className="h-full w-full object-cover" />
+          <img
+            src={url}
+            alt={photo.caption ?? "Site survey photo"}
+            className="h-full w-full object-cover"
+            style={{ objectPosition: `${photo.crop_offset_x}% ${photo.crop_offset_y}%` }}
+          />
         ) : (
           <span className="text-xs text-ink-muted">Loading…</span>
         )}
@@ -370,6 +462,27 @@ function PhotoCard({
           </Button>
         )}
       </div>
+      {canEdit && (
+        <div className="flex gap-1">
+          <input
+            ref={replaceInput}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (file) onReplace(file);
+            }}
+          />
+          <Button variant="secondary" size="sm" className="flex-1 justify-center" loading={replacing} onClick={() => replaceInput.current?.click()}>
+            <RefreshCw size={13} /> Replace
+          </Button>
+          <Button variant="secondary" size="sm" className="flex-1 justify-center" onClick={onReposition}>
+            <Move size={13} /> Position
+          </Button>
+        </div>
+      )}
       {/* The marking tool used to be a bare icon button easy to miss entirely
           (and easy to mistake for an actual crop, not a mark) -- now a
           full-width labeled button, plus a status line either way so it's
@@ -390,6 +503,105 @@ function PhotoCard({
 }
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
+
+const POSITION_NUDGE_STEP = 8;
+
+/**
+ * "Move a little here and there" -- lets a photo's crop_offset_x/y be
+ * nudged so a different part of it stays visible once the cover-fit crop
+ * (both here and in the generated PDF's drawPhotoBox) overflows one axis.
+ * Deliberately a D-pad of small nudge buttons rather than free-form drag:
+ * this is meant for small corrections ("show a bit more of the left
+ * side"), not a full crop tool, and a handful of clicks against a live
+ * preview is both easier to get exactly right and easier to build
+ * correctly than pointer-drag math against an unknown final aspect ratio
+ * (the box this photo lands in on the actual PDF page varies by category
+ * and isn't the same shape as this preview). The preview below uses the
+ * same CSS `object-position` percentages that drive both the on-screen
+ * thumbnail and (via the identical formula, see drawPhotoBox) the PDF
+ * itself, so what's shown here is representative, not just illustrative.
+ */
+function PositionEditor({
+  photo,
+  onClose,
+  onSave,
+}: {
+  photo: SiteSurveyPhotoRow;
+  onClose: () => void;
+  onSave: (photoId: string, cropOffsetX: number, cropOffsetY: number) => void;
+}) {
+  const url = useSignedPhotoUrl(photo);
+  const [x, setX] = useState(photo.crop_offset_x);
+  const [y, setY] = useState(photo.crop_offset_y);
+
+  function nudge(dx: number, dy: number) {
+    setX((v) => clamp(v + dx, 0, 100));
+    setY((v) => clamp(v + dy, 0, 100));
+  }
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" role="presentation">
+      <div className="flex w-full max-w-sm flex-col gap-3 rounded-lg bg-surface-overlay p-5 shadow-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-ink">Reposition photo</h3>
+          <button aria-label="Close" onClick={onClose} className="rounded p-1 text-ink-muted hover:bg-surface-sunken">
+            <X size={16} />
+          </button>
+        </div>
+        <p className="text-xs text-ink-secondary">
+          The photo box crops to fit — nudge which part stays visible if something important got cropped off.
+        </p>
+
+        <div className="h-40 w-full overflow-hidden rounded border border-line-strong bg-surface-sunken">
+          {url ? (
+            // eslint-disable-next-line @next/next/no-img-element -- short-lived signed R2 URL
+            <img src={url} alt="" className="h-full w-full object-cover" style={{ objectPosition: `${x}% ${y}%` }} />
+          ) : (
+            <p className="flex h-full items-center justify-center text-xs text-ink-muted">Loading photo…</p>
+          )}
+        </div>
+
+        <div className="flex items-center justify-center gap-4">
+          <div className="grid grid-cols-3 grid-rows-3 gap-1">
+            <div />
+            <Button variant="icon" size="sm" aria-label="Show more above" onClick={() => nudge(0, -POSITION_NUDGE_STEP)}>
+              <ArrowUp size={14} />
+            </Button>
+            <div />
+            <Button variant="icon" size="sm" aria-label="Show more to the left" onClick={() => nudge(-POSITION_NUDGE_STEP, 0)}>
+              <ArrowLeft size={14} />
+            </Button>
+            <Button variant="icon" size="sm" aria-label="Centre" onClick={() => nudge(50 - x, 50 - y)}>
+              <Target size={14} />
+            </Button>
+            <Button variant="icon" size="sm" aria-label="Show more to the right" onClick={() => nudge(POSITION_NUDGE_STEP, 0)}>
+              <ArrowRight size={14} />
+            </Button>
+            <div />
+            <Button variant="icon" size="sm" aria-label="Show more below" onClick={() => nudge(0, POSITION_NUDGE_STEP)}>
+              <ArrowDown size={14} />
+            </Button>
+            <div />
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => {
+              onSave(photo.id, x, y);
+              onClose();
+            }}
+          >
+            Save
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /** Recomputes an obstacle rectangle from one corner being dragged to `point`, keeping the opposite corner fixed -- a normal resize-by-corner, including flipping to whichever corner is actually top-left afterwards if dragged past the opposite one. */
 function resizeObstacleCorner(o: AnnotationObstacle, corner: "nw" | "ne" | "sw" | "se", point: AnnotationPoint): AnnotationObstacle {

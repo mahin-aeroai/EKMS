@@ -16,9 +16,9 @@ import { createContext, useContext } from "react";
  * groups render, so a restricted user doesn't see a nav item that would
  * just 403/return-empty if they clicked it.
  *
- * Only the 8 real business-domain sidebar groups are ever restrictable:
- * 'customers', 'operations', 'manufacturing', 'knowledge', 'people',
- * 'finance', 'compliance', 'administration'. Overview/Foundations/
+ * Only the 9 real business-domain sidebar groups are ever restrictable:
+ * 'masters', 'customers', 'operations', 'manufacturing', 'knowledge',
+ * 'people', 'finance', 'compliance', 'administration'. Overview/Foundations/
  * Components (design-system showcase) and Executive (cross-cutting
  * dashboards) are never gated by this — see the migration file's header
  * comment for why Executive specifically stays ungated.

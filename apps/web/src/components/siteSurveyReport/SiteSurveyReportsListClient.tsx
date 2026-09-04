@@ -165,7 +165,16 @@ export function SiteSurveyReportsListClient({
           const imageRes = await fetch(signedData.url);
           if (!imageRes.ok) return null;
           const bytes = new Uint8Array(await imageRes.arrayBuffer());
-          const input: SurveyPhotoInput = { id: photo.id, bytes, format: "jpg", category: photo.category, caption: photo.caption, annotation: photo.annotation };
+          const input: SurveyPhotoInput = {
+            id: photo.id,
+            bytes,
+            format: "jpg",
+            category: photo.category,
+            caption: photo.caption,
+            annotation: photo.annotation,
+            cropOffsetX: photo.crop_offset_x,
+            cropOffsetY: photo.crop_offset_y,
+          };
           return input;
         } catch {
           return null;
