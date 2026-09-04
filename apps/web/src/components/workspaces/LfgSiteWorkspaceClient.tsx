@@ -2016,7 +2016,7 @@ function ShipmentCard({
             <div className="mb-2 flex items-center justify-between">
               <h4 className="text-xs font-semibold text-ink-secondary">Tracking Timeline</h4>
               <div className="flex items-center gap-2">
-                {isBlueDart && shipment.awb_number && (
+                {editable && isBlueDart && shipment.awb_number && (
                   <Button size="sm" variant="secondary" loading={tracking} onClick={handleTrackViaBlueDart}>
                     <RefreshCw size={14} className="mr-1.5" />
                     Track via Blue Dart
