@@ -43,6 +43,7 @@ import {
   Store,
   MapPin,
   ClipboardCheck,
+  Database,
 } from "lucide-react";
 import { Sidebar, type SidebarSection } from "@/components/ui/Sidebar";
 import { TopNav } from "@/components/ui/TopNav";
@@ -80,6 +81,7 @@ import { UserToolsContext, canAccessTool } from "@/lib/UserToolsContext";
 // unrestricted), so flag this if that changes before someone relies on
 // People/Finance/Compliance being independently restrictable again.
 const SECTION_GROUP: Record<string, string> = {
+  Masters: "masters",
   Customers: "customers",
   Operations: "operations",
   Manufacturing: "manufacturing",
@@ -103,6 +105,10 @@ export const NAV: SidebarSection[] = [
       { id: "ai-copilot", label: "AI Copilot", icon: <Bot size={16} />, href: "/workspaces/ai-copilot" },
       { id: "analytics", label: "Analytics", icon: <BarChart3 size={16} />, href: "/workspaces/analytics" },
     ],
+  },
+  {
+    title: "Masters",
+    items: [{ id: "masters", label: "Masters", icon: <Database size={16} />, href: "/workspaces/masters" }],
   },
   {
     title: "Customers",

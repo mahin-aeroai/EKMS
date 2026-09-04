@@ -45,12 +45,16 @@ async function authHeaders() {
   return { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token ?? ""}` };
 }
 
-// The 8 real business-domain sidebar groups a user's module access can be
-// restricted to — matches SECTION_GROUP in AppShell.tsx and the group_map
-// in supabase-module-access-migration.sql. Executive (Command Center/AI
-// Copilot/Analytics) and the design-system showcase sections are never
-// restrictable, so they're not listed here.
+// The 9 real business-domain sidebar groups a user's module access can be
+// restricted to — matches SECTION_GROUP in AppShell.tsx and the group ids
+// checked by RLS (see supabase-role-based-rls-migration.sql /
+// supabase-estimate-builder-schema.sql, where user_role()/
+// user_has_group_access() and profiles.allowed_groups were first
+// defined). Executive (Command Center/AI Copilot/Analytics) and the
+// design-system showcase sections are never restrictable, so they're not
+// listed here.
 const GROUP_OPTIONS: { id: string; label: string }[] = [
+  { id: "masters", label: "Masters" },
   { id: "customers", label: "Customers" },
   { id: "operations", label: "Operations" },
   { id: "manufacturing", label: "Manufacturing" },
