@@ -423,6 +423,9 @@ export interface SurveyPhotoInput {
   caption: string | null;
   /** Installation-area marker (polygon + obstacle cut-outs), top-left origin fractional coords relative to the FULL original image as shown uncropped in the editor -- only ever present for the measurement photo. Whatever shape is actually in the DB (new or the original single-rectangle one) -- normalized once, below, before any drawing happens. */
   annotation: SiteSurveyPhotoAnnotationRaw;
+  /** 0-100, CSS object-position semantics -- see drawPhotoBox and site_survey_photos.crop_offset_x/y's own column comment. Defaults to 50 (centred, today's only previous behaviour) when omitted, so callers building a SurveyPhotoInput before this field existed don't need updating. */
+  cropOffsetX?: number;
+  cropOffsetY?: number;
 }
 
 // Internal shape once a photo's bytes have been embedded into this build's
@@ -433,6 +436,8 @@ interface SurveyPhotoImage {
   category: PhotoCategory;
   caption: string | null;
   annotation: SiteSurveyPhotoAnnotation | null;
+  cropOffsetX: number;
+  cropOffsetY: number;
 }
 
 export interface SiteSurveyReportPdfData {
@@ -1120,8 +1125,20 @@ function drawPhotoBox(page: PDFPage, ctx: Ctx, photo: SurveyPhotoImage | undefin
   const scale = Math.max(w / img.width, h / img.height);
   const drawW = img.width * scale;
   const drawH = img.height * scale;
-  const imgX = x + (w - drawW) / 2;
-  const imgY = boxY - (drawH - h) / 2;
+  // Cover-fit always makes drawW/drawH >= w/h on at least one axis; how
+  // much of that overflow to hide off which edge is driven by
+  // cropOffsetX/Y (0-100, CSS object-position semantics -- 50 reproduces
+  // the plain centred crop this used to always do unconditionally). X=0
+  // keeps the image's left edge pinned to the box's left edge (right side
+  // crops off); X=100 pins the right edge instead. Y follows the same
+  // logic but flipped, since pdf-lib's Y axis increases upward while
+  // object-position's Y=0% means "top of image visible" -- see
+  // supabase-site-survey-photos-position-migration.sql's header comment
+  // for the full derivation.
+  const overflowX = Math.max(0, drawW - w);
+  const overflowY = Math.max(0, drawH - h);
+  const imgX = x - overflowX * (photo.cropOffsetX / 100);
+  const imgY = boxY - overflowY * (1 - photo.cropOffsetY / 100);
 
   page.drawRectangle({ x, y: boxY, width: w, height: h, borderColor: RULE_COLOR, borderWidth: RULE_WEIGHT });
 
@@ -1979,6 +1996,8 @@ export async function buildSiteSurveyReportPdf(
       category: p.category,
       caption: p.caption,
       annotation: normalizeAnnotation(p.annotation),
+      cropOffsetX: p.cropOffsetX ?? 50,
+      cropOffsetY: p.cropOffsetY ?? 50,
     }))
   );
 

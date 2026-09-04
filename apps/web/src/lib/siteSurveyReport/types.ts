@@ -590,6 +590,13 @@ export interface SiteSurveyPhotoRow {
   // SiteSurveyPhotoAnnotationRaw's header comment. Always read via
   // normalizeAnnotation(), never assumed to already be the new shape.
   annotation: SiteSurveyPhotoAnnotationRaw;
+  // 0-100, CSS object-position semantics -- which part of the photo stays
+  // visible once the cover-fit crop (both here and in the generated PDF's
+  // drawPhotoBox) overflows one axis. 50/50 = centred crop (the only
+  // behaviour that existed before this pair of columns was added -- see
+  // supabase-site-survey-photos-position-migration.sql).
+  crop_offset_x: number;
+  crop_offset_y: number;
   created_at: string;
 }
 
