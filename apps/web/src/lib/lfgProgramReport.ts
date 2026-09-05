@@ -46,7 +46,18 @@ export interface LfgProgramReportRow {
   program: string;
   sfoId: string;
   storeName: string;
+  // TODO(pending user clarification, 5 Sep 2026): "HQ Partner" was
+  // originally mismapped to lfg_partners.name -- that table is actually
+  // the installation/execution contractor (values like "MMDI"/"I & S"),
+  // confirmed correct as `executionPartner` below instead. The real "HQ
+  // Partner" (a reseller/chain company like "iPlanet"/"i Biz"/"Velocity
+  // IT", today only present as free text inside store_name/outlet_name,
+  // e.g. "iPlanet @ ByPass") has no dedicated column in the schema yet --
+  // left blank until the user confirms the right source (parse from
+  // store name? a new field? something else). Do not fill this from
+  // lfg_partners again.
   hqPartner: string;
+  executionPartner: string;
   city: string;
   state: string;
   region: string;
@@ -144,13 +155,14 @@ export async function buildLfgProgramReportRows(
     const installation = installationBySite.get(site.id);
     const shipment = latestShipmentBySite.get(site.id);
 
-    const sizeInMm = site.width != null && site.height != null ? `${site.width} x ${site.height}` : "";
+    const sizeInMm = site.width != null && site.height != null ? `${Math.round(site.width)} x ${Math.round(site.height)}` : "";
 
     return {
       program: program.name,
       sfoId: site.sfo_id ?? "",
       storeName: store?.store_name ?? site.outlet_name ?? "",
-      hqPartner: partner?.name ?? "",
+      hqPartner: "",
+      executionPartner: partner?.name ?? "",
       city: site.city ?? "",
       state: site.state ?? "",
       region: site.region ?? "",
@@ -177,6 +189,7 @@ const COLUMNS: { header: string; key: keyof LfgProgramReportRow; width: number }
   { header: "SFO ID", key: "sfoId", width: 12 },
   { header: "Store Name", key: "storeName", width: 28 },
   { header: "HQ Partner", key: "hqPartner", width: 18 },
+  { header: "Execution Partner", key: "executionPartner", width: 18 },
   { header: "City", key: "city", width: 16 },
   { header: "State", key: "state", width: 16 },
   { header: "Region", key: "region", width: 12 },
