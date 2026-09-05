@@ -60,6 +60,7 @@ function StatPill({
   onClick,
   active,
   title,
+  dense,
 }: {
   icon: LucideIcon;
   tone: "primary" | "warning" | "success" | "danger";
@@ -68,8 +69,25 @@ function StatPill({
   onClick?: () => void;
   active?: boolean;
   title?: string;
+  // Single-line "12  Total Sites" layout with a smaller icon badge, instead
+  // of the default two-line stacked value/label -- used once this card
+  // became sticky (see the header comment above the card below) to keep
+  // the pinned strip from eating too much of the screen while scrolling
+  // (Srinivas: "did you reduce the height of header as it occupy major
+  // screen space"). Same click/active/tone behavior either way.
+  dense?: boolean;
 }) {
-  const content = (
+  const content = dense ? (
+    <span className="flex items-center gap-2">
+      <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${STAT_TONE_CLASSES[tone]}`}>
+        <Icon size={12} />
+      </span>
+      <span className="flex items-baseline gap-1 leading-tight">
+        <span className={`text-sm font-semibold ${active ? "text-primary" : "text-ink"}`}>{value}</span>
+        <span className="text-[11px] text-ink-secondary">{label}</span>
+      </span>
+    </span>
+  ) : (
     <span className="flex items-center gap-2.5">
       <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${STAT_TONE_CLASSES[tone]}`}>
         <Icon size={16} />
@@ -701,19 +719,32 @@ export default function LfgSiteListPage() {
           here attaches to that scroll, not the viewport. Deliberately only
           this card sticks, not the page title/breadcrumb/Programs tiles
           above and below it -- those would eat into the space this was
-          meant to free up. `-mt-4`/`pt-4` (cancelling the card's own
-          top margin) lets it sit flush against `main`'s own top padding
-          instead of leaving a gap once stuck; `bg-surface-sunken` matches
-          `main`'s own background there so it reads as one continuous
-          strip rather than a floating card. Solid `bg-surface` + shadow
-          on the card itself is what actually hides the site rows
-          scrolling underneath once it's pinned. */}
-      <div className="sticky top-0 z-20 -mt-4 bg-surface-sunken pt-4 pb-4 sm:-mt-6 sm:pt-6">
-      <div className="rounded-xl border border-line bg-surface p-4 shadow-sm">
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-          <StatPill icon={Building2} tone="primary" label="Total Sites" value={totalCount === null ? "…" : String(totalCount)} />
-          <div className="hidden h-9 w-px bg-line sm:block" />
+          meant to free up. `-mt-4`/`pt-3` (cancelling the card's own top
+          margin, then adding back a smaller gap) lets it sit close to
+          `main`'s own top padding instead of leaving the original 1rem
+          gap once stuck; `bg-surface-sunken` matches `main`'s own
+          background there so it reads as one continuous strip rather than
+          a floating card. Solid `bg-surface` + shadow on the card itself
+          is what actually hides the site rows scrolling underneath once
+          it's pinned.
+
+          Compact single-row layout + dense stat pills (Srinivas, same day:
+          "did you reduce the height of header as it occupy major screen
+          space") -- the original two-row version (stats+search, then a
+          border-t divider, then format/status/view-toggle) stayed sticky
+          the whole time you scrolled, permanently eating ~180px of a
+          laptop screen. Folded into one `flex-wrap` row so it's a single
+          ~48px strip on anything wider than a narrow phone (it still wraps
+          to 2 lines there, same as any flex-wrap row) -- and stat pills
+          use `dense` (see StatPill above) to go from a 2-line
+          value-over-label stack to one inline line. */}
+      <div className="sticky top-0 z-20 -mt-4 bg-surface-sunken pt-3 pb-3 sm:-mt-6 sm:pt-4">
+      <div className="rounded-xl border border-line bg-surface px-4 py-2.5 shadow-sm">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <StatPill dense icon={Building2} tone="primary" label="Total Sites" value={totalCount === null ? "…" : String(totalCount)} />
+          <div className="hidden h-6 w-px bg-line sm:block" />
           <StatPill
+            dense
             icon={AlertTriangle}
             tone="warning"
             label="Data Gaps"
@@ -722,24 +753,27 @@ export default function LfgSiteListPage() {
             active={gapsOnly}
             title="Missing City / ASM / SFO ID — click to view"
           />
-          <div className="hidden h-9 w-px bg-line sm:block" />
+          <div className="hidden h-6 w-px bg-line sm:block" />
           <StatPill
+            dense
             icon={Eye}
             tone="success"
             label={`Showing${query.trim() || statusFilter || formatFilter || programIdFilter || storeIdFilter || gapsOnly ? " (filtered)" : ""}`}
             value={rows === null ? "…" : String(rows.length)}
           />
-          <div className="hidden h-9 w-px bg-line sm:block" />
+          <div className="hidden h-6 w-px bg-line sm:block" />
           <StatPill
+            dense
             icon={ShieldAlert}
             tone="danger"
             label="Need Attention"
             value={rows === null ? "…" : String(rows.filter((r) => r.site_status === "issue_attention_required").length)}
           />
+          <div className="hidden h-6 w-px bg-line lg:block" />
 
-          <div className="ml-auto flex flex-1 items-center gap-2 sm:flex-none sm:min-w-[22rem]">
-            <div className="flex flex-1 items-center gap-2 rounded-md border border-line-strong bg-surface-sunken/50 px-3 py-2">
-              <Search size={16} className="text-ink-muted" />
+          <div className="flex flex-1 items-center gap-2 sm:min-w-[16rem] sm:flex-none lg:min-w-[20rem]">
+            <div className="flex flex-1 items-center gap-2 rounded-md border border-line-strong bg-surface-sunken/50 px-2.5 py-1.5">
+              <Search size={15} className="text-ink-muted" />
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
@@ -748,59 +782,57 @@ export default function LfgSiteListPage() {
               />
             </div>
           </div>
-        </div>
 
-        <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-4">
-            <select
-              value={formatFilter}
-              onChange={(e) => setFormatFilter(e.target.value)}
-              className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
+          <select
+            value={formatFilter}
+            onChange={(e) => setFormatFilter(e.target.value)}
+            className="shrink-0 rounded-md border border-line-strong bg-surface px-2.5 py-1.5 text-sm text-ink focus:border-primary focus:outline-none"
+          >
+            <option value="">All formats</option>
+            {formatOptions.map((f) => (
+              <option key={f} value={f}>
+                {f}
+              </option>
+            ))}
+          </select>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="shrink-0 rounded-md border border-line-strong bg-surface px-2.5 py-1.5 text-sm text-ink focus:border-primary focus:outline-none"
+          >
+            <option value="">All statuses</option>
+            {LFG_STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {lfgStatusLabel(s)}
+              </option>
+            ))}
+          </select>
+          <div className="flex shrink-0 items-center gap-1 rounded-md border border-line-strong bg-surface p-1">
+            <button
+              type="button"
+              onClick={() => setView("list")}
+              aria-pressed={view === "list"}
+              title="List view"
+              className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium transition-colors ${
+                view === "list" ? "bg-primary text-on-brand" : "text-ink-secondary hover:bg-surface-sunken"
+              }`}
             >
-              <option value="">All formats</option>
-              {formatOptions.map((f) => (
-                <option key={f} value={f}>
-                  {f}
-                </option>
-              ))}
-            </select>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
+              <ListIcon size={14} /> List
+            </button>
+            <button
+              type="button"
+              onClick={() => setView("cards")}
+              aria-pressed={view === "cards"}
+              title="Card view"
+              className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium transition-colors ${
+                view === "cards" ? "bg-primary text-on-brand" : "text-ink-secondary hover:bg-surface-sunken"
+              }`}
             >
-              <option value="">All statuses</option>
-              {LFG_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {lfgStatusLabel(s)}
-                </option>
-              ))}
-            </select>
-            <div className="flex shrink-0 items-center gap-1 rounded-md border border-line-strong bg-surface p-1">
-              <button
-                type="button"
-                onClick={() => setView("list")}
-                aria-pressed={view === "list"}
-                title="List view"
-                className={`flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium transition-colors ${
-                  view === "list" ? "bg-primary text-on-brand" : "text-ink-secondary hover:bg-surface-sunken"
-                }`}
-              >
-                <ListIcon size={14} /> List
-              </button>
-              <button
-                type="button"
-                onClick={() => setView("cards")}
-                aria-pressed={view === "cards"}
-                title="Card view"
-                className={`flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium transition-colors ${
-                  view === "cards" ? "bg-primary text-on-brand" : "text-ink-secondary hover:bg-surface-sunken"
-                }`}
-              >
-                <LayoutGrid size={14} /> Cards
-              </button>
-            </div>
+              <LayoutGrid size={14} /> Cards
+            </button>
           </div>
         </div>
+      </div>
       </div>
 
       <LfgProgramSummaryCard
