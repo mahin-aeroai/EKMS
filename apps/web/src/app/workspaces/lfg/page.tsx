@@ -692,8 +692,24 @@ export default function LfgSiteListPage() {
           Format/Status selects + List/Cards view toggle below, always
           visible (task: "keep the filter active all time without
           collapse" -- previously behind a collapsible "Filters" button),
-          all inside one card. */}
-      <div className="my-4 rounded-xl border border-line bg-surface p-4">
+          all inside one card.
+
+          Sticky (Srinivas, 5 Sep 2026: "when i scroll down extreme low i
+          need to come back to do filters and searches... can we out header
+          freeze") -- `main` in AppShell.tsx is the actual scrolling
+          container (overflow-y-auto), not the window, so `sticky top-0`
+          here attaches to that scroll, not the viewport. Deliberately only
+          this card sticks, not the page title/breadcrumb/Programs tiles
+          above and below it -- those would eat into the space this was
+          meant to free up. `-mt-4`/`pt-4` (cancelling the card's own
+          top margin) lets it sit flush against `main`'s own top padding
+          instead of leaving a gap once stuck; `bg-surface-sunken` matches
+          `main`'s own background there so it reads as one continuous
+          strip rather than a floating card. Solid `bg-surface` + shadow
+          on the card itself is what actually hides the site rows
+          scrolling underneath once it's pinned. */}
+      <div className="sticky top-0 z-20 -mt-4 bg-surface-sunken pt-4 pb-4 sm:-mt-6 sm:pt-6">
+      <div className="rounded-xl border border-line bg-surface p-4 shadow-sm">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
           <StatPill icon={Building2} tone="primary" label="Total Sites" value={totalCount === null ? "…" : String(totalCount)} />
           <div className="hidden h-9 w-px bg-line sm:block" />
@@ -785,6 +801,7 @@ export default function LfgSiteListPage() {
             </div>
           </div>
         </div>
+      </div>
 
       <LfgProgramSummaryCard
         selectedProgramId={programIdFilter}
