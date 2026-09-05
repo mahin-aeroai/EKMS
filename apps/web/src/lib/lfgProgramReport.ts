@@ -46,16 +46,14 @@ export interface LfgProgramReportRow {
   program: string;
   sfoId: string;
   storeName: string;
-  // TODO(pending user clarification, 5 Sep 2026): "HQ Partner" was
-  // originally mismapped to lfg_partners.name -- that table is actually
-  // the installation/execution contractor (values like "MMDI"/"I & S"),
-  // confirmed correct as `executionPartner` below instead. The real "HQ
-  // Partner" (a reseller/chain company like "iPlanet"/"i Biz"/"Velocity
-  // IT", today only present as free text inside store_name/outlet_name,
-  // e.g. "iPlanet @ ByPass") has no dedicated column in the schema yet --
-  // left blank until the user confirms the right source (parse from
-  // store name? a new field? something else). Do not fill this from
-  // lfg_partners again.
+  // The reseller/franchise company that operates the store (e.g. "PAI
+  // INTERNATIONAL ELECTRONICS LTD") -- lfg_sites.hq_partner, confirmed
+  // by Srinivas as a genuinely distinct concept from both `format` (the
+  // broad retail chain/category) and `executionPartner` below (the
+  // installation contractor, MMDI or I&S). See
+  // supabase-lfg-sites-hq-partner-migration.sql for the column and
+  // supabase-lfg-fall2026-hq-partner-execution-partner-import.sql for
+  // the real-data backfill -- not every site has this filled in yet.
   hqPartner: string;
   executionPartner: string;
   city: string;
@@ -104,7 +102,7 @@ export async function buildLfgProgramReportRows(
   const { data: sites, error: sitesError } = await admin
     .from("lfg_sites")
     .select(
-      "id, outlet_name, sfo_id, city, state, region, width, height, material, partner_id, store_id, remarks, creative_received_at"
+      "id, outlet_name, sfo_id, city, state, region, width, height, material, partner_id, store_id, remarks, creative_received_at, hq_partner"
     )
     .eq("program_id", programId)
     .order("sfo_id", { ascending: true, nullsFirst: false });
@@ -161,7 +159,7 @@ export async function buildLfgProgramReportRows(
       program: program.name,
       sfoId: site.sfo_id ?? "",
       storeName: store?.store_name ?? site.outlet_name ?? "",
-      hqPartner: "",
+      hqPartner: site.hq_partner ?? "",
       executionPartner: partner?.name ?? "",
       city: site.city ?? "",
       state: site.state ?? "",
