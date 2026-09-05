@@ -278,6 +278,21 @@ export function LfgSiteCardGrid({
   const idsKey = visible.map((r) => r.id).join(",");
   const ordinals = useMemo(() => siteOrdinals(rows), [rows]);
 
+  // Identity of the FULL filtered set (every row's id, not just the
+  // visible page) -- membership/order only, deliberately blind to any
+  // other field changing. Used below instead of `rows` itself as the
+  // pagination-reset trigger: the parent page updates a site's status
+  // in place via `rows.map(r => r.id === id ? {...r, site_status:...} :
+  // r)` (see e.g. workspaces/lfg/page.tsx's handleStatusChanged), which
+  // returns a brand-new array reference with the exact same ids in the
+  // exact same order every time -- so `rows` itself changes on every
+  // single status update even though the filtered SET hasn't. Keying off
+  // this string instead means a same-set in-place edit leaves it
+  // unchanged (no reset -- "Show more" stays expanded through a status
+  // update), while an actual filter/search change, which does change
+  // which ids are present, still resets to the first page as intended.
+  const fullSetIdsKey = useMemo(() => rows.map((r) => r.id).join(","), [rows]);
+
   const [awbBySite, setAwbBySite] = useState<Record<string, CardShipmentRef>>({});
   const [surveyDocBySite, setSurveyDocBySite] = useState<Record<string, DocRef>>({});
   const [installReportDocBySite, setInstallReportDocBySite] = useState<Record<string, DocRef>>({});
@@ -300,10 +315,17 @@ export function LfgSiteCardGrid({
     return () => document.removeEventListener("keydown", onKey);
   }, [preview]);
 
-  // Resets the page whenever the underlying filtered row set changes (a
-  // new search/format/status) -- otherwise a leftover high visibleCount
-  // from a previous, larger result set would render every row of a
-  // smaller one instead of respecting the paged default.
+  // Resets the page whenever the underlying filtered row SET changes (a
+  // new search/format/status filter) -- otherwise a leftover high
+  // visibleCount from a previous, larger result set would render every
+  // row of a smaller one instead of respecting the paged default.
+  //
+  // Deliberately keyed on `fullSetIdsKey` (the full set's ids), NOT on
+  // `rows` itself -- see that constant's own comment. Bug fixed here (5
+  // Sep 2026, reported by Srinivas): keying on `rows` reset "Show more"
+  // back to the first 12 cards after every single status update, since
+  // the parent always hands down a new array reference even for an
+  // in-place field edit on the exact same set of sites.
   useEffect(() => {
     // Resetting pagination is a deliberate reaction to the filtered set
     // changing, not state derived purely from props/state that could be
@@ -311,7 +333,7 @@ export function LfgSiteCardGrid({
     // PAGE_SIZE via "Show more" until the next filter change resets it).
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setVisibleCount(PAGE_SIZE);
-  }, [rows]);
+  }, [fullSetIdsKey]);
 
   useEffect(() => {
     const ids = idsKey ? idsKey.split(",") : [];
