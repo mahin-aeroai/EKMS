@@ -1,5 +1,6 @@
 import ExcelJS from "exceljs";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { MM_PER_INCH } from "@/lib/lfg-units";
 
 /**
  * "LFG Connect Updates" daily/on-demand report -- one Excel workbook per
@@ -43,7 +44,13 @@ const SHIPMENT_STATUS_LABEL: Record<string, string> = {
 };
 
 export interface LfgProgramReportRow {
-  program: string;
+  // lfg_sites.format -- the retail chain/category (APR, Mono AAR, Croma,
+  // Reliance, Vijay Sales, ...). Was the seasonal Program's own name
+  // (repeated identically down every row, since the report is already
+  // scoped to one Program) until Srinivas asked for Format here instead
+  // -- Format actually varies row to row and is the more useful first
+  // column to scan/sort by.
+  format: string;
   sfoId: string;
   storeName: string;
   // The reseller/franchise company that operates the store (e.g. "PAI
@@ -102,7 +109,7 @@ export async function buildLfgProgramReportRows(
   const { data: sites, error: sitesError } = await admin
     .from("lfg_sites")
     .select(
-      "id, outlet_name, sfo_id, city, state, region, width, height, material, partner_id, store_id, remarks, creative_received_at, hq_partner"
+      "id, outlet_name, sfo_id, city, state, region, width, height, material, partner_id, store_id, remarks, creative_received_at, hq_partner, format"
     )
     .eq("program_id", programId)
     .order("sfo_id", { ascending: true, nullsFirst: false });
@@ -153,10 +160,21 @@ export async function buildLfgProgramReportRows(
     const installation = installationBySite.get(site.id);
     const shipment = latestShipmentBySite.get(site.id);
 
-    const sizeInMm = site.width != null && site.height != null ? `${Math.round(site.width)} x ${Math.round(site.height)}` : "";
+    // lfg_sites.width/.height are stored in INCHES (see lfg-units.ts's
+    // own header comment -- every New Site form/import/backfill writes
+    // inches, same unit the Site Master's own "Width (mm)"/"Height (mm)"
+    // columns convert from). Bug fixed here (5 Sep 2026, reported by
+    // Srinivas): this used to just round the raw inches value and label
+    // it "mm" -- e.g. a real 116-inch-wide display came out as "116 x
+    // 102", not the ~2.9m it actually is. Converted properly now, same
+    // ×MM_PER_INCH the rest of the app already uses.
+    const sizeInMm =
+      site.width != null && site.height != null
+        ? `${Math.round(site.width * MM_PER_INCH)} x ${Math.round(site.height * MM_PER_INCH)}`
+        : "";
 
     return {
-      program: program.name,
+      format: site.format ?? "",
       sfoId: site.sfo_id ?? "",
       storeName: store?.store_name ?? site.outlet_name ?? "",
       hqPartner: site.hq_partner ?? "",
@@ -183,7 +201,7 @@ export async function buildLfgProgramReportRows(
 }
 
 const COLUMNS: { header: string; key: keyof LfgProgramReportRow; width: number }[] = [
-  { header: "Program", key: "program", width: 22 },
+  { header: "Format", key: "format", width: 18 },
   { header: "SFO ID", key: "sfoId", width: 12 },
   { header: "Store Name", key: "storeName", width: 28 },
   { header: "HQ Partner", key: "hqPartner", width: 18 },
