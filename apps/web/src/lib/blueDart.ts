@@ -7,20 +7,29 @@
 //
 // Verified 5 Sept 2026 against Blue Dart's own "APIGEE USER MANUAL 1.2.0"
 // and "BLUEDART APIGATEWAY SPECIFICATIONS" documents (Srinivas forwarded
-// both, received from Blue Dart's Chakra Pani) -- this replaces the
-// earlier best-guess shape gathered from public docs. Still not exercised
-// against a live call from this sandbox (no network path to Blue Dart's
-// account), but every endpoint, header, query param and response field
-// below is now taken directly from Blue Dart's own reference doc rather
-// than inferred.
+// both, received from Blue Dart's Chakra Pani), AND against the live
+// Reference Docs on developer.dhl.com for the real "Authentication API
+// (DHL eCommerce India, Blue Dart)" product -- Srinivas registered an app
+// there and screenshotted its actual "User Guide" page. That caught one
+// real mistake: an earlier pass here used AUTH_URL
+// "https://apigateway.bluedart.com/v2/login", lifted from a *generic
+// tutorial screenshot* in the manual illustrating the concept on a
+// placeholder demo environment -- not Blue Dart's real portal. The real
+// Reference Docs' own curl example gives a different, correct URL (below).
+// A live call still hasn't been exercised end to end from this sandbox
+// (no network path to Blue Dart's account at all), so treat anything not
+// explicitly called out as confirmed-by-screenshot as still best-effort.
 //
-//   1. Auth ("Blue Dart Authentication API", GET /v2/login): send the
-//      Consumer Key/Secret (from the App created on developer.dhl.com) as
-//      the `ClientID` / `clientSecret` headers -- NOT query params, NOT a
-//      request body. Response is JSON: { "JWTToken": "<jwt>" }. Token is
-//      valid 24 hrs; re-fetched per call rather than cached in memory --
-//      this route runs in a stateless serverless function, so an
-//      in-memory cache would rarely hit anyway.
+//   1. Auth ("Authentication API (DHL eCommerce India, Blue Dart)", GET
+//      /in/transportation/token/v1/login -- CONFIRMED against the real
+//      developer.dhl.com Reference Docs' own curl example, Production
+//      host): send the Consumer Key/Secret (from the App created on
+//      developer.dhl.com) as the `ClientID` / `clientSecret` headers --
+//      NOT query params, NOT a request body. Response is JSON:
+//      { "JWTToken": "<jwt>" }. Token is valid 24 hrs; re-fetched per
+//      call rather than cached in memory -- this route runs in a
+//      stateless serverless function, so an in-memory cache would rarely
+//      hit anyway.
 //   2. Track ("Blue Dart-Tracking Of Shipment", GET .../tracking/v1): the
 //      JWT goes on the tracking call as `Authorization: Bearer <jwt>`
 //      (standard JWT-bearer pattern; the manual's own examples only show
@@ -51,7 +60,7 @@
 
 import { XMLParser } from "fast-xml-parser";
 
-const AUTH_URL = "https://apigateway.bluedart.com/v2/login";
+const AUTH_URL = "https://apigateway.bluedart.com/in/transportation/token/v1/login";
 const TRACK_URL = "https://apigateway.bluedart.com/in/transportation/tracking/v1";
 const FINDER_URL = "https://apigateway.bluedart.com/in/transportation/finder/v1/GetServicesforPincode";
 const TRANSIT_TIME_URL = "https://apigateway.bluedart.com/in/transportation/transittime/v1/GetNewDomesticTransitTimeForPinCodeandProduct";
