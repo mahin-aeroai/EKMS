@@ -1,5 +1,6 @@
 import ExcelJS from "exceljs";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { MM_PER_INCH } from "@/lib/lfg-units";
 
 /**
  * "LFG Connect Updates" daily/on-demand report -- one Excel workbook per
@@ -159,7 +160,18 @@ export async function buildLfgProgramReportRows(
     const installation = installationBySite.get(site.id);
     const shipment = latestShipmentBySite.get(site.id);
 
-    const sizeInMm = site.width != null && site.height != null ? `${Math.round(site.width)} x ${Math.round(site.height)}` : "";
+    // lfg_sites.width/.height are stored in INCHES (see lfg-units.ts's
+    // own header comment -- every New Site form/import/backfill writes
+    // inches, same unit the Site Master's own "Width (mm)"/"Height (mm)"
+    // columns convert from). Bug fixed here (5 Sep 2026, reported by
+    // Srinivas): this used to just round the raw inches value and label
+    // it "mm" -- e.g. a real 116-inch-wide display came out as "116 x
+    // 102", not the ~2.9m it actually is. Converted properly now, same
+    // ×MM_PER_INCH the rest of the app already uses.
+    const sizeInMm =
+      site.width != null && site.height != null
+        ? `${Math.round(site.width * MM_PER_INCH)} x ${Math.round(site.height * MM_PER_INCH)}`
+        : "";
 
     return {
       format: site.format ?? "",
