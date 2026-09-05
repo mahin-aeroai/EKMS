@@ -27,6 +27,22 @@ interface TableProps<T extends { id: string }> {
   rows: T[];
   density?: "compact" | "comfortable";
   onRowClick?: (row: T) => void;
+  /** Caps the table's own scroll box so BOTH its scrollbars stay reachable
+   * on a long/wide table, instead of the box growing to fit every row and
+   * pushing its horizontal scrollbar down past however many hundred rows
+   * there are (task, 5 Sep 2026, Srinivas on LFG Site Master's List view:
+   * "the two scrolls on right and no scroll at bottom making me very
+   * uncomfort to edit the records... fix bottom scroll from left to right
+   * always visible"). It's also what makes the `sticky top-0` header just
+   * below actually DO anything -- sticky positioning has no effect
+   * without a bounded scrolling ancestor to stick within, so before this
+   * the header just scrolled away with the page like everything else.
+   * `overflow-auto` only ever shows a scrollbar once content exceeds this
+   * height, so a short table is completely unaffected -- safe to leave at
+   * its default everywhere. Pass `"none"` to opt a specific table out
+   * (unbounded, growing with the page, the old behavior) if one ever
+   * needs that instead. */
+  maxHeight?: string;
 }
 
 /**
@@ -44,6 +60,7 @@ export function Table<T extends { id: string }>({
   rows,
   density = "comfortable",
   onRowClick,
+  maxHeight = "70vh",
 }: TableProps<T>) {
   const [sortKey, setSortKey] = useState<keyof T | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -89,7 +106,10 @@ export function Table<T extends { id: string }>({
   const compact = density === "compact";
 
   return (
-    <div className="overflow-auto rounded-lg border border-line">
+    <div
+      className="overflow-auto rounded-lg border border-line"
+      style={maxHeight !== "none" ? { maxHeight } : undefined}
+    >
       <table className={cn("text-left", compact ? "table-fixed text-xs" : "w-full text-sm")}>
         <thead
           className={cn(

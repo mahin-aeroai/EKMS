@@ -1060,14 +1060,22 @@ export default function LfgSiteListPage() {
         ) : rows.length === 0 ? (
           <p className="py-6 text-center text-sm text-ink-muted">No sites match your search.</p>
         ) : (
-          <div className="overflow-x-auto">
-            <Table
-              columns={COLUMNS}
-              rows={rows.map((r): SelectableRow => ({ ...r, selected: selectedIds.has(r.id) }))}
-              onRowClick={(r) => router.push(`/workspaces/lfg/sites/${r.id}`)}
-              density="compact"
-            />
-          </div>
+          // No wrapping overflow-x-auto div here anymore -- Table itself
+          // now owns a single, properly bounded scroll box (both axes) for
+          // exactly this reason (see maxHeight's own comment on Table.tsx).
+          // The old setup nested this div's own overflow-x-auto around
+          // Table's internal overflow-auto div, an unbounded scroll box
+          // that just grew to fit every row -- two overlapping scrolling
+          // containers, and a horizontal scrollbar that ended up several
+          // screens below the fold on a list this long. One scroll box,
+          // one reachable horizontal scrollbar right under the visible
+          // rows, fixes both.
+          <Table
+            columns={COLUMNS}
+            rows={rows.map((r): SelectableRow => ({ ...r, selected: selectedIds.has(r.id) }))}
+            onRowClick={(r) => router.push(`/workspaces/lfg/sites/${r.id}`)}
+            density="compact"
+          />
         )}
       </div>
 
