@@ -19,9 +19,19 @@
 -- is currently NULL -- an already-assigned partner is never overwritten.
 --
 -- STEP 1 -- staging table, dropped at the end of this script.
+--
+-- Deliberately a real table, not a TEMP table -- Supabase's SQL Editor
+-- runs through its connection pooler, which can hand each statement in
+-- a pasted script to a different backend connection. A TEMP table only
+-- exists on the connection that created it, so the very next statement
+-- can come back "relation does not exist" even though it looks like one
+-- unbroken script. A real table (schema-qualified, dropped explicitly
+-- at the end of STEP 3) has no such connection-affinity problem.
 -- ============================================================
 
-create temp table _fall_lfg_import (
+drop table if exists public._fall_lfg_import;
+
+create table public._fall_lfg_import (
   sfo_id text,
   store_name text,
   hq_partner text,
@@ -29,7 +39,7 @@ create temp table _fall_lfg_import (
   source_sheet text
 );
 
-insert into _fall_lfg_import (sfo_id, store_name, hq_partner, installation_team, source_sheet) values
+insert into public._fall_lfg_import (sfo_id, store_name, hq_partner, installation_team, source_sheet) values
   ('1300789', 'IPLANET @ BANASHANKARI', 'CONSOLIDATED PRIVATE LIMITED', 'I&S', 'APR- APP'),
   ('1606231', 'APTRONIX @ M.G ROAD', 'PREMIUM LIFESTYLE & FASHION INDIA PVT LTD', 'MMDI', 'APR- APP'),
   ('1616817', 'UNICORN @ ASHRAM ROAD', 'UNICORN INFOSOLUTIONS PVT LTD', 'MMDI', 'APR- APP'),
@@ -425,7 +435,7 @@ insert into _fall_lfg_import (sfo_id, store_name, hq_partner, installation_team,
 
 update public.lfg_sites s
 set hq_partner = i.hq_partner
-from _fall_lfg_import i
+from public._fall_lfg_import i
 where s.sfo_id = i.sfo_id
   and s.hq_partner is null
   and i.hq_partner is not null;
@@ -445,7 +455,7 @@ where s.sfo_id = i.sfo_id
 
 update public.lfg_sites s
 set partner_id = p.id
-from _fall_lfg_import i
+from public._fall_lfg_import i
 join public.lfg_partners p
   on lower(replace(replace(p.name, ' ', ''), '&', 'and'))
    = lower(replace(replace(i.installation_team, ' ', ''), '&', 'and'))
@@ -462,7 +472,7 @@ where s.sfo_id = i.sfo_id
 --     Connect. If a site is missing from LFG Connect entirely, it needs
 --     to be created (New Site / New Store), not just backfilled.
 select i.sfo_id, i.store_name, i.hq_partner, i.installation_team, i.source_sheet
-from _fall_lfg_import i
+from public._fall_lfg_import i
 left join public.lfg_sites s on s.sfo_id = i.sfo_id
 where s.id is null
 order by i.source_sheet, i.store_name;
@@ -476,11 +486,11 @@ order by i.source_sheet, i.store_name;
 --     directly, this script can't guess it.
 select s.id, s.site_id, s.sfo_id, s.outlet_name, s.format
 from public.lfg_sites s
-join _fall_lfg_import i on i.sfo_id = s.sfo_id
+join public._fall_lfg_import i on i.sfo_id = s.sfo_id
 where s.hq_partner is null
 order by s.sfo_id;
 
-drop table if exists _fall_lfg_import;
+drop table if exists public._fall_lfg_import;
 
 -- (c) lfg_sites rows with NO sfo_id at all -- can't be matched against
 --     the spreadsheet by this script (it only matches on SFO ID, on
