@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   MapPin,
@@ -224,6 +224,41 @@ interface ProgramOption {
 // row type: every TableColumn needs a distinct, real `keyof` key, or the
 // underlying <th>/<td> elements get duplicate React keys).
 type SelectableRow = LfgSiteListRow & { selected: boolean };
+
+// Scroll-position memory (task, 5 Sep 2026: "after editing site and coming
+// back to the previous page it goes to home postion instead staying at
+// previous state... I was in program and filtered format and selected on
+// of site tried editing and came back then it went to home postion instead
+// of staying at that particular site place"). `main` in AppShell.tsx --
+// not `window` -- is the actual scrolling element on every internal page
+// (see the sticky-filter-card comment further down for the same fact), so
+// Next.js/the browser's own scroll restoration (which only ever tracks
+// window scroll) never had anything to restore here in the first place.
+//
+// Keyed on the full URL (path + query string), same one the existing
+// filter-persistence effect below already keeps in sync -- so a Back
+// navigation, which lands on that exact URL via real browser history (see
+// that effect's own comment), reliably finds the right saved offset for
+// the exact filtered view that was scrolled. sessionStorage, not
+// component state, because the value needs to survive the Site Master
+// page unmounting entirely while Site 360 is open.
+function scrollStorageKey(): string {
+  return `lfg-site-master-scroll:${window.location.pathname}${window.location.search}`;
+}
+function cardsVisibleStorageKey(): string {
+  return `lfg-site-master-cards-visible:${window.location.pathname}${window.location.search}`;
+}
+function readSavedNumber(key: string): number | undefined {
+  try {
+    const raw = sessionStorage.getItem(key);
+    const n = raw ? Number(raw) : NaN;
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  } catch {
+    // Private-browsing/storage-disabled -- just means nothing gets
+    // restored, never worth breaking the page over.
+    return undefined;
+  }
+}
 
 export default function LfgSiteListPage() {
   const router = useRouter();
@@ -576,6 +611,55 @@ export default function LfgSiteListPage() {
         }
         setSiblingCounts(counts);
       });
+  }, [rows]);
+
+  // Scroll-position memory, part 1: save. Listens on `main` (the real
+  // scrolling element -- see scrollStorageKey's own comment above), not
+  // `rows`/`view`/anything React-driven, since the whole point is to catch
+  // every scroll regardless of what triggered it. rAF-throttled so a fast
+  // trackpad fling doesn't spam sessionStorage on every pixel.
+  useEffect(() => {
+    const main = document.querySelector("main");
+    if (!main) return;
+    let frame: number | null = null;
+    function onScroll() {
+      if (frame !== null) return;
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        try {
+          sessionStorage.setItem(scrollStorageKey(), String(main!.scrollTop));
+        } catch {
+          // storage disabled -- nothing to save, nothing to break.
+        }
+      });
+    }
+    main.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      main.removeEventListener("scroll", onScroll);
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  // Scroll-position memory, part 2: restore. Fires once, the first time
+  // `rows` finishes its first real load after this page mounts (not on
+  // every later in-place row update, e.g. handleStatusChanged -- the
+  // scrollRestoredRef guard). Deferred one animation frame past that so
+  // Cards view has already painted with its own restored
+  // initialVisibleCount (see the LfgSiteCardGrid usage below) -- without
+  // that, the card someone actually clicked into might be past the
+  // default first page and this would fall short of where it needs to
+  // land.
+  const scrollRestoredRef = useRef(false);
+  useEffect(() => {
+    if (rows === null || scrollRestoredRef.current) return;
+    scrollRestoredRef.current = true;
+    const saved = readSavedNumber(scrollStorageKey());
+    if (saved === undefined) return;
+    const main = document.querySelector("main");
+    if (!main) return;
+    requestAnimationFrame(() => {
+      main.scrollTop = saved;
+    });
   }, [rows]);
 
   const COLUMNS: TableColumn<SelectableRow>[] = [
@@ -948,6 +1032,14 @@ export default function LfgSiteListPage() {
         ) : view === "cards" ? (
           <LfgSiteCardGrid
             rows={rows}
+            initialVisibleCount={readSavedNumber(cardsVisibleStorageKey())}
+            onVisibleCountChange={(n) => {
+              try {
+                sessionStorage.setItem(cardsVisibleStorageKey(), String(n));
+              } catch {
+                // storage disabled -- nothing to save, nothing to break.
+              }
+            }}
             renderQuickActions={
               editable
                 ? (row) => (

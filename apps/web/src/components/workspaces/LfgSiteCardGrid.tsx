@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { MapPin, FileText, ExternalLink, X, RefreshCw } from "lucide-react";
 import { Badge, type BadgeStatus } from "@/components/ui/Badge";
@@ -255,6 +255,8 @@ export function LfgSiteCardGrid({
   rows,
   buildHref,
   renderQuickActions,
+  initialVisibleCount,
+  onVisibleCountChange,
 }: {
   rows: LfgSiteCardRow[];
   // Where clicking/Enter-ing a card navigates. Defaults to the staff Site
@@ -272,8 +274,19 @@ export function LfgSiteCardGrid({
   // deciding per-row whether to render them at all (only on the viewer's
   // own sites) -- this component itself stays ownership-agnostic.
   renderQuickActions?: (row: LfgSiteCardRow) => ReactNode;
+  // Both new, additive, optional (task, 5 Sep 2026: "after editing site
+  // and coming back to the previous page it goes to home postion instead
+  // staying at previous state") -- lets the Site Master page restore how
+  // many cards were expanded via "Show more" BEFORE it tries to restore
+  // scroll position, so the card someone clicked into (which may be past
+  // the first PAGE_SIZE) actually exists in the DOM to scroll to. Neither
+  // prop changes anything for a caller that doesn't pass them (the LFG
+  // partner home page doesn't, and still gets the plain PAGE_SIZE-at-a-
+  // time default exactly as before).
+  initialVisibleCount?: number;
+  onVisibleCountChange?: (count: number) => void;
 }) {
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [visibleCount, setVisibleCount] = useState(initialVisibleCount ?? PAGE_SIZE);
   const visible = rows.slice(0, visibleCount);
   const idsKey = visible.map((r) => r.id).join(",");
   const ordinals = useMemo(() => siteOrdinals(rows), [rows]);
@@ -326,14 +339,35 @@ export function LfgSiteCardGrid({
   // back to the first 12 cards after every single status update, since
   // the parent always hands down a new array reference even for an
   // in-place field edit on the exact same set of sites.
+  //
+  // Skips its own very first run (the `isFirstSetRef` guard) -- an effect
+  // keyed on a value that's already different at mount runs once
+  // immediately regardless, which would otherwise stomp an
+  // `initialVisibleCount` restored from a previous visit (see that prop's
+  // own comment) straight back down to PAGE_SIZE before anyone ever sees
+  // it. Every later, genuine filter change still resets it exactly as
+  // before.
+  const isFirstSetRef = useRef(true);
   useEffect(() => {
+    if (isFirstSetRef.current) {
+      isFirstSetRef.current = false;
+      return;
+    }
     // Resetting pagination is a deliberate reaction to the filtered set
     // changing, not state derived purely from props/state that could be
     // computed inline (visibleCount is deliberately allowed to grow past
     // PAGE_SIZE via "Show more" until the next filter change resets it).
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setVisibleCount(PAGE_SIZE);
   }, [fullSetIdsKey]);
+
+  // Reports every change (including the initial, possibly-restored value
+  // above) back up to a caller that wants to remember it -- the Site
+  // Master page uses this to persist how far someone had paged in, so a
+  // Back navigation can restore it. A no-op for any caller that doesn't
+  // pass onVisibleCountChange (e.g. the LFG partner home page).
+  useEffect(() => {
+    onVisibleCountChange?.(visibleCount);
+  }, [visibleCount, onVisibleCountChange]);
 
   useEffect(() => {
     const ids = idsKey ? idsKey.split(",") : [];
