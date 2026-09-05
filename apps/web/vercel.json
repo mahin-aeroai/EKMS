@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/lfg-daily-report",
+      "schedule": "30 1 * * *"
+    }
+  ]
+}

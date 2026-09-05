@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type MouseEvent } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarRange, Plus } from "lucide-react";
+import { CalendarRange, Plus, Mail, Send, Trash2, ChevronDown, ChevronUp } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -12,6 +12,14 @@ import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/dashboard-queries";
 import { LFG_PIPELINE_STAGES, LFG_PIPELINE_STAGE_BADGE, lfgPipelineStageOf, type LfgPipelineStageKey } from "@/lib/lfgStatus";
 import { LfgConnectHeader } from "@/components/workspaces/LfgConnectHeader";
+import { timeAgo } from "@/lib/timeAgo";
+
+async function authHeaders() {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  return { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token ?? ""}` };
+}
 
 // Programs (seasonal waves: "Spring Refresh 2025", "Fall Refresh 2025/26",
 // etc.) -- task #39-49. Distinct from the Format Dashboard, which groups by
@@ -61,6 +69,25 @@ interface SiteStageRow {
   creative_received_at: string | null;
 }
 
+// "LFG Connect Updates" daily report -- who gets the daily/on-demand
+// Excel report for each Program, and the log of every send attempt.
+// Configurable per Program (not a fixed list, not derived from
+// lfg_partners) per the user's own choice.
+interface ReportRecipientRow {
+  id: string;
+  program_id: string;
+  email: string;
+  active: boolean;
+}
+
+interface ReportSendRow {
+  program_id: string;
+  sent_at: string;
+  status: "sent" | "failed" | "skipped_no_recipients";
+  row_count: number | null;
+  recipient_emails: string[];
+}
+
 type StageCounts = Record<LfgPipelineStageKey, number>;
 
 interface ProgramGroup extends ProgramRow {
@@ -106,6 +133,10 @@ export default function LfgProgramsPage() {
   const [newNotes, setNewNotes] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  const [recipientRows, setRecipientRows] = useState<ReportRecipientRow[]>([]);
+  const [lastSendByProgram, setLastSendByProgram] = useState<Record<string, ReportSendRow>>({});
+  const [expandedProgramId, setExpandedProgramId] = useState<string | null>(null);
+
   async function loadPrograms() {
     // Newest first -- the grid below renders every card the same size, but
     // still tags whichever one is first (index 0) as "Current Season", so
@@ -114,9 +145,37 @@ export default function LfgProgramsPage() {
     setProgramRows((data as ProgramRow[]) ?? []);
   }
 
+  async function loadRecipients() {
+    const { data } = await supabase
+      .from("lfg_program_report_recipients")
+      .select("id, program_id, email, active")
+      .eq("active", true)
+      .order("email", { ascending: true });
+    setRecipientRows((data as ReportRecipientRow[]) ?? []);
+  }
+
+  async function loadLastSends() {
+    // Most recent 200 send attempts across every Program is plenty to
+    // reduce down to "the latest send per Program" client-side -- this
+    // page doesn't need the full history, just the last-known status
+    // shown on each card (Supabase JS has no DISTINCT ON without an RPC).
+    const { data } = await supabase
+      .from("lfg_program_report_sends")
+      .select("program_id, sent_at, status, row_count, recipient_emails")
+      .order("sent_at", { ascending: false })
+      .limit(200);
+    const latest: Record<string, ReportSendRow> = {};
+    for (const row of (data as ReportSendRow[]) ?? []) {
+      if (!latest[row.program_id]) latest[row.program_id] = row;
+    }
+    setLastSendByProgram(latest);
+  }
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadPrograms();
+    loadRecipients();
+    loadLastSends();
     fetchAllRows<SiteStageRow>((from, to) =>
       supabase.from("lfg_sites").select("program_id, site_status, creative_received_at").range(from, to)
     ).then(setSiteRows);
@@ -222,7 +281,19 @@ export default function LfgProgramsPage() {
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {groups.map((g, i) => (
-                <ProgramCard key={g.id} group={g} current={i === 0} onClick={() => openProgram(g.id, g.name)} />
+                <ProgramCard
+                  key={g.id}
+                  group={g}
+                  current={i === 0}
+                  onClick={() => openProgram(g.id, g.name)}
+                  editable={editable}
+                  recipients={recipientRows.filter((r) => r.program_id === g.id)}
+                  lastSend={lastSendByProgram[g.id]}
+                  expanded={expandedProgramId === g.id}
+                  onToggleExpand={() => setExpandedProgramId((id) => (id === g.id ? null : g.id))}
+                  onRecipientsChanged={loadRecipients}
+                  onSent={loadLastSends}
+                />
               ))}
             </div>
           </>
@@ -232,7 +303,29 @@ export default function LfgProgramsPage() {
   );
 }
 
-function ProgramCard({ group, current, onClick }: { group: ProgramGroup; current: boolean; onClick: () => void }) {
+function ProgramCard({
+  group,
+  current,
+  onClick,
+  editable,
+  recipients,
+  lastSend,
+  expanded,
+  onToggleExpand,
+  onRecipientsChanged,
+  onSent,
+}: {
+  group: ProgramGroup;
+  current: boolean;
+  onClick: () => void;
+  editable: boolean;
+  recipients: ReportRecipientRow[];
+  lastSend?: ReportSendRow;
+  expanded: boolean;
+  onToggleExpand: () => void;
+  onRecipientsChanged: () => void;
+  onSent: () => void;
+}) {
   // Only the stages that actually have sites in them render a pill -- an
   // empty "0 Printing" pill on every card would bury the ones that matter
   // (this is exactly the "some in production, some in transit, some
@@ -243,38 +336,215 @@ function ProgramCard({ group, current, onClick }: { group: ProgramGroup; current
   // this file's header comment) -- `current` only adds a small badge next
   // to the name, not a different card size or tint.
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={onClick}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") onClick();
-      }}
-      className="cursor-pointer rounded-xl border border-line bg-surface p-4 shadow-1 transition-shadow hover:shadow-2"
-    >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2.5">
-          <h3 className="text-sm font-semibold text-ink">{group.name}</h3>
-          <Badge status={group.active ? "success" : "neutral"}>{group.active ? "Active" : "Inactive"}</Badge>
-          {current && <Badge status="info">Current Season</Badge>}
+    <div className="rounded-xl border border-line bg-surface p-4 shadow-1 transition-shadow hover:shadow-2">
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onClick}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") onClick();
+        }}
+        className="cursor-pointer"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h3 className="text-sm font-semibold text-ink">{group.name}</h3>
+            <Badge status={group.active ? "success" : "neutral"}>{group.active ? "Active" : "Inactive"}</Badge>
+            {current && <Badge status="info">Current Season</Badge>}
+          </div>
+          <span className="text-xs text-ink-muted">
+            {group.total} site{group.total === 1 ? "" : "s"}
+          </span>
         </div>
-        <span className="text-xs text-ink-muted">
-          {group.total} site{group.total === 1 ? "" : "s"}
-        </span>
+
+        {group.notes && <p className="mt-2 text-xs text-ink-secondary">{group.notes}</p>}
+
+        {stages.length === 0 ? (
+          <p className="mt-3 text-xs text-ink-muted">No sites in this Program yet.</p>
+        ) : (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {stages.map((s) => (
+              <Badge key={s.key} status={LFG_PIPELINE_STAGE_BADGE[s.key]}>
+                {group.counts[s.key]} {s.label}
+              </Badge>
+            ))}
+          </div>
+        )}
       </div>
 
-      {group.notes && <p className="mt-2 text-xs text-ink-secondary">{group.notes}</p>}
+      <div className="mt-3 border-t border-line pt-2.5">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleExpand();
+          }}
+          className="flex w-full items-center justify-between gap-2 text-xs text-ink-secondary hover:text-ink"
+        >
+          <span className="inline-flex items-center gap-1.5">
+            <Mail size={13} />
+            LFG Connect Updates report
+            {recipients.length > 0 && (
+              <span className="text-ink-muted">
+                ({recipients.length} recipient{recipients.length === 1 ? "" : "s"})
+              </span>
+            )}
+          </span>
+          {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+        </button>
 
-      {stages.length === 0 ? (
-        <p className="mt-3 text-xs text-ink-muted">No sites in this Program yet.</p>
+        {!expanded && lastSend && (
+          <p className="mt-1 text-[11px] text-ink-muted">
+            Last sent {timeAgo(lastSend.sent_at)}
+            {lastSend.status === "failed" && " — failed"}
+            {lastSend.status === "skipped_no_recipients" && " — skipped (no recipients)"}
+          </p>
+        )}
+
+        {expanded && (
+          <ProgramReportPanel
+            programId={group.id}
+            editable={editable}
+            recipients={recipients}
+            lastSend={lastSend}
+            onRecipientsChanged={onRecipientsChanged}
+            onSent={onSent}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ProgramReportPanel({
+  programId,
+  editable,
+  recipients,
+  lastSend,
+  onRecipientsChanged,
+  onSent,
+}: {
+  programId: string;
+  editable: boolean;
+  recipients: ReportRecipientRow[];
+  lastSend?: ReportSendRow;
+  onRecipientsChanged: () => void;
+  onSent: () => void;
+}) {
+  const { toast } = useToast();
+  const [newEmail, setNewEmail] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+
+  async function handleAdd(e: FormEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const email = newEmail.trim().toLowerCase();
+    if (!email) return;
+    setAdding(true);
+    const { error: insertError } = await supabase
+      .from("lfg_program_report_recipients")
+      .upsert({ program_id: programId, email, active: true }, { onConflict: "program_id,email" });
+    setAdding(false);
+    if (insertError) {
+      toast("danger", insertError.message);
+      return;
+    }
+    setNewEmail("");
+    onRecipientsChanged();
+  }
+
+  async function handleRemove(recipientId: string) {
+    setRemovingId(recipientId);
+    const { error: deleteError } = await supabase.from("lfg_program_report_recipients").delete().eq("id", recipientId);
+    setRemovingId(null);
+    if (deleteError) {
+      toast("danger", deleteError.message);
+      return;
+    }
+    onRecipientsChanged();
+  }
+
+  async function handleSendNow(e: MouseEvent) {
+    e.stopPropagation();
+    if (recipients.length === 0) {
+      toast("danger", "Add at least one recipient before sending.");
+      return;
+    }
+    setSending(true);
+    try {
+      const headers = await authHeaders();
+      const res = await fetch(`/api/lfg/programs/${programId}/send-report`, { method: "POST", headers });
+      const data = await res.json();
+      if (!res.ok) {
+        toast("danger", data?.message ?? "Couldn't send the report.");
+        return;
+      }
+      toast("success", `Report sent to ${data.recipientCount} recipient${data.recipientCount === 1 ? "" : "s"} (${data.rowCount} sites)`);
+      onSent();
+    } catch {
+      toast("danger", "Couldn't send the report — check your connection and try again.");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div onClick={(e) => e.stopPropagation()} className="mt-2.5 flex flex-col gap-2 rounded-md border border-line bg-surface-sunken p-2.5">
+      {recipients.length === 0 ? (
+        <p className="text-xs text-ink-muted">No recipients configured yet — this Program&rsquo;s report won&rsquo;t send until you add one.</p>
       ) : (
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {stages.map((s) => (
-            <Badge key={s.key} status={LFG_PIPELINE_STAGE_BADGE[s.key]}>
-              {group.counts[s.key]} {s.label}
-            </Badge>
+        <ul className="flex flex-col gap-1">
+          {recipients.map((r) => (
+            <li key={r.id} className="flex items-center justify-between gap-2 text-xs text-ink">
+              <span className="truncate">{r.email}</span>
+              {editable && (
+                <Button
+                  variant="icon"
+                  size="sm"
+                  aria-label={`Remove ${r.email}`}
+                  onClick={() => handleRemove(r.id)}
+                  loading={removingId === r.id}
+                  className="h-6 w-6 shrink-0"
+                >
+                  <Trash2 size={12} />
+                </Button>
+              )}
+            </li>
           ))}
-        </div>
+        </ul>
+      )}
+
+      {editable && (
+        <form onSubmit={handleAdd} className="flex items-center gap-1.5">
+          <input
+            type="email"
+            value={newEmail}
+            onChange={(e) => setNewEmail(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            placeholder="Add recipient email"
+            className="h-7 flex-1 rounded-md border border-line-strong bg-surface px-2 text-xs text-ink focus:border-primary focus:outline-none"
+          />
+          <Button type="submit" size="sm" loading={adding} className="h-7 px-2 text-[11px]">
+            <Plus size={12} />
+          </Button>
+        </form>
+      )}
+
+      {editable && (
+        <Button variant="secondary" size="sm" onClick={handleSendNow} loading={sending} className="mt-0.5 w-fit text-[11px]">
+          <Send size={12} className="mr-1" /> Send Report Now
+        </Button>
+      )}
+
+      {lastSend && (
+        <p className="text-[11px] text-ink-muted">
+          Last sent {timeAgo(lastSend.sent_at)} to {lastSend.recipient_emails.length} recipient{lastSend.recipient_emails.length === 1 ? "" : "s"}
+          {lastSend.status === "sent" && lastSend.row_count != null && ` (${lastSend.row_count} sites)`}
+          {lastSend.status === "failed" && " — failed"}
+          {lastSend.status === "skipped_no_recipients" && " — skipped (no recipients)"}
+        </p>
       )}
     </div>
   );
