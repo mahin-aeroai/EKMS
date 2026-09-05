@@ -59,13 +59,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ shi
     return NextResponse.json({ error: "no_awb", message: "This shipment has no AWB number set yet." }, { status: 400 });
   }
 
-  let events;
+  let result;
   try {
-    events = await trackAwb(shipment.awb_number);
+    result = await trackAwb(shipment.awb_number);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: "bluedart_error", message }, { status: 502 });
   }
+  const { events, currentStatus, currentStatusTime } = result;
 
   if (events.length > 0) {
     await supabase.from("lfg_shipment_events").insert(
@@ -79,16 +80,23 @@ export async function POST(request: Request, { params }: { params: Promise<{ shi
         created_by: user.id,
       }))
     );
+  }
 
-    const latest = events[events.length - 1];
-    const mappedStatus = mapBlueDartStatusToLfg(latest.status);
+  // Prefer Blue Dart's own top-level <Status> (authoritative "current
+  // status of this shipment") over inferring it from the scan list --
+  // falls back to the most recent scan (events is oldest-first) if the
+  // response had a scan history but no top-level Status for some reason.
+  const latest = events[events.length - 1];
+  const statusSource = currentStatus ?? latest?.status;
+  if (statusSource) {
+    const mappedStatus = mapBlueDartStatusToLfg(statusSource);
     const update: Record<string, unknown> = {
       current_status: mappedStatus,
       last_tracked_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
     if (mappedStatus === "delivered") {
-      update.delivery_date = latest.time.slice(0, 10);
+      update.delivery_date = (currentStatusTime ?? latest?.time)?.slice(0, 10);
     }
     // last_tracked_at is an optional column
     // (supabase-lfg-shipments-last-tracked-migration.sql) -- if it hasn't
