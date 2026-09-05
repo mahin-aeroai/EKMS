@@ -66,7 +66,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ shi
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: "bluedart_error", message }, { status: 502 });
   }
-  const { events, currentStatus, currentStatusTime } = result;
+  const { events, currentStatus, currentStatusTime, currentLocation, expectedDeliveryDate } = result;
 
   if (events.length > 0) {
     await supabase.from("lfg_shipment_events").insert(
@@ -88,23 +88,35 @@ export async function POST(request: Request, { params }: { params: Promise<{ shi
   // response had a scan history but no top-level Status for some reason.
   const latest = events[events.length - 1];
   const statusSource = currentStatus ?? latest?.status;
-  if (statusSource) {
-    const mappedStatus = mapBlueDartStatusToLfg(statusSource);
+  if (statusSource || currentLocation || expectedDeliveryDate) {
     const update: Record<string, unknown> = {
-      current_status: mappedStatus,
       last_tracked_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
-    if (mappedStatus === "delivered") {
-      update.delivery_date = (currentStatusTime ?? latest?.time)?.slice(0, 10);
+    if (statusSource) {
+      const mappedStatus = mapBlueDartStatusToLfg(statusSource);
+      update.current_status = mappedStatus;
+      if (mappedStatus === "delivered") {
+        update.delivery_date = (currentStatusTime ?? latest?.time)?.slice(0, 10);
+      }
     }
-    // last_tracked_at is an optional column
-    // (supabase-lfg-shipments-last-tracked-migration.sql) -- if it hasn't
-    // been run yet, drop it and retry rather than failing the whole
-    // tracking call over a purely cosmetic field.
+    // current_location is set from the most recent scan's location; only
+    // overwrite expected_delivery_date when Blue Dart actually returned
+    // one -- it started life as a manually-entered field, so a courier
+    // response with no ExpectedDeliveryDate (e.g. before pickup) should
+    // never blank out a value someone typed in.
+    if (currentLocation) update.current_location = currentLocation;
+    if (expectedDeliveryDate) update.expected_delivery_date = expectedDeliveryDate;
+
+    // last_tracked_at and current_location are optional columns
+    // (supabase-lfg-shipments-last-tracked-migration.sql /
+    // supabase-lfg-shipments-current-location-migration.sql) -- if either
+    // hasn't been run yet, drop both and retry rather than failing the
+    // whole tracking call over a couple of cosmetic fields.
     const { error: updateError } = await supabase.from("lfg_shipments").update(update).eq("id", shipmentId);
     if (updateError) {
       delete update.last_tracked_at;
+      delete update.current_location;
       await supabase.from("lfg_shipments").update(update).eq("id", shipmentId);
     }
   }

@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { MapPin, Pencil, FileText, Lock, Upload, Eye, Trash2, Truck, ArrowLeft, X, ExternalLink, RefreshCw } from "lucide-react";
+import { MapPin, Pencil, FileText, Lock, Upload, Eye, Trash2, Truck, ArrowLeft, X, ExternalLink, RefreshCw, Search } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -13,6 +13,17 @@ import { useToast } from "@/components/ui/Notifications";
 import { useUserRole, canWrite, canDelete } from "@/lib/UserRoleContext";
 import { formatDecimal, formatMm, round2 } from "@/lib/lfg-units";
 import { useLfgDistinctValues } from "@/lib/useLfgDistinctValues";
+
+// Mirrors BLUEDART_PRODUCT_CODES in src/lib/blueDart.ts -- duplicated
+// here (rather than imported) because that module is server-only (reads
+// bare process.env vars, calls Blue Dart directly) and must never be
+// imported from a Client Component like this one.
+const BLUEDART_PRODUCT_CODES = [
+  { code: "A", label: "Air / Apex" },
+  { code: "D", label: "Domestic Priority" },
+  { code: "E", label: "Ground / Surface" },
+  { code: "I", label: "International E-comm" },
+] as const;
 import { supabase } from "@/lib/supabase";
 import {
   LFG_STATUSES,
@@ -182,6 +193,10 @@ export interface ShipmentRow {
   awb_number: string | null;
   dispatch_date: string | null;
   expected_delivery_date: string | null;
+  // Optional column (supabase-lfg-shipments-current-location-migration.sql)
+  // -- set automatically from the most recent Blue Dart scan's location
+  // by the /track route; always null for manually-logged shipments.
+  current_location?: string | null;
   shipment_contents: string | null;
   number_of_packages: number | null;
   package_details: string | null;
@@ -1673,6 +1688,14 @@ export function ShipmentTab({
             value={form.package_details}
             onChange={(e) => setForm((f) => ({ ...f, package_details: e.target.value }))}
           />
+          {/blue\s*dart/i.test(form.courier) && (
+            <div className="col-span-2 sm:col-span-4">
+              <BlueDartDeliveryCheck
+                dispatchDate={form.dispatch_date}
+                onUseDate={(date) => setForm((f) => ({ ...f, expected_delivery_date: date }))}
+              />
+            </div>
+          )}
           <div className="col-span-2 sm:col-span-4">
             <Button size="sm" loading={saving} onClick={handleCreate}>
               Save Shipment
@@ -1688,6 +1711,141 @@ export function ShipmentTab({
           {initialShipments.map((s) => (
             <ShipmentCard key={s.id} shipment={s} editable={editable} onChanged={onChanged} />
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Small self-contained "will Blue Dart deliver here, and by when" helper
+// shown inline in the New Shipment form once the courier field looks
+// like Blue Dart. Calls the two pre-shipment Blue Dart APIs (Location
+// Finder + Transit Time -- distinct from the post-shipment AWB tracking
+// call used elsewhere on this page) via their own API routes, since the
+// Blue Dart client itself is server-only. Origin pincode isn't stored
+// anywhere in this app today, so it's a plain text field here rather
+// than something pre-filled from site/company data.
+function BlueDartDeliveryCheck({ dispatchDate, onUseDate }: { dispatchDate: string; onUseDate: (date: string) => void }) {
+  const { toast } = useToast();
+  const [originPincode, setOriginPincode] = useState("");
+  const [destPincode, setDestPincode] = useState("");
+  const [productCode, setProductCode] = useState<string>(BLUEDART_PRODUCT_CODES[0].code);
+  const [checking, setChecking] = useState(false);
+  const [serviceability, setServiceability] = useState<{
+    isError: boolean;
+    errorMessage: string | null;
+    airAvailable: boolean;
+    groundAvailable: boolean;
+    pincodeDescription: string | null;
+  } | null>(null);
+  const [transit, setTransit] = useState<{
+    isError: boolean;
+    errorMessage: string | null;
+    expectedDeliveryDate: string | null;
+    additionalDays: number | null;
+  } | null>(null);
+
+  async function handleCheck() {
+    if (!/^\d{6}$/.test(originPincode) || !/^\d{6}$/.test(destPincode)) {
+      toast("danger", "Enter a 6-digit origin and destination pincode.");
+      return;
+    }
+    setChecking(true);
+    setServiceability(null);
+    setTransit(null);
+    try {
+      const [svcRes, transitRes] = await Promise.all([
+        fetch("/api/lfg/bluedart/pincode-check", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pincode: destPincode }),
+        }),
+        fetch("/api/lfg/bluedart/transit-time", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            originPincode,
+            destPincode,
+            productCode,
+            pickupDate: dispatchDate || new Date().toISOString().slice(0, 10),
+            pickupTime: "14:00",
+          }),
+        }),
+      ]);
+      const svcData = await svcRes.json();
+      const transitData = await transitRes.json();
+      if (!svcRes.ok) {
+        toast("danger", svcData.message || svcData.error || "Couldn't check serviceability");
+      } else {
+        setServiceability(svcData);
+      }
+      if (!transitRes.ok) {
+        toast("danger", transitData.message || transitData.error || "Couldn't estimate transit time");
+      } else {
+        setTransit(transitData);
+      }
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-dashed border-line bg-canvas p-3">
+      <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-ink-secondary">
+        <Search size={13} />
+        Check Blue Dart delivery estimate
+      </div>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <input
+          placeholder="Origin Pincode"
+          className={inputClass}
+          value={originPincode}
+          onChange={(e) => setOriginPincode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+        />
+        <input
+          placeholder="Destination Pincode"
+          className={inputClass}
+          value={destPincode}
+          onChange={(e) => setDestPincode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+        />
+        <select className={inputClass} value={productCode} onChange={(e) => setProductCode(e.target.value)}>
+          {BLUEDART_PRODUCT_CODES.map((p) => (
+            <option key={p.code} value={p.code}>
+              {p.label}
+            </option>
+          ))}
+        </select>
+        <Button size="sm" variant="secondary" loading={checking} onClick={handleCheck}>
+          Check
+        </Button>
+      </div>
+      {(serviceability || transit) && (
+        <div className="mt-2 flex flex-col gap-1 text-xs text-ink-secondary">
+          {serviceability &&
+            (serviceability.isError ? (
+              <p className="text-danger">Not serviceable: {serviceability.errorMessage ?? "no service at this pincode"}</p>
+            ) : (
+              <p>
+                Serviceable{serviceability.pincodeDescription ? ` (${serviceability.pincodeDescription})` : ""} — Air/Apex:{" "}
+                {serviceability.airAvailable ? "yes" : "no"}, Ground: {serviceability.groundAvailable ? "yes" : "no"}
+              </p>
+            ))}
+          {transit &&
+            (transit.isError ? (
+              <p className="text-danger">Transit time unavailable: {transit.errorMessage ?? "unknown error"}</p>
+            ) : transit.expectedDeliveryDate ? (
+              <div className="flex items-center gap-2">
+                <p>
+                  Estimated delivery: {transit.expectedDeliveryDate}
+                  {transit.additionalDays != null ? ` (${transit.additionalDays} day(s) transit)` : ""}
+                </p>
+                <Button size="sm" variant="ghost" onClick={() => onUseDate(transit.expectedDeliveryDate!)}>
+                  Use this date
+                </Button>
+              </div>
+            ) : (
+              <p>No transit time estimate returned.</p>
+            ))}
         </div>
       )}
     </div>
@@ -1882,6 +2040,7 @@ function ShipmentCard({
             </div>
             <div className="mt-0.5 text-xs text-ink-secondary">
               Dispatched {shipment.dispatch_date ?? "—"} · Expected {shipment.expected_delivery_date ?? "—"}
+              {shipment.current_location && <> · Currently at {shipment.current_location}</>}
             </div>
           </div>
         </div>
