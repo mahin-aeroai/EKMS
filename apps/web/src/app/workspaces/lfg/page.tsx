@@ -6,10 +6,10 @@ import {
   MapPin,
   Search,
   Plus,
-  Trash2,
   X,
   ArrowLeft,
   FolderInput,
+  FolderOutput,
   LayoutGrid,
   List as ListIcon,
   Building2,
@@ -24,7 +24,7 @@ import { Table, type TableColumn } from "@/components/ui/Table";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { useToast } from "@/components/ui/Notifications";
-import { useUserRole, canDelete, canWrite } from "@/lib/UserRoleContext";
+import { useUserRole, canWrite } from "@/lib/UserRoleContext";
 import { supabase } from "@/lib/supabase";
 import { LFG_STATUSES, lfgStatusLabel, lfgFormatPriorityRank } from "@/lib/lfgStatus";
 import { formatMm } from "@/lib/lfg-units";
@@ -142,6 +142,10 @@ interface LfgSiteListRow {
   // for the store filter chip and the "shares a store" indicator below --
   // nothing else on this list reads it.
   store_id: string | null;
+  // Seasonal Program this site currently belongs to, if any -- read here
+  // only to decide whether the row's "Remove from Program" button has
+  // anything to do (see the table columns below).
+  program_id: string | null;
   site_status: string;
   // Derived client-side from site_status (see the mapping in the fetch
   // effect below) -- its own field, not reusing site_status as a table
@@ -258,8 +262,20 @@ export default function LfgSiteListPage() {
   // "keep the filter active all time without collapse." Used to live
   // behind a collapsible "Filters" toggle, defaulting closed; now always
   // rendered, no toggle/state needed.
-  const [deleteTarget, setDeleteTarget] = useState<LfgSiteListRow | null>(null);
-  const [deleting, setDeleting] = useState(false);
+  // Single-row "Remove from Program" (task, 5 Sep 2026: "create moving out
+  // button from a program") -- a light, reversible unassign (program_id ->
+  // null), NOT a delete. Replaces the per-row Trash icon that used to sit
+  // here: that one-click "Delete Permanently" action, at the end of every
+  // row in a big list, was too easy to hit by mistake when someone
+  // actually just wanted a site out of its current Program (Srinivas hit
+  // exactly this confusion). Real permanent delete now lives only on the
+  // site's own Site 360 page (LfgSiteWorkspaceClient.tsx already has its
+  // own identical "Delete Permanently" flow there) -- a more deliberate
+  // place to reach, since you have to actually open the site first,
+  // matching this dialog's own old hint text ("Open the site's own page
+  // first if you want to see what's on it before deleting").
+  const [removeFromProgramTarget, setRemoveFromProgramTarget] = useState<LfgSiteListRow | null>(null);
+  const [removingFromProgram, setRemovingFromProgram] = useState(false);
 
   // Bulk "Move to Program" (task #46) -- row selection + a program picker,
   // admin/editor gated same as everywhere else write access is checked in
@@ -298,44 +314,22 @@ export default function LfgSiteListPage() {
     setMoveProgramId("");
   }
 
-  // Quick cleanup for the empty "Store Master" import stubs and other
-  // one-off junk records found while browsing/searching (see the dedupe
-  // script from task #24 for the bulk version of this same cleanup) --
-  // no live related-data check here the way Site 360's delete dialog has
-  // one, since checking every visible row would mean N extra queries; an
-  // admin who wants that detail opens the site's own page instead. RLS
-  // (lfg_sites_delete_staff, admin-only) is the real boundary either way.
-  async function handleDeleteSite() {
-    if (!deleteTarget) return;
-    setDeleting(true);
-    const { error } = await supabase.from("lfg_sites").delete().eq("id", deleteTarget.id);
+  // The single-row equivalent of handleMoveToProgram above, targeting
+  // "Unassigned" specifically (program_id -> null) for just the one row --
+  // same update, just without needing a checkbox selection first for the
+  // common "take this one site out" case.
+  async function handleRemoveFromProgram() {
+    if (!removeFromProgramTarget) return;
+    setRemovingFromProgram(true);
+    const { error } = await supabase.from("lfg_sites").update({ program_id: null }).eq("id", removeFromProgramTarget.id);
+    setRemovingFromProgram(false);
     if (error) {
-      setDeleting(false);
-      toast("danger", `Couldn't delete ${deleteTarget.site_id}: ${error.message}`);
+      toast("danger", `Couldn't remove ${removeFromProgramTarget.site_id} from its Program: ${error.message}`);
       return;
     }
-    // Clean up the store row too if this was its last remaining site --
-    // left orphaned otherwise, it keeps holding its SFO ID/name forever,
-    // which then blocks any OTHER store from ever claiming that same SFO
-    // ID (lfg_stores.sfo_id is unique where set) -- the exact bug behind
-    // "duplicate key value violates unique constraint lfg_stores_sfo_id_key"
-    // on an unrelated site's save. Best-effort: the site itself is already
-    // deleted either way, so a failure here isn't surfaced as if the whole
-    // delete failed.
-    if (deleteTarget.store_id) {
-      const { count } = await supabase
-        .from("lfg_sites")
-        .select("id", { count: "exact", head: true })
-        .eq("store_id", deleteTarget.store_id);
-      if (!count) {
-        await supabase.from("lfg_stores").delete().eq("id", deleteTarget.store_id);
-      }
-    }
-    setDeleting(false);
-    toast("success", `${deleteTarget.site_id} deleted`);
-    setRows((prev) => prev?.filter((r) => r.id !== deleteTarget.id) ?? prev);
-    setTotalCount((prev) => (prev === null ? prev : prev - 1));
-    setDeleteTarget(null);
+    toast("success", `${removeFromProgramTarget.site_id} removed from its Program`);
+    setRows((prev) => (prev ?? []).map((r) => (r.id === removeFromProgramTarget.id ? { ...r, program_id: null } : r)));
+    setRemoveFromProgramTarget(null);
   }
 
   // Same in-place row update the LFG partner home page's own
@@ -489,7 +483,7 @@ export default function LfgSiteListPage() {
           let q = supabase
             .from("lfg_sites")
             .select(
-              "id, site_id, outlet_name, format, sfo_id, city, state, region, material, mat_code, width, height, bleed, store_id, site_status, number_of_sites, asm_name, partner_id, lfg_partners(name), store_address, site_reference_picture_path, creative_received_at"
+              "id, site_id, outlet_name, format, sfo_id, city, state, region, material, mat_code, width, height, bleed, store_id, program_id, site_status, number_of_sites, asm_name, partner_id, lfg_partners(name), store_address, site_reference_picture_path, creative_received_at"
             )
             // Default sort: SFO/Apple ID ascending, not the internal LFG
             // code -- see this file's header comment. nullsFirst: false so
@@ -648,25 +642,29 @@ export default function LfgSiteListPage() {
     { key: "height", header: "Height (mm)", sortable: true, width: "5rem", render: (r) => formatMm(r.height) },
     { key: "number_of_sites", header: "Qty", sortable: true, width: "3rem" },
     { key: "partner_id", header: "Partner", width: "6rem", render: (r) => partnerName(r) },
-    ...(canDelete(role)
+    ...(editable
       ? [
           {
             key: "id",
             header: "",
             width: "2.75rem",
-            render: (r) => (
-              <Button
-                size="sm"
-                variant="ghost"
-                aria-label={`Delete ${r.site_id}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setDeleteTarget(r);
-                }}
-              >
-                <Trash2 size={14} className="text-danger" />
-              </Button>
-            ),
+            render: (r) =>
+              // Only rendered when the row actually has a Program to come
+              // out of -- nothing to click for an already-unassigned site.
+              r.program_id ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-label={`Remove ${r.site_id} from its Program`}
+                  title="Remove from Program"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setRemoveFromProgramTarget(r);
+                  }}
+                >
+                  <FolderOutput size={14} className="text-ink-secondary" />
+                </Button>
+              ) : null,
           } satisfies TableColumn<SelectableRow>,
         ]
       : []),
@@ -961,18 +959,17 @@ export default function LfgSiteListPage() {
       </Dialog>
 
       <Dialog
-        open={deleteTarget !== null}
-        onClose={() => setDeleteTarget(null)}
-        title={deleteTarget ? `Delete ${deleteTarget.site_id}?` : "Delete site?"}
+        open={removeFromProgramTarget !== null}
+        onClose={() => setRemoveFromProgramTarget(null)}
+        title={removeFromProgramTarget ? `Remove ${removeFromProgramTarget.site_id} from its Program?` : "Remove from Program?"}
         variant="confirm"
-        destructive
-        onConfirm={handleDeleteSite}
-        confirmLabel={deleting ? "Deleting…" : "Delete Permanently"}
+        onConfirm={handleRemoveFromProgram}
+        confirmLabel={removingFromProgram ? "Removing…" : "Remove from Program"}
       >
         <p className="text-sm text-ink-secondary">
-          This permanently deletes <span className="font-medium text-ink">{deleteTarget?.outlet_name}</span> and
-          everything logged against it (surveys, shipments, installation, financials, etc.) — this cannot be undone.
-          Open the site&apos;s own page first if you want to see what&apos;s on it before deleting.
+          <span className="font-medium text-ink">{removeFromProgramTarget?.outlet_name}</span> stays in LFG Connect
+          exactly as it is — this only clears its Program assignment. Move it into any Program again later from here
+          or from the Programs page.
         </p>
       </Dialog>
     </div>
