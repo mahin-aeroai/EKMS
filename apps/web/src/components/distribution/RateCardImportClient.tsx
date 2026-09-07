@@ -1,15 +1,18 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import ExcelJS from "exceljs";
-import { ArrowLeft, FileSpreadsheet, Upload, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, FileSpreadsheet, Search, Upload, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { Table, type TableColumn } from "@/components/ui/Table";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
+import { fetchAllRows } from "@/lib/dashboard-queries";
 import { cellPrimitive } from "@/lib/distribution/excelCellValue";
+import type { DistributionRateCardRow } from "@/lib/distribution/types";
 import {
   RATE_CARD_FIELDS,
   autoMapRateCardHeaders,
@@ -19,6 +22,23 @@ import {
   type RateCardColumnMap,
   type RateCardFieldKey,
 } from "@/lib/distribution/parseRateCard";
+
+function formatRate(v: number | null): string {
+  if (v === null) return "—";
+  return `₹${v.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+}
+
+const RATE_CARD_VIEW_COLUMNS: TableColumn<DistributionRateCardRow>[] = [
+  { key: "sku_id", header: "SKU ID", width: "8rem" },
+  { key: "sku_description", header: "SKU Description", render: (r) => r.sku_description ?? "—" },
+  { key: "category", header: "Category", render: (r) => r.category ?? "—" },
+  { key: "program", header: "Program", render: (r) => r.program ?? "—" },
+  { key: "substrate", header: "Substrate", render: (r) => r.substrate ?? "—" },
+  { key: "width_mm", header: "W (mm)", width: "5rem", render: (r) => r.width_mm ?? "—" },
+  { key: "height_mm", header: "H (mm)", width: "5rem", render: (r) => r.height_mm ?? "—" },
+  { key: "bill_rate_2023", header: "2023 Rate", render: (r) => formatRate(r.bill_rate_2023) },
+  { key: "revised_rate_2026", header: "2026 Rate", render: (r) => formatRate(r.revised_rate_2026) },
+];
 
 const CHUNK_SIZE = 500;
 async function chunkedUpsert(table: string, rows: Record<string, unknown>[], onConflict: string): Promise<{ error: string | null }> {
@@ -41,6 +61,40 @@ export default function RateCardImportClient() {
   const [dataRows, setDataRows] = useState<(string | number | null)[][]>([]);
   const [columnMap, setColumnMap] = useState<RateCardColumnMap>({});
   const [submitting, setSubmitting] = useState(false);
+
+  // The current Rate Card, as already loaded in the DB -- shown so Srinivas
+  // can check pricing/size/description are actually right without having
+  // to trust the import blindly. Refetched after a successful import below.
+  const [rateCards, setRateCards] = useState<DistributionRateCardRow[]>([]);
+  const [loadingRateCards, setLoadingRateCards] = useState(true);
+  const [rateCardSearch, setRateCardSearch] = useState("");
+
+  async function loadRateCards() {
+    setLoadingRateCards(true);
+    try {
+      const rows = await fetchAllRows<DistributionRateCardRow>((from, to) =>
+        supabase.from("distribution_rate_card").select("*").order("sku_id", { ascending: true }).range(from, to)
+      );
+      setRateCards(rows);
+    } finally {
+      setLoadingRateCards(false);
+    }
+  }
+
+  useEffect(() => {
+    // Run once on mount -- loadRateCards is re-invoked explicitly (not via
+    // a dependency) after a successful import instead.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadRateCards();
+  }, []);
+
+  const filteredRateCards = useMemo(() => {
+    const q = rateCardSearch.trim().toLowerCase();
+    if (!q) return rateCards;
+    return rateCards.filter((r) =>
+      [r.sku_id, r.sku_description, r.category, r.program, r.substrate].some((v) => (v ?? "").toLowerCase().includes(q))
+    );
+  }, [rateCards, rateCardSearch]);
 
   const parsed = useMemo(() => (headerRow ? parseRateCardRows(dataRows, columnMap) : null), [headerRow, dataRows, columnMap]);
   const missing = useMemo(() => missingRequiredRateCardFields(columnMap), [columnMap]);
@@ -125,7 +179,12 @@ export default function RateCardImportClient() {
       }
 
       toast("success", `Imported ${rows.length} Rate Card SKUs.`);
-      router.push("/workspaces/distribution");
+      setHeaderRow(null);
+      setDataRows([]);
+      setColumnMap({});
+      setFileName(null);
+      setSubmitting(false);
+      await loadRateCards();
     } catch (err) {
       toast("danger", `Import failed: ${err instanceof Error ? err.message : String(err)}`);
       setSubmitting(false);
@@ -144,15 +203,47 @@ export default function RateCardImportClient() {
 
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-ink">Import Rate Card</h1>
+          <h1 className="text-xl font-semibold text-ink">Rate Card</h1>
           <p className="text-sm text-ink-secondary">
-            Upload MMDI&apos;s Master Rate Card — re-importing revises pricing for every SKU it contains (matched by SKU ID);
-            it doesn&apos;t touch SKUs the new file doesn&apos;t mention.
+            MMDI&apos;s current pricing and sizes, and where to import or revise them from Apple&apos;s Master Rate Card.
           </p>
         </div>
         <Button variant="ghost" size="sm" onClick={() => router.push("/workspaces/distribution")}>
           <ArrowLeft size={14} /> Back to Distribution
         </Button>
+      </div>
+
+      <div className="rounded-lg border border-line bg-surface p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-ink">Current Rate Card</span>
+            <Badge>{rateCards.length} SKUs</Badge>
+          </div>
+          <div className="flex items-center gap-2 rounded-md border border-line bg-surface-sunken px-2 py-1">
+            <Search size={13} className="text-ink-muted" />
+            <input
+              value={rateCardSearch}
+              onChange={(e) => setRateCardSearch(e.target.value)}
+              placeholder="Search SKU ID, description, category, program, or substrate"
+              className="w-72 bg-transparent text-xs text-ink outline-none placeholder:text-ink-muted"
+            />
+          </div>
+        </div>
+        {loadingRateCards ? (
+          <p className="py-10 text-center text-sm text-ink-muted">Loading…</p>
+        ) : rateCards.length === 0 ? (
+          <p className="py-10 text-center text-sm text-ink-muted">No Rate Card imported yet — upload one below.</p>
+        ) : (
+          <Table columns={RATE_CARD_VIEW_COLUMNS} rows={filteredRateCards} density="compact" />
+        )}
+      </div>
+
+      <div>
+        <h2 className="text-base font-semibold text-ink">Import / update</h2>
+        <p className="text-sm text-ink-secondary">
+          Upload MMDI&apos;s Master Rate Card — this revises pricing for every SKU the file contains (matched by SKU ID);
+          it doesn&apos;t touch SKUs the new file doesn&apos;t mention.
+        </p>
       </div>
 
       <div className="rounded-lg border border-line bg-surface p-4">
