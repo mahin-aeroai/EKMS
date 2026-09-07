@@ -9,11 +9,13 @@ import {
   ArrowLeftRight,
   FileClock,
   Users,
+  Receipt,
   type LucideIcon,
 } from "lucide-react";
 
 // Shared top nav for every LFG Connect page (Site Master, Dashboard,
-// Programs, Stores, Status Sheet, Activity Log, Partners) -- built per the
+// Programs, Stores, Estimates, Status Sheet, Activity Log, Partners) --
+// built per the
 // reference mockup the user supplied ("alter the menu design like this")
 // showing stacked icon-over-label tiles in a single bordered segmented
 // container, with the current section highlighted. Replaces the old
@@ -38,6 +40,7 @@ const TABS: { label: string; href: string; icon: LucideIcon; exact?: boolean }[]
   { label: "Dashboard", href: "/workspaces/lfg/dashboard", icon: LayoutDashboard },
   { label: "Programs", href: "/workspaces/lfg/programs", icon: CalendarRange },
   { label: "Stores", href: "/workspaces/lfg/stores", icon: StoreIcon },
+  { label: "Estimates", href: "/workspaces/lfg/estimates", icon: Receipt },
   { label: "Status Sheet", href: "/workspaces/lfg/status-sheet", icon: ArrowLeftRight },
   { label: "Activity Log", href: "/workspaces/lfg/activity", icon: FileClock },
   { label: "Partners", href: "/workspaces/lfg/partners", icon: Users },
