@@ -9,6 +9,7 @@ import { normalizeHeader } from "./parseDistributionBrief";
 
 export type RateCardFieldKey =
   | "skuId"
+  | "skuDescription"
   | "category"
   | "program"
   | "substrate"
@@ -32,16 +33,25 @@ export interface RateCardFieldDef {
 // (e.g. "GSM Approval Name") repeat under both the 2023 and 2026 sections --
 // autoMapRateCardHeaders below takes the first match for those, which is
 // fine since the duplicated columns carry the same value either way.
+// Neither price column is universally present -- MMDI's full Master Rate
+// Card carries both a 2023 Bill Rate and a 2026 Revised Rate, but a
+// simplified/per-program rate card (e.g. one built just for Apple's GPF
+// distribution SKUs) may only carry the current price under a plain
+// "Revised Rate (INR) Each" header with no Bill Rate column at all. The
+// app always prefers the 2026 rate when both exist (resolvePartRates in
+// erpInputExport.ts), so that's the one actually required for a usable
+// import; Bill Rate is kept for reference only.
 export const RATE_CARD_FIELDS: RateCardFieldDef[] = [
   { key: "skuId", label: "SKU ID", candidates: ["sku id"], required: true },
+  { key: "skuDescription", label: "SKU Description", candidates: ["sku description"] },
   { key: "category", label: "Category", candidates: ["category"] },
   { key: "program", label: "Program", candidates: ["program"] },
   { key: "substrate", label: "Substrate", candidates: ["substrate"] },
   { key: "unit", label: "Unit", candidates: ["unit"] },
   { key: "widthMm", label: "Width (mm)", candidates: ["width (mm)"] },
   { key: "heightMm", label: "Height (mm)", candidates: ["height (mm)"] },
-  { key: "billRate2023", label: "Bill Rate (2023)", candidates: ["bill rate"], required: true },
-  { key: "revisedRate2026", label: "Revised Rate (2026)", candidates: ["revised rate (inr) each"] },
+  { key: "billRate2023", label: "Bill Rate (2023)", candidates: ["bill rate"] },
+  { key: "revisedRate2026", label: "Revised Rate (2026)", candidates: ["revised rate (inr) each"], required: true },
   { key: "gsmApprovalName", label: "GSM Approval Name", candidates: ["gsm approval name"] },
   { key: "remarks", label: "Remarks", candidates: ["remarks"] },
 ];
@@ -74,6 +84,7 @@ export function missingRequiredRateCardFields(map: RateCardColumnMap): RateCardF
 
 export interface RateCardParsedRow {
   skuId: string;
+  skuDescription: string | null;
   category: string | null;
   program: string | null;
   substrate: string | null;
@@ -114,6 +125,7 @@ export function parseRateCardRows(dataRows: unknown[][], map: RateCardColumnMap)
     }
     rows.push({
       skuId,
+      skuDescription: textOf(row, map, "skuDescription"),
       category: textOf(row, map, "category"),
       program: textOf(row, map, "program"),
       substrate: textOf(row, map, "substrate"),

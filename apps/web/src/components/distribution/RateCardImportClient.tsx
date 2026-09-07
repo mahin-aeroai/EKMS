@@ -103,6 +103,7 @@ export default function RateCardImportClient() {
     try {
       const rows = parsed.rows.map((r) => ({
         sku_id: r.skuId,
+        sku_description: r.skuDescription,
         category: r.category,
         program: r.program,
         substrate: r.substrate,

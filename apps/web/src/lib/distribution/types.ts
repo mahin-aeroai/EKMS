@@ -86,6 +86,7 @@ export interface DistributionShipmentRow {
 export interface DistributionRateCardRow {
   id: string;
   sku_id: string;
+  sku_description: string | null;
   category: string | null;
   program: string | null;
   substrate: string | null;
