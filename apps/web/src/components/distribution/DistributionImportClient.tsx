@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
+import { cellPrimitive } from "@/lib/distribution/excelCellValue";
 import {
   DISTRIBUTION_FIELDS,
   autoMapHeaders,
@@ -18,27 +19,6 @@ import {
   type DistributionFieldKey,
   type ParseResult,
 } from "@/lib/distribution/parseDistributionBrief";
-
-// Apple's own cell values come through exceljs as plain strings/numbers for
-// this workbook, but exceljs can hand back richer shapes (rich text runs, a
-// formula's cached {result}, a hyperlink object) for other cells -- this
-// keeps the parser's input to plain primitives regardless of which shape a
-// given cell happens to be.
-function cellPrimitive(value: ExcelJS.CellValue): string | number | null {
-  if (value === null || value === undefined) return null;
-  if (typeof value === "string" || typeof value === "number") return value;
-  if (value instanceof Date) return value.toISOString();
-  if (typeof value === "object") {
-    if ("richText" in value && Array.isArray(value.richText)) {
-      return value.richText.map((r) => r.text).join("");
-    }
-    if ("result" in value && value.result !== undefined) return cellPrimitive(value.result as ExcelJS.CellValue);
-    if ("text" in value && typeof (value as { text?: unknown }).text === "string") {
-      return (value as { text: string }).text;
-    }
-  }
-  return String(value);
-}
 
 interface SheetData {
   name: string;
