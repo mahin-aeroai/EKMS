@@ -18,8 +18,8 @@ import { LfgConnectNavBar } from "./LfgConnectNavBar";
 // line" bug. Splitting into two rows removes that fight for space
 // entirely: the action button always sits at the top right next to the
 // title, never below the nav strip, on every viewport width. Every LFG
-// Connect page (Site Master, Dashboard, Programs, Stores, Status Sheet,
-// Activity Log, Partners) renders this instead of its own one-off title
+// Connect page (Site Master, Dashboard, Programs, Stores, Estimates,
+// Status Sheet, Activity Log, Partners) renders this instead of its own one-off title
 // block + button row, so the "menu design" reads identically everywhere.
 // Site 360 (workspaces/lfg/sites/[id]) deliberately does NOT use this --
 // it's a record detail page, not a section of the module nav.
