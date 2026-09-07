@@ -14,12 +14,13 @@
 // instruction to use the revised price going forward).
 
 import ExcelJS from "exceljs";
-import { classifyHub, isAgencySparesStore, type HubKey } from "./oversList";
+import { buildOversList, classifyHub, isAgencySparesStore, type HubKey } from "./oversList";
 import { masterPartSku2, masterPartSku3 } from "./skuCodes";
 import type { DistributionRateCardRow, DistributionStoreWithItems } from "./types";
 
 const HUB_DISPLAY: Record<HubKey, string> = { Ban: "Bangalore", Mum: "Mumbai", Del: "Delhi" };
 const HUB_ORDER: HubKey[] = ["Ban", "Mum", "Del"];
+const HUB_OVERS_FIELD: Record<HubKey, "ban" | "mum" | "del"> = { Ban: "ban", Mum: "mum", Del: "del" };
 
 export interface PartRateInfo {
   program: string | null;
@@ -36,31 +37,36 @@ export async function buildErpInputWorkbook(
   partRateByMasterPartNumber: Map<string, PartRateInfo>,
   masterPartNumberByPart: Map<string, string | null>
 ): Promise<Blob> {
-  // Store Qty (real stores) and Overs (spares) per (hub, part number) --
-  // same hub classification / spares detection as the Overs List, so the
-  // two exports always agree on what counts as which.
+  // Store Qty (real stores) per (hub, part number). Overs/spares are NOT
+  // computed here anymore -- they come from buildOversList() below, the
+  // same function the Overs List export itself calls, so the two exports
+  // can never disagree on which parts have spares or how they're split
+  // across Ban/Mum/Del again (this divergence was Finding #2).
   const storeQty: Record<HubKey, Map<string, number>> = { Ban: new Map(), Mum: new Map(), Del: new Map() };
-  const oversQty: Record<HubKey, Map<string, number>> = { Ban: new Map(), Mum: new Map(), Del: new Map() };
 
   function add(map: Map<string, number>, key: string, qty: number) {
     map.set(key, (map.get(key) ?? 0) + qty);
   }
 
   for (const store of stores) {
+    if (isAgencySparesStore(store)) continue; // spares are handled by buildOversList below
     const hub = classifyHub(store.shipping_city);
-    if (!hub) continue; // shipping city didn't resolve to a known KNN hub -- skip rather than guess
-    const spares = isAgencySparesStore(store);
+    // Every real store's shipping city in today's data is one of the 3 KNN
+    // hub cities themselves, so this always classifies -- skip rather than
+    // guess if a future season ever ships from elsewhere.
+    if (!hub) continue;
     for (const item of store.items) {
       const part = item.part_number ?? "—";
-      add(spares ? oversQty[hub] : storeQty[hub], part, item.quantity);
+      add(storeQty[hub], part, item.quantity);
     }
   }
 
+  const oversRows = buildOversList(stores);
+  const oversByPart = new Map(oversRows.map((r) => [r.partNumber, r]));
+
   const allParts = new Set<string>();
-  for (const hub of HUB_ORDER) {
-    for (const p of storeQty[hub].keys()) allParts.add(p);
-    for (const p of oversQty[hub].keys()) allParts.add(p);
-  }
+  for (const hub of HUB_ORDER) for (const p of storeQty[hub].keys()) allParts.add(p);
+  for (const p of oversByPart.keys()) allParts.add(p);
   const sortedParts = [...allParts].sort((a, b) => a.localeCompare(b));
 
   const workbook = new ExcelJS.Workbook();
@@ -97,7 +103,8 @@ export async function buildErpInputWorkbook(
   for (const hub of HUB_ORDER) {
     for (const part of sortedParts) {
       const sq = storeQty[hub].get(part) ?? 0;
-      const ov = oversQty[hub].get(part) ?? 0;
+      const oversRow = oversByPart.get(part);
+      const ov = oversRow ? oversRow[HUB_OVERS_FIELD[hub]] : 0;
       if (sq === 0 && ov === 0) continue;
 
       const masterPart = masterPartNumberByPart.get(part) ?? null;

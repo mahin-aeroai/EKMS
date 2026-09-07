@@ -9,6 +9,7 @@ import { Badge, type BadgeStatus } from "@/components/ui/Badge";
 import { Table, type TableColumn } from "@/components/ui/Table";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
+import { fetchAllRows } from "@/lib/dashboard-queries";
 import { buildDistributionLabelsDocx, downloadBlob } from "@/lib/distribution/labelDocx";
 import { buildDbListWorkbook } from "@/lib/distribution/dbListExport";
 import { buildOversListWorkbook } from "@/lib/distribution/oversListExport";
@@ -75,14 +76,20 @@ export default function DistributionWorkspaceClient() {
       if (!seasonId && data && data.length > 0) setSeasonId(data[0].id as string);
     })();
     (async () => {
-      const [{ data: rateCardData, error: rateCardError }, { data: mapData, error: mapError }] = await Promise.all([
-        supabase.from("distribution_rate_card").select("*"),
-        supabase.from("distribution_item_type_rate_map").select("*"),
-      ]);
-      if (rateCardError) toast("danger", `Couldn't load Rate Card: ${rateCardError.message}`);
-      else setRateCards((rateCardData as DistributionRateCardRow[]) ?? []);
-      if (mapError) toast("danger", `Couldn't load Item Type mapping: ${mapError.message}`);
-      else setItemTypeMap((mapData as DistributionItemTypeRateMapRow[]) ?? []);
+      try {
+        const [rateCardData, mapData] = await Promise.all([
+          fetchAllRows<DistributionRateCardRow>((from, to) =>
+            supabase.from("distribution_rate_card").select("*").order("sku_id", { ascending: true }).range(from, to)
+          ),
+          fetchAllRows<DistributionItemTypeRateMapRow>((from, to) =>
+            supabase.from("distribution_item_type_rate_map").select("*").order("item_type", { ascending: true }).range(from, to)
+          ),
+        ]);
+        setRateCards(rateCardData);
+        setItemTypeMap(mapData);
+      } catch (err) {
+        toast("danger", `Couldn't load Rate Card / Item Type mapping: ${err instanceof Error ? err.message : String(err)}`);
+      }
     })();
     // Run once on mount only -- seasonId is read here purely to avoid
     // clobbering a season already picked from the URL; toast is stable.
@@ -99,43 +106,48 @@ export default function DistributionWorkspaceClient() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     (async () => {
-      const { data: storeRows, error: storeError } = await supabase
-        .from("distribution_stores")
-        .select("*")
-        .eq("season_id", seasonId)
-        .order("sl_no", { ascending: true });
+      try {
+        // Paginated via fetchAllRows -- a season can have 200+ stores, which
+        // is under PostgREST's 1000-row cap today but this stays correct as
+        // seasons grow. See the distribution_items fetch below for the case
+        // that actually hit the cap.
+        const typedStores = await fetchAllRows<DistributionStoreRow>((from, to) =>
+          supabase.from("distribution_stores").select("*").eq("season_id", seasonId).order("sl_no", { ascending: true }).range(from, to)
+        );
+        setStores(typedStores);
 
-      if (storeError) {
-        toast("danger", `Couldn't load stores: ${storeError.message}`);
+        const storeIds = typedStores.map((s) => s.id);
+        if (storeIds.length === 0) {
+          setItemsByStore(new Map());
+          setLoading(false);
+          return;
+        }
+
+        // CRITICAL: a plain `.select("*").in("store_id", storeIds)` here
+        // silently truncated at PostgREST's 1000-row default cap for any
+        // season with more than 1000 line items (Fall 2026 has 1252), and
+        // with no `.order()` clause the ~1000 rows returned were not even
+        // stable across repeated loads -- this is what caused the Overs
+        // List and ERP Input List to disagree on which spares/items exist.
+        // fetchAllRows + an explicit order fixes both the truncation and
+        // the non-determinism. See dashboard-queries.ts's own fetchAllRows
+        // doc comment for the prior incidents this exact bug class caused.
+        const itemRows = await fetchAllRows<DistributionItemRow>((from, to) =>
+          supabase.from("distribution_items").select("*").in("store_id", storeIds).order("id", { ascending: true }).range(from, to)
+        );
+
+        const map = new Map<string, DistributionItemRow[]>();
+        for (const item of itemRows) {
+          const list = map.get(item.store_id) ?? [];
+          list.push(item);
+          map.set(item.store_id, list);
+        }
+        setItemsByStore(map);
+      } catch (err) {
+        toast("danger", `Couldn't load stores/line items: ${err instanceof Error ? err.message : String(err)}`);
+      } finally {
         setLoading(false);
-        return;
       }
-
-      const typedStores = (storeRows as DistributionStoreRow[]) ?? [];
-      setStores(typedStores);
-
-      const storeIds = typedStores.map((s) => s.id);
-      if (storeIds.length === 0) {
-        setItemsByStore(new Map());
-        setLoading(false);
-        return;
-      }
-
-      const { data: itemRows, error: itemError } = await supabase.from("distribution_items").select("*").in("store_id", storeIds);
-      if (itemError) {
-        toast("danger", `Couldn't load line items: ${itemError.message}`);
-        setLoading(false);
-        return;
-      }
-
-      const map = new Map<string, DistributionItemRow[]>();
-      for (const item of (itemRows as DistributionItemRow[]) ?? []) {
-        const list = map.get(item.store_id) ?? [];
-        list.push(item);
-        map.set(item.store_id, list);
-      }
-      setItemsByStore(map);
-      setLoading(false);
     })();
   }, [seasonId, toast]);
 
