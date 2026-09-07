@@ -35,6 +35,7 @@ export async function buildDistributionLabelsDocx(stores: DistributionStoreWithI
             italics: true,
             underline: { type: UnderlineType.SINGLE },
             size: 18, // 9pt
+            font: "Calibri",
           }),
         ],
       }),
@@ -45,37 +46,38 @@ export async function buildDistributionLabelsDocx(stores: DistributionStoreWithI
             bold: true,
             underline: { type: UnderlineType.SINGLE },
             size: 44, // 22pt
+            font: "Calibri",
           }),
         ],
       }),
       new Paragraph({
         children: [
-          new TextRun({ text: "SFO ID: ", size: 44 }),
-          new TextRun({ text: store.sfo_id, size: 44 }),
+          new TextRun({ text: "SFO ID: ", size: 44, font: "Calibri" }),
+          new TextRun({ text: store.sfo_id, size: 44, font: "Calibri" }),
         ],
       }),
       new Paragraph({
         children: [
-          new TextRun({ text: "Apple ID: ", size: 44 }),
-          new TextRun({ text: store.apple_id ?? "—", bold: true, size: 44 }),
+          new TextRun({ text: "Apple ID: ", size: 44, font: "Calibri" }),
+          new TextRun({ text: store.apple_id ?? "—", bold: true, size: 44, font: "Calibri" }),
         ],
       }),
       new Paragraph({
         children: [
-          new TextRun({ text: "Program: ", size: 44 }),
-          new TextRun({ text: store.programme ?? "—", bold: true, size: 44 }),
+          new TextRun({ text: "Program: ", size: 44, font: "Calibri" }),
+          new TextRun({ text: store.programme ?? "—", bold: true, size: 44, font: "Calibri" }),
         ],
       }),
       new Paragraph({
         spacing: { before: 200 },
         children: [
-          new TextRun({ text: "Part #: ", bold: true, size: 36 }), // 18pt
-          new TextRun({ text: partsLine(store.items), bold: true, size: 36 }),
+          new TextRun({ text: "Part #: ", bold: true, size: 36, font: "Calibri" }), // 18pt
+          new TextRun({ text: partsLine(store.items), bold: true, size: 36, font: "Calibri" }),
         ],
       }),
       new Paragraph({
         spacing: { before: 200 },
-        children: [new TextRun({ text: `Total units in this box: ${totalUnits}`, italics: true, size: 20 })], // 10pt
+        children: [new TextRun({ text: `Total units in this box: ${totalUnits}`, italics: true, size: 20, font: "Calibri" })], // 10pt
       })
     );
     if (i < sorted.length - 1) {
