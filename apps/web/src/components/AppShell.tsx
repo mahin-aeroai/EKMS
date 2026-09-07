@@ -44,6 +44,7 @@ import {
   MapPin,
   ClipboardCheck,
   Database,
+  PackageOpen,
 } from "lucide-react";
 import { Sidebar, type SidebarSection } from "@/components/ui/Sidebar";
 import { TopNav } from "@/components/ui/TopNav";
@@ -181,6 +182,11 @@ export const NAV: SidebarSection[] = [
       { id: "cost-sheet", label: "Cost Sheet", icon: <Layers size={16} />, href: "/workspaces/cost-sheet" },
       { id: "material-ordering", label: "Material Ordering", icon: <PackageCheck size={16} />, href: "/workspaces/material-ordering" },
       { id: "import-duty", label: "Import Duty", icon: <Ship size={16} />, href: "/workspaces/import-duty" },
+      // Apple seasonal distribution job -- import Apple's Distribution Brief
+      // sheet, generate store-wise packing labels, track pack/ship status,
+      // and log the (manual, no-API) handoff to KNN's 3 hub cities. See
+      // supabase-distribution-schema.sql.
+      { id: "distribution", label: "Distribution", icon: <PackageOpen size={16} />, href: "/workspaces/distribution" },
       // Staff-side (admin/editor/viewer) Site Master + Site 360 view for
       // the LFG Connect program -- NOT the same surface as /lfg/(app)/, which
       // is the separate lfg_partner-only external portal (lfgconnect.mmdi.in,

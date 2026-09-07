@@ -19,7 +19,7 @@ import { createContext, useContext } from "react";
  * Tool ids match AppShell.tsx's NAV Tools section `id` fields: site-surveys,
  * site-survey-report, sign-estimator, installation-report, cut-file-tool,
  * qr-label-tool, estimate-builder, cost-sheet, material-ordering,
- * import-duty.
+ * import-duty, distribution.
  */
 export const UserToolsContext = createContext<string[] | null>(null);
 
