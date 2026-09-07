@@ -1,34 +1,21 @@
-// Builds store-wise packing labels for a Distribution season -- two labels
-// per A4 sheet (stacked, separated by a dashed cut line), printed and cut
-// in half to fix to each packed box. Started as a one-off Fall 2026 label
-// script (docx-js, reverse-engineered from Spring 2026's Word mail-merge
-// template, DB_GPF_Store_Label_Spring_2026_01.docx); A4 confirmed as the
-// right page size (the Spring template itself is A4, not A5, despite the
-// "A5" mentioned when this was scoped -- see Srinivas's own "Label page
-// size" answer, Sept 2026). Reworked (Sept 2026) per his direct feedback on
-// the live-app output: no more dot-leader part-number line -- part numbers
-// are laid out as a clean two-column grid -- and two labels now share one
-// A4 sheet instead of one label per full sheet.
+// Builds store-wise packing labels for a Distribution season -- one label
+// per A4 page, printed and applied to each packed box. Started as a one-off
+// Fall 2026 label script (docx-js, reverse-engineered from Spring 2026's
+// Word mail-merge template, DB_GPF_Store_Label_Spring_2026_01.docx); A4
+// confirmed as the right page size (the Spring template itself is A4, not
+// A5, despite the "A5" mentioned when this was scoped -- see Srinivas's own
+// "Label page size" answer, Sept 2026). Reworked (Sept 2026) per his direct
+// feedback on the live-app output: no more dot-leader part-number line --
+// part numbers are laid out as a clean two-column grid. Two-per-sheet
+// pairing was tried and then explicitly reverted per Srinivas, after seeing
+// the live-app output: "I need 1 lable per page" -- back to one label per
+// full A4 page, keeping the no-dots grid and the big Calibri 22pt/18pt
+// fonts from that same round of feedback.
 
-import {
-  BorderStyle,
-  Document,
-  Packer,
-  PageBreak,
-  Paragraph,
-  Table,
-  TableCell,
-  TableRow,
-  TextRun,
-  WidthType,
-  AlignmentType,
-  UnderlineType,
-} from "docx";
-import { isAgencySparesStore } from "./oversList";
+import { Document, Packer, PageBreak, Paragraph, Table, TableCell, TableRow, TextRun, WidthType, AlignmentType, UnderlineType, BorderStyle } from "docx";
 import { displayStoreName, type DistributionStoreWithItems } from "./types";
 
-// A4 in DXA, 0.5" margins on every side -- tighter than the old 1" margins
-// so two labels comfortably share one sheet.
+// A4 in DXA, 0.5" margins on every side.
 const PAGE_WIDTH = 11906;
 const PAGE_HEIGHT = 16838;
 const MARGIN = 720;
@@ -97,7 +84,7 @@ function buildPartsTable(items: DistributionStoreWithItems["items"]): Table {
   });
 }
 
-/** One store's label content -- half of an A4 sheet. */
+/** One store's label content -- a full A4 page. */
 function buildStoreBlock(store: DistributionStoreWithItems): (Paragraph | Table)[] {
   const totalUnits = store.items.reduce((n, it) => n + it.quantity, 0);
   return [
@@ -155,50 +142,17 @@ function buildStoreBlock(store: DistributionStoreWithItems): (Paragraph | Table)
   ];
 }
 
-/** Dashed rule between the two labels sharing a sheet -- a cut guide. */
-function cutLine(): Paragraph {
-  return new Paragraph({
-    spacing: { before: 260, after: 260 },
-    border: { bottom: { style: BorderStyle.DASHED, size: 6, color: "999999", space: 4 } },
-    children: [],
-  });
-}
-
 export async function buildDistributionLabelsDocx(stores: DistributionStoreWithItems[]): Promise<Blob> {
   const sorted = [...stores].sort((a, b) => (a.sl_no ?? 0) - (b.sl_no ?? 0));
 
-  // Group into pages: two ordinary stores share a sheet (cut in half), but
-  // an Agency Spares pseudo-store gets a full page to itself -- its part
-  // list runs to 50-75+ line items (it's a bulk hub manifest, not a single
-  // box label), so pairing it with a normal store like every other pair
-  // would blow past half a page and misalign every pairing after it.
-  const pageGroups: DistributionStoreWithItems[][] = [];
-  let pendingPair: DistributionStoreWithItems[] = [];
-  for (const store of sorted) {
-    if (isAgencySparesStore(store)) {
-      if (pendingPair.length > 0) {
-        pageGroups.push(pendingPair);
-        pendingPair = [];
-      }
-      pageGroups.push([store]);
-      continue;
-    }
-    pendingPair.push(store);
-    if (pendingPair.length === 2) {
-      pageGroups.push(pendingPair);
-      pendingPair = [];
-    }
-  }
-  if (pendingPair.length > 0) pageGroups.push(pendingPair);
-
+  // One label per full A4 page -- per Srinivas's direct feedback on the
+  // live-app output ("I need 1 lable per page"), reverting the earlier
+  // two-per-sheet layout. Every store, Agency Spares pseudo-stores
+  // included, gets its own page.
   const children: (Paragraph | Table)[] = [];
-  pageGroups.forEach((group, i) => {
-    children.push(...buildStoreBlock(group[0]));
-    if (group[1]) {
-      children.push(cutLine());
-      children.push(...buildStoreBlock(group[1]));
-    }
-    if (i < pageGroups.length - 1) {
+  sorted.forEach((store, i) => {
+    children.push(...buildStoreBlock(store));
+    if (i < sorted.length - 1) {
       children.push(new Paragraph({ children: [new PageBreak()] }));
     }
   });
