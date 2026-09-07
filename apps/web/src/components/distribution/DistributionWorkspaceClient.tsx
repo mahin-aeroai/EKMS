@@ -2,15 +2,27 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FileDown, Package, Plus, Search } from "lucide-react";
+import { AlertTriangle, FileDown, Package, Plus, Search, Tags } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Button } from "@/components/ui/Button";
 import { Badge, type BadgeStatus } from "@/components/ui/Badge";
 import { Table, type TableColumn } from "@/components/ui/Table";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
-import { buildDistributionLabelsPdf, downloadBlob } from "@/lib/distribution/labelPdf";
-import { displayStoreName, type DistributionItemRow, type DistributionPackStatus, type DistributionSeasonRow, type DistributionStoreRow } from "@/lib/distribution/types";
+import { buildDistributionLabelsDocx, downloadBlob } from "@/lib/distribution/labelDocx";
+import { buildDbListWorkbook } from "@/lib/distribution/dbListExport";
+import { buildOversListWorkbook } from "@/lib/distribution/oversListExport";
+import { buildErpInputWorkbook, resolvePartRates } from "@/lib/distribution/erpInputExport";
+import {
+  displayStoreName,
+  type DistributionItemRow,
+  type DistributionItemTypeRateMapRow,
+  type DistributionPackStatus,
+  type DistributionRateCardRow,
+  type DistributionSeasonRow,
+  type DistributionStoreRow,
+  type DistributionStoreWithItems,
+} from "@/lib/distribution/types";
 
 const PACK_STATUS_BADGE: Record<DistributionPackStatus, BadgeStatus> = {
   pending: "neutral",
@@ -21,6 +33,10 @@ const PACK_STATUS_BADGE: Record<DistributionPackStatus, BadgeStatus> = {
 
 interface StoreRow extends DistributionStoreRow {
   itemCount: number;
+}
+
+function slugifyFilename(name: string): string {
+  return (name.replace(/[^\w -]+/g, "").trim() || "distribution").replace(/\s+/g, "_");
 }
 
 export default function DistributionWorkspaceClient() {
@@ -39,7 +55,14 @@ export default function DistributionWorkspaceClient() {
   const [itemsByStore, setItemsByStore] = useState<Map<string, DistributionItemRow[]>>(new Map());
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
-  const [generating, setGenerating] = useState<string | null>(null); // "season" | store id | null
+  const [generating, setGenerating] = useState<string | null>(null); // "season" | "db" | "overs" | "erp" | store id | null
+
+  // Rate Card + Item Type mapping -- not season-scoped, loaded once. Drives
+  // the ERP Input List's Program/Substrate/Rate columns (see
+  // erpInputExport.ts) and the "map any new Item Types" panel below.
+  const [rateCards, setRateCards] = useState<DistributionRateCardRow[]>([]);
+  const [itemTypeMap, setItemTypeMap] = useState<DistributionItemTypeRateMapRow[]>([]);
+  const [savingMapping, setSavingMapping] = useState<string | null>(null); // item_type currently being saved
 
   useEffect(() => {
     (async () => {
@@ -50,6 +73,16 @@ export default function DistributionWorkspaceClient() {
       }
       setSeasons((data as DistributionSeasonRow[]) ?? []);
       if (!seasonId && data && data.length > 0) setSeasonId(data[0].id as string);
+    })();
+    (async () => {
+      const [{ data: rateCardData, error: rateCardError }, { data: mapData, error: mapError }] = await Promise.all([
+        supabase.from("distribution_rate_card").select("*"),
+        supabase.from("distribution_item_type_rate_map").select("*"),
+      ]);
+      if (rateCardError) toast("danger", `Couldn't load Rate Card: ${rateCardError.message}`);
+      else setRateCards((rateCardData as DistributionRateCardRow[]) ?? []);
+      if (mapError) toast("danger", `Couldn't load Item Type mapping: ${mapError.message}`);
+      else setItemTypeMap((mapData as DistributionItemTypeRateMapRow[]) ?? []);
     })();
     // Run once on mount only -- seasonId is read here purely to avoid
     // clobbering a season already picked from the URL; toast is stable.
@@ -111,6 +144,11 @@ export default function DistributionWorkspaceClient() {
     router.replace(`/workspaces/distribution?season=${id}`, { scroll: false });
   }
 
+  const storesWithItems: DistributionStoreWithItems[] = useMemo(
+    () => stores.map((s) => ({ ...s, items: itemsByStore.get(s.id) ?? [] })),
+    [stores, itemsByStore]
+  );
+
   const rows: StoreRow[] = useMemo(() => {
     const q = search.trim().toLowerCase();
     return stores
@@ -137,17 +175,88 @@ export default function DistributionWorkspaceClient() {
 
   const season = seasons.find((s) => s.id === seasonId) ?? null;
 
+  const rateCardBySkuId = useMemo(() => new Map(rateCards.map((r) => [r.sku_id, r])), [rateCards]);
+  const itemTypeToSkuId = useMemo(
+    () => new Map(itemTypeMap.filter((m) => m.rate_card_sku_id).map((m) => [m.item_type, m.rate_card_sku_id as string])),
+    [itemTypeMap]
+  );
+  const rateResolution = useMemo(
+    () => resolvePartRates(storesWithItems, itemTypeToSkuId, rateCardBySkuId),
+    [storesWithItems, itemTypeToSkuId, rateCardBySkuId]
+  );
+
+  async function saveItemTypeMapping(itemType: string, skuId: string) {
+    setSavingMapping(itemType);
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      const { error } = await supabase
+        .from("distribution_item_type_rate_map")
+        .upsert({ item_type: itemType, rate_card_sku_id: skuId || null, mapped_by: user?.id ?? null, mapped_at: new Date().toISOString() });
+      if (error) {
+        toast("danger", `Couldn't save mapping: ${error.message}`);
+        return;
+      }
+      setItemTypeMap((prev) => {
+        const next = prev.filter((m) => m.item_type !== itemType);
+        next.push({ item_type: itemType, rate_card_sku_id: skuId || null, mapped_by: user?.id ?? null, mapped_at: new Date().toISOString() });
+        return next;
+      });
+    } finally {
+      setSavingMapping(null);
+    }
+  }
+
   async function generateLabels(target: "season" | StoreRow) {
-    const targetStores = target === "season" ? stores : [target];
+    const targetStores = target === "season" ? storesWithItems : storesWithItems.filter((s) => s.id === target.id);
     if (targetStores.length === 0) return;
     setGenerating(target === "season" ? "season" : target.id);
     try {
-      const withItems = targetStores.map((s) => ({ ...s, items: itemsByStore.get(s.id) ?? [] }));
-      const blob = await buildDistributionLabelsPdf(withItems);
+      const blob = await buildDistributionLabelsDocx(targetStores);
       const name = target === "season" ? season?.name ?? "Distribution" : displayStoreName(target.store_name, target.shipping_city);
-      downloadBlob(blob, `${name.replace(/[^\w -]+/g, "").trim() || "labels"}_labels.pdf`.replace(/\s+/g, "_"));
+      downloadBlob(blob, `${slugifyFilename(name)}_labels.docx`);
     } catch (err) {
       toast("danger", `Couldn't generate labels: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setGenerating(null);
+    }
+  }
+
+  async function generateDbList() {
+    if (storesWithItems.length === 0) return;
+    setGenerating("db");
+    try {
+      const blob = await buildDbListWorkbook(storesWithItems);
+      downloadBlob(blob, `${slugifyFilename(season?.name ?? "Distribution")}_DB_List.xlsx`);
+    } catch (err) {
+      toast("danger", `Couldn't generate the DB List: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setGenerating(null);
+    }
+  }
+
+  async function generateOversList() {
+    if (storesWithItems.length === 0) return;
+    setGenerating("overs");
+    try {
+      const blob = await buildOversListWorkbook(storesWithItems);
+      downloadBlob(blob, `${slugifyFilename(season?.name ?? "Distribution")}_Overs_List.xlsx`);
+    } catch (err) {
+      toast("danger", `Couldn't generate the Overs List: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setGenerating(null);
+    }
+  }
+
+  async function generateErpInput() {
+    if (storesWithItems.length === 0) return;
+    setGenerating("erp");
+    try {
+      const blob = await buildErpInputWorkbook(storesWithItems, rateResolution.partRateByMasterPartNumber, rateResolution.masterPartNumberByPart);
+      downloadBlob(blob, `${slugifyFilename(season?.name ?? "Distribution")}_ERP_Input_Data.xlsx`);
+    } catch (err) {
+      toast("danger", `Couldn't generate the ERP Input List: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setGenerating(null);
     }
@@ -189,12 +298,18 @@ export default function DistributionWorkspaceClient() {
         <div>
           <h1 className="text-xl font-semibold text-ink">Distribution</h1>
           <p className="text-sm text-ink-secondary">
-            Apple seasonal distribution — store-wise packing labels, generated from the imported Distribution Brief.
+            Apple seasonal distribution — store-wise packing labels, DB List, Overs List, and ERP Input List, generated
+            from the imported Distribution Brief.
           </p>
         </div>
-        <Button onClick={() => router.push("/workspaces/distribution/import")}>
-          <Plus size={14} /> Import a season
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="secondary" onClick={() => router.push("/workspaces/distribution/rate-card")}>
+            <Tags size={14} /> Rate Card
+          </Button>
+          <Button onClick={() => router.push("/workspaces/distribution/import")}>
+            <Plus size={14} /> Import a season
+          </Button>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-3 rounded-lg border border-line bg-surface px-4 py-3">
@@ -221,12 +336,63 @@ export default function DistributionWorkspaceClient() {
           <span>{totals.items} line items</span>
           <span>{totals.units} units</span>
         </div>
-        <div className="ml-auto">
-          <Button variant="secondary" size="sm" loading={generating === "season"} disabled={stores.length === 0} onClick={() => generateLabels("season")}>
-            <Package size={14} /> Generate all labels
-          </Button>
-        </div>
       </div>
+
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface px-4 py-3">
+        <span className="text-xs font-medium text-ink-secondary">Download</span>
+        <Button variant="secondary" size="sm" loading={generating === "season"} disabled={stores.length === 0} onClick={() => generateLabels("season")}>
+          <Package size={14} /> All labels (.docx)
+        </Button>
+        <Button variant="secondary" size="sm" loading={generating === "db"} disabled={stores.length === 0} onClick={generateDbList}>
+          <FileDown size={14} /> DB List
+        </Button>
+        <Button variant="secondary" size="sm" loading={generating === "overs"} disabled={stores.length === 0} onClick={generateOversList}>
+          <FileDown size={14} /> Overs List
+        </Button>
+        <Button variant="secondary" size="sm" loading={generating === "erp"} disabled={stores.length === 0} onClick={generateErpInput}>
+          <FileDown size={14} /> ERP Input List
+        </Button>
+      </div>
+
+      {rateResolution.unmappedItemTypes.size > 0 && (
+        <div className="rounded-lg border border-warning/40 bg-warning/5 p-4">
+          <div className="mb-2 flex items-start gap-2">
+            <AlertTriangle size={15} className="mt-0.5 shrink-0 text-warning" />
+            <div>
+              <p className="text-sm font-medium text-ink">
+                {rateResolution.unmappedItemTypes.size} Item Type(s) in this season aren&apos;t mapped to a Rate Card SKU yet
+              </p>
+              <p className="text-xs text-ink-secondary">
+                Their parts show up blank in the ERP Input List&apos;s Program/Substrate/Rate columns until mapped — mapped once,
+                reused automatically for every future season using the same Item Type.
+              </p>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {[...rateResolution.unmappedItemTypes].sort().map((itemType) => (
+              <div key={itemType} className="flex items-center gap-3 rounded-md border border-line bg-surface px-3 py-2 text-xs">
+                <span className="flex-1 font-medium text-ink">{itemType}</span>
+                <select
+                  defaultValue=""
+                  disabled={savingMapping === itemType}
+                  onChange={(e) => e.target.value && saveItemTypeMapping(itemType, e.target.value)}
+                  className="w-72 rounded-md border border-line bg-surface px-2 py-1 text-xs text-ink"
+                >
+                  <option value="" disabled>
+                    Map to a Rate Card SKU…
+                  </option>
+                  {rateCards.map((r) => (
+                    <option key={r.sku_id} value={r.sku_id}>
+                      {r.sku_id} — {r.category ?? r.program ?? "—"}
+                      {r.substrate ? ` — ${r.substrate}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2">
         <Search size={15} className="text-ink-muted" />

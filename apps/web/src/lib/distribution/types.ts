@@ -62,6 +62,12 @@ export interface DistributionItemRow {
   amount: number | null;
 }
 
+/** A store row with its line items attached -- the shape every export
+ * (labels, DB List, Overs List, ERP Input List) actually consumes. */
+export interface DistributionStoreWithItems extends DistributionStoreRow {
+  items: DistributionItemRow[];
+}
+
 export interface DistributionShipmentRow {
   id: string;
   season_id: string;
@@ -75,6 +81,29 @@ export interface DistributionShipmentRow {
   internal_remarks: string | null;
   created_by: string | null;
   created_at: string;
+}
+
+export interface DistributionRateCardRow {
+  id: string;
+  sku_id: string;
+  category: string | null;
+  program: string | null;
+  substrate: string | null;
+  unit: string | null;
+  width_mm: number | null;
+  height_mm: number | null;
+  bill_rate_2023: number | null;
+  revised_rate_2026: number | null;
+  gsm_approval_name: string | null;
+  remarks: string | null;
+  imported_at: string;
+}
+
+export interface DistributionItemTypeRateMapRow {
+  item_type: string;
+  rate_card_sku_id: string | null;
+  mapped_by: string | null;
+  mapped_at: string;
 }
 
 /** Display name shown for a season's "Agency Spares" pseudo-store rows. */
