@@ -40,6 +40,44 @@ function slugifyFilename(name: string): string {
   return (name.replace(/[^\w -]+/g, "").trim() || "distribution").replace(/\s+/g, "_");
 }
 
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+// A season can have 200+ stores (Fall 2026 has 226+). A plain
+// `.in("store_id", storeIds)` with every store id in one call puts ~230
+// UUIDs (36 chars each) into the request's query string -- 8KB+ once
+// URL-encoded, past what many proxies/load balancers allow on a request
+// line (commonly 8KB). When that request fails, fetchAllRows' `if (error)
+// break` swallows it silently and returns `[]` with no toast, no throw --
+// which reads as "every store has 0 items" exactly like Srinivas's
+// reported "no Partnumbers" bug. Chunking the store ids keeps every
+// request's `.in()` list comfortably small, and this fetch throws on any
+// page error (rather than swallowing it) so a real failure surfaces as a
+// toast instead of silently blank data.
+const ITEM_STORE_CHUNK = 150;
+
+async function fetchItemsForStores(storeIds: string[]): Promise<DistributionItemRow[]> {
+  const all: DistributionItemRow[] = [];
+  for (const idsChunk of chunkArray(storeIds, ITEM_STORE_CHUNK)) {
+    const pageSize = 1000;
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await supabase
+        .from("distribution_items")
+        .select("*")
+        .in("store_id", idsChunk)
+        .order("id", { ascending: true })
+        .range(from, from + pageSize - 1);
+      if (error) throw error;
+      all.push(...((data as DistributionItemRow[] | null) ?? []));
+      if (!data || data.length < pageSize) break;
+    }
+  }
+  return all;
+}
+
 export default function DistributionWorkspaceClient() {
   const router = useRouter();
   const { toast } = useToast();
@@ -129,12 +167,11 @@ export default function DistributionWorkspaceClient() {
         // with no `.order()` clause the ~1000 rows returned were not even
         // stable across repeated loads -- this is what caused the Overs
         // List and ERP Input List to disagree on which spares/items exist.
-        // fetchAllRows + an explicit order fixes both the truncation and
-        // the non-determinism. See dashboard-queries.ts's own fetchAllRows
-        // doc comment for the prior incidents this exact bug class caused.
-        const itemRows = await fetchAllRows<DistributionItemRow>((from, to) =>
-          supabase.from("distribution_items").select("*").in("store_id", storeIds).order("id", { ascending: true }).range(from, to)
-        );
+        // An explicit order fixes the non-determinism; fetchItemsForStores
+        // (above) fixes the truncation AND chunks storeIds so the `.in()`
+        // filter's own URL never grows large enough to fail outright -- see
+        // its doc comment for the all-zero-items regression that caused.
+        const itemRows = await fetchItemsForStores(storeIds);
 
         const map = new Map<string, DistributionItemRow[]>();
         for (const item of itemRows) {
@@ -305,7 +342,7 @@ export default function DistributionWorkspaceClient() {
       key: "id",
       header: "",
       render: (row) => (
-        <Button variant="ghost" size="sm" loading={generating === row.id} onClick={() => generateLabels(row)}>
+        <Button variant="ghost" size="sm" loading={generating === row.id} disabled={loading} onClick={() => generateLabels(row)}>
           <FileDown size={13} /> Label
         </Button>
       ),
@@ -362,16 +399,28 @@ export default function DistributionWorkspaceClient() {
 
       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface px-4 py-3">
         <span className="text-xs font-medium text-ink-secondary">Download</span>
-        <Button variant="secondary" size="sm" loading={generating === "season"} disabled={stores.length === 0} onClick={() => generateLabels("season")}>
+        {/* disabled also gates on `loading`: stores.length flips true as soon
+            as the stores fetch resolves, but the (now-chunked) items fetch
+            is still in flight for a bit after that -- clicking Generate
+            during that window built labels/lists from an empty itemsByStore
+            map, which is what produced Srinivas's "0 units, no part
+            numbers" bug even before the query-chunking fix above. */}
+        <Button
+          variant="secondary"
+          size="sm"
+          loading={generating === "season"}
+          disabled={loading || stores.length === 0}
+          onClick={() => generateLabels("season")}
+        >
           <Package size={14} /> All labels (.docx)
         </Button>
-        <Button variant="secondary" size="sm" loading={generating === "db"} disabled={stores.length === 0} onClick={generateDbList}>
+        <Button variant="secondary" size="sm" loading={generating === "db"} disabled={loading || stores.length === 0} onClick={generateDbList}>
           <FileDown size={14} /> DB List
         </Button>
-        <Button variant="secondary" size="sm" loading={generating === "overs"} disabled={stores.length === 0} onClick={generateOversList}>
+        <Button variant="secondary" size="sm" loading={generating === "overs"} disabled={loading || stores.length === 0} onClick={generateOversList}>
           <FileDown size={14} /> Overs List
         </Button>
-        <Button variant="secondary" size="sm" loading={generating === "erp"} disabled={stores.length === 0} onClick={generateErpInput}>
+        <Button variant="secondary" size="sm" loading={generating === "erp"} disabled={loading || stores.length === 0} onClick={generateErpInput}>
           <FileDown size={14} /> ERP Input List
         </Button>
       </div>
