@@ -188,6 +188,16 @@ export default function DistributionWorkspaceClient() {
   const season = seasons.find((s) => s.id === seasonId) ?? null;
 
   const rateCardBySkuId = useMemo(() => new Map(rateCards.map((r) => [r.sku_id, r])), [rateCards]);
+  // Sorted for the "map to a Rate Card SKU" picker -- by the human-readable
+  // SKU Description (e.g. "GPF25-APR 2.5") when present, so Srinivas can
+  // actually find the code he's looking for instead of scanning by sku_id.
+  const rateCardOptions = useMemo(
+    () =>
+      [...rateCards].sort((a, b) =>
+        (a.sku_description ?? a.category ?? a.program ?? a.sku_id).localeCompare(b.sku_description ?? b.category ?? b.program ?? b.sku_id)
+      ),
+    [rateCards]
+  );
   const itemTypeToSkuId = useMemo(
     () => new Map(itemTypeMap.filter((m) => m.rate_card_sku_id).map((m) => [m.item_type, m.rate_card_sku_id as string])),
     [itemTypeMap]
@@ -388,14 +398,15 @@ export default function DistributionWorkspaceClient() {
                   defaultValue=""
                   disabled={savingMapping === itemType}
                   onChange={(e) => e.target.value && saveItemTypeMapping(itemType, e.target.value)}
-                  className="w-72 rounded-md border border-line bg-surface px-2 py-1 text-xs text-ink"
+                  className="w-96 rounded-md border border-line bg-surface px-2 py-1 text-xs text-ink"
                 >
                   <option value="" disabled>
                     Map to a Rate Card SKU…
                   </option>
-                  {rateCards.map((r) => (
+                  {rateCardOptions.map((r) => (
                     <option key={r.sku_id} value={r.sku_id}>
-                      {r.sku_id} — {r.category ?? r.program ?? "—"}
+                      {r.sku_description ?? r.category ?? r.program ?? "—"} ({r.sku_id})
+                      {r.program && r.sku_description ? ` — ${r.program}` : ""}
                       {r.substrate ? ` — ${r.substrate}` : ""}
                     </option>
                   ))}

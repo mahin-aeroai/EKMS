@@ -70,7 +70,7 @@ function buildPartsTable(items: DistributionStoreWithItems["items"]): Table {
                     new TextRun({
                       text: entry[1] > 1 ? `${entry[0]}  x${entry[1]}` : entry[0],
                       bold: true,
-                      size: 20, // 10pt
+                      size: 36, // 18pt -- per Srinivas
                       font: "Calibri",
                     }),
                   ]
@@ -109,7 +109,7 @@ function buildStoreBlock(store: DistributionStoreWithItems): (Paragraph | Table)
           bold: true,
           italics: true,
           underline: { type: UnderlineType.SINGLE },
-          size: 16, // 8pt
+          size: 18, // 9pt
           font: "Calibri",
         }),
       ],
@@ -120,37 +120,37 @@ function buildStoreBlock(store: DistributionStoreWithItems): (Paragraph | Table)
           text: displayStoreName(store.store_name, store.shipping_city),
           bold: true,
           underline: { type: UnderlineType.SINGLE },
-          size: 32, // 16pt
+          size: 44, // 22pt -- big and prominent, per Srinivas
           font: "Calibri",
         }),
       ],
     }),
     new Paragraph({
       children: [
-        new TextRun({ text: "SFO ID: ", size: 22, font: "Calibri" }),
-        new TextRun({ text: store.sfo_id, size: 22, font: "Calibri" }),
+        new TextRun({ text: "SFO ID: ", size: 44, font: "Calibri" }),
+        new TextRun({ text: store.sfo_id, size: 44, font: "Calibri" }),
       ],
     }),
     new Paragraph({
       children: [
-        new TextRun({ text: "Apple ID: ", size: 22, font: "Calibri" }),
-        new TextRun({ text: store.apple_id ?? "—", bold: true, size: 22, font: "Calibri" }),
+        new TextRun({ text: "Apple ID: ", size: 44, font: "Calibri" }),
+        new TextRun({ text: store.apple_id ?? "—", bold: true, size: 44, font: "Calibri" }),
       ],
     }),
     new Paragraph({
       children: [
-        new TextRun({ text: "Program: ", size: 22, font: "Calibri" }),
-        new TextRun({ text: store.programme ?? "—", bold: true, size: 22, font: "Calibri" }),
+        new TextRun({ text: "Program: ", size: 44, font: "Calibri" }),
+        new TextRun({ text: store.programme ?? "—", bold: true, size: 44, font: "Calibri" }),
       ],
     }),
     new Paragraph({
       spacing: { before: 140, after: 40 },
-      children: [new TextRun({ text: "Part #:", bold: true, size: 20, font: "Calibri" })], // 10pt
+      children: [new TextRun({ text: "Part #:", bold: true, size: 36, font: "Calibri" })], // 18pt -- per Srinivas
     }),
     buildPartsTable(store.items),
     new Paragraph({
       spacing: { before: 140 },
-      children: [new TextRun({ text: `Total units in this box: ${totalUnits}`, italics: true, size: 16, font: "Calibri" })], // 8pt
+      children: [new TextRun({ text: `Total units in this box: ${totalUnits}`, italics: true, size: 20, font: "Calibri" })], // 10pt
     }),
   ];
 }
