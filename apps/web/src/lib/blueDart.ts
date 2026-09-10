@@ -16,9 +16,24 @@
 // tutorial screenshot* in the manual illustrating the concept on a
 // placeholder demo environment -- not Blue Dart's real portal. The real
 // Reference Docs' own curl example gives a different, correct URL (below).
-// A live call still hasn't been exercised end to end from this sandbox
-// (no network path to Blue Dart's account at all), so treat anything not
-// explicitly called out as confirmed-by-screenshot as still best-effort.
+//
+// UPDATE 10 Sept 2026: first live call (real AWB, real credentials, via
+// lfgconnect.mmdi.in) failed with "Blue Dart tracking call failed: 401
+// Unauthorized" -- confirming the one piece this file had always flagged
+// as inferred-not-verified: how the JWT is presented on every call AFTER
+// the auth step. Re-checked against developer.dhl.com's own Reference
+// Docs for Tracking, Location Finder, and Transit Time (each page's own
+// curl example, fetched directly, not re-derived from the auth page's
+// generic "Authorize" dialog screenshot this file relied on before) --
+// all three use a header literally named `JWTToken`, raw token value, NO
+// `Authorization: Bearer` wrapper. That was the bug: every one of the 3
+// non-auth calls below was sending `Authorization: Bearer <jwt>`, which
+// Blue Dart's gateway doesn't recognize at all, hence 401. Fixed in all
+// three. Same pass also caught Location Finder/Transit Time's `Api_type`
+// being sent as the number `5` -- the real spec's `profile.Api_type` is
+// the STRING `"S"` on every operation on both those endpoints; fixed
+// alongside the header, since an untested field is exactly where a
+// second bug hides once the first one stops masking it.
 //
 //   1. Auth ("Authentication API (DHL eCommerce India, Blue Dart)", GET
 //      /in/transportation/token/v1/login -- CONFIRMED against the real
@@ -29,13 +44,12 @@
 //      { "JWTToken": "<jwt>" }. Token is valid 24 hrs; re-fetched per
 //      call rather than cached in memory -- this route runs in a
 //      stateless serverless function, so an in-memory cache would rarely
-//      hit anyway.
+//      hit anyway. This step was already confirmed working (the live
+//      failure below is a 401 from the NEXT call, not this one).
 //   2. Track ("Blue Dart-Tracking Of Shipment", GET .../tracking/v1): the
-//      JWT goes on the tracking call as `Authorization: Bearer <jwt>`
-//      (standard JWT-bearer pattern; the manual's own examples only show
-//      pasting the token into an "Authorize" dialog, so this is the one
-//      piece inferred rather than lifted verbatim -- flagged in case a
-//      live call ever needs a different header name). Response is XML
+//      JWT goes on the tracking call as a `JWTToken: <jwt>` header (raw
+//      token, no "Bearer" prefix) -- CONFIRMED against developer.dhl.com's
+//      Tracking API reference page's own curl example. Response is XML
 //      (format=xml), confirmed shape: <ShipmentData><Shipment RefNo=".."
 //      WaybillNo="..">...<Status>/<StatusType>/<StatusDate>/<StatusTime>
 //      (Blue Dart's own authoritative "current status", not just the
@@ -44,14 +58,14 @@
 //      GetServicesforPincode): checks whether Blue Dart services a given
 //      pincode at all (before a shipment even exists). JSON in, JSON out
 //      -- unlike tracking, no XML here. Body is `{ pinCode, profile:
-//      { Api_type: 5, LicenceKey, LoginID } }` (Api_type is a fixed
-//      literal for this endpoint per Blue Dart's own published OpenAPI
-//      spec -- other Blue Dart endpoints use a different Api_type value
-//      for their own profile object).
-//   4. Transit Time ("GetNewDomesticTransitTimeForPinCodeandProduct",
-//      the newer of the two transit-time methods in the spec) estimates
-//      delivery date for a product/pincode pair before booking. Also
-//      JSON in, JSON out.
+//      { Api_type: "S", LicenceKey, LoginID } }` -- Api_type "S" (string)
+//      CONFIRMED against the Location Finder reference page's own curl
+//      example; same `JWTToken` header as Track above.
+//   4. Transit Time ("GetDomesticTransitTimeForPinCodeandProduct")
+//      estimates delivery date for a product/pincode pair before
+//      booking. Also JSON in, JSON out, same `JWTToken` header and
+//      `Api_type: "S"` (string) -- CONFIRMED against the Transit Time
+//      reference page's own curl example.
 //
 // Production API host is apigateway.bluedart.com (the sandbox/dev host is
 // apigateway-dev.bluedart.com) -- Srinivas's Login ID (HYD00374) and
@@ -193,7 +207,7 @@ export async function trackAwb(awb: string): Promise<BlueDartTrackResult> {
 
   const res = await fetch(url.toString(), {
     method: "GET",
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { JWTToken: token },
   });
   if (!res.ok) {
     throw new BlueDartApiError(`Blue Dart tracking call failed: ${res.status} ${res.statusText}`);
@@ -251,10 +265,10 @@ export async function checkPincodeServiceability(pincode: string): Promise<Pinco
 
   const res = await fetch(FINDER_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    headers: { "Content-Type": "application/json", JWTToken: token },
     body: JSON.stringify({
       pinCode: pincode,
-      profile: { Api_type: 5, LicenceKey: licenseKey, LoginID: loginId },
+      profile: { Api_type: "S", LicenceKey: licenseKey, LoginID: loginId },
     }),
   });
   if (!res.ok) {
@@ -311,7 +325,7 @@ export async function getTransitTime(params: {
 
   const res = await fetch(TRANSIT_TIME_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    headers: { "Content-Type": "application/json", JWTToken: token },
     body: JSON.stringify({
       pPinCode: params.originPincode,
       pPinCodeTo: params.destPincode,
@@ -319,7 +333,7 @@ export async function getTransitTime(params: {
       pSubProductCode: params.subProductCode ?? "",
       pPudate: pudateDDMMYYYY,
       pPickupTime,
-      profile: { Api_type: 5, LicenceKey: licenseKey, LoginID: loginId },
+      profile: { Api_type: "S", LicenceKey: licenseKey, LoginID: loginId },
     }),
   });
   if (!res.ok) {
