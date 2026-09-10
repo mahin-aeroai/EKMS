@@ -195,6 +195,13 @@ interface CardShipmentRef {
   awb_number: string;
   courier: string | null;
   current_status: string | null;
+  // Both optional columns, same as ShipmentRow in LfgSiteWorkspaceClient.tsx
+  // -- only ever set by the /track route from a real Blue Dart response.
+  // Used to give the compact "Track via Blue Dart" result something to
+  // show when Blue Dart's response carries a top-level status but no
+  // scan-by-scan history (see trackedEvents' empty-state below).
+  current_location: string | null;
+  last_tracked_at: string | null;
 }
 
 function isBlueDartCourier(courier: string | null): boolean {
@@ -376,7 +383,7 @@ export function LfgSiteCardGrid({
 
     supabase
       .from("lfg_shipments")
-      .select("id, site_id, awb_number, courier, current_status, created_at")
+      .select("id, site_id, awb_number, courier, current_status, current_location, last_tracked_at, created_at")
       .in("site_id", ids)
       .not("awb_number", "is", null)
       .order("created_at", { ascending: false })
@@ -384,10 +391,25 @@ export function LfgSiteCardGrid({
         if (cancelled) return;
         const map: Record<string, CardShipmentRef> = {};
         for (const row of (data as
-          | { id: string; site_id: string; awb_number: string | null; courier: string | null; current_status: string | null }[]
+          | {
+              id: string;
+              site_id: string;
+              awb_number: string | null;
+              courier: string | null;
+              current_status: string | null;
+              current_location: string | null;
+              last_tracked_at: string | null;
+            }[]
           | null) ?? []) {
           if (row.awb_number && !map[row.site_id]) {
-            map[row.site_id] = { id: row.id, awb_number: row.awb_number, courier: row.courier, current_status: row.current_status };
+            map[row.site_id] = {
+              id: row.id,
+              awb_number: row.awb_number,
+              courier: row.courier,
+              current_status: row.current_status,
+              current_location: row.current_location,
+              last_tracked_at: row.last_tracked_at,
+            };
           }
         }
         setAwbBySite(map);
@@ -455,6 +477,13 @@ export function LfgSiteCardGrid({
             onPreview={setPreview}
             buildHref={buildHref}
             quickActions={renderQuickActions?.(row) ?? null}
+            onTracked={(patch) =>
+              setAwbBySite((prev) => {
+                const existing = prev[row.id];
+                if (!existing) return prev;
+                return { ...prev, [row.id]: { ...existing, ...patch } };
+              })
+            }
           />
         ))}
       </div>
@@ -520,6 +549,7 @@ function SiteCard({
   onPreview,
   buildHref,
   quickActions,
+  onTracked,
 }: {
   row: LfgSiteCardRow;
   shipment: CardShipmentRef | null;
@@ -530,6 +560,15 @@ function SiteCard({
   onPreview: (p: PreviewState) => void;
   buildHref?: (id: string) => string;
   quickActions: ReactNode;
+  // Lets this card push a fresh current_status/current_location/
+  // last_tracked_at straight into the parent's awbBySite map the moment a
+  // Blue Dart track call returns, instead of only ever seeing new courier
+  // data after the next full fetch (idsKey change / page reload). Fixes
+  // the "Tracking" badge above this button staying on stale data
+  // (Srinivas, 10 Sept 2026: badge stuck while a fresh track call had
+  // clearly just run -- toast fired, but the badge came from the same
+  // stale `shipment` prop the compact result list below it also reads).
+  onTracked: (patch: Partial<CardShipmentRef>) => void;
 }) {
   const router = useRouter();
   const { toast } = useToast();
@@ -601,6 +640,13 @@ function SiteCard({
         return;
       }
       setTrackedEvents(((data.events ?? []) as CardTrackEvent[]).slice(0, 3));
+      if (data.shipment) {
+        onTracked({
+          current_status: data.shipment.current_status ?? null,
+          current_location: data.shipment.current_location ?? null,
+          last_tracked_at: data.shipment.last_tracked_at ?? null,
+        });
+      }
       toast("success", "Tracking updated from Blue Dart");
     } catch {
       toast("danger", "Couldn't reach the tracking service");
@@ -789,7 +835,20 @@ function SiteCard({
             {trackedEvents && (
               <div className="mt-2 rounded-lg border border-line bg-surface-sunken p-2.5">
                 {trackedEvents.length === 0 ? (
-                  <p className="text-xs text-ink-muted">No tracking events yet.</p>
+                  // Blue Dart's own top-level status (now reflected in the
+                  // "Tracking" badge above, via onTracked) can be present
+                  // even when it hasn't returned any scan-by-scan history
+                  // for this AWB -- see LfgSiteWorkspaceClient.tsx's
+                  // ShipmentCard for the same fallback and its longer
+                  // comment on why this shows instead of a bare "nothing".
+                  shipment?.current_status ? (
+                    <p className="text-xs text-ink-secondary">
+                      Latest from Blue Dart: <span className="font-semibold text-ink">{shipmentStatusLabel(shipment.current_status)}</span>
+                      {shipment.current_location && <> — {shipment.current_location}</>}. No scan-by-scan history yet.
+                    </p>
+                  ) : (
+                    <p className="text-xs text-ink-muted">No tracking events yet.</p>
+                  )
                 ) : (
                   <ul className="flex flex-col gap-2">
                     {trackedEvents.map((ev) => (
