@@ -97,3 +97,96 @@ export async function requestPasswordReset(
   }
   return data?.error ? { message: data.error } : null;
 }
+
+// 10 Sept 2026: the rest of the login flow (sign-in, MFA, the typed
+// reset/invite code, and setting a new password) moved server-side the
+// same way requestPasswordReset() above did, after the SAME team confirmed
+// plain email+password sign-in hits the identical ERR_QUIC_PROTOCOL_ERROR
+// -- see each new route under src/app/api/auth/ for the per-step reasoning.
+// Every one of these posts to our own domain (proven reachable, since the
+// login page itself just rendered) instead of calling supabase.auth.*
+// directly from the browser.
+//
+// Every login page must do a HARD navigation (window.location.href = ...),
+// not router.push()/router.refresh(), after any of these succeed. The
+// session now lands via a Set-Cookie header on the fetch response, not
+// through the browser's in-memory Supabase client -- a full page load is
+// what makes that client (and every Server Component) actually pick the
+// new cookie up.
+
+export async function signInViaServer(
+  email: string,
+  password: string
+): Promise<{ error: string | null; mfa: { factorId: string; challengeId: string } | null }> {
+  try {
+    const res = await fetch("/api/auth/sign-in", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    const data = (await res.json().catch(() => null)) as
+      | { error?: string | null; mfa?: { factorId: string; challengeId: string } | null }
+      | null;
+    if (!res.ok && !data) {
+      return { error: "Something went wrong signing in. Please try again.", mfa: null };
+    }
+    return { error: data?.error ?? null, mfa: data?.mfa ?? null };
+  } catch {
+    return { error: "Failed to fetch", mfa: null };
+  }
+}
+
+export async function verifyMfaViaServer(
+  factorId: string,
+  challengeId: string,
+  code: string
+): Promise<string | null> {
+  try {
+    const res = await fetch("/api/auth/mfa-verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ factorId, challengeId, code }),
+    });
+    const data = (await res.json().catch(() => null)) as { error?: string | null } | null;
+    if (!res.ok && !data) return "Something went wrong verifying that code. Please try again.";
+    return data?.error ?? null;
+  } catch {
+    return "Failed to fetch";
+  }
+}
+
+export async function verifyCodeViaServer(
+  email: string,
+  code: string,
+  type: "recovery" | "invite"
+): Promise<{ error: string | null; email: string | null }> {
+  try {
+    const res = await fetch("/api/auth/verify-code", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, code, type }),
+    });
+    const data = (await res.json().catch(() => null)) as { error?: string | null; email?: string | null } | null;
+    if (!res.ok && !data) {
+      return { error: "That code didn't work. Double-check it and try again.", email: null };
+    }
+    return { error: data?.error ?? null, email: data?.email ?? null };
+  } catch {
+    return { error: "Failed to fetch", email: null };
+  }
+}
+
+export async function setPasswordViaServer(password: string): Promise<string | null> {
+  try {
+    const res = await fetch("/api/auth/set-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+    const data = (await res.json().catch(() => null)) as { error?: string | null } | null;
+    if (!res.ok && !data) return "Something went wrong setting your password. Please try again.";
+    return data?.error ?? null;
+  } catch {
+    return "Failed to fetch";
+  }
+}
