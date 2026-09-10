@@ -1,9 +1,9 @@
 "use client";
 
 import { Suspense, useEffect, useState, type FormEvent } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { withAuthRetry, requestPasswordReset } from "@/lib/authRetry";
+import { requestPasswordReset, signInViaServer, verifyCodeViaServer, setPasswordViaServer } from "@/lib/authRetry";
 import { Button } from "@/components/ui/Button";
 import { LFG_HOST } from "@/lib/lfg-host";
 import { APP_HOST } from "@/lib/app-host";
@@ -41,7 +41,6 @@ export default function LfgLoginPage() {
 }
 
 function LfgLoginForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [mode] = useState<Mode>(initialModeFromUrl);
   const [email, setEmail] = useState("");
@@ -103,17 +102,16 @@ function LfgLoginForm() {
     setError(null);
     setLoading(true);
 
-    const { error: signInError } = await withAuthRetry(() => supabase.auth.signInWithPassword({ email, password }));
+    const { error: signInError } = await signInViaServer(email, password);
     setLoading(false);
 
     if (signInError) {
-      setError(signInError.message);
+      setError(signInError);
       return;
     }
 
     const redirectTo = searchParams.get("redirectTo") || defaultHome();
-    router.push(redirectTo);
-    router.refresh();
+    window.location.href = redirectTo;
   }
 
   async function handleForgotPassword(e: FormEvent) {
@@ -155,22 +153,20 @@ function LfgLoginForm() {
     setError(null);
     setLoading(true);
 
-    const { data, error: verifyError } = await withAuthRetry(() =>
-      supabase.auth.verifyOtp({
-        email,
-        token: code,
-        type: resetSent ? "recovery" : "invite",
-      })
+    const { error: verifyError, email: verifiedEmail } = await verifyCodeViaServer(
+      email,
+      code,
+      resetSent ? "recovery" : "invite"
     );
 
     setLoading(false);
 
-    if (verifyError || !data.session) {
-      setError(verifyError?.message ?? "That code didn't work. Double-check it and try again.");
+    if (verifyError) {
+      setError(verifyError);
       return;
     }
 
-    setInviteEmail(data.session.user?.email ?? email);
+    setInviteEmail(verifiedEmail ?? email);
     setOtpVerified(true);
   }
 
@@ -188,16 +184,15 @@ function LfgLoginForm() {
     }
 
     setLoading(true);
-    const { error: updateError } = await withAuthRetry(() => supabase.auth.updateUser({ password }));
+    const updateError = await setPasswordViaServer(password);
     setLoading(false);
 
     if (updateError) {
-      setError(updateError.message);
+      setError(updateError);
       return;
     }
 
-    router.push(defaultHome());
-    router.refresh();
+    window.location.href = defaultHome();
   }
 
   const isInvite = mode === "set-password" || otpVerified;

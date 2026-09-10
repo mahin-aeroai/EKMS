@@ -4,7 +4,14 @@ import { Suspense, useEffect, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Lock, ShieldCheck } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { withAuthRetry, requestPasswordReset } from "@/lib/authRetry";
+import {
+  withAuthRetry,
+  requestPasswordReset,
+  signInViaServer,
+  verifyMfaViaServer,
+  verifyCodeViaServer,
+  setPasswordViaServer,
+} from "@/lib/authRetry";
 import { Button } from "@/components/ui/Button";
 import { LFG_HOST } from "@/lib/lfg-host";
 
@@ -186,25 +193,22 @@ function LoginForm() {
     setError(null);
     setLoading(true);
 
-    const { error: signInError } = await withAuthRetry(() => supabase.auth.signInWithPassword({ email, password }));
+    const { error: signInError, mfa } = await signInViaServer(email, password);
+    setLoading(false);
 
     if (signInError) {
-      setLoading(false);
-      setError(signInError.message);
+      setError(signInError);
       return;
     }
 
-    const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
-    setLoading(false);
-
-    if (aal && aal.nextLevel === "aal2" && aal.nextLevel !== aal.currentLevel) {
-      await beginMfaChallenge();
+    if (mfa) {
+      setError(null);
+      setMfaPending(mfa);
       return;
     }
 
     const redirectTo = searchParams.get("redirectTo") || "/";
-    router.push(redirectTo);
-    router.refresh();
+    window.location.href = redirectTo;
   }
 
   async function handleRegister(e: FormEvent) {
@@ -265,24 +269,17 @@ function LoginForm() {
     setError(null);
     setLoading(true);
 
-    const { error: verifyError } = await withAuthRetry(() =>
-      supabase.auth.mfa.verify({
-        factorId: mfaPending.factorId,
-        challengeId: mfaPending.challengeId,
-        code: mfaCode,
-      })
-    );
+    const verifyError = await verifyMfaViaServer(mfaPending.factorId, mfaPending.challengeId, mfaCode);
 
     setLoading(false);
 
     if (verifyError) {
-      setError(verifyError.message);
+      setError(verifyError);
       return;
     }
 
     const redirectTo = searchParams.get("redirectTo") || "/";
-    router.push(redirectTo);
-    router.refresh();
+    window.location.href = redirectTo;
   }
 
   async function handleForgotPassword(e: FormEvent) {
@@ -323,22 +320,20 @@ function LoginForm() {
     setError(null);
     setLoading(true);
 
-    const { data, error: verifyError } = await withAuthRetry(() =>
-      supabase.auth.verifyOtp({
-        email,
-        token: code,
-        type: resetSent ? "recovery" : "invite",
-      })
+    const { error: verifyError, email: verifiedEmail } = await verifyCodeViaServer(
+      email,
+      code,
+      resetSent ? "recovery" : "invite"
     );
 
     setLoading(false);
 
-    if (verifyError || !data.session) {
-      setError(verifyError?.message ?? "That code didn't work. Double-check it and try again.");
+    if (verifyError) {
+      setError(verifyError);
       return;
     }
 
-    setInviteEmail(data.session.user?.email ?? email);
+    setInviteEmail(verifiedEmail ?? email);
     setOtpVerified(true);
   }
 
@@ -356,16 +351,15 @@ function LoginForm() {
     }
 
     setLoading(true);
-    const { error: updateError } = await withAuthRetry(() => supabase.auth.updateUser({ password }));
+    const updateError = await setPasswordViaServer(password);
     setLoading(false);
 
     if (updateError) {
-      setError(updateError.message);
+      setError(updateError);
       return;
     }
 
-    router.push("/");
-    router.refresh();
+    window.location.href = "/";
   }
 
   const isInvite = mode === "set-password" || otpVerified;
