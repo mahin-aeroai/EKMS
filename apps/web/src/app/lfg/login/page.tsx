@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { withAuthRetry } from "@/lib/authRetry";
 import { Button } from "@/components/ui/Button";
 import { LFG_HOST } from "@/lib/lfg-host";
 import { APP_HOST } from "@/lib/app-host";
@@ -102,7 +103,7 @@ function LfgLoginForm() {
     setError(null);
     setLoading(true);
 
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+    const { error: signInError } = await withAuthRetry(() => supabase.auth.signInWithPassword({ email, password }));
     setLoading(false);
 
     if (signInError) {
@@ -120,9 +121,11 @@ function LfgLoginForm() {
     setError(null);
     setLoading(true);
 
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}${window.location.pathname}`,
-    });
+    const { error: resetError } = await withAuthRetry(() =>
+      supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}${window.location.pathname}`,
+      })
+    );
     setLoading(false);
 
     if (resetError) {
@@ -153,11 +156,13 @@ function LfgLoginForm() {
     setError(null);
     setLoading(true);
 
-    const { data, error: verifyError } = await supabase.auth.verifyOtp({
-      email,
-      token: code,
-      type: resetSent ? "recovery" : "invite",
-    });
+    const { data, error: verifyError } = await withAuthRetry(() =>
+      supabase.auth.verifyOtp({
+        email,
+        token: code,
+        type: resetSent ? "recovery" : "invite",
+      })
+    );
 
     setLoading(false);
 
@@ -184,7 +189,7 @@ function LfgLoginForm() {
     }
 
     setLoading(true);
-    const { error: updateError } = await supabase.auth.updateUser({ password });
+    const { error: updateError } = await withAuthRetry(() => supabase.auth.updateUser({ password }));
     setLoading(false);
 
     if (updateError) {
