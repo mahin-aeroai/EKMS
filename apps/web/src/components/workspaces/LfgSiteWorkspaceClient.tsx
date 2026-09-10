@@ -197,6 +197,10 @@ export interface ShipmentRow {
   // -- set automatically from the most recent Blue Dart scan's location
   // by the /track route; always null for manually-logged shipments.
   current_location?: string | null;
+  // Optional column (supabase-lfg-shipments-last-tracked-migration.sql) --
+  // set to "now" every time the /track route pulls a fresh Blue Dart
+  // update, whether or not that update carried any new scan events.
+  last_tracked_at?: string | null;
   shipment_contents: string | null;
   number_of_packages: number | null;
   package_details: string | null;
@@ -1884,6 +1888,23 @@ function ShipmentCard({
 
   const [tracking, setTracking] = useState(false);
 
+  // Overrides shipment.current_status/current_location/last_tracked_at the
+  // instant a track call returns, rather than waiting on onChanged()'s
+  // router.refresh() (a full server round-trip) before the badge/fallback
+  // line below reflect what Blue Dart just said -- `shipment` is a prop
+  // here, not local state, so it can't be patched directly. onChanged() is
+  // still called too, so the "source of truth" (the shipment prop) catches
+  // up once the page finishes refreshing; this is purely for instant
+  // feedback in between.
+  const [liveShipment, setLiveShipment] = useState<{
+    current_status: string;
+    current_location: string | null;
+    last_tracked_at: string | null;
+  } | null>(null);
+  const displayStatus = liveShipment?.current_status ?? shipment.current_status;
+  const displayLocation = liveShipment ? liveShipment.current_location : shipment.current_location;
+  const displayLastTracked = liveShipment ? liveShipment.last_tracked_at : shipment.last_tracked_at;
+
   // Shown only for a Blue Dart shipment with an AWB on file -- calls the
   // new /track route (apps/web/src/lib/blueDart.ts), which inserts any
   // new lfg_shipment_events rows with source: "api" (the ev.source ===
@@ -1900,6 +1921,13 @@ function ShipmentCard({
         return;
       }
       setEvents(data.events ?? []);
+      if (data.shipment?.current_status) {
+        setLiveShipment({
+          current_status: data.shipment.current_status,
+          current_location: data.shipment.current_location ?? null,
+          last_tracked_at: data.shipment.last_tracked_at ?? null,
+        });
+      }
       toast("success", "Tracking updated from Blue Dart");
       onChanged();
     } catch {
@@ -2040,12 +2068,12 @@ function ShipmentCard({
             </div>
             <div className="mt-0.5 text-xs text-ink-secondary">
               Dispatched {shipment.dispatch_date ?? "—"} · Expected {shipment.expected_delivery_date ?? "—"}
-              {shipment.current_location && <> · Currently at {shipment.current_location}</>}
+              {displayLocation && <> · Currently at {displayLocation}</>}
             </div>
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <Badge status={shipmentStatusBadge(shipment.current_status)}>{shipmentStatusLabel(shipment.current_status)}</Badge>
+          <Badge status={shipmentStatusBadge(displayStatus)}>{shipmentStatusLabel(displayStatus)}</Badge>
           <Badge status={deliveryStatusBadge(shipment.delivery_status)}>{deliveryStatusLabel(shipment.delivery_status)}</Badge>
         </div>
       </button>
@@ -2214,7 +2242,31 @@ function ShipmentCard({
             {loadingEvents ? (
               <p className="text-sm text-ink-muted">Loading…</p>
             ) : !events || events.length === 0 ? (
-              <p className="text-sm text-ink-muted">No tracking events logged yet.</p>
+              // Blue Dart's top-level <Status> (shipment.current_status,
+              // shown as the badge in the collapsed header above) can
+              // populate even when the detailed scan-by-scan history
+              // doesn't -- happens when the courier hasn't returned any
+              // <Scans> yet, or (10 Sept 2026 live finding) when the
+              // account's scan feed doesn't reach this AWB at all. Either
+              // way, a bare "No events" reads as "nothing happened" when
+              // Blue Dart HAS told us something -- so surface that instead
+              // of leaving the timeline looking empty.
+              isBlueDart && displayStatus && displayStatus !== "shipment_created" ? (
+                <div className="rounded-md border border-dashed border-line bg-surface-sunken p-3 text-sm">
+                  <p className="text-ink">
+                    Latest known status: <span className="font-semibold">{shipmentStatusLabel(displayStatus)}</span>
+                    {displayLocation && <> — {displayLocation}</>}
+                  </p>
+                  <p className="mt-1 text-xs text-ink-muted">
+                    {displayLastTracked
+                      ? `From Blue Dart as of ${new Date(displayLastTracked).toLocaleString()}`
+                      : "From Blue Dart's own shipment status"}
+                    ; no scan-by-scan history returned yet for this AWB.
+                  </p>
+                </div>
+              ) : (
+                <p className="text-sm text-ink-muted">No tracking events logged yet.</p>
+              )
             ) : (
               <Timeline
                 entries={events.map(

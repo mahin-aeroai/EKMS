@@ -127,5 +127,23 @@ export async function POST(request: Request, { params }: { params: Promise<{ shi
     .eq("shipment_id", shipmentId)
     .order("event_time", { ascending: false });
 
-  return NextResponse.json({ events: refreshed ?? [] });
+  // Also hand back the shipment's own post-update status fields, not just
+  // the event list -- both call sites (the Shipment tab's ShipmentCard and
+  // the Site Cards grid's inline "Track via Blue Dart") previously only
+  // updated their local `events` state from this response and relied on a
+  // full page refresh (router.refresh()) to ever see the new
+  // current_status/current_location/last_tracked_at. That left the
+  // "Tracking" badge and the (now-added) no-scans fallback line showing
+  // stale data until the next reload even though the courier call that
+  // just ran DID update them. Reading them back from the DB here (rather
+  // than trusting the in-memory `update` object above, which may have
+  // been trimmed if the optional columns weren't migrated yet) keeps this
+  // response as the single source of truth for "what got saved".
+  const { data: shipmentNow } = await supabase
+    .from("lfg_shipments")
+    .select("current_status, current_location, last_tracked_at")
+    .eq("id", shipmentId)
+    .maybeSingle();
+
+  return NextResponse.json({ events: refreshed ?? [], shipment: shipmentNow ?? null });
 }

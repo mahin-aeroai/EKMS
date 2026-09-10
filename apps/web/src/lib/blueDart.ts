@@ -250,13 +250,38 @@ export async function trackAwb(awb: string): Promise<BlueDartTrackResult> {
 
   // Confirmed shape: <ShipmentData><Shipment RefNo=".." WaybillNo="..">
   // ...<Scans><ScanDetail>...</Scans></Shipment></ShipmentData>. Still
-  // walk a couple of defensive fallback paths (lowercase / unwrapped)
-  // in case an edge case (e.g. AWB not found) shapes the response
-  // differently -- returns [] rather than throwing on a shape mismatch.
+  // walk a couple of defensive fallback paths (lowercase / unwrapped /
+  // Shipment landing as a single-element array -- fast-xml-parser can
+  // produce either shape depending on how many <Shipment> siblings are in
+  // the response) in case an edge case (e.g. AWB not found) shapes the
+  // response differently -- returns [] rather than throwing on a shape
+  // mismatch.
   const root = parsed?.ShipmentData ?? parsed;
-  const shipment = root?.Shipment ?? root?.shipment ?? root;
-  const rawScans = shipment?.Scans?.ScanDetail ?? shipment?.ScanDetails ?? shipment?.Scan ?? [];
+  const rawShipment = root?.Shipment ?? root?.shipment ?? root;
+  const shipment = Array.isArray(rawShipment) ? rawShipment[0] : rawShipment;
+  const rawScans =
+    shipment?.Scans?.ScanDetail ?? shipment?.Scans?.Scan ?? shipment?.ScanDetails ?? shipment?.ScanDetail ?? shipment?.Scan ?? [];
   const scansNewestFirst = Array.isArray(rawScans) ? rawScans : rawScans ? [rawScans] : [];
+
+  // 10 Sept 2026: live testing showed <Status> populating correctly
+  // (current_status/badge update fine) while the Tracking Timeline stayed
+  // permanently empty -- i.e. Blue Dart's response is reaching this
+  // parser (200 OK, top-level Status present) but scansNewestFirst comes
+  // back [] even for an AWB that IS actually moving. That means the real
+  // response either has no <Scans> block at all for this AWB/account, or
+  // wraps it in a shape none of the fallback paths above catch. Can't
+  // confirm which from here (no Blue Dart network access in this
+  // sandbox) -- logging the raw shipment keys (and the whole object, one
+  // level deep) so the NEXT live call's Vercel function log settles it
+  // instead of another guess.
+  if (scansNewestFirst.length === 0 && shipment?.Status) {
+    console.warn(
+      "[BlueDart] tracking returned a Status but no scans parsed -- raw shipment keys:",
+      shipment && typeof shipment === "object" ? Object.keys(shipment) : typeof shipment,
+      "raw shipment:",
+      JSON.stringify(shipment).slice(0, 2000)
+    );
+  }
 
   const events: BlueDartEvent[] = scansNewestFirst
     .map((scan: Record<string, unknown>): BlueDartEvent => {
