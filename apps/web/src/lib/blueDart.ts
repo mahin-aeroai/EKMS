@@ -77,7 +77,14 @@ import { XMLParser } from "fast-xml-parser";
 const AUTH_URL = "https://apigateway.bluedart.com/in/transportation/token/v1/login";
 const TRACK_URL = "https://apigateway.bluedart.com/in/transportation/tracking/v1";
 const FINDER_URL = "https://apigateway.bluedart.com/in/transportation/finder/v1/GetServicesforPincode";
-const TRANSIT_TIME_URL = "https://apigateway.bluedart.com/in/transportation/transittime/v1/GetNewDomesticTransitTimeForPinCodeandProduct";
+// Was "/transittime/v1/GetNewDomesticTransitTimeForPinCodeandProduct" -- a
+// guessed path (this file always flagged the exact method name as
+// unconfirmed), and it 404'd on the first live call. developer.dhl.com's
+// Transit Time reference page's own "Environments" table names the real
+// production base path as "/time-finder/v1", confirmed across several
+// independent fetches of that page -- CONFIRMED, unlike the guess it
+// replaces.
+const TRANSIT_TIME_URL = "https://apigateway.bluedart.com/in/transportation/time-finder/v1";
 
 /**
  * Blue Dart's Product/Sub Product master (spec Appendix A) -- the only 4
@@ -150,6 +157,31 @@ function requireEnv(name: string): string {
 }
 
 /**
+ * Every prior "Blue Dart X call failed: <status> <statusText>" message
+ * this file threw discarded the response BODY -- which is exactly where
+ * Apigee (Blue Dart's gateway) puts the actual reason for a 4xx
+ * (typically `{"fault":{"faultstring":"...","detail":{"errorcode":"..."}}}`).
+ * The first live run hit a bare "400 Bad Request" on the Location Finder
+ * call with no way to tell why from that alone -- root cause not yet
+ * confirmed (unlike the 401-on-tracking and 404-on-transit-time bugs
+ * fixed alongside this, both confirmed against Blue Dart's own reference
+ * docs and fixed outright). Every call below now reads and includes the
+ * body so the NEXT failure, if any, is self-explanatory instead of
+ * another round of guessing.
+ */
+async function throwBlueDartApiError(res: Response, label: string): Promise<never> {
+  let detail = "";
+  try {
+    const text = await res.text();
+    if (text.trim()) detail = ` -- ${text.slice(0, 500)}`;
+  } catch {
+    // Body unreadable (already consumed, network cut mid-read, etc.) --
+    // fall through with just the status, same as before this existed.
+  }
+  throw new BlueDartApiError(`${label} failed: ${res.status} ${res.statusText}${detail}`);
+}
+
+/**
  * Authenticates against Blue Dart's gateway using the Consumer Key/Secret
  * and returns a JWT to use as a bearer token on the tracking call. Throws
  * BlueDartConfigError if the env vars are missing (caller should turn
@@ -169,7 +201,7 @@ export async function getBlueDartToken(): Promise<string> {
     },
   });
   if (!res.ok) {
-    throw new BlueDartApiError(`Blue Dart auth failed: ${res.status} ${res.statusText}`);
+    await throwBlueDartApiError(res, "Blue Dart auth");
   }
   const data = (await res.json()) as { JWTToken?: string; access_token?: string };
   const token = data.JWTToken ?? data.access_token;
@@ -210,7 +242,7 @@ export async function trackAwb(awb: string): Promise<BlueDartTrackResult> {
     headers: { JWTToken: token },
   });
   if (!res.ok) {
-    throw new BlueDartApiError(`Blue Dart tracking call failed: ${res.status} ${res.statusText}`);
+    await throwBlueDartApiError(res, "Blue Dart tracking call");
   }
 
   const xml = await res.text();
@@ -272,7 +304,7 @@ export async function checkPincodeServiceability(pincode: string): Promise<Pinco
     }),
   });
   if (!res.ok) {
-    throw new BlueDartApiError(`Blue Dart Location Finder call failed: ${res.status} ${res.statusText}`);
+    await throwBlueDartApiError(res, "Blue Dart Location Finder call");
   }
   const data = (await res.json()) as Record<string, unknown>;
   // The spec's own object name is "ServiceCenterDetailsReference" -- some
@@ -298,9 +330,8 @@ export async function checkPincodeServiceability(pincode: string): Promise<Pinco
 
 /**
  * Transit Time: estimates delivery date for a product/pincode pair
- * before a shipment is booked (GetNewDomesticTransitTimeForPinCodeand
- * Product -- the newer of the two transit-time methods Blue Dart's spec
- * documents; both have an identical request/response shape).
+ * before a shipment is booked (GetDomesticTransitTimeForPinCodeandProduct,
+ * against the confirmed "/time-finder/v1" base path -- see TRANSIT_TIME_URL).
  */
 export async function getTransitTime(params: {
   originPincode: string;
@@ -337,7 +368,7 @@ export async function getTransitTime(params: {
     }),
   });
   if (!res.ok) {
-    throw new BlueDartApiError(`Blue Dart Transit Time call failed: ${res.status} ${res.statusText}`);
+    await throwBlueDartApiError(res, "Blue Dart Transit Time call");
   }
   const data = (await res.json()) as Record<string, unknown>;
   const d = (data.DomesticTranistTimeReference as Record<string, unknown>) ?? data;
