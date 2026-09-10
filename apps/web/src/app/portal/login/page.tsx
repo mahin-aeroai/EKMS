@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Lock } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { withAuthRetry } from "@/lib/authRetry";
+import { withAuthRetry, requestPasswordReset } from "@/lib/authRetry";
 import { Button } from "@/components/ui/Button";
 import { PORTAL_HOST } from "@/lib/portal-host";
 import { PortalPolicyFooter } from "@/components/portal/PortalPolicyFooter";
@@ -143,10 +143,9 @@ function PortalLoginForm() {
     // Send the reset link back to wherever this login page is actually
     // being viewed from -- bare "/login" on the subdomain, "/portal/login"
     // elsewhere -- rather than hardcoding one form.
-    const { error: resetError } = await withAuthRetry(() =>
-      supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}${window.location.pathname}`,
-      })
+    const resetError = await requestPasswordReset(
+      email,
+      `${window.location.origin}${window.location.pathname}`
     );
     setLoading(false);
 

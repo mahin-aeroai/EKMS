@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Lock, ShieldCheck } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { withAuthRetry } from "@/lib/authRetry";
+import { withAuthRetry, requestPasswordReset } from "@/lib/authRetry";
 import { Button } from "@/components/ui/Button";
 import { LFG_HOST } from "@/lib/lfg-host";
 
@@ -290,11 +290,7 @@ function LoginForm() {
     setError(null);
     setLoading(true);
 
-    const { error: resetError } = await withAuthRetry(() =>
-      supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/login`,
-      })
-    );
+    const resetError = await requestPasswordReset(email, `${window.location.origin}/login`);
 
     setLoading(false);
 
