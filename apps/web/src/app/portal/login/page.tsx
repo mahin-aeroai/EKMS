@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Lock } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { withAuthRetry } from "@/lib/authRetry";
 import { Button } from "@/components/ui/Button";
 import { PORTAL_HOST } from "@/lib/portal-host";
 import { PortalPolicyFooter } from "@/components/portal/PortalPolicyFooter";
@@ -121,7 +122,7 @@ function PortalLoginForm() {
     setError(null);
     setLoading(true);
 
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+    const { error: signInError } = await withAuthRetry(() => supabase.auth.signInWithPassword({ email, password }));
     setLoading(false);
 
     if (signInError) {
@@ -142,9 +143,11 @@ function PortalLoginForm() {
     // Send the reset link back to wherever this login page is actually
     // being viewed from -- bare "/login" on the subdomain, "/portal/login"
     // elsewhere -- rather than hardcoding one form.
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}${window.location.pathname}`,
-    });
+    const { error: resetError } = await withAuthRetry(() =>
+      supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}${window.location.pathname}`,
+      })
+    );
     setLoading(false);
 
     if (resetError) {
@@ -175,11 +178,13 @@ function PortalLoginForm() {
     setError(null);
     setLoading(true);
 
-    const { data, error: verifyError } = await supabase.auth.verifyOtp({
-      email,
-      token: code,
-      type: resetSent ? "recovery" : "invite",
-    });
+    const { data, error: verifyError } = await withAuthRetry(() =>
+      supabase.auth.verifyOtp({
+        email,
+        token: code,
+        type: resetSent ? "recovery" : "invite",
+      })
+    );
 
     setLoading(false);
 
@@ -206,7 +211,7 @@ function PortalLoginForm() {
     }
 
     setLoading(true);
-    const { error: updateError } = await supabase.auth.updateUser({ password });
+    const { error: updateError } = await withAuthRetry(() => supabase.auth.updateUser({ password }));
     setLoading(false);
 
     if (updateError) {

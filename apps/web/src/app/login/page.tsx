@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Lock, ShieldCheck } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { withAuthRetry } from "@/lib/authRetry";
 import { Button } from "@/components/ui/Button";
 import { LFG_HOST } from "@/lib/lfg-host";
 
@@ -185,7 +186,7 @@ function LoginForm() {
     setError(null);
     setLoading(true);
 
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+    const { error: signInError } = await withAuthRetry(() => supabase.auth.signInWithPassword({ email, password }));
 
     if (signInError) {
       setLoading(false);
@@ -230,11 +231,13 @@ function LoginForm() {
     }
 
     setLoading(true);
-    const { data, error: signUpError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { emailRedirectTo: `${window.location.origin}/login` },
-    });
+    const { data, error: signUpError } = await withAuthRetry(() =>
+      supabase.auth.signUp({
+        email,
+        password,
+        options: { emailRedirectTo: `${window.location.origin}/login` },
+      })
+    );
     setLoading(false);
 
     if (signUpError) {
@@ -262,11 +265,13 @@ function LoginForm() {
     setError(null);
     setLoading(true);
 
-    const { error: verifyError } = await supabase.auth.mfa.verify({
-      factorId: mfaPending.factorId,
-      challengeId: mfaPending.challengeId,
-      code: mfaCode,
-    });
+    const { error: verifyError } = await withAuthRetry(() =>
+      supabase.auth.mfa.verify({
+        factorId: mfaPending.factorId,
+        challengeId: mfaPending.challengeId,
+        code: mfaCode,
+      })
+    );
 
     setLoading(false);
 
@@ -285,9 +290,11 @@ function LoginForm() {
     setError(null);
     setLoading(true);
 
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/login`,
-    });
+    const { error: resetError } = await withAuthRetry(() =>
+      supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/login`,
+      })
+    );
 
     setLoading(false);
 
@@ -320,11 +327,13 @@ function LoginForm() {
     setError(null);
     setLoading(true);
 
-    const { data, error: verifyError } = await supabase.auth.verifyOtp({
-      email,
-      token: code,
-      type: resetSent ? "recovery" : "invite",
-    });
+    const { data, error: verifyError } = await withAuthRetry(() =>
+      supabase.auth.verifyOtp({
+        email,
+        token: code,
+        type: resetSent ? "recovery" : "invite",
+      })
+    );
 
     setLoading(false);
 
@@ -351,7 +360,7 @@ function LoginForm() {
     }
 
     setLoading(true);
-    const { error: updateError } = await supabase.auth.updateUser({ password });
+    const { error: updateError } = await withAuthRetry(() => supabase.auth.updateUser({ password }));
     setLoading(false);
 
     if (updateError) {
