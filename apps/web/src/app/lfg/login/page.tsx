@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { withAuthRetry } from "@/lib/authRetry";
+import { withAuthRetry, requestPasswordReset } from "@/lib/authRetry";
 import { Button } from "@/components/ui/Button";
 import { LFG_HOST } from "@/lib/lfg-host";
 import { APP_HOST } from "@/lib/app-host";
@@ -121,10 +121,9 @@ function LfgLoginForm() {
     setError(null);
     setLoading(true);
 
-    const { error: resetError } = await withAuthRetry(() =>
-      supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}${window.location.pathname}`,
-      })
+    const resetError = await requestPasswordReset(
+      email,
+      `${window.location.origin}${window.location.pathname}`
     );
     setLoading(false);
 

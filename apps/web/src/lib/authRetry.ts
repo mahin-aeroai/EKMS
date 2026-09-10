@@ -64,3 +64,36 @@ export async function withAuthRetry<T extends { error: { message?: string } | nu
   await new Promise((resolve) => setTimeout(resolve, delayMs));
   return fn();
 }
+
+// 10 Sept 2026: routes password-reset requests through our own
+// /api/auth/reset-password instead of calling
+// supabase.auth.resetPasswordForEmail() directly from the browser -- see
+// that route's header comment for why (ERR_QUIC_PROTOCOL_ERROR against
+// <project>.supabase.co on some Windows/corporate networks, invisible on
+// others). Every login page's handleForgotPassword should call this
+// instead of the direct Supabase client call.
+export async function requestPasswordReset(
+  email: string,
+  redirectTo: string
+): Promise<{ message: string } | null> {
+  let res: Response;
+  try {
+    res = await fetch("/api/auth/reset-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, redirectTo }),
+    });
+  } catch {
+    // A failure here means even our OWN domain (same-origin, already
+    // proven reachable since the login page itself just rendered) is
+    // unreachable -- genuinely offline, not the supabase.co-specific
+    // network issue this route exists to route around.
+    return { message: "Failed to fetch" };
+  }
+
+  const data = (await res.json().catch(() => null)) as { error?: string | null } | null;
+  if (!res.ok && !data?.error) {
+    return { message: "Something went wrong sending the reset email. Please try again." };
+  }
+  return data?.error ? { message: data.error } : null;
+}
