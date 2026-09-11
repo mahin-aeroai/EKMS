@@ -553,3 +553,19 @@ A batch of feedback from Mahin on the Site Master page (`app.mmdi.in`), covering
 **Still open:** the new LFG Connect rate card, map, and pricing update — on hold until Mahin sends the rate card file.
 
 Verified: `npx tsc --noEmit` (whole project, clean) and `npx eslint` on all six changed files (clean). No schema/migration changes in this batch — everything above works against tables and RPCs that already existed.
+
+---
+
+## 11. Customer Portal (`portal.mmdi.in`) — shipping/Blue Dart tracking + invoice download (11 Sept 2026)
+
+Task feedback (Mahin, verbatim): "Add feature shipping to portal.mmdi.in app with Bluedart tracking details. after receipt of the order with payment we go and add shipping details to the site and generate invoice for them and we will input CRN number and GSt invoice format to you for customers to download."
+
+**Requires a manual SQL step** — run `supabase-portal-shipping-invoicing-migration.sql` in the Supabase SQL Editor before this code goes live (adds `portal_order_shipments`, `portal_shipment_events`, `portal_order_invoices` + RLS; safe to re-run). No new Vercel env vars — reuses the existing `R2_*` and `BLUEDART_*` credentials already set for LFG Connect (see section 6).
+
+**Shipping.** Once a portal order's `payment_status` is `paid`, staff (admin/editor) can add a shipment on that order's page (`/portal/orders/[orderId]`, the same page both staff and the customer view — `OrderDetailClient.tsx`): courier (a dropdown — Blue Dart, DTDC, WorldFirst, By Cargo, By Hand, or Other — reusing `LFG_COURIERS`/`isBlueDartCourier()` from LFG Connect as-is, not a second copy), AWB/tracking number, dispatch date, expected delivery. For a Blue Dart shipment, a "Track via Blue Dart" button calls the courier's live tracking API (same `trackAwb()`/`mapBlueDartStatusToLfg()` integration LFG Connect already uses — one Blue Dart integration in the codebase, not two) and appends the scan history as a timeline, visible read-only to the customer on their own order page. Every other courier is manual-status only, same limitation as LFG Connect.
+
+**Invoice.** Deliberately NOT an auto-generated GST document — Mahin said "we will input CRN number and GST invoice format to you", meaning the actual invoice layout is still to come. What ships now: staff types in the CRN number, invoice number, invoice date, and amount, and uploads the invoice PDF (produced in MMDI's existing GST/billing process) on the order page; the customer then sees a "Download Invoice" button on their own order. Fully working end to end today for whatever PDF staff hands it — the only open item is Mahin sending the real GST invoice format so a from-scratch generator could be built later if wanted, same "ships now, on hold pending a file" split as the LFG rate card (section 10) and the Distribution Tool's rate-card import.
+
+**New tables**: `portal_order_shipments` / `portal_shipment_events` mirror `lfg_shipments` / `lfg_shipment_events` column-for-column (same `current_status` vocabulary). `portal_order_invoices` holds the CRN/invoice metadata + the R2 `relative_path` of the uploaded PDF. All three follow the same staff-write/customer-read-own-company RLS shape as every other `portal_order_*` table, reusing the existing `is_mmdi_staff()`/`portal_company_id()` helpers — no new RLS pattern introduced.
+
+Verified: `npx tsc --noEmit` (clean) and `npx eslint` on every new/changed file (clean); the migration SQL parses cleanly under `pglast.parse_sql`.
