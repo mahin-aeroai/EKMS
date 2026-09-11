@@ -1254,3 +1254,13 @@ export interface PortalOrderInvoiceRow {
   uploaded_by_role: "staff";
   created_at: string;
 }
+
+/** One photo slot on the Customer Portal home page's hero banner (see PortalHeroBanner.tsx's HERO_SLOTS). One row per slot_key -- upserted, not a history. */
+export interface PortalHeroImageRow {
+  id: string;
+  slot_key: string;
+  relative_path: string;
+  uploaded_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
