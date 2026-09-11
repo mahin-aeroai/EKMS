@@ -98,7 +98,12 @@ export default function LfgSiteImportClient() {
   const [sheets, setSheets] = useState<RawSheet[]>([]);
   const [selectedSheet, setSelectedSheet] = useState<string | null>(null);
   const [columnMap, setColumnMap] = useState<ColumnMap>({});
-  const [sizeUnit, setSizeUnit] = useState<"in" | "mm">("in");
+  // Defaults to MM, not Inch -- task feedback: "why inches it is always mm
+  // only". Site lists come from partners/Apple as mm measurements far more
+  // often than inches; MM as the starting toggle state means a typical
+  // sheet needs no unit fiddling before import, only a deliberate switch to
+  // Inch when that's genuinely what a file contains.
+  const [sizeUnit, setSizeUnit] = useState<"in" | "mm">("mm");
   const [submitting, setSubmitting] = useState(false);
 
   const [existingStores, setExistingStores] = useState<ExistingStore[] | null>(null);
@@ -333,7 +338,16 @@ export default function LfgSiteImportClient() {
           number_of_sites: site.numberOfSites || 1,
           width: toInches(site.width),
           height: toInches(site.height),
-          bleed: site.bleed !== null ? round2(site.bleed) : null,
+          // 11 Sept 2026: task feedback -- "why inches it is always mm only
+          // including bleed" -- Bleed now converts through the same
+          // Inch/MM toggle as Width/Height, unlike the manual New Site
+          // form's own Bleed field (that one takes whatever number is
+          // typed literally, with no unit conversion at all -- a
+          // pre-existing quirk of that form, out of scope here). A sheet
+          // of mm data can now be imported as-is with the toggle left on
+          // MM and every measurement -- width, height, and bleed alike --
+          // lands in the database's native inches correctly.
+          bleed: toInches(site.bleed),
           sqft: site.sqft !== null ? round2(site.sqft) : null,
           remarks: site.remarks,
           created_by: user?.id ?? null,
@@ -443,13 +457,13 @@ export default function LfgSiteImportClient() {
                 onClick={() => setSizeUnit("in")}
                 className={`px-2.5 py-1 ${sizeUnit === "in" ? "bg-primary text-on-brand" : "bg-surface text-ink-secondary"}`}
               >
-                Width/Height in Inch
+                Width/Height/Bleed in Inch
               </button>
               <button
                 onClick={() => setSizeUnit("mm")}
                 className={`px-2.5 py-1 ${sizeUnit === "mm" ? "bg-primary text-on-brand" : "bg-surface text-ink-secondary"}`}
               >
-                Width/Height in MM
+                Width/Height/Bleed in MM
               </button>
             </div>
           </div>

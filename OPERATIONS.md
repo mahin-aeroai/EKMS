@@ -663,3 +663,11 @@ New `/workspaces/lfg/import` page (`LfgSiteImportClient.tsx`), a "Bulk Import" b
 **No new SQL migration** -- this only writes to `lfg_stores`/`lfg_sites` under their existing RLS (`lfg_stores_insert`/`lfg_sites_insert`, both already admin/editor-writable -- confirmed by reading the policies in `supabase-lfg-site-management-schema.sql` before writing any code), the same tables and the same policies the manual New Site form already uses.
 
 Verified: `npx tsc --noEmit` (whole project, clean) and `npx eslint` on all four new/changed files (clean).
+
+**11 Sept 2026, one more round: Bulk Import's Bleed field now actually respects the Inch/MM toggle, and MM is the default.** Task feedback (Mahin, verbatim, after being handed a cleaned CSV converted to inches): "why inches it is always mm only including bleed change it even inport template mech too." Two things here: the site data he works with is always in mm, and Bleed specifically wasn't converting at all.
+
+**Root cause**: `LfgSiteImportClient.tsx`'s size-unit toggle was already converting Width/Height through `toInches()`, but Bleed was inserted as a literal `round2(site.bleed)` with no unit conversion at all -- so a bleed value typed as "30" (mm) was landing in the database as 30 *inches* regardless of which toggle was selected. This mirrors a pre-existing quirk in the manual New Site form (its own Bleed field has never been unit-converted either), which is presumably where the same assumption crept into the bulk import code -- but for a file with dozens of rows at once, that's a real, silent, hard-to-spot data error rather than a one-off a single filer would immediately notice and fix by hand.
+
+**Fix**: Bleed now runs through the same `toInches()` conversion as Width/Height. The unit toggle's default flipped from Inch to MM (site lists from partners/Apple arrive in mm far more often than inches, so MM is now the no-fiddling-needed default), and its label was reworded from "Width/Height in Inch/MM" to "Width/Height/Bleed in Inch/MM" so it's clear all three fields are covered. The manual New Site form's own Bleed field was deliberately left as-is -- out of scope for this request, and changing it would need its own confirmation since it'd change how every existing user of that form enters bleed.
+
+Verified: `npx tsc --noEmit` (clean) and `npx eslint` on the changed file (clean).
