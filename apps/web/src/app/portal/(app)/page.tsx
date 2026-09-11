@@ -46,7 +46,7 @@ export default async function PortalHomePage() {
 
   return (
     <div className="flex flex-col gap-8">
-      <PortalHeroBanner greetingName={identity.fullName || identity.companyName} ctaHref="#products" />
+      <PortalHeroBanner ctaHref="#products" />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <a
