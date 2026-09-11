@@ -220,7 +220,7 @@ function PortalLoginForm() {
   const isInvite = mode === "set-password" || otpVerified;
 
   return (
-    <div className="flex min-h-screen flex-col bg-surface-sunken">
+    <div data-theme="portal" className="flex min-h-screen flex-col bg-surface-sunken">
       <div className="flex flex-1 items-center justify-center px-4">
       <div className="w-full max-w-sm rounded-lg border border-line bg-surface p-8 shadow-sm">
         <div className="mb-6 flex flex-col items-center gap-2 text-center">

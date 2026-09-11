@@ -47,14 +47,14 @@ export default async function PortalLayout({ children }: { children: ReactNode }
   const onPortalHost = hostHeader === PORTAL_HOST;
 
   return (
-    <div className="min-h-screen bg-surface-sunken">
+    <div data-theme="portal" className="min-h-screen bg-surface-sunken">
       <PortalProviders onPortalHost={onPortalHost} identity={identity}>
         {identity ? (
           <PortalTopBar companyName={identity.companyName} fullName={identity.fullName} email={identity.email} />
         ) : (
           isStaffPreview && <PortalStaffBar />
         )}
-        <main className="mx-auto max-w-4xl px-4 py-6 sm:px-6">
+        <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
           {identity || isStaffPreview ? (
             children
           ) : (

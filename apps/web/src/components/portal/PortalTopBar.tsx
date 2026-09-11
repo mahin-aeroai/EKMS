@@ -2,15 +2,21 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LogOut, Package, ClipboardList, Building2, ShieldCheck, ShoppingCart } from "lucide-react";
+import { LogOut, ClipboardList, Building2, ShieldCheck, ShoppingCart } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/cn";
 import { usePortalHost, portalHref } from "@/lib/portal-links";
 
 // Bare, /portal-less paths -- portalHref() below adds the /portal prefix
 // back on hosts where the middleware doesn't rewrite it for us.
+//
+// 11 Sept 2026: "Products" dropped from the nav (task feedback: "remove
+// products tab and add products here so that home page looks occupied")
+// -- the catalog now renders directly on the home page instead of a
+// separate destination. /products itself still exists as a route (no
+// dead links from anywhere that already pointed at it), just isn't
+// linked from here anymore.
 const NAV = [
-  { href: "/products", label: "Products", icon: Package },
   { href: "/orders", label: "Orders", icon: ClipboardList },
   { href: "/account", label: "Account", icon: Building2 },
   { href: "/security", label: "Security", icon: ShieldCheck },
@@ -39,7 +45,7 @@ export function PortalTopBar({
 
   return (
     <header className="border-b border-line bg-surface">
-      <div className="mx-auto flex max-w-4xl flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+      <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
         <div className="flex items-center gap-3">
           <Link href={portalHref("/", onPortalHost)} className="flex items-center gap-2">
             {/*
