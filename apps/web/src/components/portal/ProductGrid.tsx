@@ -59,7 +59,12 @@ export function ProductGrid({ products }: { products: PortalProductRow[] }) {
   }
 
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    // auto-fit (not auto-fill/a fixed column count) so a handful of
+    // products stretch to fill the row's full width instead of leaving a
+    // dead gap where unused columns would sit -- task feedback: "increase
+    // the card width to match page width" (2 products in a 3-column grid
+    // left roughly a third of the row empty).
+    <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-4">
       {products.map((product) => (
         <div key={product.id} className="flex gap-4 rounded-xl border border-line bg-surface p-5 shadow-1">
           <div className="w-28 shrink-0 sm:w-32">

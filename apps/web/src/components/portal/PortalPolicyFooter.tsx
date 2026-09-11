@@ -61,7 +61,7 @@ export function PortalPolicyFooter({
   }
 
   return (
-    <footer className="mx-auto mb-6 mt-6 flex max-w-4xl flex-col items-center gap-4 rounded-lg bg-black px-4 py-8 sm:px-6">
+    <footer className="mx-auto mb-6 mt-6 flex max-w-6xl flex-col items-center gap-4 rounded-lg bg-black px-4 py-8 sm:px-6">
       <nav className="flex flex-wrap items-center justify-center gap-x-1 gap-y-2">
         {LINKS.map((l, i) => (
           <span key={l.href} className="flex items-center">
