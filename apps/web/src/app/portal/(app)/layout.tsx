@@ -1,8 +1,10 @@
 import type { ReactNode } from "react";
 import { headers } from "next/headers";
 import { getPortalIdentity } from "@/lib/portal-auth";
+import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { PORTAL_HOST } from "@/lib/portal-host";
 import { PortalTopBar } from "@/components/portal/PortalTopBar";
+import { PortalStaffBar } from "@/components/portal/PortalStaffBar";
 import { PortalProviders } from "@/components/portal/PortalProviders";
 import { PortalPolicyFooter } from "@/components/portal/PortalPolicyFooter";
 
@@ -15,6 +17,28 @@ export const dynamic = "force-dynamic";
 
 export default async function PortalLayout({ children }: { children: ReactNode }) {
   const identity = await getPortalIdentity();
+  // getPortalIdentity() returns null for BOTH "not signed in" and "signed
+  // in as MMDI staff, who has no portal_users row" -- supabase-middleware.ts
+  // deliberately lets staff (admin/editor/viewer) through to every
+  // /portal/* path ("useful for previewing exactly what a customer sees"),
+  // but until this fix the two null cases were indistinguishable here, so
+  // staff always hit the "No customer-portal account here" wall below --
+  // including on an order page's own staff-only actions (upload proof,
+  // status changes, and now Shipping/Invoice), which were unreachable by
+  // direct navigation even though middleware never intended to block them.
+  // Distinguish the two by checking profiles.role when there's no portal
+  // identity.
+  let isStaffPreview = false;
+  if (!identity) {
+    const supabase = await createServerSupabaseClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (user) {
+      const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+      isStaffPreview = profile?.role === "admin" || profile?.role === "editor" || profile?.role === "viewer";
+    }
+  }
   // Whether this request came in on portal.mmdi.in vs. a /portal-prefixed
   // path on another host -- decides whether internal links below render
   // clean (subdomain) or /portal-prefixed (everywhere else). See
@@ -25,9 +49,13 @@ export default async function PortalLayout({ children }: { children: ReactNode }
   return (
     <div className="min-h-screen bg-surface-sunken">
       <PortalProviders onPortalHost={onPortalHost} identity={identity}>
-        {identity && <PortalTopBar companyName={identity.companyName} fullName={identity.fullName} email={identity.email} />}
+        {identity ? (
+          <PortalTopBar companyName={identity.companyName} fullName={identity.fullName} email={identity.email} />
+        ) : (
+          isStaffPreview && <PortalStaffBar />
+        )}
         <main className="mx-auto max-w-4xl px-4 py-6 sm:px-6">
-          {identity ? (
+          {identity || isStaffPreview ? (
             children
           ) : (
             <div className="mx-auto mt-16 max-w-md rounded-lg border border-line bg-surface p-6 text-center shadow-1">
