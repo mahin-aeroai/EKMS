@@ -1205,3 +1205,52 @@ export interface PortalOrderApprovalRow {
   decided_by: string;
   decided_at: string;
 }
+
+// Mirrors lfg_shipments' own status vocabulary on purpose (see
+// supabase-portal-shipping-invoicing-migration.sql) -- SHIPMENT_STATUSES
+// in lfgStatus.ts is the type for current_status here too, reused as-is
+// rather than duplicated.
+export interface PortalOrderShipmentRow {
+  id: string;
+  order_id: string;
+  courier: string | null;
+  awb_number: string | null;
+  dispatch_date: string | null;
+  expected_delivery_date: string | null;
+  number_of_packages: number | null;
+  package_details: string | null;
+  current_status: string;
+  current_location: string | null;
+  delivery_date: string | null;
+  last_tracked_at: string | null;
+  internal_remarks: string | null;
+  created_at: string;
+  created_by: string | null;
+  updated_at: string;
+}
+
+export interface PortalShipmentEventRow {
+  id: string;
+  shipment_id: string;
+  event_status: string;
+  event_time: string;
+  location: string | null;
+  source: "manual" | "api";
+  raw_payload: Record<string, unknown> | null;
+  created_at: string;
+  created_by: string | null;
+}
+
+export interface PortalOrderInvoiceRow {
+  id: string;
+  order_id: string;
+  crn_number: string | null;
+  invoice_number: string | null;
+  invoice_date: string | null;
+  amount: number | null;
+  relative_path: string;
+  file_name: string;
+  uploaded_by: string;
+  uploaded_by_role: "staff";
+  created_at: string;
+}

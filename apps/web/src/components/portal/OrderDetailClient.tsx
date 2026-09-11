@@ -3,18 +3,28 @@
 import { useRef, useState } from "react";
 import Script from "next/script";
 import { useRouter } from "next/navigation";
-import { Download, UploadCloud, CheckCircle2, RotateCcw, CreditCard } from "lucide-react";
+import { Download, UploadCloud, CheckCircle2, RotateCcw, CreditCard, Truck, Radar, FileText } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { usePortalUser } from "@/lib/PortalUserContext";
 import { orderStatusBadge, orderStatusLabel, paymentStatusBadge, paymentStatusLabel } from "./orderStatus";
+// Reused as-is from the LFG Connect side of this app (see
+// supabase-portal-shipping-invoicing-migration.sql's header comment) --
+// portal_order_shipments.current_status speaks the exact same
+// SHIPMENT_STATUSES vocabulary as lfg_shipments, and only Blue Dart has a
+// live-tracking integration on either side, so the courier list/gate and
+// the Blue Dart status mapping don't need a second copy here.
+import { LFG_COURIERS, isBlueDartCourier, shipmentStatusBadge, shipmentStatusLabel } from "@/lib/lfgStatus";
 import type {
   PortalOrderRow,
   PortalOrderItemRow,
   PortalOrderFileRow,
   PortalOrderApprovalRow,
   PortalCompanyStoreRow,
+  PortalOrderShipmentRow,
+  PortalShipmentEventRow,
+  PortalOrderInvoiceRow,
 } from "@mmdi/shared/rows";
 
 declare global {
@@ -37,6 +47,13 @@ async function downloadFile(fileId: string) {
   if (res.ok) window.open(data.url, "_blank");
 }
 
+async function downloadInvoice(invoiceId: string) {
+  const headers = await authHeaders();
+  const res = await fetch(`/api/portal/order-invoices/${invoiceId}/download-url`, { headers });
+  const data = await res.json();
+  if (res.ok) window.open(data.url, "_blank");
+}
+
 export function OrderDetailClient({
   order: initialOrder,
   items,
@@ -44,6 +61,9 @@ export function OrderDetailClient({
   approvals,
   store,
   isStaff,
+  shipments: initialShipments,
+  shipmentEvents: initialShipmentEvents,
+  invoices: initialInvoices,
 }: {
   order: PortalOrderRow;
   items: PortalOrderItemRow[];
@@ -51,6 +71,9 @@ export function OrderDetailClient({
   approvals: PortalOrderApprovalRow[];
   store: PortalCompanyStoreRow | null;
   isStaff: boolean;
+  shipments: PortalOrderShipmentRow[];
+  shipmentEvents: PortalShipmentEventRow[];
+  invoices: PortalOrderInvoiceRow[];
 }) {
   const router = useRouter();
   const portalUser = usePortalUser();
@@ -61,6 +84,16 @@ export function OrderDetailClient({
   const [showRevisionBox, setShowRevisionBox] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const proofInputRef = useRef<HTMLInputElement>(null);
+
+  const [shipments, setShipments] = useState(initialShipments);
+  const [shipmentEvents, setShipmentEvents] = useState(initialShipmentEvents);
+  const [invoices, setInvoices] = useState(initialInvoices);
+  const [showAddShipment, setShowAddShipment] = useState(false);
+  const [shipmentForm, setShipmentForm] = useState({ courier: LFG_COURIERS[0] as string, courierOther: "", awb_number: "", dispatch_date: "", expected_delivery_date: "" });
+  const [trackingBusy, setTrackingBusy] = useState<string | null>(null);
+  const [showAddInvoice, setShowAddInvoice] = useState(false);
+  const [invoiceForm, setInvoiceForm] = useState({ crn_number: "", invoice_number: "", invoice_date: "", amount: "" });
+  const invoiceInputRef = useRef<HTMLInputElement>(null);
 
   // Staff can preview /portal/* (see supabase-middleware.ts) but doesn't
   // have a portal_users row, so PortalUserContext is null for them — the
@@ -202,6 +235,101 @@ export function OrderDetailClient({
       },
     });
     razorpay.open();
+  }
+
+  async function refreshShipping() {
+    const [{ data: newShipments }, { data: newInvoices }] = await Promise.all([
+      supabase.from("portal_order_shipments").select("*").eq("order_id", order.id).order("created_at", { ascending: false }),
+      supabase.from("portal_order_invoices").select("*").eq("order_id", order.id).order("created_at", { ascending: false }),
+    ]);
+    const shipmentIds = (newShipments ?? []).map((s) => s.id);
+    const { data: newEvents } = shipmentIds.length
+      ? await supabase.from("portal_shipment_events").select("*").in("shipment_id", shipmentIds).order("event_time", { ascending: false })
+      : { data: [] as PortalShipmentEventRow[] };
+    if (newShipments) setShipments(newShipments as PortalOrderShipmentRow[]);
+    if (newInvoices) setInvoices(newInvoices as PortalOrderInvoiceRow[]);
+    setShipmentEvents((newEvents ?? []) as PortalShipmentEventRow[]);
+  }
+
+  async function handleAddShipment() {
+    setBusy(true);
+    setError(null);
+    const headers = await authHeaders();
+    const courier = shipmentForm.courier === "Other" ? shipmentForm.courierOther.trim() : shipmentForm.courier;
+    const res = await fetch(`/api/portal/orders/${order.id}/shipments`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        courier,
+        awb_number: shipmentForm.awb_number.trim() || undefined,
+        dispatch_date: shipmentForm.dispatch_date || undefined,
+        expected_delivery_date: shipmentForm.expected_delivery_date || undefined,
+      }),
+    });
+    const data = await res.json();
+    setBusy(false);
+    if (!res.ok) {
+      setError(data.message || data.error);
+      return;
+    }
+    setShowAddShipment(false);
+    setShipmentForm({ courier: LFG_COURIERS[0], courierOther: "", awb_number: "", dispatch_date: "", expected_delivery_date: "" });
+    await refreshShipping();
+  }
+
+  async function handleTrack(shipmentId: string) {
+    setTrackingBusy(shipmentId);
+    setError(null);
+    const headers = await authHeaders();
+    const res = await fetch(`/api/portal/shipments/${shipmentId}/track`, { method: "POST", headers });
+    const data = await res.json();
+    setTrackingBusy(null);
+    if (!res.ok) {
+      setError(data.message || data.error);
+      return;
+    }
+    await refreshShipping();
+  }
+
+  async function handleUploadInvoice(file: File) {
+    setBusy(true);
+    setError(null);
+    const headers = await authHeaders();
+    const uploadRes = await fetch(`/api/portal/orders/${order.id}/invoices/upload-url`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ file_name: file.name, content_type: file.type || "application/pdf" }),
+    });
+    const uploadData = await uploadRes.json();
+    if (!uploadRes.ok) {
+      setError(uploadData.message || uploadData.error);
+      setBusy(false);
+      return;
+    }
+    await fetch(uploadData.url, { method: "PUT", headers: { "Content-Type": file.type || "application/pdf" }, body: file });
+
+    const {
+      data: { user: authUser },
+    } = await supabase.auth.getUser();
+    const { error: insertErr } = await supabase.from("portal_order_invoices").insert({
+      order_id: order.id,
+      crn_number: invoiceForm.crn_number.trim() || null,
+      invoice_number: invoiceForm.invoice_number.trim() || null,
+      invoice_date: invoiceForm.invoice_date || null,
+      amount: invoiceForm.amount ? Number(invoiceForm.amount) : null,
+      relative_path: uploadData.relative_path,
+      file_name: file.name,
+      uploaded_by: authUser?.id,
+      uploaded_by_role: "staff",
+    });
+    setBusy(false);
+    if (insertErr) {
+      setError(insertErr.message);
+      return;
+    }
+    setShowAddInvoice(false);
+    setInvoiceForm({ crn_number: "", invoice_number: "", invoice_date: "", amount: "" });
+    await refreshShipping();
   }
 
   const proofFiles = files.filter((f) => f.kind === "proof");
@@ -350,6 +478,201 @@ export function OrderDetailClient({
           <Button onClick={handlePay} loading={busy}>
             <CreditCard size={14} /> Pay now
           </Button>
+        </div>
+      )}
+
+      {(shipments.length > 0 || (isStaff && order.payment_status === "paid")) && (
+        <div className="rounded-lg border border-line bg-surface p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-sm font-semibold text-ink">Shipping</p>
+            {isStaff && (
+              <Button size="sm" variant="secondary" onClick={() => setShowAddShipment((v) => !v)} disabled={busy}>
+                <Truck size={13} /> Add shipment
+              </Button>
+            )}
+          </div>
+
+          {showAddShipment && (
+            <div className="mb-3 flex flex-col gap-2 rounded-md bg-surface-sunken p-3">
+              <div className="flex flex-wrap gap-2">
+                <select
+                  value={shipmentForm.courier}
+                  onChange={(e) => setShipmentForm((f) => ({ ...f, courier: e.target.value }))}
+                  className="rounded-md border border-line-strong bg-surface px-2 py-1.5 text-sm text-ink focus:border-primary focus:outline-none"
+                >
+                  {LFG_COURIERS.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                  <option value="Other">Other</option>
+                </select>
+                {shipmentForm.courier === "Other" && (
+                  <input
+                    value={shipmentForm.courierOther}
+                    onChange={(e) => setShipmentForm((f) => ({ ...f, courierOther: e.target.value }))}
+                    placeholder="Courier name"
+                    className="rounded-md border border-line-strong bg-surface px-2 py-1.5 text-sm text-ink focus:border-primary focus:outline-none"
+                  />
+                )}
+                <input
+                  value={shipmentForm.awb_number}
+                  onChange={(e) => setShipmentForm((f) => ({ ...f, awb_number: e.target.value }))}
+                  placeholder="AWB / tracking number"
+                  className="rounded-md border border-line-strong bg-surface px-2 py-1.5 text-sm text-ink focus:border-primary focus:outline-none"
+                />
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="flex items-center gap-1.5 text-xs text-ink-secondary">
+                  Dispatch
+                  <input
+                    type="date"
+                    value={shipmentForm.dispatch_date}
+                    onChange={(e) => setShipmentForm((f) => ({ ...f, dispatch_date: e.target.value }))}
+                    className="rounded-md border border-line-strong bg-surface px-2 py-1 text-sm text-ink focus:border-primary focus:outline-none"
+                  />
+                </label>
+                <label className="flex items-center gap-1.5 text-xs text-ink-secondary">
+                  Expected delivery
+                  <input
+                    type="date"
+                    value={shipmentForm.expected_delivery_date}
+                    onChange={(e) => setShipmentForm((f) => ({ ...f, expected_delivery_date: e.target.value }))}
+                    className="rounded-md border border-line-strong bg-surface px-2 py-1 text-sm text-ink focus:border-primary focus:outline-none"
+                  />
+                </label>
+                <Button size="sm" onClick={handleAddShipment} loading={busy}>
+                  Save shipment
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {shipments.length === 0 && !showAddShipment && (
+            <p className="text-sm text-ink-muted">No shipment added yet.</p>
+          )}
+
+          <div className="flex flex-col gap-3">
+            {shipments.map((s) => {
+              const events = shipmentEvents.filter((e) => e.shipment_id === s.id);
+              return (
+                <div key={s.id} className="rounded-md border border-line p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-medium text-ink">
+                        {s.courier || "Courier not set"} {s.awb_number ? `· AWB ${s.awb_number}` : ""}
+                      </p>
+                      <p className="text-xs text-ink-muted">
+                        {s.dispatch_date ? `Dispatched ${new Date(s.dispatch_date).toLocaleDateString("en-IN")}` : "Not yet dispatched"}
+                        {s.expected_delivery_date ? ` · Expected ${new Date(s.expected_delivery_date).toLocaleDateString("en-IN")}` : ""}
+                        {s.current_location ? ` · Currently at ${s.current_location}` : ""}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge status={shipmentStatusBadge(s.current_status)}>{shipmentStatusLabel(s.current_status)}</Badge>
+                      {isStaff && isBlueDartCourier(s.courier) && s.awb_number && (
+                        <Button size="sm" variant="ghost" onClick={() => handleTrack(s.id)} loading={trackingBusy === s.id}>
+                          <Radar size={13} /> Track via Blue Dart
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  {s.last_tracked_at && (
+                    <p className="mt-1 text-[11px] text-ink-muted">Last tracked {new Date(s.last_tracked_at).toLocaleString("en-IN")}</p>
+                  )}
+                  {events.length > 0 && (
+                    <ul className="mt-2 flex flex-col gap-1 border-t border-line pt-2">
+                      {events.map((e) => (
+                        <li key={e.id} className="text-xs text-ink-secondary">
+                          <span className="font-medium text-ink">{e.event_status}</span>
+                          {e.location ? ` — ${e.location}` : ""} · {new Date(e.event_time).toLocaleString("en-IN")}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {(invoices.length > 0 || isStaff) && (
+        <div className="rounded-lg border border-line bg-surface p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-sm font-semibold text-ink">Invoice</p>
+            {isStaff && (
+              <Button size="sm" variant="secondary" onClick={() => setShowAddInvoice((v) => !v)} disabled={busy}>
+                <FileText size={13} /> Add invoice
+              </Button>
+            )}
+          </div>
+
+          {showAddInvoice && (
+            <div className="mb-3 flex flex-col gap-2 rounded-md bg-surface-sunken p-3">
+              <div className="flex flex-wrap gap-2">
+                <input
+                  value={invoiceForm.crn_number}
+                  onChange={(e) => setInvoiceForm((f) => ({ ...f, crn_number: e.target.value }))}
+                  placeholder="CRN number"
+                  className="rounded-md border border-line-strong bg-surface px-2 py-1.5 text-sm text-ink focus:border-primary focus:outline-none"
+                />
+                <input
+                  value={invoiceForm.invoice_number}
+                  onChange={(e) => setInvoiceForm((f) => ({ ...f, invoice_number: e.target.value }))}
+                  placeholder="Invoice number"
+                  className="rounded-md border border-line-strong bg-surface px-2 py-1.5 text-sm text-ink focus:border-primary focus:outline-none"
+                />
+                <input
+                  type="date"
+                  value={invoiceForm.invoice_date}
+                  onChange={(e) => setInvoiceForm((f) => ({ ...f, invoice_date: e.target.value }))}
+                  className="rounded-md border border-line-strong bg-surface px-2 py-1.5 text-sm text-ink focus:border-primary focus:outline-none"
+                />
+                <input
+                  value={invoiceForm.amount}
+                  onChange={(e) => setInvoiceForm((f) => ({ ...f, amount: e.target.value }))}
+                  placeholder="Amount (₹)"
+                  inputMode="decimal"
+                  className="w-28 rounded-md border border-line-strong bg-surface px-2 py-1.5 text-sm text-ink focus:border-primary focus:outline-none"
+                />
+              </div>
+              <input
+                ref={invoiceInputRef}
+                type="file"
+                accept="application/pdf"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleUploadInvoice(file);
+                  e.target.value = "";
+                }}
+              />
+              <Button size="sm" onClick={() => invoiceInputRef.current?.click()} loading={busy}>
+                <UploadCloud size={14} /> Upload invoice PDF
+              </Button>
+            </div>
+          )}
+
+          {invoices.length === 0 ? (
+            !showAddInvoice && <p className="text-sm text-ink-muted">No invoice uploaded yet.</p>
+          ) : (
+            <ul className="flex flex-col gap-1.5">
+              {invoices.map((inv) => (
+                <li key={inv.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-surface-sunken px-3 py-2 text-xs">
+                  <span className="text-ink-secondary">
+                    {inv.invoice_number ? `Invoice ${inv.invoice_number}` : inv.file_name}
+                    {inv.crn_number ? ` · CRN ${inv.crn_number}` : ""}
+                    {inv.invoice_date ? ` · ${new Date(inv.invoice_date).toLocaleDateString("en-IN")}` : ""}
+                    {inv.amount != null ? ` · ₹${Number(inv.amount).toLocaleString("en-IN")}` : ""}
+                  </span>
+                  <button onClick={() => downloadInvoice(inv.id)} className="flex items-center gap-1 text-primary hover:underline">
+                    <Download size={12} /> Download
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 
