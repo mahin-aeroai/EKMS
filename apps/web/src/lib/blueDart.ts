@@ -182,6 +182,26 @@ async function throwBlueDartApiError(res: Response, label: string): Promise<neve
 }
 
 /**
+ * 11 Sept 2026: a live tracking call failed with a bare Apigee-shaped 500
+ * ({"status":500,"title":"Internal Server Error","error-response":[{"msg":
+ * "The server encountered an unexpected condition..."}]}) -- a generic
+ * gateway/backend fault, not the request-format issues the 401/404/400
+ * bugs above turned out to be (those came back as 401/400, not 500, and
+ * are already fixed). Nothing in this file's request shape looks wrong
+ * for that AWB, so this reads as a transient fault on Blue Dart's side
+ * rather than a bug here -- retried once after a short pause before
+ * giving up, same as any flaky-upstream 5xx deserves. Never retries a
+ * 4xx (401/400/etc.) -- those are real request-format/auth problems that
+ * won't fix themselves on a second try.
+ */
+async function fetchBlueDart(url: string, init: RequestInit): Promise<Response> {
+  const first = await fetch(url, init);
+  if (first.ok || first.status < 500) return first;
+  await new Promise((resolve) => setTimeout(resolve, 800));
+  return fetch(url, init);
+}
+
+/**
  * Authenticates against Blue Dart's gateway using the Consumer Key/Secret
  * and returns a JWT to use as a bearer token on the tracking call. Throws
  * BlueDartConfigError if the env vars are missing (caller should turn
@@ -193,7 +213,7 @@ export async function getBlueDartToken(): Promise<string> {
   const consumerKey = requireEnv("BLUEDART_CONSUMER_KEY");
   const consumerSecret = requireEnv("BLUEDART_CONSUMER_SECRET");
 
-  const res = await fetch(AUTH_URL, {
+  const res = await fetchBlueDart(AUTH_URL, {
     method: "GET",
     headers: {
       ClientID: consumerKey,
@@ -237,7 +257,7 @@ export async function trackAwb(awb: string): Promise<BlueDartTrackResult> {
   url.searchParams.set("verno", "1");
   url.searchParams.set("scan", "1");
 
-  const res = await fetch(url.toString(), {
+  const res = await fetchBlueDart(url.toString(), {
     method: "GET",
     headers: { JWTToken: token },
   });
@@ -320,7 +340,7 @@ export async function checkPincodeServiceability(pincode: string): Promise<Pinco
   const licenseKey = requireEnv("BLUEDART_LICENSE_KEY");
   const token = await getBlueDartToken();
 
-  const res = await fetch(FINDER_URL, {
+  const res = await fetchBlueDart(FINDER_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", JWTToken: token },
     body: JSON.stringify({
@@ -379,7 +399,7 @@ export async function getTransitTime(params: {
   const pudateDDMMYYYY = y && m && dd ? `${dd}${m}${y}` : params.pickupDate.replaceAll("-", "");
   const pPickupTime = params.pickupTime.replace(":", "");
 
-  const res = await fetch(TRANSIT_TIME_URL, {
+  const res = await fetchBlueDart(TRANSIT_TIME_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", JWTToken: token },
     body: JSON.stringify({
