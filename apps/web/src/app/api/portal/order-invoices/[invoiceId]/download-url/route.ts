@@ -11,7 +11,17 @@ export const dynamic = "force-dynamic";
 // orders) IS the authorization check here, so a foreign/unowned
 // invoiceId simply resolves to no row and this 404s.
 //
-// GET /api/portal/order-invoices/[invoiceId]/download-url
+// GET /api/portal/order-invoices/[invoiceId]/download-url?mode=download
+//
+// Two client-facing affordances share this one route (task feedback: "i
+// want invoice preview along with download"): the default (no `mode`, or
+// any value other than "download") signs a plain GET with no
+// Content-Disposition override, so the browser's own PDF viewer renders
+// it inline when opened in a new tab -- a "Preview". `?mode=download`
+// additionally sets ResponseContentDisposition to force a real Save-As
+// with the invoice's real file name, even though R2 objects here were
+// uploaded generically (no Content-Disposition set at upload time in
+// invoices/upload-url/route.ts).
 
 const r2 = new S3Client({
   region: "auto",
@@ -31,6 +41,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ invo
   }
 
   const { invoiceId } = await params;
+  const mode = new URL(request.url).searchParams.get("mode");
 
   const supabase = await createRouteSupabaseClient(request);
   const { response: authError } = await requireVerifiedUser(supabase);
@@ -46,7 +57,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ invo
   }
 
   try {
-    const command = new GetObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: invoice.relative_path });
+    const command = new GetObjectCommand({
+      Bucket: process.env.R2_BUCKET_NAME,
+      Key: invoice.relative_path,
+      ...(mode === "download" ? { ResponseContentDisposition: `attachment; filename="${invoice.file_name.replace(/"/g, "")}"` } : {}),
+    });
     const url = await getSignedUrl(r2, command, { expiresIn: 60 });
     return NextResponse.json({ url, file_name: invoice.file_name });
   } catch (err) {

@@ -5,11 +5,18 @@ import { trackAwb, mapBlueDartStatusToLfg } from "@/lib/blueDart";
 export const dynamic = "force-dynamic";
 
 // Live Blue Dart tracking bridge for a portal order's shipment -- staff
-// only (the customer sees the resulting timeline read-only on their order
-// page, same as LFG's shipments/[shipmentId]/track/route.ts, which this
-// deliberately mirrors almost line-for-line: same trackAwb()/
-// mapBlueDartStatusToLfg() functions, same event-log shape, so there's
-// exactly one Blue Dart integration in this codebase, not two).
+// OR the order's own company's portal customer (task feedback: customers
+// had no way to pull a fresh status themselves). Mirrors LFG Connect's own
+// precedent exactly -- lfg_shipments_write already grants a partner full
+// write access to their own site's shipments -- via
+// supabase-portal-shipment-tracking-customer-migration.sql's matching RLS
+// grant, rather than a service-role bypass (see supabase-admin.ts's own
+// header comment on why that's reserved for requests with no real user
+// session, which this has). Also deliberately mirrors LFG's
+// shipments/[shipmentId]/track/route.ts almost line-for-line otherwise --
+// same trackAwb()/mapBlueDartStatusToLfg() functions, same event-log
+// shape, so there's exactly one Blue Dart integration in this codebase,
+// not two.
 //
 // POST /api/portal/shipments/[shipmentId]/track
 export async function POST(request: Request, { params }: { params: Promise<{ shipmentId: string }> }) {
@@ -29,19 +36,27 @@ export async function POST(request: Request, { params }: { params: Promise<{ shi
   const { user, response: authError } = await requireVerifiedUser(supabase);
   if (authError) return authError;
 
-  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
-  if (profile?.role !== "admin" && profile?.role !== "editor") {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
-  }
-
   const { data: shipment } = await supabase
     .from("portal_order_shipments")
-    .select("id, awb_number")
+    .select("id, awb_number, order_id")
     .eq("id", shipmentId)
     .maybeSingle();
   if (!shipment) {
     return NextResponse.json({ error: "shipment_not_found" }, { status: 404 });
   }
+
+  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+  const isStaffWriter = profile?.role === "admin" || profile?.role === "editor";
+  if (!isStaffWriter) {
+    // Mirrors LFG Connect's own site.partner_id === partnerUser.partner_id
+    // check for the same route.
+    const { data: order } = await supabase.from("portal_orders").select("company_id").eq("id", shipment.order_id).maybeSingle();
+    const { data: portalUser } = await supabase.from("portal_users").select("company_id").eq("id", user.id).maybeSingle();
+    if (!order || !portalUser || order.company_id !== portalUser.company_id) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
+  }
+
   if (!shipment.awb_number) {
     return NextResponse.json({ error: "no_awb", message: "This shipment has no AWB number set yet." }, { status: 400 });
   }
