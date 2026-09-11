@@ -26,10 +26,17 @@ const HERO_CATEGORY_LABELS = ["Spaces", "Vehicles", "Signage", "Displays", "Grap
  * strip down to just: headline/CTA/category list on the left, one
  * staff-uploaded collage image (built outside the app, uploaded as a
  * single file from Customer Portal → Hero Banner) on the right, at roughly
- * 40% of the previous overall height. Every non-photo color here is still
- * one of globals.css's existing semantic tokens (primary/ai, portal-themed) —
- * no
- * new brand hex introduced.
+ * 40% of the previous overall height.
+ *
+ * Same day, follow-up: "I have bee asking to remove the text" -- "from
+ * ideas text" in the original request meant the pitch paragraph itself
+ * ("From ideas to impact — place a new order..."), not the "Ideas in
+ * Every Space" script line dropped in the round above. Removed now --
+ * headline goes straight into the CTA button.
+ *
+ * Every non-photo color here is still one of globals.css's existing
+ * semantic tokens (primary/ai, portal-themed) -- no new brand hex
+ * introduced.
  */
 export function PortalHeroBanner({
   greetingName,
@@ -50,13 +57,10 @@ export function PortalHeroBanner({
               Possibilities.
             </span>
           </h1>
-          <p className="max-w-sm text-xs text-ink-secondary sm:text-sm">
-            From ideas to impact — place a new order, track design approval, and follow every shipment right through to your stores.
-          </p>
 
           <Link
             href={ctaHref}
-            className="mt-1.5 inline-flex w-fit items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-on-brand shadow-1 transition-colors hover:bg-primary-hover"
+            className="mt-2.5 inline-flex w-fit items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-on-brand shadow-1 transition-colors hover:bg-primary-hover"
           >
             Place Your Order
             <ArrowRight size={16} />
