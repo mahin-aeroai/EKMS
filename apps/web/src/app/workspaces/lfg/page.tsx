@@ -16,6 +16,7 @@ import {
   AlertTriangle,
   Eye,
   ShieldAlert,
+  Upload,
   type LucideIcon,
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
@@ -781,9 +782,14 @@ export default function LfgSiteListPage() {
         section="Site Master"
         subtitle="Search or browse every site for the Basil (Apple) LFG program, then open its Site 360 view. Sorted by SFO / Apple ID."
         action={
-          <Button onClick={() => router.push("/workspaces/lfg/new")}>
-            <Plus size={15} className="mr-1.5" /> New Site
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={() => router.push("/workspaces/lfg/import")}>
+              <Upload size={15} className="mr-1.5" /> Bulk Import
+            </Button>
+            <Button onClick={() => router.push("/workspaces/lfg/new")}>
+              <Plus size={15} className="mr-1.5" /> New Site
+            </Button>
+          </div>
         }
       />
 
