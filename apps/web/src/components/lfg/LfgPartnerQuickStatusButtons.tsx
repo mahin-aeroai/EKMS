@@ -6,7 +6,13 @@ import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
-import { LFG_STATUSES, lfgStatusLabel, type LfgStatus } from "@/lib/lfgStatus";
+import { LFG_STATUSES, lfgStatusLabel, LFG_COURIERS, type LfgStatus } from "@/lib/lfgStatus";
+
+const inputClass =
+  "rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none";
+const labelClass = "text-xs font-medium text-ink-secondary";
+
+const EMPTY_SHIP_FORM = { courier: "", courierOther: "", awb_number: "", dispatch_date: "", expected_delivery_date: "" };
 
 // The single "what's next" button for a site card's Cards view (see
 // LfgSiteCardGrid's renderQuickActions prop) -- despite the filename/
@@ -97,6 +103,18 @@ export function LfgPartnerQuickStatusButtons({
   // way to go back") is what actually fires the write below. null = no
   // confirmation dialog open.
   const [confirming, setConfirming] = useState<NextAction | null>(null);
+  // Mark Shipped gets its own richer in-page popup instead of the plain
+  // confirm dialog above (task feedback: "when we are updating the status
+  // to shipped i pop up should open withing the screen and give
+  // provisions to enter courier details AWB number etc details") -- opens
+  // in place, never a new window/tab. Submitting it both creates the
+  // lfg_shipments row (same shape as LfgSiteWorkspaceClient's own "New
+  // Shipment" form, so there's one insert shape, not two) and advances
+  // the site to Shipped in a single action, instead of two separate trips
+  // (Site 360's Shipment tab, then this button).
+  const [shipModalOpen, setShipModalOpen] = useState(false);
+  const [shipSaving, setShipSaving] = useState(false);
+  const [shipForm, setShipForm] = useState(EMPTY_SHIP_FORM);
 
   const rank = LFG_STATUSES.indexOf(status as LfgStatus);
   if (rank < 0) return null;
@@ -172,6 +190,46 @@ export function LfgPartnerQuickStatusButtons({
     toast("success", `${outletName} → ${lfgStatusLabel(action.target)}`);
   }
 
+  async function handleConfirmShip() {
+    if (shipSaving) return;
+    setShipSaving(true);
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const courierValue = shipForm.courier === "Other" ? shipForm.courierOther.trim() : shipForm.courier;
+    const { error: shipmentError } = await supabase.from("lfg_shipments").insert({
+      site_id: siteId,
+      courier: courierValue || null,
+      awb_number: shipForm.awb_number.trim() || null,
+      dispatch_date: shipForm.dispatch_date || null,
+      expected_delivery_date: shipForm.expected_delivery_date || null,
+      created_by: user?.id ?? null,
+    });
+    if (shipmentError) {
+      setShipSaving(false);
+      toast("danger", `Couldn't save shipment details: ${shipmentError.message}`);
+      return;
+    }
+    const { error } = await supabase.rpc("lfg_change_site_status", {
+      p_site_id: siteId,
+      p_new_status: "dispatched",
+      p_remarks: null,
+    });
+    setShipSaving(false);
+    if (error) {
+      // The shipment row above did save -- only the status change failed
+      // -- so say so rather than implying nothing happened.
+      toast("danger", `Shipment details saved, but couldn't update ${siteCode}'s status: ${error.message}`);
+      return;
+    }
+    setShipModalOpen(false);
+    setShipForm(EMPTY_SHIP_FORM);
+    onChanged(siteId, "dispatched");
+    toast("success", `${outletName} → Shipped`);
+  }
+
+  const isShipAction = next.kind === "status" && next.target === "dispatched";
+
   const icon =
     next.kind === "creative" ? (
       <Inbox size={14} className="mr-1.5" />
@@ -195,7 +253,7 @@ export function LfgPartnerQuickStatusButtons({
         className="flex-1"
         loading={saving}
         disabled={saving}
-        onClick={() => setConfirming(next)}
+        onClick={() => (isShipAction ? setShipModalOpen(true) : setConfirming(next))}
       >
         {icon}
         {buttonLabel}
@@ -209,6 +267,72 @@ export function LfgPartnerQuickStatusButtons({
       >
         {outletName} ({siteCode}) will move to {confirmLabel}. This updates the site right away — Cancel here first
         if you&rsquo;re not sure.
+      </Dialog>
+
+      <Dialog
+        open={shipModalOpen}
+        onClose={() => setShipModalOpen(false)}
+        title={`Mark ${outletName} (${siteCode}) as Shipped`}
+        variant="form"
+        onConfirm={handleConfirmShip}
+        confirmLabel={shipSaving ? "Saving…" : "Save & Mark Shipped"}
+      >
+        <p className="mb-3 text-sm text-ink-secondary">
+          Courier and AWB are optional here — add them now if you have them, or leave blank and fill in later from
+          the site&rsquo;s Shipment tab.
+        </p>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="flex flex-col gap-1">
+            <label className={labelClass}>Courier</label>
+            <select
+              className={inputClass}
+              value={shipForm.courier}
+              onChange={(e) => setShipForm((f) => ({ ...f, courier: e.target.value }))}
+            >
+              <option value="">Select courier</option>
+              {LFG_COURIERS.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+              <option value="Other">Other</option>
+            </select>
+            {shipForm.courier === "Other" && (
+              <input
+                placeholder="Courier name"
+                className={`${inputClass} mt-1`}
+                value={shipForm.courierOther}
+                onChange={(e) => setShipForm((f) => ({ ...f, courierOther: e.target.value }))}
+              />
+            )}
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className={labelClass}>AWB / Tracking Number</label>
+            <input
+              className={inputClass}
+              value={shipForm.awb_number}
+              onChange={(e) => setShipForm((f) => ({ ...f, awb_number: e.target.value }))}
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className={labelClass}>Dispatch Date</label>
+            <input
+              type="date"
+              className={inputClass}
+              value={shipForm.dispatch_date}
+              onChange={(e) => setShipForm((f) => ({ ...f, dispatch_date: e.target.value }))}
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className={labelClass}>Expected Delivery</label>
+            <input
+              type="date"
+              className={inputClass}
+              value={shipForm.expected_delivery_date}
+              onChange={(e) => setShipForm((f) => ({ ...f, expected_delivery_date: e.target.value }))}
+            />
+          </div>
+        </div>
       </Dialog>
     </div>
   );

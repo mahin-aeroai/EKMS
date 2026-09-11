@@ -10,6 +10,11 @@ import { Dialog } from "@/components/ui/Dialog";
 import { Tabs, type TabItem } from "@/components/ui/Tabs";
 import { Timeline, type TimelineEntry } from "@/components/ui/Timeline";
 import { useToast } from "@/components/ui/Notifications";
+// Same tracking-stepper card the Customer Portal's own order page uses
+// (task feedback: "i love the bar card. implement the same at lfg
+// connect too") -- shared so the two don't drift into two slightly
+// different stepper implementations.
+import { ShipmentTrackingStepper } from "@/components/shipment/ShipmentTrackingStepper";
 import { useUserRole, canWrite, canDelete } from "@/lib/UserRoleContext";
 import { formatDecimal, formatMm, round2 } from "@/lib/lfg-units";
 import { useLfgDistinctValues } from "@/lib/useLfgDistinctValues";
@@ -2104,6 +2109,17 @@ function ShipmentCard({
 
       {expanded && (
         <div className="mt-4 flex flex-col gap-4 border-t border-line pt-4">
+          <div>
+            <ShipmentTrackingStepper
+              status={displayStatus}
+              statusLabel={shipmentStatusLabel(displayStatus)}
+              exceptionLocation={displayLocation}
+            />
+            {displayLastTracked && (
+              <p className="mt-2 text-[11px] text-ink-muted">Last tracked {new Date(displayLastTracked).toLocaleString()}</p>
+            )}
+          </div>
+
           <div className="flex items-center justify-between">
             <h4 className="text-xs font-semibold text-ink-secondary">Shipment Details</h4>
             {editable && (
@@ -2266,28 +2282,16 @@ function ShipmentCard({
             {loadingEvents ? (
               <p className="text-sm text-ink-muted">Loading…</p>
             ) : !events || events.length === 0 ? (
-              // Blue Dart's top-level <Status> (shipment.current_status,
-              // shown as the badge in the collapsed header above) can
-              // populate even when the detailed scan-by-scan history
-              // doesn't -- happens when the courier hasn't returned any
-              // <Scans> yet, or (10 Sept 2026 live finding) when the
-              // account's scan feed doesn't reach this AWB at all. Either
-              // way, a bare "No events" reads as "nothing happened" when
-              // Blue Dart HAS told us something -- so surface that instead
-              // of leaving the timeline looking empty.
+              // Blue Dart's top-level <Status> (now shown by the stepper
+              // above, not repeated here) can populate even when the
+              // detailed scan-by-scan history doesn't -- happens when the
+              // courier hasn't returned any <Scans> yet, or (10 Sept 2026
+              // live finding) when the account's scan feed doesn't reach
+              // this AWB at all. Note that rather than a bare "No events",
+              // which would read as "nothing happened" when Blue Dart HAS
+              // told us something via the stepper above.
               isBlueDart && displayStatus && displayStatus !== "shipment_created" ? (
-                <div className="rounded-md border border-dashed border-line bg-surface-sunken p-3 text-sm">
-                  <p className="text-ink">
-                    Latest known status: <span className="font-semibold">{shipmentStatusLabel(displayStatus)}</span>
-                    {displayLocation && <> — {displayLocation}</>}
-                  </p>
-                  <p className="mt-1 text-xs text-ink-muted">
-                    {displayLastTracked
-                      ? `From Blue Dart as of ${new Date(displayLastTracked).toLocaleString()}`
-                      : "From Blue Dart's own shipment status"}
-                    ; no scan-by-scan history returned yet for this AWB.
-                  </p>
-                </div>
+                <p className="text-sm text-ink-muted">No scan-by-scan history returned yet for this AWB.</p>
               ) : (
                 <p className="text-sm text-ink-muted">No tracking events logged yet.</p>
               )
