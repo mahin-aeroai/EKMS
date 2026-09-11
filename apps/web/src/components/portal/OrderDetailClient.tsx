@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import Script from "next/script";
 import { useRouter } from "next/navigation";
-import { Download, UploadCloud, CheckCircle2, RotateCcw, CreditCard, Truck, Radar, FileText } from "lucide-react";
+import { Download, UploadCloud, CheckCircle2, RotateCcw, CreditCard, Truck, Radar, FileText, Eye } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -47,9 +47,13 @@ async function downloadFile(fileId: string) {
   if (res.ok) window.open(data.url, "_blank");
 }
 
-async function downloadInvoice(invoiceId: string) {
+// mode omitted: no Content-Disposition override, so a new tab opens the
+// PDF in the browser's own viewer -- a "Preview". mode=download: the
+// route sets Content-Disposition: attachment, forcing a real Save-As.
+async function openInvoice(invoiceId: string, mode?: "download") {
   const headers = await authHeaders();
-  const res = await fetch(`/api/portal/order-invoices/${invoiceId}/download-url`, { headers });
+  const url = `/api/portal/order-invoices/${invoiceId}/download-url${mode ? `?mode=${mode}` : ""}`;
+  const res = await fetch(url, { headers });
   const data = await res.json();
   if (res.ok) window.open(data.url, "_blank");
 }
@@ -570,7 +574,7 @@ export function OrderDetailClient({
                     </div>
                     <div className="flex items-center gap-2">
                       <Badge status={shipmentStatusBadge(s.current_status)}>{shipmentStatusLabel(s.current_status)}</Badge>
-                      {isStaff && isBlueDartCourier(s.courier) && s.awb_number && (
+                      {(isStaff || isCustomer) && isBlueDartCourier(s.courier) && s.awb_number && (
                         <Button size="sm" variant="ghost" onClick={() => handleTrack(s.id)} loading={trackingBusy === s.id}>
                           <Radar size={13} /> Track via Blue Dart
                         </Button>
@@ -666,9 +670,14 @@ export function OrderDetailClient({
                     {inv.invoice_date ? ` · ${new Date(inv.invoice_date).toLocaleDateString("en-IN")}` : ""}
                     {inv.amount != null ? ` · ₹${Number(inv.amount).toLocaleString("en-IN")}` : ""}
                   </span>
-                  <button onClick={() => downloadInvoice(inv.id)} className="flex items-center gap-1 text-primary hover:underline">
-                    <Download size={12} /> Download
-                  </button>
+                  <span className="flex items-center gap-3">
+                    <button onClick={() => openInvoice(inv.id)} className="flex items-center gap-1 text-primary hover:underline">
+                      <Eye size={12} /> Preview
+                    </button>
+                    <button onClick={() => openInvoice(inv.id, "download")} className="flex items-center gap-1 text-primary hover:underline">
+                      <Download size={12} /> Download
+                    </button>
+                  </span>
                 </li>
               ))}
             </ul>
