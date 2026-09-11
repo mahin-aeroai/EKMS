@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/dashboard-queries";
-import { lfgFormatPriorityRank, lfgPipelineStageOf } from "@/lib/lfgStatus";
+import { lfgFormatPriorityRank, lfgPipelineStageOf, lfgBenchmarkStatus } from "@/lib/lfgStatus";
 import { formatPlaceholderColor, isLightColor } from "@/lib/lfg-format-colors";
 
 // A single wide "how's a program actually going" summary, shown on the
@@ -56,14 +56,22 @@ interface SiteFormatRow {
   store_id: string | null;
 }
 
-// The four secondary stages shown per tile, below the headline Active
-// count -- narrowed from the full pipeline (Survey/Creative Receipt/
-// Schedule/Issues left off) to keep each tile readable at a glance.
+// The four secondary tiles shown below the headline Active count. These
+// are CUMULATIVE milestones ("has this site been printed yet, or gone
+// further"), not "currently sitting at this exact stage" -- a site can't
+// un-print itself by shipping, so Shipped only ever climbs as sites move
+// on, and a program can never show more Shipped than total sites. Keyed
+// to LFG_BENCHMARKS (@/lib/lfgStatus) -- the SAME "crossed" checkpoint
+// logic already used on the Status Sheet and Site Cards benchmark row --
+// rather than lfgPipelineStageOf's mutually-exclusive "current stage
+// only" buckets, which is what made Printed/Shipped/Delivered/Installed
+// read as a snapshot instead of a funnel (task feedback: "number of sites
+// can not be less than shipped").
 const SECONDARY_STAGES = [
-  { key: "printing", label: "Printed" },
-  { key: "shipping", label: "Shipped" },
-  { key: "delivery", label: "Delivered" },
-  { key: "installation", label: "Installed" },
+  { key: "in_production", label: "Printed" },
+  { key: "shipped", label: "Shipped" },
+  { key: "delivered", label: "Delivered" },
+  { key: "installed", label: "Installed" },
 ] as const;
 
 interface LfgProgramSummaryCardProps {
@@ -113,6 +121,9 @@ export function LfgProgramSummaryCard({ selectedProgramId, onSelectProgram, part
   const selectedProgramName = selectedProgramId ? (programs.find((p) => p.id === selectedProgramId)?.name ?? "") : "All Sites";
 
   const byFormat = new Map<string, Record<string, number>>();
+  // Cumulative "crossed this benchmark" counts per format, for the 4
+  // secondary tiles -- see SECONDARY_STAGES' comment above.
+  const benchmarkCountsByFormat = new Map<string, Record<string, number>>();
   // Total Sites/Stores per format (task: "in that card i want no of
   // stores and no of sites too" -- an all-zero tile, before this, read as
   // "this format has no sites at all" when really it just meant nothing
@@ -130,6 +141,12 @@ export function LfgProgramSummaryCard({ selectedProgramId, onSelectProgram, part
     const counts = byFormat.get(format) ?? {};
     counts[stage] = (counts[stage] ?? 0) + 1;
     byFormat.set(format, counts);
+
+    const benchmarkCounts = benchmarkCountsByFormat.get(format) ?? {};
+    for (const b of lfgBenchmarkStatus(r.site_status, r.creative_received_at)) {
+      if (b.crossed) benchmarkCounts[b.key] = (benchmarkCounts[b.key] ?? 0) + 1;
+    }
+    benchmarkCountsByFormat.set(format, benchmarkCounts);
 
     siteCountByFormat.set(format, (siteCountByFormat.get(format) ?? 0) + 1);
     if (r.store_id) {
@@ -181,8 +198,17 @@ export function LfgProgramSummaryCard({ selectedProgramId, onSelectProgram, part
         <div className="flex gap-3 overflow-x-auto pb-1">
           {formats.map((format) => {
             const counts = byFormat.get(format)!;
+            const benchmarkCounts = benchmarkCountsByFormat.get(format) ?? {};
             const siteCount = siteCountByFormat.get(format) ?? 0;
             const storeCount = storeCountByFormat.get(format) ?? 0;
+            // "Active" reads as this program's overall health, not the
+            // separate/rarely-set "active" status value alone (nothing in
+            // the app ever auto-promotes a fully-installed site to that
+            // exact status, so that reading showed 0 for every program --
+            // task feedback: "it suppose to be all active leaving 1-2
+            // where we marked issue"). Every site counts as Active except
+            // ones explicitly flagged Issues or explicitly deactivated.
+            const activeCount = siteCount - (counts.issues ?? 0) - (counts.inactive ?? 0);
             const bg = formatPlaceholderColor(format);
             const fg = isLightColor(bg) ? "#1E252B" : "#FFFFFF";
             return (
@@ -199,7 +225,7 @@ export function LfgProgramSummaryCard({ selectedProgramId, onSelectProgram, part
                   {siteCount} site{siteCount === 1 ? "" : "s"} · {storeCount} store{storeCount === 1 ? "" : "s"}
                 </p>
                 <p className="mt-1.5 text-3xl font-extrabold leading-none" style={{ color: fg }}>
-                  {counts.active ?? 0}
+                  {activeCount}
                 </p>
                 <p className="mt-1 text-[10px] font-medium uppercase tracking-wide" style={{ color: fg, opacity: 0.7 }}>
                   Active
@@ -208,7 +234,7 @@ export function LfgProgramSummaryCard({ selectedProgramId, onSelectProgram, part
                   {SECONDARY_STAGES.map((s) => (
                     <div key={s.key}>
                       <p className="text-sm font-bold leading-none" style={{ color: fg }}>
-                        {counts[s.key] ?? 0}
+                        {benchmarkCounts[s.key] ?? 0}
                       </p>
                       <p className="mt-0.5 text-[9px] font-medium uppercase tracking-wide" style={{ color: fg, opacity: 0.65 }}>
                         {s.label}

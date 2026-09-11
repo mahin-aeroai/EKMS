@@ -36,6 +36,8 @@ import {
   DELIVERY_STATUSES,
   deliveryStatusLabel,
   deliveryStatusBadge,
+  LFG_COURIERS,
+  isBlueDartCourier,
 } from "@/lib/lfgStatus";
 
 // Site 360 -- the tabbed view every part of the spec (New Site through
@@ -1588,6 +1590,8 @@ export function ShipmentTab({
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     courier: "",
+    // Only populated when courier === "Other" -- see the picker below.
+    courierOther: "",
     awb_number: "",
     dispatch_date: "",
     expected_delivery_date: "",
@@ -1601,9 +1605,10 @@ export function ShipmentTab({
     const {
       data: { user },
     } = await supabase.auth.getUser();
+    const courierValue = form.courier === "Other" ? form.courierOther.trim() : form.courier;
     const { error } = await supabase.from("lfg_shipments").insert({
       site_id: siteId,
-      courier: form.courier.trim() || null,
+      courier: courierValue || null,
       awb_number: form.awb_number.trim() || null,
       dispatch_date: form.dispatch_date || null,
       expected_delivery_date: form.expected_delivery_date || null,
@@ -1621,6 +1626,7 @@ export function ShipmentTab({
     setShowForm(false);
     setForm({
       courier: "",
+      courierOther: "",
       awb_number: "",
       dispatch_date: "",
       expected_delivery_date: "",
@@ -1643,12 +1649,30 @@ export function ShipmentTab({
 
       {showForm && (
         <div className="grid grid-cols-2 gap-3 rounded-lg border border-line bg-surface p-4 sm:grid-cols-4">
-          <input
-            placeholder="Courier"
-            className={inputClass}
-            value={form.courier}
-            onChange={(e) => setForm((f) => ({ ...f, courier: e.target.value }))}
-          />
+          <div className="flex flex-col gap-1">
+            <label className={labelClass}>Courier</label>
+            <select
+              className={inputClass}
+              value={form.courier}
+              onChange={(e) => setForm((f) => ({ ...f, courier: e.target.value }))}
+            >
+              <option value="">Select courier</option>
+              {LFG_COURIERS.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+              <option value="Other">Other</option>
+            </select>
+            {form.courier === "Other" && (
+              <input
+                placeholder="Courier name"
+                className={`${inputClass} mt-1`}
+                value={form.courierOther}
+                onChange={(e) => setForm((f) => ({ ...f, courierOther: e.target.value }))}
+              />
+            )}
+          </div>
           <input
             placeholder="AWB Number"
             className={inputClass}
@@ -1692,7 +1716,7 @@ export function ShipmentTab({
             value={form.package_details}
             onChange={(e) => setForm((f) => ({ ...f, package_details: e.target.value }))}
           />
-          {/blue\s*dart/i.test(form.courier) && (
+          {isBlueDartCourier(form.courier) && (
             <div className="col-span-2 sm:col-span-4">
               <BlueDartDeliveryCheck
                 dispatchDate={form.dispatch_date}
@@ -1910,7 +1934,7 @@ function ShipmentCard({
   // new lfg_shipment_events rows with source: "api" (the ev.source ===
   // "api" branch below already existed, previously dead code) and
   // refreshes current_status from the latest scan.
-  const isBlueDart = /blue\s*dart/i.test(shipment.courier ?? "");
+  const isBlueDart = isBlueDartCourier(shipment.courier);
   async function handleTrackViaBlueDart() {
     setTracking(true);
     try {

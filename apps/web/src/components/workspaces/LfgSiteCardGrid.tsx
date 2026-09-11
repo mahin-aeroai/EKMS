@@ -5,9 +5,18 @@ import { useRouter } from "next/navigation";
 import { MapPin, FileText, ExternalLink, X, RefreshCw } from "lucide-react";
 import { Badge, type BadgeStatus } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { Dialog } from "@/components/ui/Dialog";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
-import { LFG_STATUSES, type LfgStatus, lfgStatusLabel, lfgStatusBadge, shipmentStatusLabel, shipmentStatusBadge } from "@/lib/lfgStatus";
+import {
+  LFG_STATUSES,
+  type LfgStatus,
+  lfgStatusLabel,
+  lfgStatusBadge,
+  shipmentStatusLabel,
+  shipmentStatusBadge,
+  isBlueDartCourier,
+} from "@/lib/lfgStatus";
 import { formatSizeMm } from "@/lib/lfg-units";
 import { formatPlaceholderColor, isLightColor } from "@/lib/lfg-format-colors";
 import { LfgBenchmarkStrip } from "./LfgBenchmarkStrip";
@@ -202,10 +211,6 @@ interface CardShipmentRef {
   // scan-by-scan history (see trackedEvents' empty-state below).
   current_location: string | null;
   last_tracked_at: string | null;
-}
-
-function isBlueDartCourier(courier: string | null): boolean {
-  return /blue\s*dart/i.test(courier ?? "");
 }
 
 // A one-line, no-click-required answer to "where is this, shipping-wise"
@@ -576,6 +581,13 @@ function SiteCard({
   const [openingDocId, setOpeningDocId] = useState<string | null>(null);
   const [tracking, setTracking] = useState(false);
   const [trackedEvents, setTrackedEvents] = useState<CardTrackEvent[] | null>(null);
+  // The full (unsliced) event list from the last track response -- kept
+  // separately from trackedEvents (capped to the top 3 for the card's own
+  // compact display) so "View full timeline" can show everything without
+  // a second request. Only ever populated once a track call has actually
+  // run, same as trackedEvents.
+  const [allTrackedEvents, setAllTrackedEvents] = useState<CardTrackEvent[] | null>(null);
+  const [timelineOpen, setTimelineOpen] = useState(false);
 
   // Only fetched when the site actually has a picture on file -- the
   // route 404s otherwise (see its own header comment), so skipping the
@@ -639,7 +651,9 @@ function SiteCard({
         toast("danger", data.message || data.error || "Couldn't fetch tracking updates");
         return;
       }
-      setTrackedEvents(((data.events ?? []) as CardTrackEvent[]).slice(0, 3));
+      const trackedNow = (data.events ?? []) as CardTrackEvent[];
+      setTrackedEvents(trackedNow.slice(0, 3));
+      setAllTrackedEvents(trackedNow);
       if (data.shipment) {
         onTracked({
           current_status: data.shipment.current_status ?? null,
@@ -866,7 +880,10 @@ function SiteCard({
                   variant="ghost"
                   size="sm"
                   className="mt-1.5 h-6 w-full text-[11px]"
-                  onClick={() => router.push(href)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setTimelineOpen(true);
+                  }}
                 >
                   View full timeline
                 </Button>
@@ -874,6 +891,30 @@ function SiteCard({
             )}
           </div>
         )}
+
+        {/* In-place timeline, not a navigation -- task feedback: "When we
+            click 'View full timeline' it should [stay on this] page but
+            not [go to the] site information page ... open a window show
+            full timeline within screen instead changing the screen."
+            Every event from the last track response, not just the top 3
+            shown inline above. */}
+        <Dialog open={timelineOpen} onClose={() => setTimelineOpen(false)} title="Tracking Timeline">
+          {allTrackedEvents && allTrackedEvents.length > 0 ? (
+            <ul className="flex max-h-[60vh] flex-col gap-3 overflow-y-auto">
+              {allTrackedEvents.map((ev) => (
+                <li key={ev.id} className="border-b border-line pb-2 text-xs last:border-b-0 last:pb-0">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="font-semibold text-ink">{ev.event_status}</span>
+                    <span className="shrink-0 text-[11px] text-ink-muted">{new Date(ev.event_time).toLocaleString()}</span>
+                  </div>
+                  {ev.location && <div className="mt-0.5 text-ink-secondary">{ev.location}</div>}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-ink-muted">No tracking events yet.</p>
+          )}
+        </Dialog>
 
         <div className="mt-3.5 flex items-center gap-2">
           <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-secondary">Installation</span>
