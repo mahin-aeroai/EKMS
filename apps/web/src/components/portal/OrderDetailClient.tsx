@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import Script from "next/script";
 import { useRouter } from "next/navigation";
-import { Download, UploadCloud, CheckCircle2, RotateCcw, CreditCard, Truck, Radar, FileText, Eye } from "lucide-react";
+import { Download, UploadCloud, CheckCircle2, RotateCcw, CreditCard, Truck, Radar, FileText, Eye, ExternalLink, X, Check, MapPin } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -15,7 +15,7 @@ import { orderStatusBadge, orderStatusLabel, paymentStatusBadge, paymentStatusLa
 // SHIPMENT_STATUSES vocabulary as lfg_shipments, and only Blue Dart has a
 // live-tracking integration on either side, so the courier list/gate and
 // the Blue Dart status mapping don't need a second copy here.
-import { LFG_COURIERS, isBlueDartCourier, shipmentStatusBadge, shipmentStatusLabel } from "@/lib/lfgStatus";
+import { LFG_COURIERS, isBlueDartCourier, shipmentStatusLabel } from "@/lib/lfgStatus";
 import type {
   PortalOrderRow,
   PortalOrderItemRow,
@@ -47,16 +47,20 @@ async function downloadFile(fileId: string) {
   if (res.ok) window.open(data.url, "_blank");
 }
 
-// mode omitted: no Content-Disposition override, so a new tab opens the
-// PDF in the browser's own viewer -- a "Preview". mode=download: the
-// route sets Content-Disposition: attachment, forcing a real Save-As.
-async function openInvoice(invoiceId: string, mode?: "download") {
-  const headers = await authHeaders();
-  const url = `/api/portal/order-invoices/${invoiceId}/download-url${mode ? `?mode=${mode}` : ""}`;
-  const res = await fetch(url, { headers });
-  const data = await res.json();
-  if (res.ok) window.open(data.url, "_blank");
-}
+// The happy-path shipment lifecycle, in order, for the horizontal tracking
+// stepper (task feedback: "Tracking needs a beautiful horizontal card
+// design"). The other 3 SHIPMENT_STATUSES entries -- delayed,
+// delivery_exception, undelivered -- are exception states, not points on
+// this line, so they get their own alert treatment instead of a step.
+const TRACKING_STEPS: { status: string; label: string }[] = [
+  { status: "shipment_created", label: "Created" },
+  { status: "dispatched", label: "Dispatched" },
+  { status: "in_transit", label: "In transit" },
+  { status: "at_hub", label: "At hub" },
+  { status: "out_for_delivery", label: "Out for delivery" },
+  { status: "delivered", label: "Delivered" },
+];
+const TRACKING_EXCEPTION_STATUSES = new Set(["delayed", "delivery_exception", "undelivered"]);
 
 export function OrderDetailClient({
   order: initialOrder,
@@ -98,6 +102,11 @@ export function OrderDetailClient({
   const [showAddInvoice, setShowAddInvoice] = useState(false);
   const [invoiceForm, setInvoiceForm] = useState({ crn_number: "", invoice_number: "", invoice_date: "", amount: "" });
   const invoiceInputRef = useRef<HTMLInputElement>(null);
+  // In-page invoice preview (task feedback: "preview is opening in another
+  // window lets open it in the same place") -- same overlay pattern as
+  // LfgSiteCardGrid.tsx's document preview, so there's one large-preview
+  // pattern in this app, not two.
+  const [previewFile, setPreviewFile] = useState<{ name: string; url: string; kind: "pdf" } | null>(null);
 
   // Staff can preview /portal/* (see supabase-middleware.ts) but doesn't
   // have a portal_users row, so PortalUserContext is null for them — the
@@ -336,6 +345,23 @@ export function OrderDetailClient({
     await refreshShipping();
   }
 
+  // mode omitted: opens the in-page preview modal below, same place the
+  // rest of the order page lives. mode=download: the route sets
+  // Content-Disposition: attachment, forcing a real Save-As, so that one
+  // stays a window.open (a genuine file-save action, not a view).
+  async function openInvoice(invoiceId: string, mode?: "download") {
+    const headers = await authHeaders();
+    const url = `/api/portal/order-invoices/${invoiceId}/download-url${mode ? `?mode=${mode}` : ""}`;
+    const res = await fetch(url, { headers });
+    const data = await res.json();
+    if (!res.ok) return;
+    if (mode === "download") {
+      window.open(data.url, "_blank");
+    } else {
+      setPreviewFile({ name: data.file_name as string, url: data.url as string, kind: "pdf" });
+    }
+  }
+
   const proofFiles = files.filter((f) => f.kind === "proof");
   // 'design' files show inline against their own line item in the Items
   // table above instead of in this generic list.
@@ -559,9 +585,12 @@ export function OrderDetailClient({
           <div className="flex flex-col gap-3">
             {shipments.map((s) => {
               const events = shipmentEvents.filter((e) => e.shipment_id === s.id);
+              const isException = TRACKING_EXCEPTION_STATUSES.has(s.current_status);
+              const stepIndex = TRACKING_STEPS.findIndex((step) => step.status === s.current_status);
+              const canTrack = (isStaff || isCustomer) && isBlueDartCourier(s.courier) && s.awb_number;
               return (
-                <div key={s.id} className="rounded-md border border-line p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
+                <div key={s.id} className="rounded-lg border border-line p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
                       <p className="text-sm font-medium text-ink">
                         {s.courier || "Courier not set"} {s.awb_number ? `· AWB ${s.awb_number}` : ""}
@@ -569,21 +598,77 @@ export function OrderDetailClient({
                       <p className="text-xs text-ink-muted">
                         {s.dispatch_date ? `Dispatched ${new Date(s.dispatch_date).toLocaleDateString("en-IN")}` : "Not yet dispatched"}
                         {s.expected_delivery_date ? ` · Expected ${new Date(s.expected_delivery_date).toLocaleDateString("en-IN")}` : ""}
-                        {s.current_location ? ` · Currently at ${s.current_location}` : ""}
                       </p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Badge status={shipmentStatusBadge(s.current_status)}>{shipmentStatusLabel(s.current_status)}</Badge>
-                      {(isStaff || isCustomer) && isBlueDartCourier(s.courier) && s.awb_number && (
-                        <Button size="sm" variant="ghost" onClick={() => handleTrack(s.id)} loading={trackingBusy === s.id}>
-                          <Radar size={13} /> Track via Blue Dart
-                        </Button>
-                      )}
-                    </div>
+                    {canTrack && (
+                      <Button size="sm" variant="ghost" onClick={() => handleTrack(s.id)} loading={trackingBusy === s.id}>
+                        <Radar size={13} /> {trackingBusy === s.id ? "Tracking…" : "Track via Blue Dart"}
+                      </Button>
+                    )}
                   </div>
-                  {s.last_tracked_at && (
-                    <p className="mt-1 text-[11px] text-ink-muted">Last tracked {new Date(s.last_tracked_at).toLocaleString("en-IN")}</p>
+
+                  {isException ? (
+                    <div className="mt-3 flex items-center gap-2 rounded-md bg-danger-tint px-3 py-2 text-sm text-danger">
+                      <span className="h-2 w-2 shrink-0 rounded-full bg-danger" />
+                      <span className="font-medium">{shipmentStatusLabel(s.current_status)}</span>
+                      {s.current_location && <span className="text-danger/80">· {s.current_location}</span>}
+                    </div>
+                  ) : (
+                    <div className="mt-4 flex items-center">
+                      {TRACKING_STEPS.map((step, i) => {
+                        const done = stepIndex >= 0 && i < stepIndex;
+                        const current = i === stepIndex;
+                        return (
+                          <div key={step.status} className={i === 0 ? "flex flex-1 flex-col items-start" : "flex flex-1 flex-col items-center"}>
+                            <div className="flex w-full items-center">
+                              {i > 0 && (
+                                <div
+                                  className={`h-0.5 flex-1 ${done || current ? "bg-primary" : "bg-line"}`}
+                                  aria-hidden="true"
+                                />
+                              )}
+                              <div
+                                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 text-[10px] font-semibold ${
+                                  done
+                                    ? "border-primary bg-primary text-on-brand"
+                                    : current
+                                      ? "border-primary bg-surface text-primary"
+                                      : "border-line bg-surface text-ink-muted"
+                                }`}
+                              >
+                                {done ? <Check size={12} /> : i + 1}
+                              </div>
+                              {i < TRACKING_STEPS.length - 1 && (
+                                <div
+                                  className={`h-0.5 flex-1 ${done ? "bg-primary" : "bg-line"}`}
+                                  aria-hidden="true"
+                                />
+                              )}
+                            </div>
+                            <p
+                              className={`mt-1.5 text-center text-[10px] leading-tight ${
+                                current ? "font-semibold text-ink" : done ? "text-ink-secondary" : "text-ink-muted"
+                              }`}
+                            >
+                              {step.label}
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </div>
                   )}
+
+                  {(s.current_location || s.last_tracked_at) && (
+                    <p className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-muted">
+                      {s.current_location && (
+                        <span className="flex items-center gap-1">
+                          <MapPin size={11} /> Currently at {s.current_location}
+                        </span>
+                      )}
+                      {s.last_tracked_at && <span>Last tracked {new Date(s.last_tracked_at).toLocaleString("en-IN")}</span>}
+                    </p>
+                  )}
+
                   {events.length > 0 && (
                     <ul className="mt-2 flex flex-col gap-1 border-t border-line pt-2">
                       {events.map((e) => (
@@ -756,6 +841,41 @@ export function OrderDetailClient({
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {previewFile && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          role="presentation"
+          onClick={() => setPreviewFile(null)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="flex h-full max-h-[90vh] w-full max-w-5xl flex-col rounded-lg bg-surface-overlay shadow-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
+              <p className="min-w-0 truncate text-sm font-semibold text-ink">{previewFile.name}</p>
+              <div className="flex shrink-0 items-center gap-1">
+                <Button size="sm" variant="ghost" onClick={() => window.open(previewFile.url, "_blank", "noopener,noreferrer")}>
+                  <ExternalLink size={14} className="mr-1.5" />
+                  Open in new tab
+                </Button>
+                <button
+                  aria-label="Close preview"
+                  onClick={() => setPreviewFile(null)}
+                  className="rounded p-1 text-ink-muted hover:bg-surface-sunken"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+            <div className="min-h-0 flex-1 bg-surface-sunken">
+              <iframe src={previewFile.url} title={previewFile.name} className="h-full w-full" />
+            </div>
+          </div>
         </div>
       )}
     </div>
