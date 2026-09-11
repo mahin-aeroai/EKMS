@@ -6,6 +6,7 @@ import { getOnPortalHost } from "@/lib/portal-host-server";
 import { portalHref } from "@/lib/portal-links-shared";
 import { Badge } from "@/components/ui/Badge";
 import { orderStatusBadge, orderStatusLabel } from "@/components/portal/orderStatus";
+import { PortalHeroBanner } from "@/components/portal/PortalHeroBanner";
 import type { PortalOrderRow } from "@mmdi/shared/rows";
 
 export const dynamic = "force-dynamic";
@@ -28,10 +29,10 @@ export default async function PortalHomePage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-lg font-semibold text-ink">Welcome, {identity.fullName || identity.companyName}</h1>
-        <p className="text-sm text-ink-muted">Order GPX04/GPX05 signage and track design approval and delivery.</p>
-      </div>
+      <PortalHeroBanner
+        greetingName={identity.fullName || identity.companyName}
+        ctaHref={portalHref("/products", onPortalHost)}
+      />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Link
