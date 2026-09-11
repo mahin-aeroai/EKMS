@@ -172,7 +172,8 @@ export default function LfgEstimatesClient() {
               .from("lfg_sites")
               .select("id, site_id, sfo_id, outlet_name, format, city, state, region, material, sqft, site_status, partner_id, program_id, lfg_partners(name)")
               .order("sfo_id", { ascending: true, nullsFirst: false })
-              .range(from, from + pageSize - 1);
+              .range(from, from + pageSize - 1)
+              .is("archived_at", null);
             if (programFilter) q = q.eq("program_id", programFilter);
             if (formatFilter) q = q.eq("format", formatFilter);
             if (partnerFilter) q = q.eq("partner_id", partnerFilter);

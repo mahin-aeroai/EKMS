@@ -112,6 +112,7 @@ export async function buildLfgProgramReportRows(
       "id, outlet_name, sfo_id, city, state, region, width, height, material, partner_id, store_id, remarks, creative_received_at, hq_partner, format"
     )
     .eq("program_id", programId)
+    .is("archived_at", null)
     .order("sfo_id", { ascending: true, nullsFirst: false });
 
   if (sitesError) throw new Error(`Failed to load sites: ${sitesError.message}`);

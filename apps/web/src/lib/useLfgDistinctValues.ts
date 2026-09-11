@@ -27,6 +27,7 @@ export function useLfgDistinctValues(column: string): string[] {
         .from("lfg_sites")
         .select(column)
         .not(column, "is", null)
+        .is("archived_at", null)
         .range(from, to) as unknown as PromiseLike<{ data: Record<string, unknown>[] | null; error: unknown }>
     ).then((rows) => {
       if (cancelled) return;

@@ -81,7 +81,7 @@ function emptyCounts(): StageCounts {
 
 async function loadDashboard(): Promise<DashboardData> {
   const rows = await fetchAllRows<SiteStageRow>((from, to) =>
-    supabase.from("lfg_sites").select("format, site_status, creative_received_at").range(from, to)
+    supabase.from("lfg_sites").select("format, site_status, creative_received_at").range(from, to).is("archived_at", null)
   );
 
   const overallCounts = emptyCounts();

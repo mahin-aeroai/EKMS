@@ -109,7 +109,11 @@ export function LfgProgramSummaryCard({ selectedProgramId, onSelectProgram, part
       .then(({ data }) => setPrograms((data as ProgramOption[] | null) ?? []));
 
     fetchAllRows<SiteFormatRow>((from, to) => {
-      let q = supabase.from("lfg_sites").select("program_id, format, site_status, creative_received_at, store_id").range(from, to);
+      let q = supabase
+        .from("lfg_sites")
+        .select("program_id, format, site_status, creative_received_at, store_id")
+        .range(from, to)
+        .is("archived_at", null);
       if (partnerId) q = q.eq("partner_id", partnerId);
       return q;
     }).then(setSiteRows);

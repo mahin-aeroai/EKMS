@@ -338,6 +338,7 @@ export function OtherDisplaysPanel({ site, hrefFor }: { site: LfgSite; hrefFor: 
       .select("id, site_id, outlet_name, material, site_status")
       .eq("store_id", site.store_id)
       .neq("id", site.id)
+      .is("archived_at", null)
       .order("site_id")
       .then(({ data }) => {
         if (!cancelled) setSiblings((data as SiblingSiteRow[]) ?? []);

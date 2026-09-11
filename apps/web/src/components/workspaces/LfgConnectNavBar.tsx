@@ -10,6 +10,7 @@ import {
   FileClock,
   Users,
   Receipt,
+  Archive,
   type LucideIcon,
 } from "lucide-react";
 
@@ -44,6 +45,11 @@ const TABS: { label: string; href: string; icon: LucideIcon; exact?: boolean }[]
   { label: "Status Sheet", href: "/workspaces/lfg/status-sheet", icon: ArrowLeftRight },
   { label: "Activity Log", href: "/workspaces/lfg/activity", icon: FileClock },
   { label: "Partners", href: "/workspaces/lfg/partners", icon: Users },
+  // 11 Sept 2026: soft-archive feature -- see
+  // supabase-lfg-sites-archive-migration.sql. Deliberately a real nav tab
+  // (not a header action button like Bulk Import) since this is a
+  // persistent section someone returns to, not a one-shot action.
+  { label: "Archive", href: "/workspaces/lfg/archive", icon: Archive },
 ];
 
 export function LfgConnectNavBar() {

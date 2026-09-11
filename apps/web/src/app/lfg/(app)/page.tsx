@@ -179,7 +179,7 @@ export default function LfgPartnerSitesPage() {
   useEffect(() => {
     if (!identity) return;
     const scopedToOwn = !identity.isStaff && !viewingAllSites;
-    let q = supabase.from("lfg_sites").select("*", { count: "exact", head: true });
+    let q = supabase.from("lfg_sites").select("*", { count: "exact", head: true }).is("archived_at", null);
     if (scopedToOwn) q = q.eq("partner_id", identity.partnerId);
     q.then(({ count }) => setTotalCount(count ?? 0));
   }, [identity, viewingAllSites]);
@@ -206,7 +206,8 @@ export default function LfgPartnerSitesPage() {
               "id, site_id, outlet_name, sfo_id, city, region, store_address, material, mat_code, width, height, bleed, format, site_status, number_of_sites, site_reference_picture_path, asm_name, store_id, creative_received_at, partner_id, lfg_partners(name)"
             )
             .order("sfo_id", { ascending: true, nullsFirst: false })
-            .range(from, from + pageSize - 1);
+            .range(from, from + pageSize - 1)
+            .is("archived_at", null);
           if (scopedToOwn) q = q.eq("partner_id", identity.partnerId);
 
           if (statusFilter) q = q.eq("site_status", statusFilter);
