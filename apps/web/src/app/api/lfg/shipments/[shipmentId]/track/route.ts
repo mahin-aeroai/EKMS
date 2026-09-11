@@ -69,8 +69,19 @@ export async function POST(request: Request, { params }: { params: Promise<{ shi
   }
   const { events, currentStatus, currentStatusTime, currentLocation, expectedDeliveryDate } = result;
 
+  // 11 Sept 2026: matching hardening applied to the Portal's equivalent
+  // route after task feedback there ("it si still nor showing actual
+  // tracking on bluedart website it is in transit but it is stuck at
+  // creared") -- neither write below used to check its own error, and
+  // Supabase/PostgREST returns 200 with zero rows AFFECTED (no thrown
+  // error) when an authenticated write is silently blocked by RLS. This
+  // route wasn't the one reported broken, but it has the exact same
+  // unchecked-write shape, so it gets the same fix rather than waiting
+  // for someone to hit it here too.
+  let warning: string | null = null;
+
   if (events.length > 0) {
-    await supabase.from("lfg_shipment_events").insert(
+    const { error: eventsError } = await supabase.from("lfg_shipment_events").insert(
       events.map((ev) => ({
         shipment_id: shipmentId,
         event_status: ev.status,
@@ -81,6 +92,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ shi
         created_by: user.id,
       }))
     );
+    if (eventsError) {
+      warning = `Blue Dart responded, but the scan history couldn't be saved: ${eventsError.message}`;
+    }
   }
 
   // Prefer Blue Dart's own top-level <Status> (authoritative "current
@@ -115,12 +129,30 @@ export async function POST(request: Request, { params }: { params: Promise<{ shi
     // (supabase-lfg-shipments-last-tracked-migration.sql /
     // supabase-lfg-shipments-current-location-migration.sql) -- if either
     // hasn't been run yet, drop both and retry rather than failing the
-    // whole tracking call over a couple of cosmetic fields.
-    const { error: updateError } = await supabase.from("lfg_shipments").update(update).eq("id", shipmentId);
+    // whole tracking call over a couple of cosmetic fields. Either attempt
+    // also re-selects the row it just touched, so a silent 0-rows-affected
+    // RLS block (no thrown error, just nothing returned) is caught too,
+    // not just a hard Postgres/missing-column error.
+    let { data: updatedRow, error: updateError } = await supabase
+      .from("lfg_shipments")
+      .update(update)
+      .eq("id", shipmentId)
+      .select("id")
+      .maybeSingle();
     if (updateError) {
       delete update.last_tracked_at;
       delete update.current_location;
-      await supabase.from("lfg_shipments").update(update).eq("id", shipmentId);
+      ({ data: updatedRow, error: updateError } = await supabase
+        .from("lfg_shipments")
+        .update(update)
+        .eq("id", shipmentId)
+        .select("id")
+        .maybeSingle());
+    }
+    if (updateError) {
+      warning = `Blue Dart says "${statusSource}", but saving it failed: ${updateError.message}`;
+    } else if (!updatedRow) {
+      warning = `Blue Dart says "${statusSource}", but this account doesn't have permission to save it on this shipment.`;
     }
   }
 
@@ -181,5 +213,5 @@ export async function POST(request: Request, { params }: { params: Promise<{ shi
     .eq("id", shipmentId)
     .maybeSingle();
 
-  return NextResponse.json({ events: refreshed ?? [], shipment: shipmentNow ?? null });
+  return NextResponse.json({ events: refreshed ?? [], shipment: shipmentNow ?? null, warning });
 }
