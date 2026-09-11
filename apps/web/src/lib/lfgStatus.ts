@@ -156,6 +156,31 @@ export function shipmentStatusBadge(status: string): BadgeStatus {
   return SHIPMENT_STATUS_BADGE[status as ShipmentStatus] ?? "neutral";
 }
 
+/**
+ * lfg_shipments.courier used to be a free-text input -- task feedback:
+ * "we also use different courirs like DTDC, Etc. so selction for
+ * trackign should based on courier company ... so tat we track
+ * accordingly we only track bluedart related shipments." Only Blue Dart
+ * has a live tracking integration (trackAwb() in blueDart.ts); every
+ * other courier here is manual-status-only, including the two
+ * non-courier dispatch methods MMDI actually uses alongside real
+ * couriers (By Cargo, By Hand). "Other" is a deliberate escape hatch in
+ * the picker (see the New Shipment form) for a courier not in this list,
+ * rather than forcing a bad fit -- the tracking gate below only ever
+ * looks for the literal "Blue Dart" value, so a free-typed "Other" value
+ * never accidentally matches it.
+ */
+export const LFG_COURIERS = ["Blue Dart", "DTDC", "WorldFirst", "By Cargo", "By Hand"] as const;
+
+/** True only for an exact "Blue Dart" courier value -- the sole courier
+ * with live tracking wired up. Kept as a substring/case-insensitive match
+ * (not a strict ===) so shipments created before the courier field became
+ * a picker (free-typed "bluedart", "Blue Dart Courier", etc.) keep
+ * working exactly as they did before this list existed. */
+export function isBlueDartCourier(courier: string | null | undefined): boolean {
+  return /blue\s*dart/i.test(courier ?? "");
+}
+
 /** lfg_shipments.delivery_status -- proof-of-delivery tracking, separate
  * from the lifecycle status above (a shipment can be "delivered" while its
  * POD is still "pod_pending"). */

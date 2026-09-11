@@ -27,15 +27,21 @@ const SiteSurveyReportEditorClient = dynamic(
 );
 
 // Bridges the standalone Site Survey Report Creator (site_survey_reports,
-// previously staff-only) into the LFG partner flow. On a successful
-// Generate:
+// previously staff-only) into the LFG Connect flow -- both partner AND
+// staff sessions render this same component (see identity.partnerId
+// handling in onGenerated below). On a successful Generate:
 //  1. If the report has no site_id yet (a freestanding draft), create a
 //     new lfg_stores + lfg_sites row from its header fields and attach
-//     the report to it -- the partner's "site survey creates a new site"
-//     requirement. Reuses an existing store by SFO ID for this partner
-//     first, mirroring workspaces/lfg/new/page.tsx's own match-before-
-//     insert logic (lfg_stores has a unique sfo_id index -- a blind
-//     insert on a collision would 23505).
+//     the report to it -- "site survey creates a new site" (task
+//     feedback: surveys created in LFG Connect weren't showing up in the
+//     Site Master list -- this auto-create step used to run for
+//     partners only). Reuses an existing store by SFO ID first,
+//     mirroring workspaces/lfg/new/page.tsx's own match-before-insert
+//     logic (lfg_stores has a unique sfo_id index -- a blind insert on a
+//     collision would 23505). A staff-created site has no partnerId to
+//     scope that reuse-lookup or the new row to -- it's created
+//     unassigned (partner_id: null, same as a New Site form submission
+//     with no partner picked) and can be assigned one later.
 //  2. Uploads the generated PDF as an lfg_site_documents row
 //     (category="survey") via the already partner-aware
 //     /api/lfg/sites/[siteId]/documents/upload-url route -- new
@@ -56,28 +62,30 @@ export function LfgPartnerSiteSurveyReportBridge({ reportId }: { reportId: strin
     let siteId = report.site_id;
 
     if (!siteId) {
-      if (!identity.partnerId) {
-        // A staff-via-lfg-connect session on a still-siteless report --
-        // no partner_id to create a site under. The PDF has already
-        // downloaded (SiteSurveyReportEditorClient does that before
-        // calling onGenerated); just point them at the right place to
-        // finish attaching it.
-        toast(
-          "info",
-          "This report has no site yet -- create the site via LFG Connect's New Site form or the internal Site Survey Reports tool, then attach this report to it."
-        );
-        return;
-      }
+      // Staff-via-LFG-Connect sessions have no partnerId (they're not
+      // tied to one partner) -- previously that meant this whole
+      // auto-create step was skipped entirely for staff, leaving a
+      // siteless report with no way to become a real site short of the
+      // New Site form (task feedback: "We have created site survey using
+      // lfgconnect but those sites are not added to the list"). Both
+      // lfg_stores.partner_id and lfg_sites.partner_id are nullable, so a
+      // staff-created site/store here is simply unassigned to a partner
+      // -- same as one created via the New Site form with no partner
+      // picked -- and can be assigned one later from the site's own edit
+      // screen. `.is("partner_id", null)` below is deliberate: `.eq(...,
+      // null)` would match nothing (SQL NULL isn't `=` to anything),
+      // silently creating a duplicate store on every subsequent staff
+      // survey for the same SFO ID otherwise.
+      const partnerId = identity.partnerId;
 
       let storeId: string | null = null;
       const sfoId = report.sfo_id?.trim();
       if (sfoId) {
-        const { data: existingStore } = await supabase
-          .from("lfg_stores")
-          .select("id")
-          .eq("sfo_id", sfoId)
-          .eq("partner_id", identity.partnerId)
-          .maybeSingle();
+        let existingStoreQuery = supabase.from("lfg_stores").select("id").eq("sfo_id", sfoId);
+        existingStoreQuery = partnerId
+          ? existingStoreQuery.eq("partner_id", partnerId)
+          : existingStoreQuery.is("partner_id", null);
+        const { data: existingStore } = await existingStoreQuery.maybeSingle();
         storeId = existingStore?.id ?? null;
       }
 
@@ -93,7 +101,7 @@ export function LfgPartnerSiteSurveyReportBridge({ reportId }: { reportId: strin
             format: report.program || null,
             sfo_id: sfoId || null,
             store_address: report.address || null,
-            partner_id: identity.partnerId,
+            partner_id: partnerId,
           })
           .select("id")
           .single();
@@ -112,7 +120,7 @@ export function LfgPartnerSiteSurveyReportBridge({ reportId }: { reportId: strin
           sfo_id: sfoId || null,
           store_address: report.address || null,
           store_id: storeId,
-          partner_id: identity.partnerId,
+          partner_id: partnerId,
         })
         .select("id")
         .single();
@@ -152,7 +160,7 @@ export function LfgPartnerSiteSurveyReportBridge({ reportId }: { reportId: strin
       file_type: "application/pdf",
       relative_path: uploadData.relative_path,
       uploaded_by: user?.id ?? null,
-      uploaded_by_role: "partner",
+      uploaded_by_role: identity.partnerId ? "partner" : "staff",
     });
     if (docError) {
       // The PDF is already uploaded to R2 at this point -- only the row
@@ -170,7 +178,7 @@ export function LfgPartnerSiteSurveyReportBridge({ reportId }: { reportId: strin
       const { error: statusError } = await supabase.rpc("lfg_change_site_status", {
         p_site_id: siteId,
         p_new_status: "survey_completed",
-        p_remarks: "Site Survey Report generated by partner",
+        p_remarks: `Site Survey Report generated by ${identity.partnerId ? "partner" : "staff"}`,
       });
       if (statusError) {
         toast("danger", `Site saved, but its status couldn't be updated: ${statusError.message}`);

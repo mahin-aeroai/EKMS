@@ -529,3 +529,27 @@ reverses it instantly, any time. This is intentionally a soft block, not
 account deletion — there is no delete option, by design (see chat history
 for why: losing the attribution on that person's past records wasn't
 worth it for a rarely-needed action that deactivate already covers).
+
+---
+
+## 10. LFG Connect — Site Master card fixes, Blue Dart auto-advance, courier picker, in-place timeline, staff site-survey auto-create (11 Sept 2026)
+
+A batch of feedback from Mahin on the Site Master page (`app.mmdi.in`), covering the summary cards, Blue Dart tracking, and a couple of related gaps. All in one commit since they touch overlapping files.
+
+**"0 Active" cards were wrong.** `LfgProgramSummaryCard.tsx` was reading `counts.active` — the count of sites whose CURRENT status is literally `"active"` — but the cards are meant to show "how many sites aren't stuck/flagged", i.e. everything except `issue_attention_required` and `deactivated`. Fixed: `activeCount = siteCount - issues - inactive`.
+
+**Printed/shipped/delivered/installed cards didn't behave as a funnel.** They were reading the same current-status buckets (`counts.in_production`, `counts.shipped`, …), so a site that had already moved on to "delivered" stopped counting toward "shipped" — the numbers could go DOWN the pipeline instead of only ever growing, and a shipped-but-not-yet-delivered site wouldn't show up in "printed" even though it obviously was printed. Fixed by switching those four cards to the existing `lfgBenchmarkStatus()` helper (already used by the Status Sheet and Site Cards) — a "crossed this checkpoint or later" cumulative check via `LFG_STATUSES` rank order, so Printed ⊇ Shipped ⊇ Delivered ⊇ Installed the way Mahin described ("number of sites can not be less than shipped").
+
+**Blue Dart "Delivered" wasn't reflected on the site itself.** `/api/lfg/shipments/[shipmentId]/track/route.ts` only ever updated `lfg_shipments.current_status` from a Blue Dart scan — `lfg_sites.site_status` (what every dashboard, card, and the Status Sheet actually reads) stayed wherever a human had last set it manually. Now, the instant Blue Dart's own status maps to "delivered", the route also calls `lfg_change_site_status(site_id, "delivered", ...)` — rank-guarded against `LFG_STATUSES` (same pattern as the site-survey auto-create below) so a site already further along (Installed, Active) is never regressed by a late/duplicate tracking call.
+
+**Courier field was free-text.** Only Blue Dart shipments can be live-tracked, but "Blue Dart" had to be typed correctly for that gate to work (an inline regex, duplicated three ways in the codebase). Added `LFG_COURIERS` (Blue Dart, DTDC, WorldFirst, By Cargo, By Hand) and `isBlueDartCourier()` to `lfgStatus.ts`; the New Shipment form (`LfgSiteWorkspaceClient.tsx`) now uses a dropdown with an "Other" free-text fallback, and both existing regex call sites were switched to the shared helper.
+
+**"View full timeline" navigated away to the Shipping tab.** Changed to open the full (unsliced) event list in the existing shared `Dialog` component in place, instead of `router.push()`ing off the Site Cards grid.
+
+**Staff-created Site Survey Reports (via LFG Connect) never became a site.** `LfgPartnerSiteSurveyReportBridge.tsx`'s auto-create-a-site-from-a-survey step only ran when `identity.partnerId` was set — a staff LFG-Connect session has no partner, so a staff-generated survey silently stayed a siteless draft report, never appearing in the Site Master list ("We have created site survey using lfgconnect but those sites are not added to the list"). Fixed: the auto-create step now runs for staff sessions too, creating an unassigned site/store (`partner_id: null`, same as the New Site form with no partner picked — can be assigned one later). One care point: the existing-store-by-SFO-ID lookup now branches on `.is("partner_id", null)` vs `.eq("partner_id", partnerId)`, since Postgres `.eq(col, null)` never matches NULL rows.
+
+**Survey PDF on site cards, and the Estimates download — both already worked.** Checked before writing any new code: the Site Cards grid already has a "Site Survey" / "Install Report" button per site (`surveyDoc`/`installReportDoc`, sourced from `lfg_site_documents`) that opens the signed PDF inline — it just had nothing to show for staff-created surveys until the fix above. And the Estimates page already has a "Download Costing Excel" button (visible to every role that can view Estimates, not gated to editors) producing a full per-site cost breakdown workbook. Neither needed changes.
+
+**Still open:** the new LFG Connect rate card, map, and pricing update — on hold until Mahin sends the rate card file.
+
+Verified: `npx tsc --noEmit` (whole project, clean) and `npx eslint` on all six changed files (clean). No schema/migration changes in this batch — everything above works against tables and RPCs that already existed.

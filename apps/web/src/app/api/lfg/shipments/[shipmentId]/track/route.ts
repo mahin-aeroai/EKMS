@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createRouteSupabaseClient, requireVerifiedUser } from "@/lib/supabase-route";
 import { trackAwb, mapBlueDartStatusToLfg } from "@/lib/blueDart";
+import { LFG_STATUSES } from "@/lib/lfgStatus";
 
 export const dynamic = "force-dynamic";
 
@@ -88,6 +89,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ shi
   // response had a scan history but no top-level Status for some reason.
   const latest = events[events.length - 1];
   const statusSource = currentStatus ?? latest?.status;
+  let mappedShipmentStatus: ReturnType<typeof mapBlueDartStatusToLfg> | null = null;
   if (statusSource || currentLocation || expectedDeliveryDate) {
     const update: Record<string, unknown> = {
       last_tracked_at: new Date().toISOString(),
@@ -95,6 +97,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ shi
     };
     if (statusSource) {
       const mappedStatus = mapBlueDartStatusToLfg(statusSource);
+      mappedShipmentStatus = mappedStatus;
       update.current_status = mappedStatus;
       if (mappedStatus === "delivered") {
         update.delivery_date = (currentStatusTime ?? latest?.time)?.slice(0, 10);
@@ -118,6 +121,39 @@ export async function POST(request: Request, { params }: { params: Promise<{ shi
       delete update.last_tracked_at;
       delete update.current_location;
       await supabase.from("lfg_shipments").update(update).eq("id", shipmentId);
+    }
+  }
+
+  // Auto-advance the SITE's own status to "delivered" the instant Blue
+  // Dart confirms delivery, instead of leaving it to a separate manual
+  // status update (task feedback: "When Bluedart courier is tracked it
+  // says delivered then it should be marked as delivered. should not
+  // wait for update."). Previously this route only ever touched the
+  // SHIPMENT's own current_status -- lfg_sites.site_status (what every
+  // dashboard/program card and the Status Sheet actually reads) stayed
+  // wherever a human had last set it, so "Blue Dart says delivered" and
+  // "the site shows Delivered" could silently disagree.
+  //
+  // Rank-guarded against LFG_STATUSES' own fixed order the same way
+  // LfgPartnerSiteSurveyReportBridge.tsx guards its own auto-advance --
+  // lfg_change_site_status() itself does no such check, so skipping this
+  // for a site that's already past Delivered (fully Installed, or Active)
+  // is on us; otherwise a late or duplicate tracking call could silently
+  // walk a further-along site backwards.
+  if (mappedShipmentStatus === "delivered") {
+    const { data: siteNow } = await supabase
+      .from("lfg_sites")
+      .select("site_status")
+      .eq("id", shipment.site_id)
+      .maybeSingle();
+    const currentRank = siteNow ? LFG_STATUSES.indexOf(siteNow.site_status as (typeof LFG_STATUSES)[number]) : -1;
+    const deliveredRank = LFG_STATUSES.indexOf("delivered");
+    if (currentRank >= 0 && currentRank < deliveredRank) {
+      await supabase.rpc("lfg_change_site_status", {
+        p_site_id: shipment.site_id,
+        p_new_status: "delivered",
+        p_remarks: "Auto-marked Delivered from Blue Dart tracking",
+      });
     }
   }
 
