@@ -70,8 +70,25 @@ export async function POST(request: Request, { params }: { params: Promise<{ shi
   }
   const { events, currentStatus, currentStatusTime, currentLocation, expectedDeliveryDate } = result;
 
+  // 11 Sept 2026: task feedback -- "it si still nor showing actual
+  // tracking on bluedart website it is in transit but it is stuck at
+  // creared." Root cause, found by inspection (not guessed): neither
+  // write below ever checked for an error, and Supabase/PostgREST
+  // returns 200 with zero rows AFFECTED (no thrown error) when an
+  // authenticated write is silently blocked by RLS -- so if this
+  // customer's session somehow didn't satisfy
+  // portal_order_shipments_update_customer's own-company check, the
+  // shipment's current_status would stay at whatever it already was
+  // (the 'shipment_created' default, since it may never have been
+  // written successfully even once) with NO error surfaced anywhere --
+  // exactly this symptom. Both writes now check their own error, and the
+  // status update additionally re-selects the row it just touched so a
+  // silent 0-rows-affected RLS block (no thrown error, just nothing
+  // returned) is caught too, not just a hard Postgres error.
+  let warning: string | null = null;
+
   if (events.length > 0) {
-    await supabase.from("portal_shipment_events").insert(
+    const { error: eventsError } = await supabase.from("portal_shipment_events").insert(
       events.map((ev) => ({
         shipment_id: shipmentId,
         event_status: ev.status,
@@ -82,6 +99,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ shi
         created_by: user.id,
       }))
     );
+    if (eventsError) {
+      warning = `Blue Dart responded, but the scan history couldn't be saved: ${eventsError.message}`;
+    }
   }
 
   const latest = events[events.length - 1];
@@ -101,7 +121,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ shi
     if (currentLocation) update.current_location = currentLocation;
     if (expectedDeliveryDate) update.expected_delivery_date = expectedDeliveryDate;
 
-    await supabase.from("portal_order_shipments").update(update).eq("id", shipmentId);
+    const { data: updatedRow, error: updateError } = await supabase
+      .from("portal_order_shipments")
+      .update(update)
+      .eq("id", shipmentId)
+      .select("id")
+      .maybeSingle();
+    if (updateError) {
+      warning = `Blue Dart says "${statusSource}", but saving it failed: ${updateError.message}`;
+    } else if (!updatedRow) {
+      warning = `Blue Dart says "${statusSource}", but this account doesn't have permission to save it on this shipment.`;
+    }
   }
 
   const { data: refreshed } = await supabase
@@ -116,5 +146,5 @@ export async function POST(request: Request, { params }: { params: Promise<{ shi
     .eq("id", shipmentId)
     .maybeSingle();
 
-  return NextResponse.json({ events: refreshed ?? [], shipment: shipmentNow ?? null });
+  return NextResponse.json({ events: refreshed ?? [], shipment: shipmentNow ?? null, warning });
 }

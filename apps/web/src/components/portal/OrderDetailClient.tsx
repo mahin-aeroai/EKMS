@@ -291,6 +291,13 @@ export function OrderDetailClient({
       setError(data.message || data.error);
       return;
     }
+    // 11 Sept 2026: the route now returns 200 even when Blue Dart replied
+    // fine but the resulting save was blocked or partially failed --
+    // surface that here too, not just the !res.ok branch, or the customer
+    // sees nothing at all and the stepper just silently doesn't move.
+    if (data.warning) {
+      setError(data.warning);
+    }
     await refreshShipping();
   }
 

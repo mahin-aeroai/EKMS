@@ -1957,7 +1957,16 @@ function ShipmentCard({
           last_tracked_at: data.shipment.last_tracked_at ?? null,
         });
       }
-      toast("success", "Tracking updated from Blue Dart");
+      // 11 Sept 2026: the route can now come back 200 with a `warning`
+      // when Blue Dart answered fine but the save itself was blocked or
+      // partially failed -- surface that instead of the plain success
+      // toast, matching the Portal's equivalent fix, so this doesn't go
+      // silently unnoticed here either.
+      if (data.warning) {
+        toast("danger", data.warning);
+      } else {
+        toast("success", "Tracking updated from Blue Dart");
+      }
       onChanged();
     } catch {
       toast("danger", "Couldn't reach the tracking service");
