@@ -105,6 +105,15 @@ export default function LfgSiteImportClient() {
   // Inch when that's genuinely what a file contains.
   const [sizeUnit, setSizeUnit] = useState<"in" | "mm">("mm");
   const [submitting, setSubmitting] = useState(false);
+  // 11 Sept 2026: task feedback, after seeing "32 existing (adding
+  // displays)" in a real preview -- "i dont want existing sites i only
+  // need the current imported ones." Defaults to false (the existing
+  // "add a display at a store already on file" behavior, matching the
+  // manual New Site form's own two-mode logic) so nothing changes for
+  // anyone not asking for this -- checking it excludes every group that
+  // matched an existing store from this run, leaving only genuinely new
+  // stores to import.
+  const [skipExisting, setSkipExisting] = useState(false);
 
   const [existingStores, setExistingStores] = useState<ExistingStore[] | null>(null);
   const [partners, setPartners] = useState<NameOption[] | null>(null);
@@ -231,7 +240,8 @@ export default function LfgSiteImportClient() {
     });
   }, [parseResult, existingStores]);
 
-  const importableGroups = resolvedGroups?.filter((r) => !r.blockingError) ?? [];
+  const existingMatchCount = resolvedGroups?.filter((r) => !r.blockingError && r.existing).length ?? 0;
+  const importableGroups = resolvedGroups?.filter((r) => !r.blockingError && !(skipExisting && r.existing)) ?? [];
   const blockedGroups = resolvedGroups?.filter((r) => r.blockingError) ?? [];
   const totalSites = importableGroups.reduce((n, r) => n + r.group.sites.length, 0);
 
@@ -523,13 +533,22 @@ export default function LfgSiteImportClient() {
                 </div>
               )}
 
+              {existingMatchCount > 0 && (
+                <label className="mb-3 flex items-center gap-2 text-xs text-ink-secondary">
+                  <input type="checkbox" checked={skipExisting} onChange={(e) => setSkipExisting(e.target.checked)} />
+                  Only import new stores — skip {existingMatchCount} store(s) already on file (an SFO ID match adds a
+                  new display at that store by default; check this to leave those alone and import only what&apos;s new)
+                </label>
+              )}
+
               <div className="mb-4 flex flex-wrap gap-4 text-sm">
                 <Badge>{importableGroups.length} stores</Badge>
-                <Badge status={"success"}>
-                  {importableGroups.filter((r) => r.existing).length} existing (adding displays)
-                </Badge>
+                {!skipExisting && (
+                  <Badge status={"success"}>{importableGroups.filter((r) => r.existing).length} existing (adding displays)</Badge>
+                )}
                 <Badge>{importableGroups.filter((r) => !r.existing).length} new stores</Badge>
                 <Badge>{totalSites} sites total</Badge>
+                {skipExisting && existingMatchCount > 0 && <Badge status="neutral">{existingMatchCount} existing skipped</Badge>}
                 {parseResult.skippedRows > 0 && <Badge status="warning">{parseResult.skippedRows} blank rows skipped</Badge>}
               </div>
 
@@ -553,23 +572,28 @@ export default function LfgSiteImportClient() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-line">
-                    {resolvedGroups!.slice(0, 100).map((r) => (
-                      <tr key={r.group.groupKey} className={r.blockingError ? "bg-danger-tint/40" : undefined}>
-                        <td className="px-3 py-2">{r.group.outletName ?? <span className="text-ink-muted">—</span>}</td>
-                        <td className="px-3 py-2">{r.group.sfoId ?? <span className="text-ink-muted">—</span>}</td>
-                        <td className="px-3 py-2">{r.group.city ?? <span className="text-ink-muted">—</span>}</td>
-                        <td className="px-3 py-2">
-                          {r.blockingError ? (
-                            <span className="text-danger">{r.blockingError}</span>
-                          ) : r.existing ? (
-                            <span className="text-success">Existing — adding display</span>
-                          ) : (
-                            <span className="text-info">New store</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2">{r.group.sites.length}</td>
-                      </tr>
-                    ))}
+                    {resolvedGroups!.slice(0, 100).map((r) => {
+                      const skipped = !r.blockingError && skipExisting && r.existing;
+                      return (
+                        <tr key={r.group.groupKey} className={r.blockingError ? "bg-danger-tint/40" : skipped ? "opacity-50" : undefined}>
+                          <td className="px-3 py-2">{r.group.outletName ?? <span className="text-ink-muted">—</span>}</td>
+                          <td className="px-3 py-2">{r.group.sfoId ?? <span className="text-ink-muted">—</span>}</td>
+                          <td className="px-3 py-2">{r.group.city ?? <span className="text-ink-muted">—</span>}</td>
+                          <td className="px-3 py-2">
+                            {r.blockingError ? (
+                              <span className="text-danger">{r.blockingError}</span>
+                            ) : skipped ? (
+                              <span className="text-ink-muted">Skipped — already on file</span>
+                            ) : r.existing ? (
+                              <span className="text-success">Existing — adding display</span>
+                            ) : (
+                              <span className="text-info">New store</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2">{skipped ? 0 : r.group.sites.length}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
                 {resolvedGroups!.length > 100 && (
