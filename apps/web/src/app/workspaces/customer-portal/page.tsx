@@ -8,6 +8,7 @@ import { Tag } from "@/components/ui/Tag";
 import { CompaniesTab } from "./CompaniesTab";
 import { ProductsTab } from "./ProductsTab";
 import { OrdersTab } from "./OrdersTab";
+import { HeroBannerTab } from "./HeroBannerTab";
 
 // Staff-side management for the customer portal (/portal/*) — the
 // invite-only ordering site for Apple-format retail chains (GPX04/GPX05
@@ -19,12 +20,13 @@ import { OrdersTab } from "./OrdersTab";
 // here — OrderDetailClient already renders the staff-only controls when
 // the signed-in user is admin/editor (see its `isStaff` prop), so the
 // Orders tab below just links straight into that page.
-type TabId = "companies" | "products" | "orders";
+type TabId = "companies" | "products" | "orders" | "hero-banner";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "companies", label: "Companies & Stores" },
   { id: "products", label: "Products" },
   { id: "orders", label: "Orders" },
+  { id: "hero-banner", label: "Hero Banner" },
 ];
 
 export default function CustomerPortalWorkspacePage() {
@@ -73,6 +75,7 @@ export default function CustomerPortalWorkspacePage() {
       {activeTab === "companies" && <CompaniesTab />}
       {activeTab === "products" && <ProductsTab />}
       {activeTab === "orders" && <OrdersTab />}
+      {activeTab === "hero-banner" && <HeroBannerTab />}
     </div>
   );
 }
