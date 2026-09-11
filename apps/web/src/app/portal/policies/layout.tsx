@@ -30,7 +30,7 @@ export default async function PoliciesLayout({ children }: { children: ReactNode
   const onPortalHost = await getOnPortalHost();
 
   return (
-    <div className="min-h-screen bg-surface-sunken">
+    <div data-theme="portal" className="min-h-screen bg-surface-sunken">
       <header className="border-b border-line bg-surface">
         <div className="mx-auto flex max-w-3xl flex-col gap-3 px-4 py-4 sm:px-6">
           <Link href={portalHref("/", onPortalHost)} className="flex items-center gap-2">

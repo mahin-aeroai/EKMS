@@ -27,7 +27,8 @@ const HERO_CATEGORY_LABELS = ["Spaces", "Vehicles", "Signage", "Displays", "Grap
  * staff-uploaded collage image (built outside the app, uploaded as a
  * single file from Customer Portal → Hero Banner) on the right, at roughly
  * 40% of the previous overall height. Every non-photo color here is still
- * one of globals.css's existing semantic tokens (primary/ai/success) — no
+ * one of globals.css's existing semantic tokens (primary/ai, portal-themed) —
+ * no
  * new brand hex introduced.
  */
 export function PortalHeroBanner({
@@ -45,7 +46,7 @@ export function PortalHeroBanner({
           <h1 className="text-xl font-bold leading-[1.1] tracking-tight text-ink sm:text-2xl">
             Print Beyond
             <br />
-            <span className="bg-gradient-to-r from-primary via-ai to-success bg-clip-text text-transparent">
+            <span className="bg-gradient-to-r from-primary to-ai bg-clip-text text-transparent">
               Possibilities.
             </span>
           </h1>
@@ -72,7 +73,7 @@ export function PortalHeroBanner({
             <div key={label}>{label}</div>
           ))}
           <div className="text-ink-muted">and more...</div>
-          <div className="mt-2 h-1 w-12 rounded-full bg-gradient-to-r from-primary via-ai to-success" aria-hidden="true" />
+          <div className="mt-2 h-1 w-12 rounded-full bg-gradient-to-r from-primary to-ai" aria-hidden="true" />
         </div>
 
         <div className="relative h-24 overflow-hidden sm:h-28 lg:h-auto lg:min-h-[130px]">
@@ -80,7 +81,7 @@ export function PortalHeroBanner({
         </div>
       </div>
 
-      <div className="h-1.5 w-full bg-gradient-to-r from-primary via-ai to-success" aria-hidden="true" />
+      <div className="h-1.5 w-full bg-gradient-to-r from-primary to-ai" aria-hidden="true" />
     </div>
   );
 }
@@ -110,7 +111,7 @@ function HeroCollageImage() {
         // eslint-disable-next-line @next/next/no-img-element -- short-lived signed R2 URL
         <img src={url} alt="MMDI print work" className="h-full w-full object-cover" onError={() => setFailed(true)} />
       ) : (
-        <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-primary-tint via-ai-tint to-success-tint">
+        <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-primary-tint to-ai-tint">
           <Images size={22} className="text-ink-secondary" />
         </div>
       )}

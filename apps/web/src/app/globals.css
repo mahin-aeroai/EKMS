@@ -122,6 +122,32 @@
   --primary-tint: var(--n-200);
 }
 
+/* Customer Portal brand override -- scoped via data-theme="portal" on
+   portal.mmdi.in's root wrappers (portal/(app)/layout.tsx, portal/login,
+   portal/policies/layout.tsx) only, NOT applied globally -- the internal
+   staff app (app.mmdi.in) and LFG Connect keep their own themes exactly
+   as before. 11 Sept 2026 task feedback: "use this color pallette
+   attached. make it stunning order page" (a reference brand-board image)
+   -- sampled directly from that image: a warm near-black maroon, a slate
+   blue, and a dusty mauve/pink, for a boutique, less "corporate SaaS"
+   feel on the customer-facing storefront specifically. Functional status
+   colors (success/warning/danger/info) are deliberately left at their
+   global defaults -- order-status badges (Paid/Submitted/etc.) staying
+   unambiguous matters more here than full-palette purity. */
+[data-theme="portal"] {
+  --ink: #2a1212;
+  --surface-sunken: #faf6f6;
+  --line: #eae2e2;
+  --line-strong: #d8c9ca;
+
+  --primary: #607586;
+  --primary-hover: #4b5c6a;
+  --primary-tint: #e2e7ea;
+
+  --ai: #a0656b;
+  --ai-tint: #f3dfe1;
+}
+
 [data-theme="enterprise"] {
   /* High-contrast, larger-scale theme for Kiosk / Factory Display / Meeting Room Display */
   --surface: #05070b;
