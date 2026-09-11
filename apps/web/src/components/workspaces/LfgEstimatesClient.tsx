@@ -17,7 +17,7 @@
 // later phase if wanted.
 
 import { useEffect, useMemo, useState } from "react";
-import { Receipt, Search, FileDown, Pencil } from "lucide-react";
+import { Receipt, Search, FileDown, Pencil, Tags } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge, type BadgeStatus } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -26,8 +26,11 @@ import { Table, type TableColumn } from "@/components/ui/Table";
 import { useToast } from "@/components/ui/Notifications";
 import { useUserRole, canWrite } from "@/lib/UserRoleContext";
 import { supabase } from "@/lib/supabase";
+import { fetchAllRows } from "@/lib/dashboard-queries";
 import { formatInr } from "@/lib/lfgStatus";
 import { LfgConnectHeader } from "@/components/workspaces/LfgConnectHeader";
+import { LfgApplyRateCardDialog, type LfgMaterialRateMapRow } from "@/components/workspaces/LfgApplyRateCardDialog";
+import type { DistributionRateCardRow } from "@/lib/distribution/types";
 import {
   buildLfgEstimatesWorkbook,
   downloadBlob,
@@ -148,6 +151,36 @@ export default function LfgEstimatesClient() {
   const [partnerFilter, setPartnerFilter] = useState("");
 
   const [editingSite, setEditingSite] = useState<SiteBase | null>(null);
+
+  // Rate Card + material mapping -- not filtered/paginated like `sites`,
+  // loaded once. Feeds the "Apply Rate Card" dialog below (see its own
+  // header comment); distribution_rate_card is the SAME table the
+  // Distribution tool's Rate Card screen imports into -- Srinivas's LFG
+  // rate card upload adds its 14 "LFG - Printing" SKUs there alongside
+  // whatever Distribution SKUs already exist, no separate table needed.
+  const [rateCards, setRateCards] = useState<DistributionRateCardRow[]>([]);
+  const [materialMap, setMaterialMap] = useState<LfgMaterialRateMapRow[]>([]);
+  const [showApplyRateCard, setShowApplyRateCard] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [rateCardData, mapData] = await Promise.all([
+          fetchAllRows<DistributionRateCardRow>((from, to) =>
+            supabase.from("distribution_rate_card").select("*").order("sku_id", { ascending: true }).range(from, to)
+          ),
+          fetchAllRows<LfgMaterialRateMapRow>((from, to) =>
+            supabase.from("lfg_material_rate_map").select("*").order("material", { ascending: true }).range(from, to)
+          ),
+        ]);
+        setRateCards(rateCardData);
+        setMaterialMap(mapData);
+      } catch (err) {
+        toast("danger", `Couldn't load Rate Card / material mapping: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -288,6 +321,25 @@ export default function LfgEstimatesClient() {
     }
   }
 
+  // Called by LfgApplyRateCardDialog after it writes lfg_site_financials
+  // for a batch of sites -- refetches just those rows (fresh, full
+  // FinancialsRow objects) rather than hand-patching state, so every other
+  // financial field the dialog didn't touch stays exactly as the DB has
+  // it, not whatever this component happened to already be holding.
+  async function reloadFinancialsFor(siteIds: string[]) {
+    if (siteIds.length === 0) return;
+    try {
+      const rows = await fetchBySiteIds<FinancialsRow>("lfg_site_financials", siteIds);
+      setFinancialsBySite((prev) => {
+        const next = new Map(prev);
+        for (const r of rows) next.set(r.site_id, r);
+        return next;
+      });
+    } catch (err) {
+      toast("danger", `Applied, but couldn't refresh the list: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   const COLUMNS: TableColumn<LfgEstimateSiteRow>[] = [
     { key: "sfoId", header: "SFO ID", width: "6rem" },
     { key: "outletName", header: "Outlet / Store" },
@@ -339,9 +391,16 @@ export default function LfgEstimatesClient() {
         section="Estimates"
         subtitle="Printing, packing, shipping, installation costs and GST for every site — download a costing Excel to mark up and share, or mark installation execution and PO details directly here."
         action={
-          <Button onClick={handleDownload} loading={downloading} disabled={estimateRows.length === 0}>
-            <FileDown size={14} /> Download Costing Excel
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            {editable && (
+              <Button variant="secondary" onClick={() => setShowApplyRateCard(true)} disabled={estimateRows.length === 0}>
+                <Tags size={14} /> Apply Rate Card
+              </Button>
+            )}
+            <Button onClick={handleDownload} loading={downloading} disabled={estimateRows.length === 0}>
+              <FileDown size={14} /> Download Costing Excel
+            </Button>
+          </div>
         }
       />
 
@@ -419,6 +478,17 @@ export default function LfgEstimatesClient() {
             setInstallBySite((prev) => new Map(prev).set(editingSite.id, row));
             setEditingSite(null);
           }}
+        />
+      )}
+
+      {showApplyRateCard && (
+        <LfgApplyRateCardDialog
+          rows={estimateRows}
+          rateCards={rateCards}
+          materialMap={materialMap}
+          onMaterialMapChanged={(row) => setMaterialMap((prev) => [...prev.filter((m) => m.material !== row.material), row])}
+          onApplied={(siteIds) => reloadFinancialsFor(siteIds)}
+          onClose={() => setShowApplyRateCard(false)}
         />
       )}
     </div>

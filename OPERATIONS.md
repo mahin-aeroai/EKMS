@@ -691,3 +691,21 @@ Verified: `npx tsc --noEmit` (clean) and `npx eslint` on the changed file (clean
 **No app code needs a new migration for the Archive PAGE itself** -- it only reads/writes the two new columns the same migration adds. RLS is unchanged: existing `lfg_sites_update`/`lfg_sites_select` policies already cover reading and restoring archived rows for staff.
 
 Verified: `npx tsc --noEmit` (whole project, clean) and `npx eslint` on all fourteen new/changed files (clean); the migration SQL (both the additive STEP 1 and the commented-out STEP 3 UPDATE, uncommented) parses cleanly under `pglast.parse_sql`.
+
+---
+
+## 12. LFG Connect — Rate Card → Finance data ("Apply Rate Card") (11 Sept 2026)
+
+Task feedback (Mahin, verbatim, with `New rate Card for LFG.xlsx` attached): "you asked for LFG connect new rate card to update fiannce data if not matching with product ask me i will map it." (Referenced back to section 10's "Still open" note.) Confirmed the one genuinely ambiguous part via a clarifying question first: the Rate Card's "Revised Rate (INR) Each" column pairs with an "SQM" column that's always 1 (i.e. a per-square-metre price) — Mahin's answer: "we use SQFt price convert and assign the rate", i.e. convert to a per-SQFT rate (÷10.7639) and write that, since `lfg_sites.sqft`/`lfg_site_financials.rate`/`amount` are SQFT-native everywhere else in the app.
+
+**The uploaded file is the SAME shape as MMDI's existing Master Rate Card** (Category/SKU ID/SKU Description/Bill Rate/Program/Substrate/SQM/Revised Rate columns) — just the 14 "LFG - Printing" SKUs. It imports straight into the Distribution tool's already-existing `distribution_rate_card` table via its already-built Rate Card screen (`/workspaces/distribution/rate-card`, upserted by SKU ID) — no separate LFG-only rate-card table. Import that file there first; everything below reads from that same table.
+
+**Requires a manual SQL step** — run `supabase-lfg-material-rate-map-schema.sql` in the Supabase SQL Editor (adds `lfg_material_rate_map` + role-based RLS mirroring `distribution_item_type_rate_map`; safe to re-run; depends on `distribution_rate_card` already existing).
+
+**New: "Apply Rate Card" on the Estimates page.** `lfg_sites.material` (free text, e.g. "Endutex BWX") almost never matches the Rate Card's own free-text Substrate column (e.g. "Endutex BWX 500") exactly, so a new `lfg_material_rate_map` table holds a one-time, reusable mapping from a `material` string actually seen on a site to the Rate Card SKU that prices it — same shape and reasoning as the Distribution tool's own `distribution_item_type_rate_map`, mapped once and reused automatically for every future site sharing that material.
+
+A new "Apply Rate Card" button (admin/editor only) on the Estimates page opens `LfgApplyRateCardDialog.tsx`, scoped to whatever site list is CURRENTLY showing there (so the page's existing Program/Format/Partner/search filters already answer "which sites" — no separate scope question needed). It groups the visible sites by distinct Material, flags any material with no mapping yet with an inline "map to a Rate Card SKU" picker (identical UX to Distribution's own unmapped-Item-Type panel), and for every already-mapped material shows a before → after preview per site (current Rate/Amount vs. computed Rate = Revised Rate ÷ 10.7639, Amount = Rate × site's Sqft) with a checkbox per row — nothing is written until a staff member reviews this and hits Apply. A site with no Sqft on file still gets a Rate (useful on its own) but no Amount.
+
+**Writes ONLY `lfg_site_financials.rate`/`amount` (+ `updated_at`/`updated_by`)** — every other financial field (packing_forwarding, gst_amount, installation_amount, total_project_cost, margin, ...) is left exactly as it was, via a partial-column upsert (same pattern the Estimates page's own `EditExecutionDialog` already uses for `lfg_installation_costs`). After a successful apply, only the affected sites' financials are refetched fresh from the DB into the page's state, rather than hand-patched, so nothing this dialog didn't touch can drift out of sync with what's actually in Supabase.
+
+Verified: `npx tsc --noEmit` (whole project, clean) and `npx eslint` on both new/changed files (clean); the migration SQL parses cleanly under `pglast.parse_sql`.
