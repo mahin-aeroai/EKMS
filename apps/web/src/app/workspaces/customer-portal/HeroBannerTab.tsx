@@ -15,12 +15,13 @@ async function authHeaders() {
 }
 
 // Task feedback: "give images upload tool so that i can place them
-// nicely" -- one upload slot per named panel in the home page's hero
-// collage (PortalHeroBanner.tsx). Deliberately no manual drag/position
-// controls: the collage's diagonal-cut layout is coded (clip-path), so
-// "placing nicely" just means picking which photo goes in which named
-// slot -- the geometry itself is handled by the banner component, not by
-// staff.
+// nicely" -- originally one upload slot per named panel in the home
+// page's hero collage. 11 Sept 2026 follow-up ("make one image insert i
+// will post the collage") collapsed the banner down to a single
+// pre-made collage image, built outside the app and uploaded as one
+// file -- so this tab now shows exactly one upload card instead of 5.
+// PORTAL_HERO_SLOTS is still an array (portalHeroSlots.ts), just with
+// one entry, so this still maps over it rather than hardcoding the key.
 export function HeroBannerTab() {
   const [rows, setRows] = useState<PortalHeroImageRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -44,11 +45,11 @@ export function HeroBannerTab() {
   return (
     <div>
       <p className="mb-4 max-w-2xl text-sm text-ink-secondary">
-        These 5 photos fill the diagonal collage on the Customer Portal home page banner (portal.mmdi.in, once
-        signed in). Upload one per slot — landscape photos, at least 800px tall, work best; a slot with nothing
-        uploaded shows a plain color placeholder instead of a broken image.
+        This image fills the right-hand side of the Customer Portal home page banner (portal.mmdi.in, once signed
+        in). Upload a single wide collage/photo — a banner-shaped image (roughly 3:1 or wider) works best; with
+        nothing uploaded yet, a plain color placeholder shows instead of a broken image.
       </p>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:max-w-md">
         {PORTAL_HERO_SLOTS.map((slot) => (
           <HeroSlotCard key={slot.key} slotKey={slot.key} label={slot.label} row={rowFor(slot.key)} onUploaded={(row) => setRows((prev) => [...prev.filter((r) => r.slot_key !== slot.key), row])} />
         ))}
@@ -142,7 +143,7 @@ function HeroSlotCard({
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-line bg-surface p-3">
       <p className="text-sm font-semibold text-ink">{label}</p>
-      <div className="flex aspect-[4/3] w-full items-center justify-center overflow-hidden rounded-md bg-surface-sunken">
+      <div className="flex aspect-[3/1] w-full items-center justify-center overflow-hidden rounded-md bg-surface-sunken">
         {previewUrl ? (
           // eslint-disable-next-line @next/next/no-img-element -- short-lived signed R2 URL
           <img src={previewUrl} alt={label} className="h-full w-full object-cover" />
