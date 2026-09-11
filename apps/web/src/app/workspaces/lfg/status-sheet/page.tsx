@@ -267,6 +267,7 @@ export default function LfgStatusSheetPage() {
     supabase
       .from("lfg_sites")
       .select("*", { count: "exact", head: true })
+      .is("archived_at", null)
       .then(({ count }) => setTotalSiteCount(count ?? 0));
   }, []);
 
@@ -279,7 +280,8 @@ export default function LfgStatusSheetPage() {
           .select(
             "id, site_id, outlet_name, format, sfo_id, city, site_status, program_id, updated_at, width, height, material, store_id, partner_id, creative_received_at, lfg_partners(name)"
           )
-          .range(from, to);
+          .range(from, to)
+          .is("archived_at", null);
         if (statusFilter) q = q.eq("site_status", statusFilter);
         // Scoped server-side to the selected Program (defaults to the
         // current season, see programFilter's own comment) rather than
@@ -309,7 +311,7 @@ export default function LfgStatusSheetPage() {
     const handle = setTimeout(() => {
       const trimmed = query.trim();
       fetchAllRows<{ site_status: string }>((from, to) => {
-        let q = supabase.from("lfg_sites").select("site_status").range(from, to);
+        let q = supabase.from("lfg_sites").select("site_status").range(from, to).is("archived_at", null);
         if (programFilter) q = q.eq("program_id", programFilter);
         if (formatFilter) q = q.eq("format", formatFilter);
         if (cityFilter) q = q.eq("city", cityFilter);

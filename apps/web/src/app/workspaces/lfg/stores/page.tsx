@@ -74,7 +74,7 @@ export default function LfgStoresPage() {
     // only to compute each store's display count and verified badge below,
     // never rendered directly.
     fetchAllRows<SiteForStoreRow>((from, to) =>
-      supabase.from("lfg_sites").select("store_id, site_verified_at").range(from, to)
+      supabase.from("lfg_sites").select("store_id, site_verified_at").range(from, to).is("archived_at", null)
     ).then(setSiteRows);
   }, []);
 

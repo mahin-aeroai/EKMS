@@ -177,7 +177,7 @@ export default function LfgProgramsPage() {
     loadRecipients();
     loadLastSends();
     fetchAllRows<SiteStageRow>((from, to) =>
-      supabase.from("lfg_sites").select("program_id, site_status, creative_received_at").range(from, to)
+      supabase.from("lfg_sites").select("program_id, site_status, creative_received_at").range(from, to).is("archived_at", null)
     ).then(setSiteRows);
   }, []);
 

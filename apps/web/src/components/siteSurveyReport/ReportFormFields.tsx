@@ -263,7 +263,12 @@ function useAsmContacts(): AsmContact[] {
   useEffect(() => {
     let cancelled = false;
     fetchAllRows<{ asm_name: string | null; asm_mobile: string | null; asm_email: string | null }>((from, to) =>
-      supabase.from("lfg_sites").select("asm_name, asm_mobile, asm_email").not("asm_name", "is", null).range(from, to)
+      supabase
+        .from("lfg_sites")
+        .select("asm_name, asm_mobile, asm_email")
+        .not("asm_name", "is", null)
+        .is("archived_at", null)
+        .range(from, to)
     ).then((rows) => {
       if (cancelled) return;
       const map = new Map<string, AsmContact>();

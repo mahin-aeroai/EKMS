@@ -402,10 +402,12 @@ export default function LfgSiteListPage() {
     supabase
       .from("lfg_sites")
       .select("*", { count: "exact", head: true })
+      .is("archived_at", null)
       .then(({ count }) => setTotalCount(count ?? 0));
     supabase
       .from("lfg_sites")
       .select("*", { count: "exact", head: true })
+      .is("archived_at", null)
       .or("city.is.null,asm_name.is.null,sfo_id.is.null")
       .then(({ count }) => setMissingCount(count ?? 0));
     supabase
@@ -543,7 +545,11 @@ export default function LfgSiteListPage() {
             // code -- see this file's header comment. nullsFirst: false so
             // rows without an SFO ID yet (brand-new sites) sort to the end.
             .order("sfo_id", { ascending: true, nullsFirst: false })
-            .range(from, from + pageSize - 1);
+            .range(from, from + pageSize - 1)
+            // Archived sites (see supabase-lfg-sites-archive-migration.sql)
+            // never show on the Site Master, same as every other list/count
+            // view in LFG Connect -- only the dedicated Archive page does.
+            .is("archived_at", null);
 
           if (statusFilter) q = q.eq("site_status", statusFilter);
           // Exact match, not the fuzzy `.or()` ilike below -- this is what
@@ -604,6 +610,7 @@ export default function LfgSiteListPage() {
       .from("lfg_sites")
       .select("store_id")
       .in("store_id", storeIds)
+      .is("archived_at", null)
       .then(({ data }) => {
         const counts: Record<string, number> = {};
         for (const row of (data as { store_id: string | null }[]) ?? []) {
