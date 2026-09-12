@@ -729,3 +729,23 @@ Requires a manual SQL step — run `supabase-distribution-tracking-detail-schema
 **Also worth knowing, not yet acted on**: this module reads only the uploaded Tracking Master's Item Type (Costs)/Shipping City/Quantity columns to do its own matching — it does NOT (re)populate `distribution_items`/`distribution_stores`. If the Distribution Tool's OTHER exports (labels, ERP Input List, Overs List) should also reflect this file's full ~8,837-row dataset, that's a separate step: (re-)import `MMDI_Q426_FALL_Tracking_Master.xlsx` via the existing `/workspaces/distribution/import` screen.
 
 Verified: `npx tsc --noEmit` (whole project, clean) and `npx eslint` on all new/changed files (clean); the migration SQL parses cleanly under `pglast.parse_sql`; `parseTrackingMasterWorksheet` → `ensureWriteColumns` → `fillTrackingMasterWorksheet` run end-to-end against the real uploaded 8,837-row file (not just type-checked), including the style-mutation fix confirmed via a 21,000+ cell diff against the original.
+
+## 14. Tracking Detail: Saved Records view (12 Sept 2026)
+
+Mahin reported downloading a generated Tracking Master and being unable to tell whether his Group mappings/tracking entries were actually saved — checking his returned file confirmed the saves were working correctly (all 8,837 rows correctly resolved, distinct Delivery Note/Courier/dates per city), but the page itself only ever showed that data after re-uploading a file, so there was nowhere to just go look at what's on file. Added a browsable/editable "All Item Type → Group mappings" table (searchable, visible on page load, no upload needed) and made "Tracking details by Group" show the union of the current upload's rows and every already-saved entry for the season (also searchable now), plus a small saved-records count strip at the top of the page. See `TrackingDetailClient.tsx`.
+
+## 15. "Apple" de-branding pass across on-screen text (12 Sept 2026)
+
+Task feedback (Mahin, verbatim): "check in my git EMKS anywhere apple name is dispayed we need to rename those records." Audited the whole repo (`grep -rniI apple`, ~530 raw hits, mostly React Native/iOS platform internals like `AppleWebKit`/`applewatch`/`com.apple.security.*` unrelated to the client and excluded via `--exclude-dir=node_modules,ios,android`) and confirmed via two clarifying questions what's actually in scope: replace with a generic term ("the client"/"Client ___"), but leave two categories alone —
+
+- **Generated PDF content** (Site Survey Report's embedded Apple logo/wordmark, "Apple Representative"/"Apple Program Position"/"Apple Standards Met" fields and their on-screen form labels in `ReportFormFields.tsx`/`MeasurementStep.tsx`, Installation Report's "APPLE STORE INSTALLATION REPORT" eyebrow/"Apple Confidential" footer) — these correctly name the real client in an actual deliverable document; renaming them would misrepresent the report.
+- **Database + AI Copilot tool names** — `apple_rate_card`, `apple_lfg_sites`, `apple_lfg_site_surveys`, `apple_store_id`/`apple_id` columns, the `ApplelfgSiteSurveyRow` type, and the AI Copilot's `search_apple_rate_card` tool all stay as-is for now — renaming a live table/column is a real migration (rename + every code reference + careful deploy ordering) that's a separate, deliberate exercise if wanted later, not a text-string change.
+
+**What actually changed** — ten on-screen strings across both apps, all pure display text, zero DB/type/behavior impact:
+- LFG Connect's "SFO / Apple ID" column header → "SFO / Client ID" (Site Master, Archive, Stores, the partner home page — 4 files) and its Site Master subtitle ("...Basil (Apple) LFG program..." → "...Basil LFG program...").
+- Site Surveys page: "Apple ID" column header → "Client ID", plus its description text and search placeholder.
+- Distribution: the Import and workspace home page subtitles, and the Rate Card page's "...from Apple's Master Rate Card" → "...from the client's Master Rate Card".
+- Estimate Builder (web + mobile): the Apple-rate-card product picker's label/placeholder and the "defaults to 45 for Apple" payment-terms hint.
+- Mobile app: Site Surveys tab's search placeholder/empty-state text (mirrors the web page).
+
+Verified: `npx tsc --noEmit` clean on both `apps/web` and `apps/mobile`; `npx eslint` clean on every changed web file (mobile has no eslint config to run). No SQL, no schema, no DB migration involved in this change.

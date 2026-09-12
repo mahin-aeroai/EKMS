@@ -1043,7 +1043,7 @@ export default function EstimateBuilderScreen() {
                       style={s.pickerSearchInput}
                       value={pickerSearch}
                       onChangeText={setPickerSearch}
-                      placeholder={isIkea ? "Search IKEA products" : "Search Apple SKUs"}
+                      placeholder={isIkea ? "Search IKEA products" : "Search Client SKUs"}
                       placeholderTextColor={t.inkMuted}
                     />
                     {isIkea && ikeaRows === null && <ActivityIndicator color={t.primary} style={{ marginVertical: 8 }} />}

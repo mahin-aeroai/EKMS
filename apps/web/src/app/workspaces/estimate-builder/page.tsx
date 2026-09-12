@@ -1325,7 +1325,7 @@ export default function EstimateBuilderPage() {
               />
             ) : isApple ? (
               <Dropdown
-                label="Product (Apple rate card)"
+                label="Product (Client rate card)"
                 placeholder={appleRateCard === null ? "Loading…" : "Search SKUs"}
                 options={(appleRateCard ?? []).map((r, i) => ({
                   value: String(i),
@@ -1733,7 +1733,7 @@ export default function EstimateBuilderPage() {
         <label className="flex flex-col gap-1 text-xs font-medium text-ink-secondary">
           Payment terms
           {isIkea && paymentTermsType === "net_days" && <span className="font-normal normal-case text-ink-muted"> — defaults to 30 for IKEA</span>}
-          {isApple && paymentTermsType === "net_days" && <span className="font-normal normal-case text-ink-muted"> — defaults to 45 for Apple</span>}
+          {isApple && paymentTermsType === "net_days" && <span className="font-normal normal-case text-ink-muted"> — defaults to 45 for this client</span>}
           <select
             value={paymentTermsType}
             onChange={(e) => setPaymentTermsType(e.target.value as EstimatePaymentTermsType)}

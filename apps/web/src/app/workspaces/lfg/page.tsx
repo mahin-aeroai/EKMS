@@ -719,7 +719,7 @@ export default function LfgSiteListPage() {
       width: "4rem",
       render: (r) => r.format ?? "—",
     },
-    { key: "sfo_id", header: "SFO / Apple ID", sortable: true, width: "5.5rem", render: (r) => r.sfo_id ?? "—" },
+    { key: "sfo_id", header: "SFO / Client ID", sortable: true, width: "5.5rem", render: (r) => r.sfo_id ?? "—" },
     {
       key: "outlet_name",
       header: "Store Name",
@@ -787,7 +787,7 @@ export default function LfgSiteListPage() {
       <LfgConnectHeader
         icon={MapPin}
         section="Site Master"
-        subtitle="Search or browse every site for the Basil (Apple) LFG program, then open its Site 360 view. Sorted by SFO / Apple ID."
+        subtitle="Search or browse every site for the Basil LFG program, then open its Site 360 view. Sorted by SFO / Client ID."
         action={
           <div className="flex gap-2">
             <Button variant="secondary" onClick={() => router.push("/workspaces/lfg/import")}>
