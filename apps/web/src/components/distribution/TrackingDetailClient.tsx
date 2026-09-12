@@ -16,7 +16,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import ExcelJS from "exceljs";
-import { AlertTriangle, ArrowLeft, CheckCircle2, ClipboardList, FileSpreadsheet, Upload } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CheckCircle2, ClipboardList, FileSpreadsheet, Search, Tags, Upload } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -84,6 +84,12 @@ export default function TrackingDetailClient() {
   const [loadingFile, setLoadingFile] = useState(false);
   const [parsed, setParsed] = useState<TrackingMasterParseResult | null>(null);
   const [generating, setGenerating] = useState(false);
+
+  // Saved-records browsing -- lets Mahin see/edit what's actually in the DB
+  // (Group mappings, tracking entries for the selected season) without
+  // having to upload a file first.
+  const [groupSearch, setGroupSearch] = useState("");
+  const [entrySearch, setEntrySearch] = useState("");
 
   // Seasons + the (not season-scoped) Rate Card / Deliverable Group map --
   // loaded once, same pattern as DistributionWorkspaceClient.
@@ -186,9 +192,12 @@ export default function TrackingDetailClient() {
   }, [parsed, groupByItemTypeCosts]);
 
   useEffect(() => {
-    // Only adds a blank draft for a newly-seen unmapped item -- never
-    // overwrites an in-progress edit -- so this is idempotent/safe as a
-    // synchronization effect despite the direct setState call.
+    // Seeds a draft for every newly-seen item -- a blank one for an
+    // unmapped item from the current upload, or pre-filled from the saved
+    // row for an already-mapped one (so the "All mappings" browser below
+    // can edit it) -- never overwrites an in-progress edit, so this is
+    // idempotent/safe as a synchronization effect despite the direct
+    // setState call.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setGroupDrafts((prev) => {
       let changed = false;
@@ -199,9 +208,29 @@ export default function TrackingDetailClient() {
           changed = true;
         }
       }
+      for (const g of groups) {
+        if (!(g.item_type_costs in next)) {
+          next[g.item_type_costs] = { groupName: g.group_name, skuId: g.rate_card_sku_id ?? "" };
+          changed = true;
+        }
+      }
       return changed ? next : prev;
     });
-  }, [unmappedItemTypes]);
+  }, [unmappedItemTypes, groups]);
+
+  // Every Item Type (Costs) this app knows about at all -- already-mapped
+  // ones (from `groups`) plus any newly-seen unmapped ones from the
+  // current upload -- what the "All mappings" browser below lists.
+  const allMappedItemTypes = useMemo(() => {
+    const set = new Set<string>([...groups.map((g) => g.item_type_costs), ...unmappedItemTypes]);
+    return [...set].sort();
+  }, [groups, unmappedItemTypes]);
+
+  const groupSearchResults = useMemo(() => {
+    const q = groupSearch.trim().toLowerCase();
+    if (!q) return allMappedItemTypes;
+    return allMappedItemTypes.filter((item) => item.toLowerCase().includes(q) || (groupDrafts[item]?.groupName ?? "").toLowerCase().includes(q));
+  }, [allMappedItemTypes, groupSearch, groupDrafts]);
 
   async function saveGroupMapping(itemTypeCosts: string) {
     const draft = groupDrafts[itemTypeCosts];
@@ -233,10 +262,10 @@ export default function TrackingDetailClient() {
     }
   }
 
-  // Every distinct (Group, Shipping City) pair actually present in the
+  // Every distinct (Group, Shipping City) pair present in the CURRENTLY
   // uploaded file, for rows whose Item Type (Costs) already resolves to a
-  // Group -- this is what the tracking-entries editor below shows.
-  const groupCities = useMemo<GroupCityInfo[]>(() => {
+  // Group -- only meaningful once a file's been uploaded this session.
+  const uploadGroupCities = useMemo<GroupCityInfo[]>(() => {
     if (!parsed) return [];
     const seen = new Map<string, GroupCityInfo>();
     for (const row of parsed.rows) {
@@ -246,8 +275,28 @@ export default function TrackingDetailClient() {
       const key = trackingEntryKey(groupName, row.shippingCity);
       if (!seen.has(key)) seen.set(key, { groupName, city: row.shippingCity, key });
     }
-    return [...seen.values()].sort((a, b) => a.groupName.localeCompare(b.groupName) || a.city.localeCompare(b.city));
+    return [...seen.values()];
   }, [parsed, groupByItemTypeCosts]);
+
+  // Every (Group, Shipping City) pair that already has a SAVED tracking
+  // entry for this season -- this is what makes those records browsable
+  // (and editable) without having to re-upload a file, per Mahin's "saved
+  // records" ask.
+  const savedGroupCities = useMemo<GroupCityInfo[]>(
+    () => entries.map((e) => ({ groupName: e.group_name, city: e.shipping_city, key: trackingEntryKey(e.group_name, e.shipping_city) })),
+    [entries]
+  );
+
+  // Union of both -- whatever's already saved, PLUS anything new the
+  // current upload introduces -- this is what the tracking-entries editor
+  // below shows.
+  const groupCities = useMemo<GroupCityInfo[]>(() => {
+    const seen = new Map<string, GroupCityInfo>();
+    for (const gc of [...savedGroupCities, ...uploadGroupCities]) {
+      if (!seen.has(gc.key)) seen.set(gc.key, gc);
+    }
+    return [...seen.values()].sort((a, b) => a.groupName.localeCompare(b.groupName) || a.city.localeCompare(b.city));
+  }, [savedGroupCities, uploadGroupCities]);
 
   const groupCitiesByGroup = useMemo(() => {
     const m = new Map<string, GroupCityInfo[]>();
@@ -258,6 +307,21 @@ export default function TrackingDetailClient() {
     }
     return m;
   }, [groupCities]);
+
+  const entrySearchResults = useMemo(() => {
+    const q = entrySearch.trim().toLowerCase();
+    if (!q) return groupCitiesByGroup;
+    const m = new Map<string, GroupCityInfo[]>();
+    for (const [groupName, cities] of groupCitiesByGroup) {
+      if (groupName.toLowerCase().includes(q)) {
+        m.set(groupName, cities);
+        continue;
+      }
+      const matchingCities = cities.filter((gc) => gc.city.toLowerCase().includes(q));
+      if (matchingCities.length > 0) m.set(groupName, matchingCities);
+    }
+    return m;
+  }, [groupCitiesByGroup, entrySearch]);
 
   const entryByKey = useMemo(() => {
     const m = new Map<string, DistributionTrackingEntryRow>();
@@ -489,6 +553,15 @@ export default function TrackingDetailClient() {
         </label>
       </div>
 
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface-sunken px-4 py-2 text-xs text-ink-secondary">
+        <CheckCircle2 size={14} className="text-success" />
+        <span>
+          Saved records: <span className="font-medium text-ink">{groups.length}</span> Item Type → Group mapping
+          {groups.length === 1 ? "" : "s"}, <span className="font-medium text-ink">{entries.length}</span> tracking
+          {entries.length === 1 ? " entry" : " entries"} for this season — see below, no upload needed to view them.
+        </span>
+      </div>
+
       <div className="rounded-lg border border-line bg-surface p-4">
         <input
           ref={fileInputRef}
@@ -519,7 +592,7 @@ export default function TrackingDetailClient() {
           <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
             <Badge>{parsed.rows.length} rows</Badge>
             {unmappedItemTypes.length > 0 && <Badge status="warning">{unmappedItemTypes.length} Item Type(s) unmapped</Badge>}
-            <Badge status="info">{groupCities.length} Group × City combination(s)</Badge>
+            <Badge status="info">{uploadGroupCities.length} Group × City combination(s) in this file</Badge>
           </div>
         )}
       </div>
@@ -579,14 +652,116 @@ export default function TrackingDetailClient() {
         </div>
       )}
 
+      {allMappedItemTypes.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Tags size={16} className="text-ink-muted" />
+              <h2 className="text-base font-semibold text-ink">All Item Type → Group mappings</h2>
+              <Badge>{groups.length} saved</Badge>
+            </div>
+            <div className="flex items-center gap-2 rounded-md border border-line bg-surface px-2 py-1">
+              <Search size={13} className="text-ink-muted" />
+              <input
+                value={groupSearch}
+                onChange={(e) => setGroupSearch(e.target.value)}
+                placeholder="Search Item Type or Group"
+                className="w-64 bg-transparent text-xs text-ink outline-none placeholder:text-ink-muted"
+              />
+            </div>
+          </div>
+          <p className="text-xs text-ink-secondary">
+            Every Item Type (Costs) → Group mapping saved so far — not season-specific, reused automatically across
+            every season. Change a Group or SKU here and hit Save to update it.
+          </p>
+          <div className="overflow-x-auto rounded-lg border border-line bg-surface">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-line text-left text-ink-secondary">
+                  <th className="px-3 py-2">Item Type (Costs)</th>
+                  <th className="px-3 py-2">Group</th>
+                  <th className="px-3 py-2">Rate Card SKU</th>
+                  <th className="px-3 py-2">Mapped At</th>
+                  <th className="px-3 py-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {groupSearchResults.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-3 py-6 text-center text-ink-muted">
+                      No matches.
+                    </td>
+                  </tr>
+                ) : (
+                  groupSearchResults.map((item) => {
+                    const draft = groupDrafts[item] ?? { groupName: "", skuId: "" };
+                    const saved = groups.find((g) => g.item_type_costs === item);
+                    return (
+                      <tr key={item} className="border-b border-line last:border-b-0">
+                        <td className="px-3 py-2 font-medium text-ink">{item}</td>
+                        <td className="px-3 py-2">
+                          <input
+                            list="tracking-known-group-names"
+                            value={draft.groupName}
+                            onChange={(e) => setGroupDrafts((prev) => ({ ...prev, [item]: { ...draft, groupName: e.target.value } }))}
+                            className="w-48 rounded-md border border-line bg-surface px-2 py-1 text-xs text-ink"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <select
+                            value={draft.skuId}
+                            onChange={(e) => setGroupDrafts((prev) => ({ ...prev, [item]: { ...draft, skuId: e.target.value } }))}
+                            className="w-64 rounded-md border border-line bg-surface px-2 py-1 text-xs text-ink"
+                          >
+                            <option value="">— none —</option>
+                            {rateCardOptions.map((r) => (
+                              <option key={r.sku_id} value={r.sku_id}>
+                                {r.sku_description ?? r.category ?? r.program ?? "—"} ({r.sku_id})
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="px-3 py-2 text-ink-secondary">
+                          {saved ? new Date(saved.mapped_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "not saved yet"}
+                        </td>
+                        <td className="px-3 py-2">
+                          <Button size="sm" variant="secondary" loading={savingGroup === item} onClick={() => saveGroupMapping(item)}>
+                            Save
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {groupCities.length > 0 && (
         <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <ClipboardList size={16} className="text-ink-muted" />
-            <h2 className="text-base font-semibold text-ink">Tracking details by Group</h2>
-            {loadingEntries && <span className="text-xs text-ink-muted">Loading saved entries…</span>}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <ClipboardList size={16} className="text-ink-muted" />
+              <h2 className="text-base font-semibold text-ink">Tracking details by Group</h2>
+              <Badge>{entries.length} saved</Badge>
+              {loadingEntries && <span className="text-xs text-ink-muted">Loading saved entries…</span>}
+            </div>
+            <div className="flex items-center gap-2 rounded-md border border-line bg-surface px-2 py-1">
+              <Search size={13} className="text-ink-muted" />
+              <input
+                value={entrySearch}
+                onChange={(e) => setEntrySearch(e.target.value)}
+                placeholder="Search Group or City"
+                className="w-64 bg-transparent text-xs text-ink outline-none placeholder:text-ink-muted"
+              />
+            </div>
           </div>
-          {[...groupCitiesByGroup.entries()].map(([groupName, cities]) => {
+          {entrySearchResults.size === 0 && (
+            <p className="rounded-lg border border-dashed border-line py-6 text-center text-xs text-ink-muted">No matches.</p>
+          )}
+          {[...entrySearchResults.entries()].map(([groupName, cities]) => {
             const estimateNumber = entryDrafts[cities[0]?.key ?? ""]?.estimateNumber ?? "";
             return (
               <div key={groupName} className="rounded-lg border border-line bg-surface p-4">
