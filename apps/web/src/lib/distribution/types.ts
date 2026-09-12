@@ -17,6 +17,47 @@ export interface DistributionSeasonRow {
   imported_at: string | null;
   created_by: string | null;
   created_at: string;
+  // Tracking Detail report -- single value for the whole season ("Project
+  // code : single entry", per Mahin's spec). Nullable since it predates
+  // this column (supabase-distribution-tracking-detail-schema.sql).
+  project_code: string | null;
+}
+
+/** Tracking Detail report -- reusable Item Type (Costs) -> Group -> Rate
+ * Card SKU mapping, imported once from Frankie Head Report and extended by
+ * staff as new Item Type (Costs) values show up in later seasons' Tracking
+ * Master files. NOT season-scoped -- same shape/reasoning as
+ * distribution_item_type_rate_map, just keyed on a different field
+ * (item_type_costs, not item_type) since the two don't share a join key. */
+export interface DistributionDeliverableGroupRow {
+  item_type_costs: string;
+  group_name: string;
+  split_note: string | null;
+  rate_card_sku_id: string | null;
+  mapped_by: string | null;
+  mapped_at: string;
+}
+
+/** Tracking Detail report -- one Group x Shipping City's worth of manually
+ * entered tracking facts for a season. Estimate Number is conceptually
+ * per-Group only but stored redundantly on every City row under that
+ * Group; TrackingDetailClient.tsx keeps it in sync across a Group's City
+ * rows when edited. */
+export interface DistributionTrackingEntryRow {
+  id: string;
+  season_id: string;
+  group_name: string;
+  shipping_city: string;
+  estimate_number: string | null;
+  delivery_note: string | null;
+  courier: string | null;
+  tracking_number: string | null;
+  dispatch_date: string | null; // ISO date (yyyy-mm-dd)
+  eta: string | null;
+  pod_date: string | null;
+  pod_name: string | null;
+  updated_by: string | null;
+  updated_at: string;
 }
 
 export interface DistributionStoreRow {

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, FileDown, Package, Plus, Search, Tags } from "lucide-react";
+import { AlertTriangle, ClipboardList, FileDown, Package, Plus, Search, Tags } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Button } from "@/components/ui/Button";
 import { Badge, type BadgeStatus } from "@/components/ui/Badge";
@@ -362,6 +362,9 @@ export default function DistributionWorkspaceClient() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button variant="secondary" onClick={() => router.push("/workspaces/distribution/tracking")}>
+            <ClipboardList size={14} /> Tracking Detail Report
+          </Button>
           <Button variant="secondary" onClick={() => router.push("/workspaces/distribution/rate-card")}>
             <Tags size={14} /> Rate Card
           </Button>
