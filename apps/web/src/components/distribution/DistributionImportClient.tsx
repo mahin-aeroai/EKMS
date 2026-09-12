@@ -241,7 +241,7 @@ export default function DistributionImportClient() {
         <div>
           <h1 className="text-xl font-semibold text-ink">Import Distribution Brief</h1>
           <p className="text-sm text-ink-secondary">
-            Upload the season&apos;s Apple distribution sheet — only the sheet with &quot;Distribution&quot; in its name is
+            Upload the season&apos;s distribution sheet — only the sheet with &quot;Distribution&quot; in its name is
             read; every other tab is ignored.
           </p>
         </div>

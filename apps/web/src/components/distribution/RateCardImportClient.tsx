@@ -205,7 +205,7 @@ export default function RateCardImportClient() {
         <div>
           <h1 className="text-xl font-semibold text-ink">Rate Card</h1>
           <p className="text-sm text-ink-secondary">
-            MMDI&apos;s current pricing and sizes, and where to import or revise them from Apple&apos;s Master Rate Card.
+            MMDI&apos;s current pricing and sizes, and where to import or revise them from the client&apos;s Master Rate Card.
           </p>
         </div>
         <Button variant="ghost" size="sm" onClick={() => router.push("/workspaces/distribution")}>

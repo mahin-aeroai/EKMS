@@ -83,7 +83,7 @@ export default function SiteSurveysPage() {
   const columns: TableColumn<ApplelfgSiteSurveyRow>[] = [
     { key: "store_name", header: "Site", sortable: true, render: (r) => r.store_name ?? r.file_name },
     { key: "chain", header: "Chain", sortable: true, render: (r) => <Badge status="neutral">{r.chain}</Badge> },
-    { key: "apple_store_id", header: "Apple ID", sortable: true, render: (r) => r.apple_store_id ?? "—" },
+    { key: "apple_store_id", header: "Client ID", sortable: true, render: (r) => r.apple_store_id ?? "—" },
     {
       key: "file_size_bytes",
       header: "Size",
@@ -112,7 +112,7 @@ export default function SiteSurveysPage() {
         <div>
           <h1 className="text-xl font-semibold text-ink">LFG Site Surveys</h1>
           <p className="mt-0.5 text-sm text-ink-secondary">
-            Search Apple LFG site survey reports and open the original PDF
+            Search LFG site survey reports and open the original PDF
           </p>
         </div>
       </div>
@@ -128,7 +128,7 @@ export default function SiteSurveysPage() {
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by store, city, chain, or Apple ID..."
+          placeholder="Search by store, city, chain, or Client ID..."
           className="h-10 w-full bg-transparent text-sm text-ink outline-none placeholder:text-ink-muted"
         />
       </div>

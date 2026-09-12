@@ -357,7 +357,7 @@ export default function DistributionWorkspaceClient() {
         <div>
           <h1 className="text-xl font-semibold text-ink">Distribution</h1>
           <p className="text-sm text-ink-secondary">
-            Apple seasonal distribution — store-wise packing labels, DB List, Overs List, and ERP Input List, generated
+            Seasonal distribution — store-wise packing labels, DB List, Overs List, and ERP Input List, generated
             from the imported Distribution Brief.
           </p>
         </div>
