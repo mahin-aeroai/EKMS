@@ -248,7 +248,7 @@ export default function LfgPartnerSitesPage() {
 
   const COLUMNS: TableColumn<PartnerSiteRow>[] = [
     { key: "site_id", header: "Site ID", sortable: true },
-    { key: "sfo_id", header: "SFO / Client ID", sortable: true, render: (r) => r.sfo_id ?? "—" },
+    { key: "sfo_id", header: "SFO / Apple ID", sortable: true, render: (r) => r.sfo_id ?? "—" },
     { key: "outlet_name", header: "Store Name", sortable: true },
     {
       key: "active",

@@ -123,7 +123,7 @@ export default function SurveysScreen() {
           style={s.search}
           value={query}
           onChangeText={setQuery}
-          placeholder="Store, chain, or Client store ID"
+          placeholder="Store, chain, or Apple store ID"
           placeholderTextColor={t.inkMuted}
           autoCorrect={false}
           clearButtonMode="while-editing"
@@ -136,7 +136,7 @@ export default function SurveysScreen() {
             <SymbolView name="doc.text.magnifyingglass" tintColor={t.primary} size={30} />
           </View>
           <Text style={s.promptTitle}>Find a site survey</Text>
-          <Text style={s.promptText}>Search by store name, chain, or Client store ID to see results.</Text>
+          <Text style={s.promptText}>Search by store name, chain, or Apple store ID to see results.</Text>
         </View>
       ) : rows === null ? (
         <ActivityIndicator style={s.pad} color={t.primary} />

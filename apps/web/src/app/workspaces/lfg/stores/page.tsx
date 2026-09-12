@@ -123,7 +123,7 @@ export default function LfgStoresPage() {
 
   const COLUMNS: TableColumn<StoreTableRow>[] = [
     { key: "store_name", header: "Store", sortable: true },
-    { key: "sfo_id", header: "SFO / Client ID", sortable: true, render: (r) => r.sfo_id ?? "—" },
+    { key: "sfo_id", header: "SFO / Apple ID", sortable: true, render: (r) => r.sfo_id ?? "—" },
     { key: "city", header: "City", sortable: true, render: (r) => r.city ?? "—" },
     { key: "format", header: "Format", sortable: true, render: (r) => r.format ?? "—" },
     { key: "partnerName", header: "Partner", sortable: true },

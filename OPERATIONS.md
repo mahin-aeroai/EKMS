@@ -749,3 +749,16 @@ Task feedback (Mahin, verbatim): "check in my git EMKS anywhere apple name is di
 - Mobile app: Site Surveys tab's search placeholder/empty-state text (mirrors the web page).
 
 Verified: `npx tsc --noEmit` clean on both `apps/web` and `apps/mobile`; `npx eslint` clean on every changed web file (mobile has no eslint config to run). No SQL, no schema, no DB migration involved in this change.
+
+## 16. De-branding correction: "Apple ID" / "SFO ID" field labels reverted (12 Sept 2026)
+
+Task feedback (Mahin, verbatim): "Keep the Apple ID / SFo ID intact do not change, it wil mislead. I wanted to hide that Apple is MMDI customer information on public. inside the data base it is fine." The intent behind section 15 was to stop the client's name from being displayed as generic public-facing branding text (page subtitles, descriptions, picker labels) — not to rename the actual field/ID labels themselves, since "Apple ID" is the real name of that identifier and calling it "Client ID" on screen is misleading about what the field is.
+
+**Reverted 9 of the 10 strings changed in section 15 — the "Apple ID" / "Apple store ID" field-label ones only:**
+- LFG Connect's "SFO / Client ID" column header → back to "SFO / Apple ID" (Site Master `apps/web/src/app/lfg/(app)/page.tsx`, Archive, Stores, the partner home page `apps/web/src/app/workspaces/lfg/page.tsx` — 4 files) and that page's subtitle ("...Sorted by SFO / Client ID." → "...Sorted by SFO / Apple ID.").
+- Site Surveys page (`apps/web/src/app/workspaces/site-surveys/page.tsx`): "Client ID" column header → "Apple ID"; search placeholder "...or Client ID..." → "...or Apple ID...".
+- Mobile Site Surveys tab (`apps/mobile/app/(tabs)/surveys.tsx`): search placeholder and empty-state text, "Client store ID" → "Apple store ID".
+
+**Left as de-branded (not reverted)** — the other generic on-screen mentions from section 15 that name the client outright rather than naming an ID field: Distribution's Import/workspace subtitles, the Rate Card page's "...from the client's Master Rate Card", Estimate Builder's Apple-rate-card picker label/placeholder and the "defaults to 45 for this client" hint, and the Site Surveys description text/Basil program subtitle wording. Those still read generically per the original request.
+
+Verified: `npx tsc --noEmit` clean on both `apps/web` and `apps/mobile`; `npx eslint` clean on every changed web file. No SQL, no schema, no DB migration.

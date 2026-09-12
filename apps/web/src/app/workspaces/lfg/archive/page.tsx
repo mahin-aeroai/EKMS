@@ -104,7 +104,7 @@ export default function LfgArchivePage() {
   const COLUMNS: TableColumn<ArchivedSiteRow>[] = [
     { key: "outlet_name", header: "Outlet", sortable: true },
     { key: "site_id", header: "Site ID", sortable: true },
-    { key: "sfo_id", header: "SFO / Client ID", sortable: true, render: (r) => r.sfo_id ?? "—" },
+    { key: "sfo_id", header: "SFO / Apple ID", sortable: true, render: (r) => r.sfo_id ?? "—" },
     { key: "city", header: "City", sortable: true, render: (r) => r.city ?? "—" },
     { key: "format", header: "Format", sortable: true, render: (r) => r.format ?? "—" },
     { key: "program_id", header: "Program (Season)", render: (r) => programName(r.program_id) },
