@@ -1162,6 +1162,11 @@ export interface PortalOrderRow {
   current_revision_number: number;
   subtotal: number;
   gst_amount: number;
+  // Flat "packing & forwarding" charge, one per order (= one per store,
+  // since checkout creates one portal_orders row per store) -- not run
+  // through GST. Added straight into total_amount at order creation; see
+  // supabase-portal-packing-forwarding-migration.sql.
+  packing_forwarding_amount: number;
   total_amount: number;
   created_at: string;
   updated_at: string;

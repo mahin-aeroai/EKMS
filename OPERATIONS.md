@@ -762,3 +762,21 @@ Task feedback (Mahin, verbatim): "Keep the Apple ID / SFo ID intact do not chang
 **Left as de-branded (not reverted)** — the other generic on-screen mentions from section 15 that name the client outright rather than naming an ID field: Distribution's Import/workspace subtitles, the Rate Card page's "...from the client's Master Rate Card", Estimate Builder's Apple-rate-card picker label/placeholder and the "defaults to 45 for this client" hint, and the Site Surveys description text/Basil program subtitle wording. Those still read generically per the original request.
 
 Verified: `npx tsc --noEmit` clean on both `apps/web` and `apps/mobile`; `npx eslint` clean on every changed web file. No SQL, no schema, no DB migration.
+
+## 17. Customer Portal: flat "Packing & forwarding" charge per delivery (15 Sept 2026)
+
+Task feedback (Mahin, verbatim): "IN PORTAL .MMDI.IN page add packing and forwarding option to bill and make 1000/- for per delivery. If there are multiple store order and multiplied by 1000."
+
+**Design: charge it per order row, not with special multiplication logic.** Checkout already creates one `portal_orders` row per STORE — a customer can add items for several stores in one visit (`NewOrderForm`'s `CartGroup`), but each store still becomes its own order with its own design-proof/approval/production tracking. So "per delivery" maps directly onto "per `portal_orders` row": charging a flat ₹1000 on every order at creation already gives "multiplied by 1000 for multiple stores" for free — a 3-store checkout creates 3 orders, each carrying its own ₹1000, for ₹3,000 total, with no separate multiplication step anywhere.
+
+**What changed:**
+- New column `portal_orders.packing_forwarding_amount` (`supabase-portal-packing-forwarding-migration.sql`), defaults to 0.
+- `POST /api/portal/orders` (order creation — the real source of truth for pricing) now adds a flat `PACKING_FORWARDING_PER_DELIVERY = 1000` into `total_amount` and stores it on the new column. Not run through GST — the request didn't mention tax on this charge, so it's a flat addition, same treatment as a handling fee. Existing orders (already placed, paid or sitting unpaid in a cart before this shipped) are **not** retroactively charged — same "frozen at creation" treatment the schema already gives `delivery_address`/`delivery_city`/`delivery_gstin`.
+- `NewOrderForm` (`/portal/orders/new`) mirrors the same ₹1000-per-store math client-side purely for the pre-payment estimate shown to the customer (a duplicated constant, commented to point back at the real server-side one) — each store's card now shows "Includes ₹1,000 packing & forwarding for this store's delivery" and the overall summary box gets its own "Packing & forwarding (N deliveries)" line, so the estimate matches what checkout actually charges.
+- `OrderDetailClient` (`/portal/orders/[orderId]`) bill breakdown gets a "Packing & forwarding: ₹—" line between GST and Total.
+- Razorpay's single-order and combined-order routes needed no changes — both read `total_amount` straight from the DB and sum it for multi-order checkouts, so they picked up the new charge automatically once order creation started including it.
+- Cart panel and the staff-side Orders tab (`OrdersTab.tsx`) show only `total_amount`, so both already reflect the new charge with no changes needed.
+
+Verified: `npx tsc --noEmit` clean on `apps/web`; `npx eslint` clean on every changed file; the migration SQL parses cleanly under `pglast.parse_sql`.
+
+Requires a manual SQL step — run `supabase-portal-packing-forwarding-migration.sql` in the Supabase SQL Editor (adds the one new column; safe to re-run).
