@@ -437,6 +437,7 @@ export function OrderDetailClient({
         <div className="mt-3 flex flex-col items-end gap-0.5 text-sm">
           <p className="text-ink-secondary">Subtotal: ₹{order.subtotal.toLocaleString("en-IN")}</p>
           <p className="text-ink-secondary">GST: ₹{order.gst_amount.toLocaleString("en-IN")}</p>
+          <p className="text-ink-secondary">Packing &amp; forwarding: ₹{order.packing_forwarding_amount.toLocaleString("en-IN")}</p>
           <p className="font-semibold text-ink">Total: ₹{order.total_amount.toLocaleString("en-IN")}</p>
         </div>
         {order.notes && (

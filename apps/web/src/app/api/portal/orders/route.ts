@@ -17,6 +17,15 @@ export const dynamic = "force-dynamic";
 // POST /api/portal/orders
 // Body: { store_id: string, notes?: string, items: { product_id: string, quantity: number }[] }
 
+// Flat "packing & forwarding" charge, once per order. Checkout creates one
+// portal_orders row per STORE (see NewOrderForm.tsx), so charging this flat
+// per order already gives "₹1000 per delivery, multiplied for multiple
+// stores" for free -- a 3-store checkout is 3 orders, each carrying its own
+// ₹1000. Not run through GST. Keep in sync with the client-side estimate in
+// NewOrderForm.tsx (groupTotals) -- that copy is display-only; this one is
+// what actually gets charged.
+const PACKING_FORWARDING_PER_DELIVERY = 1000;
+
 interface OrderItemInput {
   product_id?: string;
   quantity?: number;
@@ -114,7 +123,7 @@ export async function POST(request: Request) {
       line_total: lineTotal,
     };
   });
-  const totalAmount = subtotal + gstAmount;
+  const totalAmount = subtotal + gstAmount + PACKING_FORWARDING_PER_DELIVERY;
 
   const { data: order, error: orderErr } = await supabase
     .from("portal_orders")
@@ -132,6 +141,7 @@ export async function POST(request: Request) {
       notes: body.notes ?? null,
       subtotal,
       gst_amount: gstAmount,
+      packing_forwarding_amount: PACKING_FORWARDING_PER_DELIVERY,
       total_amount: totalAmount,
     })
     .select("id, order_no")

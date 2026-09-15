@@ -37,6 +37,12 @@ interface CartGroup {
   items: CartItem[];
 }
 
+// Flat "packing & forwarding" charge, once per store/order — mirrors
+// PACKING_FORWARDING_PER_DELIVERY in api/portal/orders/route.ts, which is
+// the actual source of truth for what gets charged. This copy is only for
+// showing an accurate estimate before checkout; keep the two in sync.
+const PACKING_FORWARDING_PER_DELIVERY = 1000;
+
 function emptyItem(productId = ""): CartItem {
   return { productId, quantity: 1, designFile: null };
 }
@@ -222,8 +228,11 @@ function NewOrderForm() {
     setGroups((prev) => prev.map((g, i) => (i === gi ? { ...g, items: g.items.filter((_, j) => j !== ii) } : g)));
   }
 
+  // Every group here becomes its own portal_orders row on submit (one per
+  // store) — so each one carries its own flat packing & forwarding charge,
+  // same as the server actually charges (see api/portal/orders/route.ts).
   function groupTotals(group: CartGroup) {
-    return group.items.reduce(
+    const items = group.items.reduce(
       (acc, it) => {
         const p = productById(it.productId);
         if (!p) return acc;
@@ -233,16 +242,17 @@ function NewOrderForm() {
       },
       { subtotal: 0, gst: 0 }
     );
+    return { ...items, packingForwarding: PACKING_FORWARDING_PER_DELIVERY };
   }
 
   const grand = groups.reduce(
     (acc, g) => {
       const t = groupTotals(g);
-      return { subtotal: acc.subtotal + t.subtotal, gst: acc.gst + t.gst };
+      return { subtotal: acc.subtotal + t.subtotal, gst: acc.gst + t.gst, packingForwarding: acc.packingForwarding + t.packingForwarding };
     },
-    { subtotal: 0, gst: 0 }
+    { subtotal: 0, gst: 0, packingForwarding: 0 }
   );
-  const grandTotal = grand.subtotal + grand.gst;
+  const grandTotal = grand.subtotal + grand.gst + grand.packingForwarding;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -521,7 +531,7 @@ function NewOrderForm() {
 
       {groups.map((group, gi) => {
         const totals = groupTotals(group);
-        const total = totals.subtotal + totals.gst;
+        const total = totals.subtotal + totals.gst + totals.packingForwarding;
         return (
           <div key={gi} className="flex flex-col gap-4 rounded-lg border border-line bg-surface p-4">
             <div className="flex items-center justify-between gap-3">
@@ -644,6 +654,9 @@ function NewOrderForm() {
               </button>
             </div>
 
+            <p className="text-right text-xs text-ink-muted">
+              Includes ₹{totals.packingForwarding.toLocaleString("en-IN")} packing &amp; forwarding for this store&apos;s delivery
+            </p>
             <p className="text-right text-sm text-ink-secondary">
               Store total: <span className="font-semibold text-ink">₹{total.toLocaleString("en-IN")}</span>
             </p>
@@ -677,6 +690,10 @@ function NewOrderForm() {
         <div className="flex justify-between text-ink-secondary">
           <span>GST</span>
           <span>₹{grand.gst.toLocaleString("en-IN")}</span>
+        </div>
+        <div className="flex justify-between text-ink-secondary">
+          <span>Packing &amp; forwarding ({groups.length} {groups.length > 1 ? "deliveries" : "delivery"})</span>
+          <span>₹{grand.packingForwarding.toLocaleString("en-IN")}</span>
         </div>
         <div className="flex justify-between border-t border-line pt-1 font-semibold text-ink">
           <span>Total to pay now</span>
