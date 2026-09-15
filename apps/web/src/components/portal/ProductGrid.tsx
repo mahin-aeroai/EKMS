@@ -78,7 +78,9 @@ export function ProductGrid({ products }: { products: PortalProductRow[] }) {
           </div>
           <div className="flex min-w-0 flex-1 flex-col gap-2">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">{product.code}</p>
+              {/* Not forced to display uppercase (see ProductsTab.tsx's toTitleCase) —
+                  a code typed as e.g. "Tactical04" should show that way, not "TACTICAL04". */}
+              <p className="text-xs font-semibold tracking-wide text-ink-muted">{product.code}</p>
               <p className="text-sm font-semibold text-ink">{product.name}</p>
               {product.description && <p className="mt-1 text-xs text-ink-secondary">{product.description}</p>}
             </div>

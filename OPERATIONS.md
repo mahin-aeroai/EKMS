@@ -790,3 +790,23 @@ Task feedback (Mahin, verbatim): "give product editinign option." `ProductsTab.t
 `code` has a unique constraint in the schema — renaming to a code already used by another product now surfaces a clear inline error ("Code \"X\" is already used by another product.") instead of silently failing (the previous save handler didn't surface any error at all). `version` (bumped on every meaningful catalog change, per the schema's own existing convention) is bumped on every save here too, same as the image-upload path already did.
 
 Verified: `npx tsc --noEmit` clean on `apps/web`; `npx eslint` clean on the changed file. No SQL, no schema, no DB migration — every field involved already existed on `portal_products`.
+
+## 19. Customer Portal home page: hero banner replaced with a flat band (15 Sept 2026)
+
+Task feedback (Mahin, verbatim): "remove hero banner and make it flat band and make it nicely placed a bit height more." The hero had gone through several rounds before this (coded 2-column card → photo collage → a single staff-uploaded banner image rendered full-width, see `PortalHeroBanner.tsx`'s own git history) and had most recently settled on being entirely driven by an uploaded image.
+
+**Replaced it with a coded, flat single-color band** — no photo, no client-side fetch to `/api/portal/hero-images` at all. Solid `bg-primary` background, centered headline ("Print Beyond Possibilities.", the tagline already used in the old image's alt text) + subtext + a "Place Your Order" CTA button, with generous vertical padding (`py-14 sm:py-20`) for the requested extra height instead of being however tall the uploaded image happened to be. Rendered a static preview (Playwright screenshot against the real Tailwind color tokens) before shipping to confirm the proportions read well.
+
+Component dropped from a client component to a plain server-renderable one — nothing in it needs `useState`/`useEffect` anymore now that there's no image to fetch.
+
+**Left alone, not removed:** the Hero Banner tab (Customer Portal workspace) and its upload API still exist and still work — nothing about the upload/storage path was touched. It's just that nothing currently displays what gets uploaded there. Worth a follow-up if that tab should come out too, now that its output has no home.
+
+Verified: `npx tsc --noEmit` clean on `apps/web`; `npx eslint` clean on the changed files. No SQL, no schema, no DB migration.
+
+## 20. Customer Portal: product code allows normal capitalization, not forced ALL CAPS (15 Sept 2026)
+
+Task feedback (Mahin, verbatim): "product code allow each word capital now it is only allowing all caps." `ProductsTab.tsx` (staff catalog, from section 18) was forcing `code.trim().toUpperCase()` on every save — typing "tactical04" or "Tactical Sign" always got saved as "TACTICAL04"/"TACTICAL SIGN" regardless of how it was typed. The edit card's code input also had a CSS `uppercase` class, so it visually *looked* all-caps as you typed even before saving.
+
+**Replaced the forced uppercase with a `toTitleCase()` helper** that capitalizes only the first letter of each word, leaving the rest exactly as typed — an existing all-caps code is unaffected ("GPX04" stays "GPX04" since its first letter's already capital), while a new one typed in normal case only gets its word-initial letters capitalized ("tactical sign kit" → "Tactical Sign Kit"). Applied at both creation (`ProductForm`) and edit (`ProductCard`) save time. Also removed the CSS `uppercase` class from the edit card's code input (was forcing an all-caps *look* independent of the saved value) and from the customer-facing catalog grid's code display (`ProductGrid.tsx`) — otherwise a title-cased code would still visually render as ALL CAPS wherever a customer sees it, undoing the fix everywhere except the admin form.
+
+Verified: `npx tsc --noEmit` clean on `apps/web`; `npx eslint` clean on both changed files. No SQL, no schema, no DB migration.
