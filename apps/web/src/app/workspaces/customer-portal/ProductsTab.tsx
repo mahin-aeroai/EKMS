@@ -14,6 +14,19 @@ async function authHeaders() {
   return { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token ?? ""}` };
 }
 
+// Capitalizes just the first letter of each word instead of forcing the
+// whole code into caps — task feedback: "product code allow each word
+// capital now it is only allowing all caps." Leaves the rest of each word
+// exactly as typed, so an existing all-caps code is untouched ("GPX04"
+// stays "GPX04") while a new one can be typed in normal case and only gets
+// its first letters capitalized ("tactical sign kit" -> "Tactical Sign Kit").
+function toTitleCase(value: string): string {
+  return value
+    .split(" ")
+    .map((word) => (word.length > 0 ? word[0].toUpperCase() + word.slice(1) : word))
+    .join(" ");
+}
+
 export function ProductsTab() {
   const [products, setProducts] = useState<PortalProductRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -79,7 +92,7 @@ function ProductForm({ onSaved }: { onSaved: (product: PortalProductRow) => void
     const { data, error: insertError } = await supabase
       .from("portal_products")
       .insert({
-        code: code.trim().toUpperCase(),
+        code: toTitleCase(code.trim()),
         name: name.trim(),
         description: description || null,
         unit_price: parseFloat(unitPrice) || 0,
@@ -240,7 +253,7 @@ function ProductCard({ product, onUpdated }: { product: PortalProductRow; onUpda
     const { data, error } = await supabase
       .from("portal_products")
       .update({
-        code: code.trim().toUpperCase(),
+        code: toTitleCase(code.trim()),
         name: name.trim(),
         description: description.trim() || null,
         unit_price: parseFloat(unitPrice) || 0,
@@ -255,7 +268,7 @@ function ProductCard({ product, onUpdated }: { product: PortalProductRow; onUpda
     if (error) {
       // portal_products.code has a unique constraint -- the likeliest real
       // failure here is renaming to a code another product already has.
-      setSaveError(error.message.includes("duplicate key") ? `Code "${code.trim().toUpperCase()}" is already used by another product.` : error.message);
+      setSaveError(error.message.includes("duplicate key") ? `Code "${toTitleCase(code.trim())}" is already used by another product.` : error.message);
       return;
     }
     if (data) onUpdated(data as PortalProductRow);
@@ -303,7 +316,7 @@ function ProductCard({ product, onUpdated }: { product: PortalProductRow; onUpda
             value={code}
             onChange={(e) => setCode(e.target.value)}
             placeholder="Code"
-            className="rounded-md border border-line-strong bg-surface px-2 py-1 text-xs font-semibold uppercase tracking-wide text-ink-muted focus:border-primary focus:outline-none"
+            className="rounded-md border border-line-strong bg-surface px-2 py-1 text-xs font-semibold tracking-wide text-ink-muted focus:border-primary focus:outline-none"
           />
           <input
             value={name}
