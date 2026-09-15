@@ -1,57 +1,38 @@
-"use client";
-
-import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Images } from "lucide-react";
-import { PORTAL_HERO_SLOTS } from "@/lib/portalHeroSlots";
-
-const HERO_SLOT_KEY = PORTAL_HERO_SLOTS[0].key;
+import { ArrowRight } from "lucide-react";
 
 /**
  * Signed-in customer portal home page hero.
  *
- * 11 Sept 2026, this round: task feedback -- "lets place the complete
- * banner in image format so remoce the card in banner header." Every
- * earlier version of this component (headline/CTA/category list column +
- * image, then simplified to headline/CTA + single image) coded a layout
- * around a photo. Now that Mahin is uploading one complete, pre-designed
- * banner graphic (its own headline, category list, and icons already
- * baked into the image itself -- see the Hero Banner tab in Customer
- * Portal workspace), that coded layout duplicated what the image already
- * shows. This is now just the uploaded image, full width, un-cropped
- * (natural aspect ratio, not object-cover) so it renders exactly as
- * designed -- wrapped in a link to `ctaHref` so the banner is still
- * clickable even with no visible button on top of it.
+ * 15 Sept 2026: task feedback -- "remove hero banner and make it flat band
+ * and make it nicely placed a bit height more." Replaces the uploaded-
+ * collage-image banner (see git history on this file: afb0efb / 73a35fe /
+ * a9636c3 for the earlier photo/collage iterations) with a coded, flat
+ * single-color band -- no photo, no client-side fetch to
+ * /api/portal/hero-images, no dependency on staff having uploaded
+ * anything. Content is centered both ways with generous vertical padding
+ * for the requested extra height, instead of being driven by an uploaded
+ * image's own aspect ratio.
+ *
+ * The Hero Banner tab (Customer Portal workspace) and its upload API still
+ * exist and still work -- nothing here was deleted, this component just no
+ * longer renders what's uploaded there. Worth revisiting if that tab
+ * should be removed too, now that nothing displays its output.
  */
 export function PortalHeroBanner({ ctaHref }: { ctaHref: string }) {
-  const [url, setUrl] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`/api/portal/hero-images/${HERO_SLOT_KEY}/preview-url`)
-      .then((res) => (res.ok ? res.json() : Promise.reject()))
-      .then((data) => {
-        if (!cancelled) setUrl(data.url);
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   return (
-    <Link href={ctaHref} className="block overflow-hidden rounded-xl border border-line bg-surface shadow-2">
-      {url && !failed ? (
-        // eslint-disable-next-line @next/next/no-img-element -- short-lived signed R2 URL, and this is the whole banner (no crop) so next/image's fixed-box sizing doesn't fit
-        <img src={url} alt="MMDI — Print Beyond Possibilities" className="h-auto w-full" onError={() => setFailed(true)} />
-      ) : (
-        <div className="flex aspect-[3/1] w-full items-center justify-center bg-gradient-to-br from-primary-tint to-ai-tint">
-          <Images size={28} className="text-ink-secondary" />
-        </div>
-      )}
-    </Link>
+    <div className="flex flex-col items-center justify-center gap-3 rounded-xl bg-primary px-6 py-14 text-center shadow-2 sm:py-20">
+      <h1 className="text-2xl font-bold tracking-tight text-on-brand sm:text-4xl">Print Beyond Possibilities.</h1>
+      <p className="max-w-md text-sm text-on-brand/85 sm:text-base">
+        Place a new order, track design approval, and follow every shipment right through to your stores.
+      </p>
+      <Link
+        href={ctaHref}
+        className="mt-3 inline-flex items-center gap-2 rounded-full bg-surface px-5 py-2.5 text-sm font-semibold text-primary shadow-1 transition-colors hover:bg-surface-sunken"
+      >
+        Place Your Order
+        <ArrowRight size={16} />
+      </Link>
+    </div>
   );
 }
