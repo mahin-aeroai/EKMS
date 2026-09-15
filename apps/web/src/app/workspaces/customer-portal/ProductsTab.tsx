@@ -143,12 +143,33 @@ function ProductForm({ onSaved }: { onSaved: (product: PortalProductRow) => void
 
 function ProductCard({ product, onUpdated }: { product: PortalProductRow; onUpdated: (product: PortalProductRow) => void }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  // Every catalog field is editable here, not just price/active — code,
+  // name, description and GST% were previously fixed at creation. Safe to
+  // change after orders exist against this product: portal_order_items
+  // snapshots product_code/product_name/unit_price/gst_percent at order
+  // time (see POST /api/portal/orders), so editing the catalog later never
+  // rewrites what an already-placed order shows it was actually ordered at.
+  const [code, setCode] = useState(product.code);
+  const [name, setName] = useState(product.name);
+  const [description, setDescription] = useState(product.description ?? "");
   const [unitPrice, setUnitPrice] = useState(String(product.unit_price));
+  const [gstPercent, setGstPercent] = useState(String(product.gst_percent));
   const [active, setActive] = useState(product.active);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Only true once something's actually been changed — keeps "Save"
+  // disabled (and no accidental no-op writes) until there's something to save.
+  const dirty =
+    code.trim() !== product.code ||
+    name.trim() !== product.name ||
+    description !== (product.description ?? "") ||
+    unitPrice !== String(product.unit_price) ||
+    gstPercent !== String(product.gst_percent) ||
+    active !== product.active;
 
   useEffect(() => {
     if (!product.preview_image_path) return;
@@ -210,15 +231,34 @@ function ProductCard({ product, onUpdated }: { product: PortalProductRow; onUpda
   }
 
   async function handleSaveDetails() {
+    if (!code.trim() || !name.trim()) {
+      setSaveError("Code and name can't be empty.");
+      return;
+    }
     setSaving(true);
+    setSaveError(null);
     const { data, error } = await supabase
       .from("portal_products")
-      .update({ unit_price: parseFloat(unitPrice) || 0, active })
+      .update({
+        code: code.trim().toUpperCase(),
+        name: name.trim(),
+        description: description.trim() || null,
+        unit_price: parseFloat(unitPrice) || 0,
+        gst_percent: parseFloat(gstPercent) || 0,
+        active,
+        version: product.version + 1,
+      })
       .eq("id", product.id)
       .select()
       .single();
     setSaving(false);
-    if (!error && data) onUpdated(data as PortalProductRow);
+    if (error) {
+      // portal_products.code has a unique constraint -- the likeliest real
+      // failure here is renaming to a code another product already has.
+      setSaveError(error.message.includes("duplicate key") ? `Code "${code.trim().toUpperCase()}" is already used by another product.` : error.message);
+      return;
+    }
+    if (data) onUpdated(data as PortalProductRow);
   }
 
   // Image on the left, details on the right -- a full-width A4-portrait
@@ -258,26 +298,51 @@ function ProductCard({ product, onUpdated }: { product: PortalProductRow; onUpda
         />
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-2">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">{product.code}</p>
-          <p className="text-sm font-semibold text-ink">{product.name}</p>
+        <div className="grid grid-cols-2 gap-2">
+          <input
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            placeholder="Code"
+            className="rounded-md border border-line-strong bg-surface px-2 py-1 text-xs font-semibold uppercase tracking-wide text-ink-muted focus:border-primary focus:outline-none"
+          />
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Name"
+            className="rounded-md border border-line-strong bg-surface px-2 py-1 text-sm font-semibold text-ink focus:border-primary focus:outline-none"
+          />
         </div>
+        <input
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Description (optional)"
+          className="rounded-md border border-line-strong bg-surface px-2 py-1 text-xs text-ink-secondary focus:border-primary focus:outline-none"
+        />
         {uploadError && <p className="text-xs text-danger">{uploadError}</p>}
+        {saveError && <p className="text-xs text-danger">{saveError}</p>}
         <div className="flex items-center gap-2">
+          <span className="text-xs text-ink-muted">₹</span>
           <input
             value={unitPrice}
             onChange={(e) => setUnitPrice(e.target.value)}
             type="number"
-            className="w-24 rounded-md border border-line-strong bg-surface px-2 py-1 text-sm text-ink focus:border-primary focus:outline-none"
+            className="w-20 rounded-md border border-line-strong bg-surface px-2 py-1 text-sm text-ink focus:border-primary focus:outline-none"
           />
-          <span className="text-xs text-ink-muted">+ {product.gst_percent}% GST</span>
+          <span className="text-xs text-ink-muted">+</span>
+          <input
+            value={gstPercent}
+            onChange={(e) => setGstPercent(e.target.value)}
+            type="number"
+            className="w-14 rounded-md border border-line-strong bg-surface px-2 py-1 text-sm text-ink focus:border-primary focus:outline-none"
+          />
+          <span className="text-xs text-ink-muted">% GST</span>
         </div>
         <label className="flex items-center gap-1.5 text-xs text-ink-secondary">
           <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Active in catalog
         </label>
         <div className="mt-auto flex items-center justify-between">
           <Badge status={active ? "success" : "neutral"}>{active ? "Active" : "Hidden"}</Badge>
-          <Button size="sm" variant="secondary" onClick={handleSaveDetails} loading={saving}>
+          <Button size="sm" variant="secondary" onClick={handleSaveDetails} loading={saving} disabled={!dirty}>
             Save
           </Button>
         </div>

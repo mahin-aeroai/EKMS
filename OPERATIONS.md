@@ -780,3 +780,13 @@ Task feedback (Mahin, verbatim): "IN PORTAL .MMDI.IN page add packing and forwar
 Verified: `npx tsc --noEmit` clean on `apps/web`; `npx eslint` clean on every changed file; the migration SQL parses cleanly under `pglast.parse_sql`.
 
 Requires a manual SQL step — run `supabase-portal-packing-forwarding-migration.sql` in the Supabase SQL Editor (adds the one new column; safe to re-run).
+
+## 18. Customer Portal: full product editing in the staff catalog (15 Sept 2026)
+
+Task feedback (Mahin, verbatim): "give product editinign option." `ProductsTab.tsx` (Tools → Customer Portal, staff-only) already let staff edit a product's unit price, active/hidden state, and preview image after creation — but Code, Name, Description, and GST% were only ever set once at creation (`ProductForm`) and had no way to change afterward.
+
+**Made all of it editable, in the same card.** Code/Name/Description/GST% are now inline-editable inputs alongside the existing price/active fields, saved together by the same "Save" button (now disabled until something's actually changed, so it can't fire an empty no-op update). Confirmed this is safe to allow after orders already exist against a product: `portal_order_items` snapshots `product_code`/`product_name`/`unit_price`/`gst_percent` at the moment an order is placed (`POST /api/portal/orders`), so editing the catalog afterward never rewrites what an already-placed order shows it was actually ordered at — only the live catalog going forward changes.
+
+`code` has a unique constraint in the schema — renaming to a code already used by another product now surfaces a clear inline error ("Code \"X\" is already used by another product.") instead of silently failing (the previous save handler didn't surface any error at all). `version` (bumped on every meaningful catalog change, per the schema's own existing convention) is bumped on every save here too, same as the image-upload path already did.
+
+Verified: `npx tsc --noEmit` clean on `apps/web`; `npx eslint` clean on the changed file. No SQL, no schema, no DB migration — every field involved already existed on `portal_products`.
