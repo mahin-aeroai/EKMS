@@ -924,3 +924,13 @@ New page: `apps/web/src/app/workspaces/lfg/sizes/page.tsx`, new "Edit Sizes" tab
 Deliberately did not build a `dirtyRows`/generic-grid abstraction — no such pattern existed anywhere in the codebase (confirmed via search), so this is a purpose-built draft-state-plus-batched-save model for this one page, not a reusable component yet.
 
 Verified: `npx tsc --noEmit` clean; `npx eslint` clean on all three changed/new files (`app/workspaces/lfg/sizes/page.tsx`, `components/workspaces/LfgConnectNavBar.tsx`, `app/workspaces/lfg/status-sheet/page.tsx`).
+
+## 28. Edit Sizes tab: Bleed field was wrongly run through the mm/inches conversion (16 Sept 2026)
+
+Found while reconciling Mahin's "LFG Permanent Site Sizes.xlsx" (Mono AAR/Multi AAR) against the live database for a bulk correction: `lfg_sites.bleed` has never had one consistent storage unit the way `width`/`height` do. Checked all 136 real bleed values on file for the sites in that sheet — 134 of them are plainly raw millimetres (10, 30, 100, ...), because Site 360's Edit form and the New Site form both write Bleed exactly as typed, no conversion (a quirk explicitly called out and left alone in section 26's mm-only fix, since that task was scoped to Width/Height only). Bulk Import is the one path that DOES convert Bleed mm→inches, per its own separate 11 Sept task feedback ("why inches it is always mm only including bleed") — so the column is genuinely mixed-convention today, not just mislabeled anywhere.
+
+The new Edit Sizes page (section 27, shipped a few hours before this) ran Bleed through `inchesToMm()`/`mmToInches()` exactly like Width/Height — which is wrong for the ~98% of existing rows that are already raw mm, and would have shown a Bleed of "762" for a real 30mm bleed the moment anyone opened that tab. Fixed to pass Bleed through unconverted (`round2()` only), matching Site 360's read view, Site 360's own Edit form, and the LFG partner page — the three other places Bleed is shown, all of which already treat it as a plain number. Column header changed from "Bleed (mm)" back to plain "Bleed" since the unit isn't actually enforced.
+
+Bulk Import's conversion was left as-is — that one's a deliberate, previously-requested behavior (11 Sept task feedback), not a bug, so overriding it here would contradict an explicit earlier instruction rather than fix anything. The underlying inconsistency (two different write paths disagree on Bleed's unit) still exists and hasn't been resolved — flagging it in the message accompanying this session's data-correction deliverable rather than picking a side unilaterally.
+
+Verified: `npx tsc --noEmit` clean; `npx eslint` clean on `app/workspaces/lfg/sizes/page.tsx`.
