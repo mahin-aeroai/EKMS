@@ -211,6 +211,24 @@ interface CardShipmentRef {
   // scan-by-scan history (see trackedEvents' empty-state below).
   current_location: string | null;
   last_tracked_at: string | null;
+  // 16 Sept 2026 task feedback: "add if it shipped it should display how
+  // it is shipped i mean Bluedart / by hand / World first courier/ DTC
+  // etc. along with expected data of delivery." Courier itself was
+  // already fetched (just used to gate the Blue Dart button below, never
+  // shown as text) -- expected_delivery_date wasn't fetched at all until
+  // now. Either a manually-typed date (Shipment tab) or one Blue Dart's
+  // own tracking response supplied -- the /track route refreshes this
+  // column too (see its own comment), and onTracked below patches it in
+  // live so a fresh track call updates the date shown here without a
+  // reload.
+  expected_delivery_date: string | null;
+}
+
+function formatShipDate(value: string | null): string | null {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 }
 
 // A one-line, no-click-required answer to "where is this, shipping-wise"
@@ -388,7 +406,7 @@ export function LfgSiteCardGrid({
 
     supabase
       .from("lfg_shipments")
-      .select("id, site_id, awb_number, courier, current_status, current_location, last_tracked_at, created_at")
+      .select("id, site_id, awb_number, courier, current_status, current_location, last_tracked_at, expected_delivery_date, created_at")
       .in("site_id", ids)
       .not("awb_number", "is", null)
       .order("created_at", { ascending: false })
@@ -404,6 +422,7 @@ export function LfgSiteCardGrid({
               current_status: string | null;
               current_location: string | null;
               last_tracked_at: string | null;
+              expected_delivery_date: string | null;
             }[]
           | null) ?? []) {
           if (row.awb_number && !map[row.site_id]) {
@@ -414,6 +433,7 @@ export function LfgSiteCardGrid({
               current_status: row.current_status,
               current_location: row.current_location,
               last_tracked_at: row.last_tracked_at,
+              expected_delivery_date: row.expected_delivery_date,
             };
           }
         }
@@ -659,6 +679,7 @@ function SiteCard({
           current_status: data.shipment.current_status ?? null,
           current_location: data.shipment.current_location ?? null,
           last_tracked_at: data.shipment.last_tracked_at ?? null,
+          expected_delivery_date: data.shipment.expected_delivery_date ?? null,
         });
       }
       toast("success", "Tracking updated from Blue Dart");
@@ -829,9 +850,30 @@ function SiteCard({
 
         <div className="my-4 h-px bg-line" />
 
-        <div className="flex items-center justify-between">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-secondary">AWB</span>
-          <span className="text-xs tabular-nums text-ink-muted">{shipment?.awb_number ?? "—"}</span>
+        {/* Courier + expected delivery date, as plain text (16 Sept 2026
+            task feedback: "add if it shipped it should display how it is
+            shipped i mean Bluedart / by hand / World first courier/ DTC
+            etc. along with expected data of delivery") -- courier was
+            already being fetched just to gate the Blue Dart button below,
+            never shown; expected_delivery_date wasn't fetched at all
+            before. Shown for any shipment on file, not just Blue Dart --
+            the Blue Dart-only section further down stays reserved for live
+            tracking, which only that one courier's integration supports. */}
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-secondary">Shipped via</span>
+            <span className="text-xs font-medium text-ink">{shipment?.courier || "—"}</span>
+          </div>
+          {shipment && formatShipDate(shipment.expected_delivery_date) && (
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-secondary">Expected delivery</span>
+              <span className="text-xs font-medium text-ink">{formatShipDate(shipment.expected_delivery_date)}</span>
+            </div>
+          )}
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-secondary">AWB</span>
+            <span className="text-xs tabular-nums text-ink-muted">{shipment?.awb_number ?? "—"}</span>
+          </div>
         </div>
 
         {shipment && isBlueDartCourier(shipment.courier) && (

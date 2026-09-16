@@ -207,9 +207,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ shi
   // than trusting the in-memory `update` object above, which may have
   // been trimmed if the optional columns weren't migrated yet) keeps this
   // response as the single source of truth for "what got saved".
+  // expected_delivery_date included here too (16 Sept 2026, "along with
+  // expected data of delivery ... followed by tracking details") -- Blue
+  // Dart's own ExpectedDeliveryDate can update this column (see the
+  // `if (expectedDeliveryDate) update.expected_delivery_date = ...` write
+  // above), and the Site Cards grid now shows this date next to the
+  // courier name, so a fresh track call should refresh it in the same
+  // response instead of only showing the new date after a full reload.
   const { data: shipmentNow } = await supabase
     .from("lfg_shipments")
-    .select("current_status, current_location, last_tracked_at")
+    .select("current_status, current_location, last_tracked_at, expected_delivery_date")
     .eq("id", shipmentId)
     .maybeSingle();
 
