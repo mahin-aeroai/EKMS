@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/dashboard-queries";
-import { mmToInches, inchesToMm } from "@/lib/lfg-units";
+import { mmToInches, inchesToMm, round2 } from "@/lib/lfg-units";
 import { useLfgDistinctValues } from "@/lib/useLfgDistinctValues";
 import { LfgConnectHeader } from "@/components/workspaces/LfgConnectHeader";
 
@@ -30,9 +30,11 @@ import { LfgConnectHeader } from "@/components/workspaces/LfgConnectHeader";
 // writes the typed number straight into the width/height inches columns
 // with no conversion, see status-sheet/page.tsx) which would silently
 // reintroduce the exact corruption class the mm-only fix just eliminated
-// if copied here. Every write below goes through mmToInches() right
-// before the Supabase update, mirroring the now-corrected Site 360 Edit
-// form, New Site form, and Bulk Import.
+// if copied here. Width/Height go through mmToInches() right before the
+// Supabase update, mirroring the now-corrected Site 360 Edit form, New
+// Site form, and Bulk Import. Bleed does NOT -- see the SizeRow.bleed
+// field comment for why (it has no enforced storage unit today; most
+// existing values are already raw mm).
 //
 // Format/SFO ID/Store Name/City/Partner are shown for context (so a row
 // is identifiable while fixing its size) but stay read-only here --
@@ -49,7 +51,22 @@ interface SizeRow {
   material: string | null;
   width: number | null; // inches (DB storage unit -- see lfg-units.ts)
   height: number | null; // inches
-  bleed: number | null; // inches
+  // NOT inches -- unlike width/height, bleed has no enforced storage unit.
+  // Found while reconciling a "Permanent Site Sizes" sheet against this
+  // page (16 Sept 2026): 134 of 136 real lfg_sites.bleed values already on
+  // file are plainly raw millimetres (10, 30, 100, ...), because Site 360's
+  // Edit form and the New Site form both write bleed exactly as typed, no
+  // conversion (a pre-existing quirk called out and deliberately left alone
+  // in the mm-only fix earlier today). Bulk Import is the one write path
+  // that DOES convert it mm->inches, per its own 11 Sept task feedback ("why
+  // inches it is always mm only including bleed") -- so the column is
+  // genuinely mixed-convention today, not just mislabeled. This page
+  // originally ran bleed through inchesToMm/mmToInches like width/height,
+  // which would have shown ~25x-too-large numbers for the vast majority of
+  // real rows; fixed to pass bleed through unconverted, matching Site 360's
+  // read/edit views and the LFG partner page (both plain formatDecimal/
+  // round2, no unit conversion).
+  bleed: number | null;
   number_of_sites: number;
   partner_id: string | null;
   program_id: string | null;
@@ -87,7 +104,7 @@ function draftFromRow(r: SizeRow): Draft {
     material: r.material ?? "",
     width: r.width != null ? String(inchesToMm(r.width)) : "",
     height: r.height != null ? String(inchesToMm(r.height)) : "",
-    bleed: r.bleed != null ? String(inchesToMm(r.bleed)) : "",
+    bleed: r.bleed != null ? String(r.bleed) : "",
     qty: String(r.number_of_sites),
   };
 }
@@ -233,7 +250,7 @@ export default function LfgSizesPage() {
         material: d.material.trim() || null,
         width: d.width.trim() === "" ? null : mmToInches(Number(d.width)),
         height: d.height.trim() === "" ? null : mmToInches(Number(d.height)),
-        bleed: d.bleed.trim() === "" ? null : mmToInches(Number(d.bleed)),
+        bleed: d.bleed.trim() === "" ? null : round2(Number(d.bleed)),
         number_of_sites: Math.round(Number(d.qty)),
       };
       const { error } = await supabase.from("lfg_sites").update(patch).eq("id", id);
@@ -324,7 +341,7 @@ export default function LfgSizesPage() {
     },
     {
       key: "bleed",
-      header: "Bleed (mm)",
+      header: "Bleed",
       width: "6.5rem",
       render: (r) => (
         <input
