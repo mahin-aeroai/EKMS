@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Search, List as ListIcon, LayoutGrid, User, Users } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
@@ -10,12 +10,13 @@ import { useToast } from "@/components/ui/Notifications";
 import { useLfgUser } from "@/lib/LfgUserContext";
 import { useLfgHost, lfgHref } from "@/lib/lfg-links";
 import { supabase } from "@/lib/supabase";
-import { LFG_STATUSES, lfgStatusLabel, lfgStatusBadge } from "@/lib/lfgStatus";
+import { lfgStatusLabel, lfgStatusBadge } from "@/lib/lfgStatus";
 import { formatMm, formatSizeInches, formatDecimal } from "@/lib/lfg-units";
 import { useLfgDistinctValues } from "@/lib/useLfgDistinctValues";
 import { LfgSiteCardGrid } from "@/components/workspaces/LfgSiteCardGrid";
 import { LfgProgramSummaryCard } from "@/components/workspaces/LfgProgramSummaryCard";
 import { LfgPartnerQuickStatusButtons } from "@/components/lfg/LfgPartnerQuickStatusButtons";
+import { type FacetKey, type FacetValue, EMPTY_FACETS, FACET_DEFS, computeSiteFacets, chunk, type ShipmentSignal } from "@/lib/lfg-site-facets";
 
 // Real LFG partner Site Master (task #19) -- replaces the earlier
 // placeholder home. Same debounced search + status filter shape as the
@@ -97,7 +98,13 @@ export default function LfgPartnerSitesPage() {
   const onLfgHost = useLfgHost();
 
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("");
+  // Seven independent yes/no facet toggles (16 Sept 2026 task, "Implement
+  // the same to customer partner site too") replacing the single
+  // site_status dropdown this page used to have -- see
+  // @/lib/lfg-site-facets's own header comment for what each facet means
+  // and why; shared with the staff Site Master (workspaces/lfg/page.tsx)
+  // so the two surfaces can't disagree on the definitions.
+  const [facets, setFacets] = useState<Record<FacetKey, FacetValue>>(EMPTY_FACETS);
   const [programIdFilter, setProgramIdFilter] = useState<string>("");
   const [formatFilter, setFormatFilter] = useState<string>("");
   const formatOptions = useLfgDistinctValues("format");
@@ -142,14 +149,22 @@ export default function LfgPartnerSitesPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const q = params.get("q");
-    const status = params.get("status");
     const programId = params.get("program_id");
     const format = params.get("format");
     const all = params.get("all");
     const viewParam = params.get("view");
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (q) setQuery(q);
-    if (status) setStatusFilter(status);
+    const nextFacets = { ...EMPTY_FACETS };
+    let hasFacetParam = false;
+    for (const f of FACET_DEFS) {
+      const v = params.get(`f_${f.key}`);
+      if (v === "yes" || v === "no") {
+        nextFacets[f.key] = v;
+        hasFacetParam = true;
+      }
+    }
+    if (hasFacetParam) setFacets(nextFacets);
     if (programId) setProgramIdFilter(programId);
     if (format) setFormatFilter(format);
     if (all === "1") setViewingAllSites(true);
@@ -163,7 +178,9 @@ export default function LfgPartnerSitesPage() {
       const params = new URLSearchParams();
       const trimmed = query.trim();
       if (trimmed) params.set("q", trimmed);
-      if (statusFilter) params.set("status", statusFilter);
+      for (const f of FACET_DEFS) {
+        if (facets[f.key]) params.set(`f_${f.key}`, facets[f.key]);
+      }
       if (programIdFilter) params.set("program_id", programIdFilter);
       if (formatFilter) params.set("format", formatFilter);
       if (viewingAllSites) params.set("all", "1");
@@ -174,7 +191,7 @@ export default function LfgPartnerSitesPage() {
     }, 300);
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hydratedFromUrl, query, statusFilter, programIdFilter, formatFilter, viewingAllSites, view]);
+  }, [hydratedFromUrl, query, facets, programIdFilter, formatFilter, viewingAllSites, view]);
 
   useEffect(() => {
     if (!identity) return;
@@ -210,7 +227,6 @@ export default function LfgPartnerSitesPage() {
             .is("archived_at", null);
           if (scopedToOwn) q = q.eq("partner_id", identity.partnerId);
 
-          if (statusFilter) q = q.eq("site_status", statusFilter);
           if (programIdFilter) q = q.eq("program_id", programIdFilter);
           if (formatFilter) q = q.eq("format", formatFilter);
 
@@ -238,7 +254,104 @@ export default function LfgPartnerSitesPage() {
     }, 250);
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [identity, query, statusFilter, programIdFilter, formatFilter, viewingAllSites]);
+  }, [identity, query, programIdFilter, formatFilter, viewingAllSites]);
+
+  // Facet signal data (same pattern as the staff Site Master's own
+  // identical effect in workspaces/lfg/page.tsx) -- survey-doc existence,
+  // the latest AWB-bearing shipment's status, and completed-installation
+  // status, for every row currently loaded. Everything else the seven
+  // facets need (active, creative, printed) is already on `rows` itself
+  // (site_status, creative_received_at) -- see computeSiteFacets() in
+  // @/lib/lfg-site-facets.
+  //
+  // Keyed on rowIdsKey (ids only) rather than `rows` directly, so an
+  // in-place status update (handleStatusChanged) -- which hands down a
+  // new array with the same ids -- doesn't re-run this fetch for no
+  // reason.
+  const rowIdsKey = rows ? rows.map((r) => r.id).join(",") : "";
+  const [surveyAvailableIds, setSurveyAvailableIds] = useState<Set<string>>(new Set());
+  const [shipmentSignalBySite, setShipmentSignalBySite] = useState<Record<string, ShipmentSignal>>({});
+  const [installedIds, setInstalledIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    const ids = rowIdsKey ? rowIdsKey.split(",") : [];
+    if (ids.length === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSurveyAvailableIds(new Set());
+      setShipmentSignalBySite({});
+      setInstalledIds(new Set());
+      return;
+    }
+    let cancelled = false;
+    const idChunks = chunk(ids, 150);
+
+    (async () => {
+      const surveySet = new Set<string>();
+      const shipMap: Record<string, ShipmentSignal> = {};
+      const installSet = new Set<string>();
+
+      await Promise.all([
+        ...idChunks.map(async (c) => {
+          const { data } = await supabase.from("lfg_site_documents").select("site_id").eq("category", "survey").in("site_id", c);
+          for (const row of (data as { site_id: string }[] | null) ?? []) surveySet.add(row.site_id);
+        }),
+        ...idChunks.map(async (c) => {
+          const { data } = await supabase
+            .from("lfg_shipments")
+            .select("site_id, awb_number, current_status")
+            .in("site_id", c)
+            .not("awb_number", "is", null);
+          for (const row of (data as { site_id: string; awb_number: string | null; current_status: string | null }[] | null) ?? []) {
+            const delivered = row.current_status === "delivered";
+            const existing = shipMap[row.site_id];
+            if (!existing) {
+              shipMap[row.site_id] = { hasAwb: true, deliveredByShipment: delivered };
+            } else if (delivered) {
+              existing.deliveredByShipment = true;
+            }
+          }
+        }),
+        ...idChunks.map(async (c) => {
+          const { data } = await supabase
+            .from("lfg_installations")
+            .select("site_id")
+            .eq("installation_status", "completed")
+            .in("site_id", c);
+          for (const row of (data as { site_id: string }[] | null) ?? []) installSet.add(row.site_id);
+        }),
+      ]);
+
+      if (cancelled) return;
+      setSurveyAvailableIds(surveySet);
+      setShipmentSignalBySite(shipMap);
+      setInstalledIds(installSet);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [rowIdsKey]);
+
+  // The rows actually rendered by the table/cards below -- `rows` further
+  // narrowed by whichever facet toggles are on. Deliberately client-side
+  // (unlike every other filter here, which is a Supabase `.eq()`/`.or()`)
+  // since three of the seven facets depend on child-table data fetched
+  // above, not a column on lfg_sites itself.
+  const displayRows = useMemo(() => {
+    if (!rows) return rows;
+    const active = FACET_DEFS.filter((f) => facets[f.key]);
+    if (active.length === 0) return rows;
+    return rows.filter((r) => {
+      const f = computeSiteFacets(r, shipmentSignalBySite[r.id], surveyAvailableIds.has(r.id), installedIds.has(r.id));
+      return active.every(({ key }) => (facets[key] === "yes" ? f[key] : !f[key]));
+    });
+  }, [rows, facets, shipmentSignalBySite, surveyAvailableIds, installedIds]);
+
+  // Clicking a facet's already-active button clears it back to "" (both
+  // Yes/No buttons off) rather than needing a separate "clear" click.
+  function toggleFacet(key: FacetKey, value: FacetValue) {
+    setFacets((prev) => ({ ...prev, [key]: prev[key] === value ? "" : value }));
+  }
 
   // True once a partner (never staff, who already see this unconditionally)
   // is either genuinely staff or has toggled to "All Sites" -- drives the
@@ -305,13 +418,13 @@ export default function LfgPartnerSitesPage() {
         />
         <StatCard
           label="Showing"
-          value={rows === null ? "…" : String(rows.length)}
+          value={displayRows === null ? "…" : String(displayRows.length)}
           trend="flat"
-          trendLabel={query.trim() || statusFilter || programIdFilter || formatFilter ? "Filtered" : "All"}
+          trendLabel={query.trim() || Object.values(facets).some(Boolean) || programIdFilter || formatFilter ? "Filtered" : "All"}
         />
         <StatCard
           label="Needs Attention"
-          value={rows === null ? "…" : String(rows.filter((r) => r.site_status === "issue_attention_required").length)}
+          value={displayRows === null ? "…" : String(displayRows.filter((r) => r.site_status === "issue_attention_required").length)}
           trend="flat"
           trendLabel="Of rows currently shown"
         />
@@ -328,18 +441,6 @@ export default function LfgPartnerSitesPage() {
               className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-ink-muted"
             />
           </div>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
-          >
-            <option value="">All statuses</option>
-            {LFG_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {lfgStatusLabel(s)}
-              </option>
-            ))}
-          </select>
           <select
             value={programIdFilter}
             onChange={(e) => setProgramIdFilter(e.target.value)}
@@ -364,6 +465,44 @@ export default function LfgPartnerSitesPage() {
               </option>
             ))}
           </select>
+        </div>
+
+        {/* Seven independent yes/no facet toggles (16 Sept 2026 task,
+            replacing the single site_status dropdown above) -- see
+            @/lib/lfg-site-facets's header comment for what each one
+            actually means. Clicking a button that's already active clears
+            it back to "off" (toggleFacet). */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {FACET_DEFS.map((f) => (
+            <div key={f.key} className="flex items-center gap-0.5 rounded-md border border-line-strong bg-surface-sunken/50 p-0.5">
+              <span className="pl-1.5 pr-1 text-[10px] font-semibold uppercase tracking-wide text-ink-muted">{f.label}</span>
+              <button
+                type="button"
+                onClick={() => toggleFacet(f.key, "yes")}
+                aria-pressed={facets[f.key] === "yes"}
+                className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
+                  facets[f.key] === "yes" ? "bg-success text-on-brand" : "text-ink-secondary hover:bg-surface-sunken"
+                }`}
+              >
+                {f.yes}
+              </button>
+              <button
+                type="button"
+                onClick={() => toggleFacet(f.key, "no")}
+                aria-pressed={facets[f.key] === "no"}
+                className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
+                  facets[f.key] === "no" ? "bg-danger text-on-brand" : "text-ink-secondary hover:bg-surface-sunken"
+                }`}
+              >
+                {f.no}
+              </button>
+            </div>
+          ))}
+          {Object.values(facets).some(Boolean) && (
+            <button type="button" onClick={() => setFacets(EMPTY_FACETS)} className="px-1.5 text-xs font-medium text-primary hover:underline">
+              Clear filters
+            </button>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -444,13 +583,13 @@ export default function LfgPartnerSitesPage() {
         partnerId={identity && !identity.isStaff && !viewingAllSites ? identity.partnerId : null}
       />
 
-      {rows === null ? (
+      {displayRows === null ? (
         <div className="rounded-lg border border-line bg-surface p-4">
           <p className="py-6 text-center text-sm text-ink-muted">Loading sites…</p>
         </div>
       ) : view === "cards" ? (
         <LfgSiteCardGrid
-          rows={rows}
+          rows={displayRows}
           buildHref={(id) => lfgHref(`/sites/${id}`, onLfgHost)}
           renderQuickActions={(row) =>
             !identity?.isStaff && row.partner_id === identity?.partnerId ? (
@@ -469,11 +608,11 @@ export default function LfgPartnerSitesPage() {
         />
       ) : (
         <div className="rounded-lg border border-line bg-surface p-4">
-          {rows.length === 0 ? (
+          {displayRows.length === 0 ? (
             <p className="py-6 text-center text-sm text-ink-muted">No sites match your search.</p>
           ) : (
             <div className="overflow-x-auto">
-              <Table columns={COLUMNS} rows={rows} onRowClick={(r) => router.push(lfgHref(`/sites/${r.id}`, onLfgHost))} />
+              <Table columns={COLUMNS} rows={displayRows} onRowClick={(r) => router.push(lfgHref(`/sites/${r.id}`, onLfgHost))} />
             </div>
           )}
         </div>

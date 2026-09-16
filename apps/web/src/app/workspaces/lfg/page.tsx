@@ -27,8 +27,9 @@ import { Dialog } from "@/components/ui/Dialog";
 import { useToast } from "@/components/ui/Notifications";
 import { useUserRole, canWrite } from "@/lib/UserRoleContext";
 import { supabase } from "@/lib/supabase";
-import { LFG_STATUSES, type LfgStatus, lfgBenchmarkStatus, lfgFormatPriorityRank } from "@/lib/lfgStatus";
+import { lfgFormatPriorityRank } from "@/lib/lfgStatus";
 import { formatMm } from "@/lib/lfg-units";
+import { type FacetKey, type FacetValue, EMPTY_FACETS, FACET_DEFS, computeSiteFacets, chunk, type ShipmentSignal } from "@/lib/lfg-site-facets";
 import { useLfgDistinctValues } from "@/lib/useLfgDistinctValues";
 import { LfgSiteCardGrid } from "@/components/workspaces/LfgSiteCardGrid";
 import { LfgProgramSummaryCard } from "@/components/workspaces/LfgProgramSummaryCard";
@@ -218,116 +219,14 @@ interface ProgramOption {
   name: string;
 }
 
-// Facet filters (16 Sept 2026 task feedback: "this filter are becoming
-// meaningless so remove some thing we are not updating from cards ... the
-// filetr of statusses should be like Active / inactive Site Survey
-// Available / non available Creative received / not received printed /
-// not printed shipped/not shipped delivered/ not delivered installed /
-// not installed") -- replaces the single 18-value site_status dropdown
-// (which mixed early-pipeline statuses like "new"/"survey_pending" no one
-// was actually keeping current with the site's real shipping/creative/
-// installation progress) with seven independent yes/no toggles, one per
-// real-world checkpoint. Each one is backed by whichever signal is
-// actually kept up to date in practice, not just site_status's own rank,
-// per the research done before writing this:
-//   - active: derived from site_status (deactivated/deactivation_requested
-//     = inactive, everything else visible = active) -- archived sites stay
-//     fully hidden always, same as today, regardless of this facet (see
-//     the always-on `.is("archived_at", null)` in the fetch below).
-//   - survey: real signal -- a Site Survey document is actually on file
-//     (lfg_site_documents, category "survey"), the same thing that decides
-//     whether a card's own "Site Survey" button is enabled or reads
-//     "Survey Not Saved" a few hundred lines below.
-//   - creative / printed: no better signal exists than site_status's own
-//     rank for "printed" (lfg_production is written but never read
-//     anywhere in the UI, per the research), so these two reuse
-//     lfgBenchmarkStatus()'s exact "creative_received"/"in_production"
-//     definitions -- the same ones LfgBenchmarkStrip already renders on
-//     every card, so this filter can never disagree with what the card
-//     itself is showing.
-//   - shipped: real signal -- a shipment row exists with an AWB number on
-//     it (lfg_shipments), the same predicate the card's own AWB/Blue Dart
-//     section already uses, not "site_status reached dispatched".
-//   - delivered: site_status reaching "delivered" or later, OR the site's
-//     latest shipment's own current_status says "delivered" -- exactly the
-//     same either/or trackingSummary() already uses for the card's
-//     "Tracking" badge, so this filter can't disagree with that badge
-//     either.
-//   - installed: real signal -- lfg_installations.installation_status is
-//     "completed", the same field the card's own bottom "Installation"
-//     badge reads.
-type FacetKey = "active" | "survey" | "creative" | "printed" | "shipped" | "delivered" | "installed";
-type FacetValue = "" | "yes" | "no";
-const EMPTY_FACETS: Record<FacetKey, FacetValue> = {
-  active: "",
-  survey: "",
-  creative: "",
-  printed: "",
-  shipped: "",
-  delivered: "",
-  installed: "",
-};
-const FACET_DEFS: { key: FacetKey; label: string; yes: string; no: string }[] = [
-  { key: "active", label: "Status", yes: "Active", no: "Inactive" },
-  { key: "survey", label: "Site Survey", yes: "Available", no: "Not available" },
-  { key: "creative", label: "Creative", yes: "Received", no: "Not received" },
-  { key: "printed", label: "Printed", yes: "Printed", no: "Not printed" },
-  { key: "shipped", label: "Shipped", yes: "Shipped", no: "Not shipped" },
-  { key: "delivered", label: "Delivered", yes: "Delivered", no: "Not delivered" },
-  { key: "installed", label: "Installed", yes: "Installed", no: "Not installed" },
-];
-
-interface SiteFacets {
-  active: boolean;
-  survey: boolean;
-  creative: boolean;
-  printed: boolean;
-  shipped: boolean;
-  delivered: boolean;
-  installed: boolean;
-}
-
-// site_id -> whether a shipment with an AWB is on file, and whether that
-// shipment's own current_status says delivered -- the two shipment-derived
-// facts computeSiteFacets() below needs, fetched once for every currently
-// loaded row (see the effect further down), same idea as
-// LfgSiteCardGrid.tsx's own awbBySite lookup but keyed to what filtering
-// needs rather than what a single card displays.
-interface ShipmentSignal {
-  hasAwb: boolean;
-  deliveredByShipment: boolean;
-}
-
-function computeSiteFacets(
-  row: Pick<LfgSiteListRow, "site_status" | "creative_received_at">,
-  shipmentSignal: ShipmentSignal | undefined,
-  surveyAvailable: boolean,
-  installed: boolean
-): SiteFacets {
-  const rank = LFG_STATUSES.indexOf(row.site_status as LfgStatus);
-  const benchmarks = lfgBenchmarkStatus(row.site_status, row.creative_received_at);
-  const creative = benchmarks.find((b) => b.key === "creative_received")?.crossed ?? false;
-  const printed = benchmarks.find((b) => b.key === "in_production")?.crossed ?? false;
-  return {
-    active: row.site_status !== "deactivated" && row.site_status !== "deactivation_requested",
-    survey: surveyAvailable,
-    creative,
-    printed,
-    shipped: shipmentSignal?.hasAwb ?? false,
-    delivered: rank >= LFG_STATUSES.indexOf("delivered") || (shipmentSignal?.deliveredByShipment ?? false),
-    installed,
-  };
-}
-
-// Splits a big id list into URL-safe-sized chunks for .in() lookups below
-// -- same reasoning as the site fetch's own .range() paging (a single
-// .in() over every currently loaded site would risk an oversized request
-// once there are a few hundred+ rows on screen).
-function chunk<T>(arr: T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
-}
+// Facet-filter definitions (FacetKey/FacetValue/EMPTY_FACETS/FACET_DEFS/
+// SiteFacets/ShipmentSignal/computeSiteFacets/chunk) now live in
+// @/lib/lfg-site-facets, shared with the LFG partner home page
+// (app/lfg/(app)/page.tsx, 16 Sept 2026: "Implement the same to customer
+// partner site too") -- see that module's own header comment for what
+// each facet means and why. Kept in one place so the two Site Master
+// surfaces can never end up disagreeing on what "Shipped"/"Delivered"/etc.
+// actually mean.
 
 // Row shape actually handed to <Table> -- adds a `selected` field so the
 // bulk-select checkbox column (task #46) has its own real TableColumn key,
