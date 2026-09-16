@@ -877,3 +877,16 @@ Task feedback (Mahin, verbatim): "Implement the same to customer partner site to
 **Nothing new in the database**, same as section 23 — this is entirely a client-side filter over existing columns/tables.
 
 Verified: `npx tsc --noEmit` clean on `apps/web`; `npx eslint` clean on all three changed/new files (`app/lfg/(app)/page.tsx`, `workspaces/lfg/page.tsx`, `lib/lfg-site-facets.ts`).
+
+## 25. Facet filter bar redesign — made it look like a filter, not plain text (16 Sept 2026)
+
+Task feedback (Mahin, verbatim, with screenshots of both Site Master surfaces): "in both site decorate that bar for statusses it looks plain and unable to identify that there are filters in it." The section 23/24 facet bar's first version only colored the one button that happened to already be selected — every other button was plain muted text with no background, so the row read as inert labels rather than clickable filters (visible in the screenshots: only "Not Printed" stood out, in red; everything else looked like static text).
+
+**Extracted the bar into its own shared component**, `components/lfg/LfgFacetFilterBar.tsx`, used identically by both `workspaces/lfg/page.tsx` and `app/lfg/(app)/page.tsx` — same reasoning as `@/lib/lfg-site-facets` itself: one visual definition, not two that could drift. Three changes to make it actually read as a filter bar at a glance:
+- A tinted band (`bg-primary-tint/40`, bordered) around the whole row, with a "Filters" label + `SlidersHorizontal` icon at the start, so the row visually separates from the search/select row above it instead of blending into the page background.
+- Every Yes/No button is now tinted green/red (`bg-success-tint`/`bg-danger-tint`) by default, not just plain text — so the "shipped vs. not shipped" direction is visible before anything is even selected, not only after.
+- The selected side additionally goes solid (`bg-success`/`bg-danger`) with a check/X icon, not color alone — reads correctly for colorblind users too, not just a color swap.
+
+No behavior change — same `facets` state, same `toggleFacet`/`onClear` handlers, same URL params; this is a pure rendering swap.
+
+Verified: `npx tsc --noEmit` clean on `apps/web`; `npx eslint` clean on all three changed/new files (`components/lfg/LfgFacetFilterBar.tsx`, `workspaces/lfg/page.tsx`, `app/lfg/(app)/page.tsx`).
