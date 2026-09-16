@@ -35,7 +35,7 @@ import { useUserRole, canWrite } from "@/lib/UserRoleContext";
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/dashboard-queries";
 import { timeAgo } from "@/lib/timeAgo";
-import { formatSizeMm } from "@/lib/lfg-units";
+import { formatSizeMm, mmToInches, inchesToMm } from "@/lib/lfg-units";
 import { useLfgDistinctValues } from "@/lib/useLfgDistinctValues";
 import { LFG_STATUSES, lfgStatusLabel, lfgStatusBadge, lfgFormatPriorityRank, type LfgStatus } from "@/lib/lfgStatus";
 import { LfgBenchmarkStrip } from "@/components/workspaces/LfgBenchmarkStrip";
@@ -835,8 +835,16 @@ function SiteFieldsEditControl({
 
   const [sfoId, setSfoId] = useState(row.sfo_id ?? "");
   const [material, setMaterial] = useState(row.material ?? "");
-  const [width, setWidth] = useState(row.width != null ? String(row.width) : "");
-  const [height, setHeight] = useState(row.height != null ? String(row.height) : "");
+  // row.width/.height are lfg_sites' native storage unit (inches, see
+  // lfg-units.ts) -- these two fields are labeled "(mm)" below (16 Sept
+  // 2026 mm-only task), so they must show/collect millimetres like every
+  // other surface, converting via inchesToMm/mmToInches at exactly this
+  // form's load/save boundary. Previously this read/wrote the raw inches
+  // value straight into a field labeled "(mm)" with no conversion at
+  // all -- the same silent corruption bug the Site 360 Edit form had,
+  // caught while building the new Edit Sizes page and fixed the same way.
+  const [width, setWidth] = useState(row.width != null ? String(inchesToMm(row.width)) : "");
+  const [height, setHeight] = useState(row.height != null ? String(inchesToMm(row.height)) : "");
   const [partnerId, setPartnerId] = useState(row.partner_id ?? "");
 
   // Re-sync the form from the row every time the popover is opened -- the
@@ -852,8 +860,8 @@ function SiteFieldsEditControl({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSfoId(row.sfo_id ?? "");
     setMaterial(row.material ?? "");
-    setWidth(row.width != null ? String(row.width) : "");
-    setHeight(row.height != null ? String(row.height) : "");
+    setWidth(row.width != null ? String(inchesToMm(row.width)) : "");
+    setHeight(row.height != null ? String(inchesToMm(row.height)) : "");
     setPartnerId(row.partner_id ?? "");
   }, [open, row]);
 
@@ -869,9 +877,13 @@ function SiteFieldsEditControl({
   async function save() {
     const trimmedSfo = sfoId.trim();
     const trimmedMaterial = material.trim();
-    const widthNum = width.trim() === "" ? null : Number(width);
-    const heightNum = height.trim() === "" ? null : Number(height);
-    if ((width.trim() !== "" && Number.isNaN(widthNum)) || (height.trim() !== "" && Number.isNaN(heightNum))) {
+    // width/heightNum are millimetres (what the field actually collects,
+    // per its "(mm)" label) -- converted to inches right here, at the
+    // write boundary, same as every other form now does. NEVER write
+    // these mm values straight into lfg_sites.width/.height.
+    const widthMm = width.trim() === "" ? null : Number(width);
+    const heightMm = height.trim() === "" ? null : Number(height);
+    if ((width.trim() !== "" && Number.isNaN(widthMm)) || (height.trim() !== "" && Number.isNaN(heightMm))) {
       toast("danger", "Width and Height must be numbers");
       return;
     }
@@ -879,8 +891,8 @@ function SiteFieldsEditControl({
     const patch = {
       sfo_id: trimmedSfo || null,
       material: trimmedMaterial || null,
-      width: widthNum,
-      height: heightNum,
+      width: widthMm === null ? null : mmToInches(widthMm),
+      height: heightMm === null ? null : mmToInches(heightMm),
       partner_id: partnerId || null,
     };
     const { error } = await supabase.from("lfg_sites").update(patch).eq("id", row.id);

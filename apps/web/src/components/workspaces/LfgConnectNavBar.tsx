@@ -11,6 +11,7 @@ import {
   Users,
   Receipt,
   Archive,
+  Ruler,
   type LucideIcon,
 } from "lucide-react";
 
@@ -45,6 +46,12 @@ const TABS: { label: string; href: string; icon: LucideIcon; exact?: boolean }[]
   { label: "Status Sheet", href: "/workspaces/lfg/status-sheet", icon: ArrowLeftRight },
   { label: "Activity Log", href: "/workspaces/lfg/activity", icon: FileClock },
   { label: "Partners", href: "/workspaces/lfg/partners", icon: Users },
+  // 16 Sept 2026: task feedback -- "give me a sparate tab with all sites
+  // by all filters to edit on row itest to correct the sizes at once.
+  // like excel edit." A real persistent destination (someone returns to
+  // it whenever a size needs fixing), not a one-shot action -- same
+  // reasoning as Archive below.
+  { label: "Edit Sizes", href: "/workspaces/lfg/sizes", icon: Ruler },
   // 11 Sept 2026: soft-archive feature -- see
   // supabase-lfg-sites-archive-migration.sql. Deliberately a real nav tab
   // (not a header action button like Bulk Import) since this is a
