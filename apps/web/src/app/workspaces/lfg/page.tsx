@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   MapPin,
@@ -27,7 +27,7 @@ import { Dialog } from "@/components/ui/Dialog";
 import { useToast } from "@/components/ui/Notifications";
 import { useUserRole, canWrite } from "@/lib/UserRoleContext";
 import { supabase } from "@/lib/supabase";
-import { LFG_STATUSES, lfgStatusLabel, lfgFormatPriorityRank } from "@/lib/lfgStatus";
+import { LFG_STATUSES, type LfgStatus, lfgBenchmarkStatus, lfgFormatPriorityRank } from "@/lib/lfgStatus";
 import { formatMm } from "@/lib/lfg-units";
 import { useLfgDistinctValues } from "@/lib/useLfgDistinctValues";
 import { LfgSiteCardGrid } from "@/components/workspaces/LfgSiteCardGrid";
@@ -218,6 +218,117 @@ interface ProgramOption {
   name: string;
 }
 
+// Facet filters (16 Sept 2026 task feedback: "this filter are becoming
+// meaningless so remove some thing we are not updating from cards ... the
+// filetr of statusses should be like Active / inactive Site Survey
+// Available / non available Creative received / not received printed /
+// not printed shipped/not shipped delivered/ not delivered installed /
+// not installed") -- replaces the single 18-value site_status dropdown
+// (which mixed early-pipeline statuses like "new"/"survey_pending" no one
+// was actually keeping current with the site's real shipping/creative/
+// installation progress) with seven independent yes/no toggles, one per
+// real-world checkpoint. Each one is backed by whichever signal is
+// actually kept up to date in practice, not just site_status's own rank,
+// per the research done before writing this:
+//   - active: derived from site_status (deactivated/deactivation_requested
+//     = inactive, everything else visible = active) -- archived sites stay
+//     fully hidden always, same as today, regardless of this facet (see
+//     the always-on `.is("archived_at", null)` in the fetch below).
+//   - survey: real signal -- a Site Survey document is actually on file
+//     (lfg_site_documents, category "survey"), the same thing that decides
+//     whether a card's own "Site Survey" button is enabled or reads
+//     "Survey Not Saved" a few hundred lines below.
+//   - creative / printed: no better signal exists than site_status's own
+//     rank for "printed" (lfg_production is written but never read
+//     anywhere in the UI, per the research), so these two reuse
+//     lfgBenchmarkStatus()'s exact "creative_received"/"in_production"
+//     definitions -- the same ones LfgBenchmarkStrip already renders on
+//     every card, so this filter can never disagree with what the card
+//     itself is showing.
+//   - shipped: real signal -- a shipment row exists with an AWB number on
+//     it (lfg_shipments), the same predicate the card's own AWB/Blue Dart
+//     section already uses, not "site_status reached dispatched".
+//   - delivered: site_status reaching "delivered" or later, OR the site's
+//     latest shipment's own current_status says "delivered" -- exactly the
+//     same either/or trackingSummary() already uses for the card's
+//     "Tracking" badge, so this filter can't disagree with that badge
+//     either.
+//   - installed: real signal -- lfg_installations.installation_status is
+//     "completed", the same field the card's own bottom "Installation"
+//     badge reads.
+type FacetKey = "active" | "survey" | "creative" | "printed" | "shipped" | "delivered" | "installed";
+type FacetValue = "" | "yes" | "no";
+const EMPTY_FACETS: Record<FacetKey, FacetValue> = {
+  active: "",
+  survey: "",
+  creative: "",
+  printed: "",
+  shipped: "",
+  delivered: "",
+  installed: "",
+};
+const FACET_DEFS: { key: FacetKey; label: string; yes: string; no: string }[] = [
+  { key: "active", label: "Status", yes: "Active", no: "Inactive" },
+  { key: "survey", label: "Site Survey", yes: "Available", no: "Not available" },
+  { key: "creative", label: "Creative", yes: "Received", no: "Not received" },
+  { key: "printed", label: "Printed", yes: "Printed", no: "Not printed" },
+  { key: "shipped", label: "Shipped", yes: "Shipped", no: "Not shipped" },
+  { key: "delivered", label: "Delivered", yes: "Delivered", no: "Not delivered" },
+  { key: "installed", label: "Installed", yes: "Installed", no: "Not installed" },
+];
+
+interface SiteFacets {
+  active: boolean;
+  survey: boolean;
+  creative: boolean;
+  printed: boolean;
+  shipped: boolean;
+  delivered: boolean;
+  installed: boolean;
+}
+
+// site_id -> whether a shipment with an AWB is on file, and whether that
+// shipment's own current_status says delivered -- the two shipment-derived
+// facts computeSiteFacets() below needs, fetched once for every currently
+// loaded row (see the effect further down), same idea as
+// LfgSiteCardGrid.tsx's own awbBySite lookup but keyed to what filtering
+// needs rather than what a single card displays.
+interface ShipmentSignal {
+  hasAwb: boolean;
+  deliveredByShipment: boolean;
+}
+
+function computeSiteFacets(
+  row: Pick<LfgSiteListRow, "site_status" | "creative_received_at">,
+  shipmentSignal: ShipmentSignal | undefined,
+  surveyAvailable: boolean,
+  installed: boolean
+): SiteFacets {
+  const rank = LFG_STATUSES.indexOf(row.site_status as LfgStatus);
+  const benchmarks = lfgBenchmarkStatus(row.site_status, row.creative_received_at);
+  const creative = benchmarks.find((b) => b.key === "creative_received")?.crossed ?? false;
+  const printed = benchmarks.find((b) => b.key === "in_production")?.crossed ?? false;
+  return {
+    active: row.site_status !== "deactivated" && row.site_status !== "deactivation_requested",
+    survey: surveyAvailable,
+    creative,
+    printed,
+    shipped: shipmentSignal?.hasAwb ?? false,
+    delivered: rank >= LFG_STATUSES.indexOf("delivered") || (shipmentSignal?.deliveredByShipment ?? false),
+    installed,
+  };
+}
+
+// Splits a big id list into URL-safe-sized chunks for .in() lookups below
+// -- same reasoning as the site fetch's own .range() paging (a single
+// .in() over every currently loaded site would risk an oversized request
+// once there are a few hundred+ rows on screen).
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
 // Row shape actually handed to <Table> -- adds a `selected` field so the
 // bulk-select checkbox column (task #46) has its own real TableColumn key,
 // computed fresh each render from `selectedIds` rather than stored on
@@ -267,7 +378,7 @@ export default function LfgSiteListPage() {
   const role = useUserRole();
   const editable = canWrite(role);
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("");
+  const [facets, setFacets] = useState<Record<FacetKey, FacetValue>>(EMPTY_FACETS);
   const [formatFilter, setFormatFilter] = useState<string>("");
   // Distinct from formatFilter -- a Programs page click-through (task #45)
   // hands off a program_id, an exact FK match, same pattern as ?format=
@@ -398,6 +509,13 @@ export default function LfgSiteListPage() {
     setRows((prev) => prev?.map((r) => (r.id === id ? { ...r, creative_received_at: new Date().toISOString() } : r)) ?? prev);
   }
 
+  // Clicking a facet's already-active button clears it back to "" (both
+  // Yes/No buttons off) rather than needing a separate "clear" click --
+  // same toggle-off feel as the Data Gaps stat pill above.
+  function toggleFacet(key: FacetKey, value: FacetValue) {
+    setFacets((prev) => ({ ...prev, [key]: prev[key] === value ? "" : value }));
+  }
+
   useEffect(() => {
     supabase
       .from("lfg_sites")
@@ -443,7 +561,6 @@ export default function LfgSiteListPage() {
     const params = new URLSearchParams(window.location.search);
     const q = params.get("q");
     const format = params.get("format");
-    const status = params.get("status");
     const programId = params.get("program_id");
     const programName = params.get("program_name");
     const storeId = params.get("store_id");
@@ -453,7 +570,16 @@ export default function LfgSiteListPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (q) setQuery(q);
     if (format) setFormatFilter(format);
-    if (status) setStatusFilter(status);
+    const nextFacets = { ...EMPTY_FACETS };
+    let hasFacetParam = false;
+    for (const f of FACET_DEFS) {
+      const v = params.get(`f_${f.key}`);
+      if (v === "yes" || v === "no") {
+        nextFacets[f.key] = v;
+        hasFacetParam = true;
+      }
+    }
+    if (hasFacetParam) setFacets(nextFacets);
     if (gaps === "1") setGapsOnly(true);
     if (programId) {
       setProgramIdFilter(programId);
@@ -488,7 +614,9 @@ export default function LfgSiteListPage() {
       const trimmed = query.trim();
       if (trimmed) params.set("q", trimmed);
       if (formatFilter) params.set("format", formatFilter);
-      if (statusFilter) params.set("status", statusFilter);
+      for (const f of FACET_DEFS) {
+        if (facets[f.key]) params.set(`f_${f.key}`, facets[f.key]);
+      }
       if (gapsOnly) params.set("gaps", "1");
       if (programIdFilter) {
         params.set("program_id", programIdFilter);
@@ -507,7 +635,7 @@ export default function LfgSiteListPage() {
     hydratedFromUrl,
     query,
     formatFilter,
-    statusFilter,
+    facets,
     gapsOnly,
     programIdFilter,
     programNameFilter,
@@ -551,7 +679,6 @@ export default function LfgSiteListPage() {
             // view in LFG Connect -- only the dedicated Archive page does.
             .is("archived_at", null);
 
-          if (statusFilter) q = q.eq("site_status", statusFilter);
           // Exact match, not the fuzzy `.or()` ilike below -- this is what
           // makes a Format Dashboard click land on strictly that format's
           // sites.
@@ -589,19 +716,111 @@ export default function LfgSiteListPage() {
     }, 250);
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, statusFilter, formatFilter, programIdFilter, storeIdFilter, gapsOnly]);
+  }, [query, formatFilter, programIdFilter, storeIdFilter, gapsOnly]);
+
+  // Facet signal data (16 Sept 2026 task) -- fetched once per change to the
+  // currently loaded row SET (search/format/program/store/gaps-filtered,
+  // same `rows` the table/cards render), not on every in-place row edit:
+  // survey-doc existence, the latest AWB-bearing shipment's status, and
+  // completed-installation status, for every row on screen. Everything
+  // else the seven facets need (active, creative, printed) is already on
+  // `rows` itself (site_status, creative_received_at) -- see
+  // computeSiteFacets() above.
+  //
+  // Keyed on rowIdsKey (ids only, same idea as LfgSiteCardGrid's own
+  // fullSetIdsKey) rather than `rows` directly, so an in-place status
+  // update (handleStatusChanged) -- which hands down a new array with the
+  // same ids -- doesn't re-run this fetch for no reason.
+  const rowIdsKey = rows ? rows.map((r) => r.id).join(",") : "";
+  const [surveyAvailableIds, setSurveyAvailableIds] = useState<Set<string>>(new Set());
+  const [shipmentSignalBySite, setShipmentSignalBySite] = useState<Record<string, ShipmentSignal>>({});
+  const [installedIds, setInstalledIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    const ids = rowIdsKey ? rowIdsKey.split(",") : [];
+    if (ids.length === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSurveyAvailableIds(new Set());
+      setShipmentSignalBySite({});
+      setInstalledIds(new Set());
+      return;
+    }
+    let cancelled = false;
+    const idChunks = chunk(ids, 150);
+
+    (async () => {
+      const surveySet = new Set<string>();
+      const shipMap: Record<string, ShipmentSignal> = {};
+      const installSet = new Set<string>();
+
+      await Promise.all([
+        ...idChunks.map(async (c) => {
+          const { data } = await supabase.from("lfg_site_documents").select("site_id").eq("category", "survey").in("site_id", c);
+          for (const row of (data as { site_id: string }[] | null) ?? []) surveySet.add(row.site_id);
+        }),
+        ...idChunks.map(async (c) => {
+          const { data } = await supabase
+            .from("lfg_shipments")
+            .select("site_id, awb_number, current_status")
+            .in("site_id", c)
+            .not("awb_number", "is", null);
+          for (const row of (data as { site_id: string; awb_number: string | null; current_status: string | null }[] | null) ?? []) {
+            const delivered = row.current_status === "delivered";
+            const existing = shipMap[row.site_id];
+            if (!existing) {
+              shipMap[row.site_id] = { hasAwb: true, deliveredByShipment: delivered };
+            } else if (delivered) {
+              existing.deliveredByShipment = true;
+            }
+          }
+        }),
+        ...idChunks.map(async (c) => {
+          const { data } = await supabase
+            .from("lfg_installations")
+            .select("site_id")
+            .eq("installation_status", "completed")
+            .in("site_id", c);
+          for (const row of (data as { site_id: string }[] | null) ?? []) installSet.add(row.site_id);
+        }),
+      ]);
+
+      if (cancelled) return;
+      setSurveyAvailableIds(surveySet);
+      setShipmentSignalBySite(shipMap);
+      setInstalledIds(installSet);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [rowIdsKey]);
+
+  // The rows actually rendered by the table/cards below -- `rows` further
+  // narrowed by whichever facet toggles are on. Deliberately client-side
+  // (unlike every other filter here, which is a Supabase `.eq()`/`.or()`)
+  // since three of the seven facets depend on child-table data fetched
+  // above, not a column on lfg_sites itself.
+  const displayRows = useMemo(() => {
+    if (!rows) return rows;
+    const active = FACET_DEFS.filter((f) => facets[f.key]);
+    if (active.length === 0) return rows;
+    return rows.filter((r) => {
+      const f = computeSiteFacets(r, shipmentSignalBySite[r.id], surveyAvailableIds.has(r.id), installedIds.has(r.id));
+      return active.every(({ key }) => (facets[key] === "yes" ? f[key] : !f[key]));
+    });
+  }, [rows, facets, shipmentSignalBySite, surveyAvailableIds, installedIds]);
 
   // Page-scoped sibling counts for the "shares a store" indicator (see
   // siblingCounts' own declaration above) -- recomputed whenever the
   // visible row set changes, scoped to just the store_ids on screen so
   // this never grows into a full-table scan.
   useEffect(() => {
-    if (!rows || rows.length === 0) {
+    if (!displayRows || displayRows.length === 0) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setSiblingCounts({});
       return;
     }
-    const storeIds = Array.from(new Set(rows.map((r) => r.store_id).filter((id): id is string => !!id)));
+    const storeIds = Array.from(new Set(displayRows.map((r) => r.store_id).filter((id): id is string => !!id)));
     if (storeIds.length === 0) {
       setSiblingCounts({});
       return;
@@ -619,7 +838,7 @@ export default function LfgSiteListPage() {
         }
         setSiblingCounts(counts);
       });
-  }, [rows]);
+  }, [displayRows]);
 
   // Scroll-position memory, part 1: save. Listens on `main` (the real
   // scrolling element -- see scrollStorageKey's own comment above), not
@@ -692,8 +911,8 @@ export default function LfgSiteListPage() {
             headerRender: () => (
               <input
                 type="checkbox"
-                checked={rows !== null && rows.length > 0 && rows.every((r) => selectedIds.has(r.id))}
-                onChange={(e) => setSelectedIds(e.target.checked ? new Set((rows ?? []).map((r) => r.id)) : new Set())}
+                checked={displayRows !== null && displayRows.length > 0 && displayRows.every((r) => selectedIds.has(r.id))}
+                onChange={(e) => setSelectedIds(e.target.checked ? new Set((displayRows ?? []).map((r) => r.id)) : new Set())}
                 aria-label="Select all shown"
                 className="h-4 w-4 rounded border-line-strong"
               />
@@ -855,8 +1074,12 @@ export default function LfgSiteListPage() {
             dense
             icon={Eye}
             tone="success"
-            label={`Showing${query.trim() || statusFilter || formatFilter || programIdFilter || storeIdFilter || gapsOnly ? " (filtered)" : ""}`}
-            value={rows === null ? "…" : String(rows.length)}
+            label={`Showing${
+              query.trim() || Object.values(facets).some(Boolean) || formatFilter || programIdFilter || storeIdFilter || gapsOnly
+                ? " (filtered)"
+                : ""
+            }`}
+            value={displayRows === null ? "…" : String(displayRows.length)}
           />
           <div className="hidden h-6 w-px bg-line sm:block" />
           <StatPill
@@ -864,7 +1087,7 @@ export default function LfgSiteListPage() {
             icon={ShieldAlert}
             tone="danger"
             label="Need Attention"
-            value={rows === null ? "…" : String(rows.filter((r) => r.site_status === "issue_attention_required").length)}
+            value={displayRows === null ? "…" : String(displayRows.filter((r) => r.site_status === "issue_attention_required").length)}
           />
           <div className="hidden h-6 w-px bg-line lg:block" />
 
@@ -892,18 +1115,6 @@ export default function LfgSiteListPage() {
               </option>
             ))}
           </select>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="shrink-0 rounded-md border border-line-strong bg-surface px-2.5 py-1.5 text-sm text-ink focus:border-primary focus:outline-none"
-          >
-            <option value="">All statuses</option>
-            {LFG_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {lfgStatusLabel(s)}
-              </option>
-            ))}
-          </select>
           <div className="flex shrink-0 items-center gap-1 rounded-md border border-line-strong bg-surface p-1">
             <button
               type="button"
@@ -928,6 +1139,44 @@ export default function LfgSiteListPage() {
               <LayoutGrid size={14} /> Cards
             </button>
           </div>
+        </div>
+
+        {/* Seven independent yes/no facet toggles (16 Sept 2026 task,
+            replacing the single site_status dropdown above) -- see the
+            FACET_DEFS/computeSiteFacets header comment for what each one
+            actually means. Clicking a button that's already active clears
+            it back to "off" (toggleFacet). */}
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-line pt-2.5">
+          {FACET_DEFS.map((f) => (
+            <div key={f.key} className="flex items-center gap-0.5 rounded-md border border-line-strong bg-surface-sunken/50 p-0.5">
+              <span className="pl-1.5 pr-1 text-[10px] font-semibold uppercase tracking-wide text-ink-muted">{f.label}</span>
+              <button
+                type="button"
+                onClick={() => toggleFacet(f.key, "yes")}
+                aria-pressed={facets[f.key] === "yes"}
+                className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
+                  facets[f.key] === "yes" ? "bg-success text-on-brand" : "text-ink-secondary hover:bg-surface-sunken"
+                }`}
+              >
+                {f.yes}
+              </button>
+              <button
+                type="button"
+                onClick={() => toggleFacet(f.key, "no")}
+                aria-pressed={facets[f.key] === "no"}
+                className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
+                  facets[f.key] === "no" ? "bg-danger text-on-brand" : "text-ink-secondary hover:bg-surface-sunken"
+                }`}
+              >
+                {f.no}
+              </button>
+            </div>
+          ))}
+          {Object.values(facets).some(Boolean) && (
+            <button type="button" onClick={() => setFacets(EMPTY_FACETS)} className="px-1.5 text-xs font-medium text-primary hover:underline">
+              Clear filters
+            </button>
+          )}
         </div>
       </div>
       </div>
@@ -1040,11 +1289,11 @@ export default function LfgSiteListPage() {
       )}
 
       <div className="rounded-lg border border-line bg-surface p-4">
-        {rows === null ? (
+        {displayRows === null ? (
           <p className="py-6 text-center text-sm text-ink-muted">Loading sites…</p>
         ) : view === "cards" ? (
           <LfgSiteCardGrid
-            rows={rows}
+            rows={displayRows}
             initialVisibleCount={readSavedNumber(cardsVisibleStorageKey())}
             onVisibleCountChange={(n) => {
               try {
@@ -1070,7 +1319,7 @@ export default function LfgSiteListPage() {
                 : undefined
             }
           />
-        ) : rows.length === 0 ? (
+        ) : displayRows.length === 0 ? (
           <p className="py-6 text-center text-sm text-ink-muted">No sites match your search.</p>
         ) : (
           // No wrapping overflow-x-auto div here anymore -- Table itself
@@ -1085,7 +1334,7 @@ export default function LfgSiteListPage() {
           // rows, fixes both.
           <Table
             columns={COLUMNS}
-            rows={rows.map((r): SelectableRow => ({ ...r, selected: selectedIds.has(r.id) }))}
+            rows={displayRows.map((r): SelectableRow => ({ ...r, selected: selectedIds.has(r.id) }))}
             onRowClick={(r) => router.push(`/workspaces/lfg/sites/${r.id}`)}
             density="compact"
           />
