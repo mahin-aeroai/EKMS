@@ -16,6 +16,7 @@ import { useLfgDistinctValues } from "@/lib/useLfgDistinctValues";
 import { LfgSiteCardGrid } from "@/components/workspaces/LfgSiteCardGrid";
 import { LfgProgramSummaryCard } from "@/components/workspaces/LfgProgramSummaryCard";
 import { LfgPartnerQuickStatusButtons } from "@/components/lfg/LfgPartnerQuickStatusButtons";
+import { LfgFacetFilterBar } from "@/components/lfg/LfgFacetFilterBar";
 import { type FacetKey, type FacetValue, EMPTY_FACETS, FACET_DEFS, computeSiteFacets, chunk, type ShipmentSignal } from "@/lib/lfg-site-facets";
 
 // Real LFG partner Site Master (task #19) -- replaces the earlier
@@ -470,40 +471,12 @@ export default function LfgPartnerSitesPage() {
         {/* Seven independent yes/no facet toggles (16 Sept 2026 task,
             replacing the single site_status dropdown above) -- see
             @/lib/lfg-site-facets's header comment for what each one
-            actually means. Clicking a button that's already active clears
-            it back to "off" (toggleFacet). */}
-        <div className="flex flex-wrap items-center gap-1.5">
-          {FACET_DEFS.map((f) => (
-            <div key={f.key} className="flex items-center gap-0.5 rounded-md border border-line-strong bg-surface-sunken/50 p-0.5">
-              <span className="pl-1.5 pr-1 text-[10px] font-semibold uppercase tracking-wide text-ink-muted">{f.label}</span>
-              <button
-                type="button"
-                onClick={() => toggleFacet(f.key, "yes")}
-                aria-pressed={facets[f.key] === "yes"}
-                className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
-                  facets[f.key] === "yes" ? "bg-success text-on-brand" : "text-ink-secondary hover:bg-surface-sunken"
-                }`}
-              >
-                {f.yes}
-              </button>
-              <button
-                type="button"
-                onClick={() => toggleFacet(f.key, "no")}
-                aria-pressed={facets[f.key] === "no"}
-                className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
-                  facets[f.key] === "no" ? "bg-danger text-on-brand" : "text-ink-secondary hover:bg-surface-sunken"
-                }`}
-              >
-                {f.no}
-              </button>
-            </div>
-          ))}
-          {Object.values(facets).some(Boolean) && (
-            <button type="button" onClick={() => setFacets(EMPTY_FACETS)} className="px-1.5 text-xs font-medium text-primary hover:underline">
-              Clear filters
-            </button>
-          )}
-        </div>
+            actually means. Rendering itself lives in the shared
+            LfgFacetFilterBar (16 Sept 2026 follow-up: "decorate that bar
+            for statusses it looks plain and unable to identify that there
+            are filters in it") -- also used as-is by the staff Site
+            Master, so both surfaces look identical. */}
+        <LfgFacetFilterBar facets={facets} onToggle={toggleFacet} onClear={() => setFacets(EMPTY_FACETS)} />
 
         <div className="flex flex-wrap items-center gap-2">
           {/* A genuine partner's own sites stay the default/primary view --

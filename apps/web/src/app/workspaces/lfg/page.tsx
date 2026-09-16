@@ -40,6 +40,7 @@ import { LfgConnectHeader } from "@/components/workspaces/LfgConnectHeader";
 // unconditionally allowed past lfg_sites_guard_partner_update() (that
 // trigger only restricts partner-role callers), so this works here as-is.
 import { LfgPartnerQuickStatusButtons } from "@/components/lfg/LfgPartnerQuickStatusButtons";
+import { LfgFacetFilterBar } from "@/components/lfg/LfgFacetFilterBar";
 
 // Stat-strip pill (task: header/menu redesign) -- a colored circular icon
 // badge + value/label pair, used for the four summary stats (Total Sites/
@@ -1041,41 +1042,15 @@ export default function LfgSiteListPage() {
         </div>
 
         {/* Seven independent yes/no facet toggles (16 Sept 2026 task,
-            replacing the single site_status dropdown above) -- see the
-            FACET_DEFS/computeSiteFacets header comment for what each one
-            actually means. Clicking a button that's already active clears
-            it back to "off" (toggleFacet). */}
-        <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-line pt-2.5">
-          {FACET_DEFS.map((f) => (
-            <div key={f.key} className="flex items-center gap-0.5 rounded-md border border-line-strong bg-surface-sunken/50 p-0.5">
-              <span className="pl-1.5 pr-1 text-[10px] font-semibold uppercase tracking-wide text-ink-muted">{f.label}</span>
-              <button
-                type="button"
-                onClick={() => toggleFacet(f.key, "yes")}
-                aria-pressed={facets[f.key] === "yes"}
-                className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
-                  facets[f.key] === "yes" ? "bg-success text-on-brand" : "text-ink-secondary hover:bg-surface-sunken"
-                }`}
-              >
-                {f.yes}
-              </button>
-              <button
-                type="button"
-                onClick={() => toggleFacet(f.key, "no")}
-                aria-pressed={facets[f.key] === "no"}
-                className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
-                  facets[f.key] === "no" ? "bg-danger text-on-brand" : "text-ink-secondary hover:bg-surface-sunken"
-                }`}
-              >
-                {f.no}
-              </button>
-            </div>
-          ))}
-          {Object.values(facets).some(Boolean) && (
-            <button type="button" onClick={() => setFacets(EMPTY_FACETS)} className="px-1.5 text-xs font-medium text-primary hover:underline">
-              Clear filters
-            </button>
-          )}
+            replacing the single site_status dropdown above) -- see
+            @/lib/lfg-site-facets's header comment for what each one
+            actually means. Rendering itself lives in the shared
+            LfgFacetFilterBar (16 Sept 2026 follow-up: "decorate that bar
+            for statusses it looks plain and unable to identify that there
+            are filters in it") -- also used as-is by the LFG partner home
+            page, so both surfaces look identical. */}
+        <div className="mt-2 border-t border-line pt-2.5">
+          <LfgFacetFilterBar facets={facets} onToggle={toggleFacet} onClear={() => setFacets(EMPTY_FACETS)} />
         </div>
       </div>
       </div>
