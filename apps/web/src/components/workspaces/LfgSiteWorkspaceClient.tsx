@@ -16,7 +16,7 @@ import { useToast } from "@/components/ui/Notifications";
 // different stepper implementations.
 import { ShipmentTrackingStepper } from "@/components/shipment/ShipmentTrackingStepper";
 import { useUserRole, canWrite, canDelete } from "@/lib/UserRoleContext";
-import { formatDecimal, formatMm, round2 } from "@/lib/lfg-units";
+import { formatDecimal, formatMm, round2, inchesToMm, mmToInches } from "@/lib/lfg-units";
 import { useLfgDistinctValues } from "@/lib/useLfgDistinctValues";
 
 // Mirrors BLUEDART_PRODUCT_CODES in src/lib/blueDart.ts -- duplicated
@@ -422,8 +422,20 @@ function siteToForm(site: LfgSite, partner: { id: string } | null, program: { id
     material: site.material ?? "",
     mat_code: site.mat_code ?? "",
     number_of_sites: String(site.number_of_sites),
-    width: site.width === null ? "" : String(site.width),
-    height: site.height === null ? "" : String(site.height),
+    // lfg_sites.width/height are stored in inches internally (unchanged --
+    // see lfg-units.ts's own header comment), but this edit form is
+    // mm-only now (16 Sept 2026 task: "admin site lfg sites sizes are in
+    // inches convert them into mm make all mm only no more inches") -- so
+    // the value is converted to mm the moment it lands in form state, and
+    // converted back to inches only at save time (handleSave below). This
+    // form used to skip that conversion entirely and just echo the raw
+    // (inches) DB value under a "Width (in)"/"Height (in)" label -- fine
+    // as long as nobody typed a number assuming it was mm, but that's
+    // exactly what this fixes: typing the real-world mm figure here now
+    // actually gets treated as mm, not silently saved as if it were
+    // inches.
+    width: site.width === null ? "" : String(inchesToMm(site.width)),
+    height: site.height === null ? "" : String(inchesToMm(site.height)),
     bleed: site.bleed === null ? "" : String(site.bleed),
     sqft: site.sqft === null ? "" : String(site.sqft),
     asm_name: site.asm_name ?? "",
@@ -562,8 +574,17 @@ function SiteInfoCard({
       material: form.material.trim() || null,
       mat_code: form.mat_code.trim() || null,
       number_of_sites: Number(form.number_of_sites) || 1,
-      width: form.width.trim() ? round2(Number(form.width)) : null,
-      height: form.height.trim() ? round2(Number(form.height)) : null,
+      // form.width/form.height are mm (see siteToForm's own comment above)
+      // -- convert back to inches here, the one place this form actually
+      // writes to the DB, so lfg_sites.width/height keep meaning the same
+      // thing they always have everywhere else that reads them (Site
+      // Master's Width (mm)/Height (mm) columns, Site Cards, the Status
+      // Sheet -- all of which already do a real inches->mm conversion via
+      // formatMm/formatSizeMm and would silently show a wildly wrong
+      // number if this form ever wrote a raw mm figure straight into an
+      // inches column, which is exactly what it used to do).
+      width: form.width.trim() ? round2(mmToInches(Number(form.width))) : null,
+      height: form.height.trim() ? round2(mmToInches(Number(form.height))) : null,
       bleed: form.bleed.trim() ? round2(Number(form.bleed)) : null,
       sqft: form.sqft.trim() ? round2(Number(form.sqft)) : null,
       program_id: form.program_id || null,
@@ -644,8 +665,10 @@ function SiteInfoCard({
               millimetres, no decimals -- installers and print vendors
               think in mm, and a bare "118.94"/"44.06" with no unit at all
               read as flatly wrong. Site Master's table already does this
-              (Width (mm)/Height (mm)); this card was the one screen still
-              showing the raw inches figure unlabeled. */}
+              (Width (mm)/Height (mm)). The Edit Site Details form right
+              below this card now does the same conversion at its own
+              boundary (16 Sept 2026: "make all mm only no more inches") --
+              see siteToForm()/handleSave()'s own comments above. */}
           <Field label="Width (mm)" value={formatMm(site.width)} />
           <Field label="Height (mm)" value={formatMm(site.height)} />
           <Field label="Bleed" value={formatDecimal(site.bleed)} />
@@ -713,12 +736,12 @@ function SiteInfoCard({
           />
         </div>
         <div className="flex flex-col gap-1.5">
-          <label className={labelClass}>Width (in)</label>
-          <input type="number" step="0.01" className={inputClass} value={form.width} onChange={(e) => set("width", e.target.value)} />
+          <label className={labelClass}>Width (mm)</label>
+          <input type="number" step="1" className={inputClass} value={form.width} onChange={(e) => set("width", e.target.value)} />
         </div>
         <div className="flex flex-col gap-1.5">
-          <label className={labelClass}>Height (in)</label>
-          <input type="number" step="0.01" className={inputClass} value={form.height} onChange={(e) => set("height", e.target.value)} />
+          <label className={labelClass}>Height (mm)</label>
+          <input type="number" step="1" className={inputClass} value={form.height} onChange={(e) => set("height", e.target.value)} />
         </div>
         <div className="flex flex-col gap-1.5">
           <label className={labelClass}>Bleed</label>

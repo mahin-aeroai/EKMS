@@ -1,15 +1,22 @@
 // LFG Connect: width/height unit helpers.
 // =========================================
-// `lfg_sites.width` / `.height` are stored in inches (unchanged -- every
-// existing New Site form, import, and backfill writes inches). The Site
-// Master and partner Sites list both display size two ways per task #50:
-// a whole-number millimetre value per axis (Width (mm) / Height (mm), 0
-// decimals -- installers and print vendors think in mm, not fractional
-// inches) and a single combined "Size (in)" column showing the original
-// inches figure as `WxH`, since that's still the unit used when talking to
-// Apple/format teams. Kept as tiny shared helpers rather than duplicated
-// inline math so the rounding rule (0 decimals, always) can't drift
-// between the two screens that use it.
+// `lfg_sites.width` / `.height` are stored in inches internally
+// (unchanged -- this was the original design and no data migration has
+// ever been run on it). Every USER-FACING surface, though, is mm-only as
+// of 16 Sept 2026 (task feedback: "admin site lfg sites sizes are in
+// inches convert them into mm make all mm only no more inches") -- the
+// Site 360 Edit form, the New Site form, and Bulk Import all now collect
+// millimetres and convert to inches only at the moment they write to
+// lfg_sites (mmToInches, right before the Supabase insert/update); every
+// read path (Site Master, Site Cards, the Status Sheet, both Site 360
+// views) converts the other way for display (formatMm/formatSizeMm).
+// There used to also be an Inch/MM toggle on the New Site and Import
+// forms, and a "Size (in)" combined column on the LFG partner home page's
+// site table (formatSizeInches) -- all removed by that same task, so
+// there's no surface left in the app where a real person ever sees or
+// types an inches figure. Kept as tiny shared helpers rather than
+// duplicated inline math so the rounding rule (0 decimals for display,
+// 2 for values still being edited) can't drift between screens.
 
 export const MM_PER_INCH = 25.4;
 
@@ -53,17 +60,8 @@ export function formatDecimal(n: number | null | undefined): string {
   return String(Math.round(n * 100) / 100);
 }
 
-/** Combined "WxH" size in the original inches values, each rounded to at
- * most 2 decimals (see formatDecimal). "—" if either axis is missing,
- * rather than a misleading "12x—". */
-export function formatSizeInches(width: number | null | undefined, height: number | null | undefined): string {
-  if (width === null || width === undefined || height === null || height === undefined) return "—";
-  return `${Math.round(width * 100) / 100}x${Math.round(height * 100) / 100}`;
-}
-
 /** Combined "W × H" size in whole millimetres (see formatMm) -- Site
- * Cards' "Size (mm)" field (task #76). "—" if either axis is missing,
- * same rule as formatSizeInches above. */
+ * Cards' "Size (mm)" field (task #76). "—" if either axis is missing. */
 export function formatSizeMm(width: number | null | undefined, height: number | null | undefined): string {
   if (width === null || width === undefined || height === null || height === undefined) return "—";
   return `${formatMm(width)} × ${formatMm(height)} mm`;

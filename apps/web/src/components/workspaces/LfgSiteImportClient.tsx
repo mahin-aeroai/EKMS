@@ -98,12 +98,6 @@ export default function LfgSiteImportClient() {
   const [sheets, setSheets] = useState<RawSheet[]>([]);
   const [selectedSheet, setSelectedSheet] = useState<string | null>(null);
   const [columnMap, setColumnMap] = useState<ColumnMap>({});
-  // Defaults to MM, not Inch -- task feedback: "why inches it is always mm
-  // only". Site lists come from partners/Apple as mm measurements far more
-  // often than inches; MM as the starting toggle state means a typical
-  // sheet needs no unit fiddling before import, only a deliberate switch to
-  // Inch when that's genuinely what a file contains.
-  const [sizeUnit, setSizeUnit] = useState<"in" | "mm">("mm");
   const [submitting, setSubmitting] = useState(false);
   // 11 Sept 2026: task feedback, after seeing "32 existing (adding
   // displays)" in a real preview -- "i dont want existing sites i only
@@ -249,9 +243,15 @@ export default function LfgSiteImportClient() {
     if (!resolvedGroups || !partners || !programs || importableGroups.length === 0) return;
     setSubmitting(true);
 
+    // Width/Height/Bleed were an Inch/MM toggle here (see the header
+    // comment this replaced); mm-only now (16 Sept 2026 task: "admin site
+    // lfg sites sizes are in inches convert them into mm make all mm only
+    // no more inches") -- every sheet's Width/Height/Bleed columns are
+    // read as millimetres and converted once, unconditionally, on the way
+    // into lfg_sites' still-inches-internally width/height/bleed columns.
     const toInches = (v: number | null): number | null => {
       if (v === null) return null;
-      return sizeUnit === "mm" ? mmToInches(v) : round2(v);
+      return mmToInches(v);
     };
 
     const newStoreIds: string[] = [];
@@ -348,15 +348,14 @@ export default function LfgSiteImportClient() {
           number_of_sites: site.numberOfSites || 1,
           width: toInches(site.width),
           height: toInches(site.height),
-          // 11 Sept 2026: task feedback -- "why inches it is always mm only
-          // including bleed" -- Bleed now converts through the same
-          // Inch/MM toggle as Width/Height, unlike the manual New Site
-          // form's own Bleed field (that one takes whatever number is
-          // typed literally, with no unit conversion at all -- a
-          // pre-existing quirk of that form, out of scope here). A sheet
-          // of mm data can now be imported as-is with the toggle left on
-          // MM and every measurement -- width, height, and bleed alike --
-          // lands in the database's native inches correctly.
+          // Bleed converts through the same mm->inches step as Width/
+          // Height (11 Sept 2026 task feedback: "why inches it is always mm
+          // only including bleed"), unlike the manual New Site form's own
+          // Bleed field (that one takes whatever number is typed literally,
+          // with no unit conversion at all -- a pre-existing quirk of that
+          // form, out of scope here). A sheet of mm data imports as-is;
+          // every measurement -- width, height, and bleed alike -- lands in
+          // the database's native inches correctly.
           bleed: toInches(site.bleed),
           sqft: site.sqft !== null ? round2(site.sqft) : null,
           remarks: site.remarks,
@@ -462,20 +461,10 @@ export default function LfgSiteImportClient() {
         <div className="rounded-lg border border-line bg-surface p-4">
           <div className="mb-3 flex items-center justify-between">
             <span className="text-sm font-medium text-ink">Column mapping</span>
-            <div className="flex overflow-hidden rounded-md border border-line-strong text-xs">
-              <button
-                onClick={() => setSizeUnit("in")}
-                className={`px-2.5 py-1 ${sizeUnit === "in" ? "bg-primary text-on-brand" : "bg-surface text-ink-secondary"}`}
-              >
-                Width/Height/Bleed in Inch
-              </button>
-              <button
-                onClick={() => setSizeUnit("mm")}
-                className={`px-2.5 py-1 ${sizeUnit === "mm" ? "bg-primary text-on-brand" : "bg-surface text-ink-secondary"}`}
-              >
-                Width/Height/Bleed in MM
-              </button>
-            </div>
+            {/* Inch/MM toggle removed (16 Sept 2026 task: "make all mm only
+                no more inches") -- Width/Height/Bleed are always read as
+                millimetres now, no way to pick Inch. */}
+            <span className="text-xs font-medium text-ink-muted">Width/Height/Bleed read as millimetres</span>
           </div>
           <p className="mb-3 text-xs text-ink-secondary">
             Auto-matched from the header row. Fix anything that didn&apos;t match — a blank field is skipped on import.

@@ -9,7 +9,7 @@ import { useToast } from "@/components/ui/Notifications";
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/dashboard-queries";
 import { useLfgDistinctValues } from "@/lib/useLfgDistinctValues";
-import { mmToInches, inchesToMm, round2 } from "@/lib/lfg-units";
+import { mmToInches, round2 } from "@/lib/lfg-units";
 
 // New Site intake -- spec section 3's "New Site View" field list, minus
 // Site Reference Picture (a site needs to exist before it has an id to
@@ -120,7 +120,6 @@ export default function NewLfgSitePage() {
   const [mode, setMode] = useState<"new_store" | "add_display">("new_store");
   const [selectedStoreId, setSelectedStoreId] = useState("");
   const [storeFilter, setStoreFilter] = useState("");
-  const [sizeUnit, setSizeUnit] = useState<"in" | "mm">("in");
 
   const formatOptions = useLfgDistinctValues("format");
   const materialOptions = useLfgDistinctValues("material");
@@ -187,19 +186,6 @@ export default function NewLfgSitePage() {
     setForm((f) => ({ ...f, [key]: value }));
   }
 
-  function toggleSizeUnit(next: "in" | "mm") {
-    setSizeUnit((prev) => {
-      if (prev === next) return prev;
-      const convert = (v: string) => {
-        const n = Number(v);
-        if (!v.trim() || Number.isNaN(n)) return v;
-        return String(next === "mm" ? inchesToMm(n) : mmToInches(n));
-      };
-      setForm((f) => ({ ...f, width: convert(f.width), height: convert(f.height) }));
-      return next;
-    });
-  }
-
   const filteredStores = useMemo(() => {
     const q = storeFilter.trim().toLowerCase();
     if (!q) return stores;
@@ -236,11 +222,14 @@ export default function NewLfgSitePage() {
       return;
     }
 
+    // lfg_sites.width/height are still stored in inches (unchanged) -- the
+    // form itself is mm-only now (see the Size (mm) fields above), so this
+    // is the one place that converts before the write.
     const toInches = (v: string): number | null => {
       if (!v.trim()) return null;
       const n = Number(v);
       if (Number.isNaN(n)) return null;
-      return sizeUnit === "mm" ? mmToInches(n) : round2(n);
+      return mmToInches(n);
     };
 
     setSaving(true);
@@ -569,37 +558,25 @@ export default function NewLfgSitePage() {
           </div>
 
           <div className="flex flex-col gap-1.5 sm:col-span-2">
-            <div className="flex items-center justify-between">
-              <span className={labelClass}>Size</span>
-              <div className="flex overflow-hidden rounded-md border border-line-strong text-xs">
-                <button
-                  type="button"
-                  onClick={() => toggleSizeUnit("in")}
-                  className={`px-2.5 py-1 ${sizeUnit === "in" ? "bg-primary text-on-brand" : "bg-surface text-ink-secondary"}`}
-                >
-                  Inch
-                </button>
-                <button
-                  type="button"
-                  onClick={() => toggleSizeUnit("mm")}
-                  className={`px-2.5 py-1 ${sizeUnit === "mm" ? "bg-primary text-on-brand" : "bg-surface text-ink-secondary"}`}
-                >
-                  MM
-                </button>
-              </div>
-            </div>
+            {/* Mm-only now (16 Sept 2026 task: "admin site lfg sites sizes
+                are in inches convert them into mm make all mm only no more
+                inches") -- this used to have an Inch/MM toggle; removed
+                rather than just defaulted, so there's no way to type an
+                inches figure into this form at all. See toInches() below
+                for the (still-inches, unchanged) DB write. */}
+            <span className={labelClass}>Size (mm)</span>
             <div className="grid grid-cols-2 gap-4">
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs text-ink-muted" htmlFor="width">
-                  Width ({sizeUnit})
+                  Width (mm)
                 </label>
-                <input id="width" type="number" step="0.01" className={inputClass} value={form.width} onChange={(e) => set("width", e.target.value)} />
+                <input id="width" type="number" step="1" className={inputClass} value={form.width} onChange={(e) => set("width", e.target.value)} />
               </div>
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs text-ink-muted" htmlFor="height">
-                  Height ({sizeUnit})
+                  Height (mm)
                 </label>
-                <input id="height" type="number" step="0.01" className={inputClass} value={form.height} onChange={(e) => set("height", e.target.value)} />
+                <input id="height" type="number" step="1" className={inputClass} value={form.height} onChange={(e) => set("height", e.target.value)} />
               </div>
             </div>
           </div>

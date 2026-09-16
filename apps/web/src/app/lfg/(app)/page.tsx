@@ -11,7 +11,7 @@ import { useLfgUser } from "@/lib/LfgUserContext";
 import { useLfgHost, lfgHref } from "@/lib/lfg-links";
 import { supabase } from "@/lib/supabase";
 import { lfgStatusLabel, lfgStatusBadge } from "@/lib/lfgStatus";
-import { formatMm, formatSizeInches, formatDecimal } from "@/lib/lfg-units";
+import { formatMm, formatDecimal } from "@/lib/lfg-units";
 import { useLfgDistinctValues } from "@/lib/useLfgDistinctValues";
 import { LfgSiteCardGrid } from "@/components/workspaces/LfgSiteCardGrid";
 import { LfgProgramSummaryCard } from "@/components/workspaces/LfgProgramSummaryCard";
@@ -377,7 +377,6 @@ export default function LfgPartnerSitesPage() {
     { key: "mat_code", header: "Mat Code", sortable: true, render: (r) => r.mat_code ?? "—" },
     { key: "width", header: "Width (mm)", sortable: true, render: (r) => formatMm(r.width) },
     { key: "height", header: "Height (mm)", sortable: true, render: (r) => formatMm(r.height) },
-    { key: "id", header: "Size (in)", render: (r) => formatSizeInches(r.width, r.height) },
     { key: "number_of_sites", header: "Qty", sortable: true },
     { key: "bleed", header: "Bleed", sortable: true, render: (r) => formatDecimal(r.bleed) },
     {
