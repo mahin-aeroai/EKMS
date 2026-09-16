@@ -66,7 +66,7 @@ export default async function PortalHomePage() {
         </a>
 
         <Link
-          href={portalHref("/orders", onPortalHost)}
+          href={portalHref("/creative-approval", onPortalHost)}
           className="flex items-center justify-between rounded-xl border border-line bg-surface p-5 shadow-1 transition-shadow hover:shadow-2"
         >
           <div className="flex items-center gap-3">
