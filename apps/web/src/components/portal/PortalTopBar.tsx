@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LogOut, ClipboardList, Building2, ShieldCheck, ShoppingCart } from "lucide-react";
+import { LogOut, ClipboardList, Building2, ShieldCheck, ShoppingCart, Palette } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/cn";
 import { usePortalHost, portalHref } from "@/lib/portal-links";
@@ -16,8 +16,15 @@ import { usePortalHost, portalHref } from "@/lib/portal-links";
 // separate destination. /products itself still exists as a route (no
 // dead links from anywhere that already pointed at it), just isn't
 // linked from here anymore.
+// 16 Sept 2026: added "Creative Approval" -- task feedback: "Lets
+// introduce a fresh tab for creative approval and place the designs
+// there and back and forth revisions." A consolidated, cross-order view
+// of every design proof needing a decision (see
+// portal/(app)/creative-approval/page.tsx); the per-order proof/approve
+// card on an order's own page is unchanged and still works the same way.
 const NAV = [
   { href: "/orders", label: "Orders", icon: ClipboardList },
+  { href: "/creative-approval", label: "Creative Approval", icon: Palette },
   { href: "/account", label: "Account", icon: Building2 },
   { href: "/security", label: "Security", icon: ShieldCheck },
 ];

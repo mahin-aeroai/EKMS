@@ -9,23 +9,36 @@ import { CompaniesTab } from "./CompaniesTab";
 import { ProductsTab } from "./ProductsTab";
 import { OrdersTab } from "./OrdersTab";
 import { HeroBannerTab } from "./HeroBannerTab";
+import { CreativeApprovalTab } from "./CreativeApprovalTab";
 
 // Staff-side management for the customer portal (/portal/*) — the
 // invite-only ordering site for Apple-format retail chains (GPX04/GPX05
 // signage). See supabase-customer-portal-schema.sql's header comment for
 // the full design, and PROJECT_STATUS.md for the build history.
 //
-// Order review/proof-upload/status-transition itself deliberately lives on
-// the SAME /portal/orders/[orderId] page a customer sees, not duplicated
-// here — OrderDetailClient already renders the staff-only controls when
-// the signed-in user is admin/editor (see its `isStaff` prop), so the
-// Orders tab below just links straight into that page.
-type TabId = "companies" | "products" | "orders" | "hero-banner";
+// Full order review/status-transition still lives on the SAME
+// /portal/orders/[orderId] page a customer sees, not duplicated here —
+// OrderDetailClient already renders the staff-only controls when the
+// signed-in user is admin/editor (see its `isStaff` prop), so the Orders
+// tab below just links straight into that page. The one exception (16
+// Sept 2026) is design-proof upload: the Creative Approval tab below
+// gives staff a consolidated queue of every order waiting on a proof,
+// calling the exact same upload-url + publish-proof endpoints
+// OrderDetailClient's own "Upload design proof" button uses — see
+// CreativeApprovalTab.tsx for why that one action earned its own
+// dedicated view instead of staying order-by-order.
+type TabId = "companies" | "products" | "orders" | "creative-approval" | "hero-banner";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "companies", label: "Companies & Stores" },
   { id: "products", label: "Products" },
   { id: "orders", label: "Orders" },
+  // 16 Sept 2026: task feedback -- "Lets introduce a fresh tab for
+  // creative approval and place the designs there and back and forth
+  // revisions." A consolidated proof-upload queue, separate from Orders
+  // (which still links out to each order's own page for any action) --
+  // see CreativeApprovalTab.tsx.
+  { id: "creative-approval", label: "Creative Approval" },
   { id: "hero-banner", label: "Hero Banner" },
 ];
 
@@ -75,6 +88,7 @@ export default function CustomerPortalWorkspacePage() {
       {activeTab === "companies" && <CompaniesTab />}
       {activeTab === "products" && <ProductsTab />}
       {activeTab === "orders" && <OrdersTab />}
+      {activeTab === "creative-approval" && <CreativeApprovalTab />}
       {activeTab === "hero-banner" && <HeroBannerTab />}
     </div>
   );
