@@ -18,6 +18,7 @@ import {
   MoreHorizontal,
   Pencil,
   PlusCircle,
+  RotateCcw,
   Search,
   Send,
   TrendingUp,
@@ -61,6 +62,14 @@ const PRIMARY_STATUS_CHIPS: { key: LfgStatus; icon: LucideIcon }[] = [
 ];
 const PRIMARY_STATUS_KEYS = new Set<string>(PRIMARY_STATUS_CHIPS.map((c) => c.key));
 const MORE_STATUSES: LfgStatus[] = LFG_STATUSES.filter((s) => !PRIMARY_STATUS_KEYS.has(s));
+
+// 19-22 Sept 2026: task feedback -- "Process steps : from active, reactive
+// not available to mark." Reactivating a site was technically possible
+// before this fix (picking "Active" out of Swap Status's own 18-option
+// list), but there was no dedicated one-click action for it -- see
+// ReactivateButton below. These are the statuses a site can get stuck in
+// that genuinely need a way back to Active.
+const REACTIVATABLE_STATUSES = new Set<string>(["deactivated", "deactivation_requested", "on_hold"]);
 
 // Status Sheet (task: "make an update/editing page like excel sheet to
 // update all kind of statuses") -- a dedicated, fast bulk status-review
@@ -116,6 +125,7 @@ interface StatusSheetRow {
   store_id: string | null;
   partner_id: string | null;
   creative_received_at: string | null;
+  creative_received_by: string | null;
   lfg_partners: { name: string } | { name: string }[] | null;
 }
 
@@ -278,7 +288,7 @@ export default function LfgStatusSheetPage() {
         let q = supabase
           .from("lfg_sites")
           .select(
-            "id, site_id, outlet_name, format, sfo_id, city, site_status, program_id, updated_at, width, height, material, store_id, partner_id, creative_received_at, lfg_partners(name)"
+            "id, site_id, outlet_name, format, sfo_id, city, site_status, program_id, updated_at, width, height, material, store_id, partner_id, creative_received_at, creative_received_by, lfg_partners(name)"
           )
           .range(from, to)
           .is("archived_at", null);
@@ -635,6 +645,11 @@ export default function LfgStatusSheetPage() {
                                   <div className="mt-1.5">
                                     <LfgBenchmarkStrip status={row.site_status} creativeReceivedAt={row.creative_received_at} />
                                   </div>
+                                  {editable && (
+                                    <div className="mt-1.5">
+                                      <CreativeReceivedControl row={row} onChanged={handleFieldsChanged} />
+                                    </div>
+                                  )}
                                 </div>
                                 <div className="flex shrink-0 items-center gap-0.5">
                                   {editable && (
@@ -656,7 +671,12 @@ export default function LfgStatusSheetPage() {
                               <div className="mt-1 text-[10px] text-ink-muted">Updated {timeAgo(row.updated_at)}</div>
                             </td>
                             <td className="px-3 py-2.5 align-top">
-                              <StatusSwapControl row={row} editable={editable} onChanged={handleStatusChanged} />
+                              <div className="flex flex-col items-start gap-1.5">
+                                {editable && REACTIVATABLE_STATUSES.has(row.site_status) && (
+                                  <ReactivateButton row={row} onChanged={handleStatusChanged} />
+                                )}
+                                <StatusSwapControl row={row} editable={editable} onChanged={handleStatusChanged} />
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -993,12 +1013,123 @@ function SiteFieldsEditControl({
   );
 }
 
+// 19-22 Sept 2026: task feedback -- "once wrongly marked that creative
+// received can not go back on 'status sheet' and there is no option for
+// creative received implement." Mark AND undo already existed on Site
+// 360's Survey tab (handleMarkCreativeReceived/handleUndoCreativeReceived
+// in LfgSiteWorkspaceClient.tsx) -- this mirrors that exact write shape
+// and awaiting/received <select> pattern, just reachable right from the
+// Status Sheet row instead of requiring a trip to Site 360. Writes
+// immediately on change (not gated behind SiteFieldsEditControl's own
+// Save button), matching how the Survey tab's own dropdown behaves.
+function CreativeReceivedControl({
+  row,
+  onChanged,
+}: {
+  row: StatusSheetRow;
+  onChanged: (id: string, patch: Partial<StatusSheetRow>) => void;
+}) {
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
+
+  async function markReceived() {
+    setSaving(true);
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const patch = { creative_received_at: new Date().toISOString(), creative_received_by: user?.id ?? null };
+    const { error } = await supabase.from("lfg_sites").update(patch).eq("id", row.id);
+    setSaving(false);
+    if (error) {
+      toast("danger", `Couldn't mark creative received: ${error.message}`);
+      return;
+    }
+    onChanged(row.id, patch);
+    toast("success", `${row.outlet_name}: Creative marked received`);
+  }
+
+  async function undoReceived() {
+    setSaving(true);
+    const patch = { creative_received_at: null, creative_received_by: null };
+    const { error } = await supabase.from("lfg_sites").update(patch).eq("id", row.id);
+    setSaving(false);
+    if (error) {
+      toast("danger", `Couldn't undo: ${error.message}`);
+      return;
+    }
+    onChanged(row.id, patch);
+    toast("success", `${row.outlet_name}: Creative receipt undone`);
+  }
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">Creative</span>
+      <select
+        value={row.creative_received_at ? "received" : "awaiting"}
+        disabled={saving}
+        onChange={(e) => {
+          if (e.target.value === "received" && !row.creative_received_at) void markReceived();
+          if (e.target.value === "awaiting" && row.creative_received_at) void undoReceived();
+        }}
+        className="h-6 rounded-md border border-line-strong bg-surface px-1.5 text-[11px] text-ink focus:border-primary focus:outline-none disabled:opacity-60"
+      >
+        <option value="awaiting">Awaiting</option>
+        <option value="received">Received</option>
+      </select>
+    </div>
+  );
+}
+
 function EditField({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="flex flex-col gap-1">
       <span className="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">{label}</span>
       {children}
     </label>
+  );
+}
+
+// See REACTIVATABLE_STATUSES's own comment above -- same lfg_change_site_status
+// RPC as StatusSwapControl's own pick(), just pre-selected to "active" and
+// surfaced as its own prominent button whenever a site sits somewhere that
+// needs reactivating from, instead of being buried in the generic 18-item
+// list.
+function ReactivateButton({
+  row,
+  onChanged,
+}: {
+  row: StatusSheetRow;
+  onChanged: (id: string, newStatus: string) => void;
+}) {
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
+
+  async function reactivate() {
+    setSaving(true);
+    const { error } = await supabase.rpc("lfg_change_site_status", {
+      p_site_id: row.id,
+      p_new_status: "active",
+      p_remarks: null,
+    });
+    setSaving(false);
+    if (error) {
+      toast("danger", `Couldn't reactivate ${row.site_id}: ${error.message}`);
+      return;
+    }
+    onChanged(row.id, "active");
+    toast("success", `${row.outlet_name} → Active`);
+  }
+
+  return (
+    <button
+      type="button"
+      disabled={saving}
+      onClick={reactivate}
+      className="inline-flex items-center gap-1.5 rounded-full border border-success bg-success-tint px-3 py-1.5 text-xs font-semibold text-success transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+    >
+      <RotateCcw size={13} />
+      {saving ? "Reactivating…" : "Reactivate"}
+    </button>
   );
 }
 

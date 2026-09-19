@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { MapPin, Pencil, FileText, Lock, Upload, Eye, Trash2, Truck, ArrowLeft, X, ExternalLink, RefreshCw, Search } from "lucide-react";
+import { MapPin, Pencil, FileText, Lock, Upload, Eye, Trash2, Truck, ArrowLeft, X, ExternalLink, RefreshCw, Search, Repeat } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -43,6 +43,7 @@ import {
   deliveryStatusBadge,
   LFG_COURIERS,
   isBlueDartCourier,
+  type LfgStatus,
 } from "@/lib/lfgStatus";
 
 // Site 360 -- the tabbed view every part of the spec (New Site through
@@ -93,6 +94,13 @@ export interface LfgSite {
   site_verified_at: string | null;
   site_reference_picture_path: string | null;
   partner_id: string | null;
+  // Reseller/franchise partner operating the store (Aptronix, iMagine,
+  // iAstra, ...) -- distinct from partner_id above, which is always the
+  // installation contractor (MMDI or I&S). Store-level in practice (see
+  // supabase-lfg-stores-hq-partner-migration.sql): changing it via the
+  // "Takeover" action below propagates to every sibling display sharing
+  // this site's store_id, same as outlet_name/format/ASM fields/etc.
+  hq_partner: string | null;
   // Store entity (task #62-#71) -- the physical outlet this site belongs
   // to. Nullable: sites created before this feature (and not yet through
   // the STEP 21b backfill) may not have one. Drives the "Other Displays at
@@ -506,6 +514,7 @@ function SiteInfoCard({
   const { toast } = useToast();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [showTakeover, setShowTakeover] = useState(false);
   const [partners, setPartners] = useState<PartnerOption[]>([]);
   const [programs, setPrograms] = useState<ProgramOption[]>([]);
   const [form, setForm] = useState<SiteInfoForm>(() => siteToForm(site, partner, program));
@@ -644,9 +653,14 @@ function SiteInfoCard({
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-ink">Site Details</h3>
           {editable && (
-            <Button size="sm" variant="secondary" onClick={startEditing}>
-              <Pencil size={14} className="mr-1.5" /> Edit
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="secondary" onClick={() => setShowTakeover(true)}>
+                <Repeat size={14} className="mr-1.5" /> Takeover
+              </Button>
+              <Button size="sm" variant="secondary" onClick={startEditing}>
+                <Pencil size={14} className="mr-1.5" /> Edit
+              </Button>
+            </div>
           )}
         </div>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
@@ -654,6 +668,7 @@ function SiteInfoCard({
           <Field label="Outlet Name" value={site.outlet_name} />
           <Field label="Format" value={site.format} />
           <Field label="Program (Season)" value={program?.name} />
+          <Field label="Reseller Partner" value={site.hq_partner} />
           <Field label="SFO ID" value={site.sfo_id} />
           <Field label="City" value={site.city} />
           <Field label="Region" value={site.region} />
@@ -685,6 +700,15 @@ function SiteInfoCard({
             <Field label="Remarks" value={site.remarks} />
           </div>
         </div>
+        <TakeoverDialog
+          site={site}
+          open={showTakeover}
+          onClose={() => setShowTakeover(false)}
+          onDone={() => {
+            setShowTakeover(false);
+            router.refresh();
+          }}
+        />
       </div>
     );
   }
@@ -798,6 +822,164 @@ function SiteInfoCard({
         </Button>
       </div>
     </div>
+  );
+}
+
+interface TakeoverSiblingRow {
+  id: string;
+  site_id: string;
+  outlet_name: string;
+}
+
+// "Takeover" action -- 19-22 Sept 2026 task feedback (Mahin, verbatim):
+// "Introduce principle Apple Partners : Like Aptronix, iMagine iAstra some
+// times that stores taken over between Apple partners and the name is
+// changing but rest all detail remains same. So need provision to switch
+// and takeover action." Deliberately a separate, purpose-built dialog
+// rather than folding hq_partner into the generic Edit Site Details form
+// above (confirmed via AskUserQuestion: "A proper 'Takeover' action" over
+// "just a simple editable field") -- a reseller handover is a deliberate
+// event worth its own confirmation and a visible list of what else it
+// moves, not a fact that can be quietly typo-fixed alongside a dozen
+// others. hq_partner is a STORE-level field (see
+// supabase-lfg-stores-hq-partner-migration.sql's header comment), so this
+// writes to lfg_stores + every sibling lfg_sites row sharing store_id --
+// same propagation shape as SiteInfoCard.handleSave()'s storeFields
+// above -- falling back to just this row when the site has no store_id
+// yet. Every write here still passes through lfg_sites/lfg_stores'
+// existing UPDATE RLS and the lfg_audit_log trigger, so a takeover shows
+// up on each affected site's own Activity Log same as any other edit.
+function TakeoverDialog({
+  site,
+  open,
+  onClose,
+  onDone,
+}: {
+  site: LfgSite;
+  open: boolean;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const { toast } = useToast();
+  const [newPartner, setNewPartner] = useState("");
+  const [siblings, setSiblings] = useState<TakeoverSiblingRow[] | null>(null);
+  const [saving, setSaving] = useState(false);
+  const hqPartnerOptions = useLfgDistinctValues("hq_partner");
+
+  useEffect(() => {
+    if (!open) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setNewPartner(site.hq_partner ?? "");
+    if (!site.store_id) {
+      setSiblings([]);
+      return;
+    }
+    let cancelled = false;
+    supabase
+      .from("lfg_sites")
+      .select("id, site_id, outlet_name")
+      .eq("store_id", site.store_id)
+      .neq("id", site.id)
+      .is("archived_at", null)
+      .order("site_id")
+      .then(({ data }) => {
+        if (!cancelled) setSiblings((data as TakeoverSiblingRow[]) ?? []);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, site.store_id, site.id, site.hq_partner]);
+
+  async function handleConfirm() {
+    const trimmed = newPartner.trim();
+    if (!trimmed) {
+      toast("danger", "Enter the new reseller partner's name.");
+      return;
+    }
+    if (trimmed === (site.hq_partner ?? "")) {
+      onClose();
+      return;
+    }
+    setSaving(true);
+    if (site.store_id) {
+      const [{ error: storeError }, { error: siblingsError }] = await Promise.all([
+        supabase.from("lfg_stores").update({ hq_partner: trimmed }).eq("id", site.store_id),
+        supabase.from("lfg_sites").update({ hq_partner: trimmed }).eq("store_id", site.store_id),
+      ]);
+      if (storeError || siblingsError) {
+        setSaving(false);
+        toast("danger", `Couldn't complete the takeover: ${(storeError ?? siblingsError)?.message}`);
+        return;
+      }
+    } else {
+      const { error } = await supabase.from("lfg_sites").update({ hq_partner: trimmed }).eq("id", site.id);
+      if (error) {
+        setSaving(false);
+        toast("danger", `Couldn't complete the takeover: ${error.message}`);
+        return;
+      }
+    }
+    setSaving(false);
+    const siblingCount = siblings?.length ?? 0;
+    toast(
+      "success",
+      siblingCount > 0
+        ? `Reseller partner updated to ${trimmed} for all ${siblingCount + 1} displays at this store`
+        : `Reseller partner updated to ${trimmed}`
+    );
+    onDone();
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title="Takeover — Change Reseller Partner"
+      variant="form"
+      onConfirm={handleConfirm}
+      confirmLabel={saving ? "Saving…" : "Confirm Takeover"}
+    >
+      <div className="flex flex-col gap-4">
+        <p className="text-xs text-ink-muted">
+          For when a store changes hands between Apple reseller partners (Aptronix, iMagine, iAstra, ...) but every
+          other detail stays the same. Updates the reseller partner for this store and every display sharing it.
+        </p>
+        <div className="flex flex-col gap-1.5">
+          <label className={labelClass}>Current Reseller Partner</label>
+          <p className="text-sm text-ink">{site.hq_partner ?? "— None on file —"}</p>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <label className={labelClass}>New Reseller Partner</label>
+          <input
+            list="takeover-hq-partner-options"
+            className={inputClass}
+            value={newPartner}
+            onChange={(e) => setNewPartner(e.target.value)}
+            autoComplete="off"
+            placeholder="e.g. iMagine"
+          />
+          <datalist id="takeover-hq-partner-options">
+            {hqPartnerOptions.map((v) => (
+              <option key={v} value={v} />
+            ))}
+          </datalist>
+        </div>
+        {site.store_id && siblings !== null && siblings.length > 0 && (
+          <div className="rounded-md border border-line bg-surface-sunken px-3 py-2">
+            <p className="mb-1.5 text-xs font-medium text-ink">
+              Also applies to {siblings.length} other display{siblings.length === 1 ? "" : "s"} at this store:
+            </p>
+            <ul className="flex flex-col gap-0.5 text-xs text-ink-secondary">
+              {siblings.map((s) => (
+                <li key={s.id}>
+                  {s.site_id} · {s.outlet_name}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </Dialog>
   );
 }
 
@@ -1066,7 +1248,15 @@ export function LfgSiteWorkspaceClient({
     {
       id: "production",
       label: "Production",
-      content: <ProductionTab siteId={site.id} initial={initialProduction} editable={editable} onChanged={() => router.refresh()} />,
+      content: (
+        <ProductionTab
+          siteId={site.id}
+          initial={initialProduction}
+          editable={editable}
+          currentStatus={site.site_status}
+          onChanged={() => router.refresh()}
+        />
+      ),
     },
     {
       id: "shipment",
@@ -1083,6 +1273,7 @@ export function LfgSiteWorkspaceClient({
           initialPhotos={initialInstallationPhotos}
           editable={editable}
           canDeletePhotos={canDelete(role)}
+          currentStatus={site.site_status}
           onChanged={() => router.refresh()}
           partnerName={partner?.name}
         />
@@ -1542,11 +1733,22 @@ export function ProductionTab({
   siteId,
   initial,
   editable,
+  currentStatus,
   onChanged,
 }: {
   siteId: string;
   initial: ProductionRow | null;
   editable: boolean;
+  // lfg_sites.site_status at render time -- 19-22 Sept 2026 fix: this tab
+  // used to only ever write lfg_production.status, and the Site Master's
+  // "Printed" facet used to only ever read site_status's own rank, so a
+  // site marked Completed here could still show "Not printed" everywhere
+  // else. The facet now reads lfg_production directly (see
+  // lfg-site-facets.ts), so this write alone already fixes the facet --
+  // this prop is only used to ALSO advance site_status forward (never
+  // backward, and only if it hasn't already moved past this point some
+  // other way) so the status badge/benchmark strip stay consistent too.
+  currentStatus: string;
   onChanged: () => void;
 }) {
   const { toast } = useToast();
@@ -1559,11 +1761,28 @@ export function ProductionTab({
     if (next === "in_progress") patch.started_at = new Date().toISOString();
     if (next === "completed") patch.completed_at = new Date().toISOString();
     const { error } = await supabase.from("lfg_production").upsert(patch, { onConflict: "site_id" });
-    setSaving(false);
     if (error) {
+      setSaving(false);
       toast("danger", `Couldn't update production status: ${error.message}`);
       return;
     }
+    // Forward-only: only advances a site that hasn't already moved past
+    // "in_production" some other way (e.g. it's already Shipped) --
+    // never regresses site_status.
+    if (next === "completed" && LFG_STATUSES.indexOf(currentStatus as LfgStatus) < LFG_STATUSES.indexOf("in_production")) {
+      const { error: statusError } = await supabase.rpc("lfg_change_site_status", {
+        p_site_id: siteId,
+        p_new_status: "in_production",
+        p_remarks: null,
+      });
+      if (statusError) {
+        setSaving(false);
+        toast("danger", `Production marked completed, but couldn't update the site's status: ${statusError.message}`);
+        onChanged();
+        return;
+      }
+    }
+    setSaving(false);
     toast("success", "Production status updated");
     onChanged();
   }
@@ -2374,6 +2593,7 @@ export function InstallationTab({
   initialPhotos,
   editable,
   canDeletePhotos,
+  currentStatus,
   onChanged,
   partnerName,
 }: {
@@ -2382,6 +2602,9 @@ export function InstallationTab({
   initialPhotos: PhotoRow[];
   editable: boolean;
   canDeletePhotos: boolean;
+  // lfg_sites.site_status at render time -- same forward-only advance
+  // reasoning as ProductionTab's own currentStatus prop above.
+  currentStatus: string;
   onChanged: () => void;
   // Site's assigned Partner (lfg_sites.partner_id -> lfg_partners.name) --
   // Installation Team was a free-text field entirely separate from Partner,
@@ -2423,11 +2646,32 @@ export function InstallationTab({
       },
       { onConflict: "site_id" }
     );
-    setSaving(false);
     if (error) {
+      setSaving(false);
       toast("danger", `Couldn't save installation details: ${error.message}`);
       return;
     }
+    // Forward-only advance, same reasoning as ProductionTab's own
+    // setStatus() -- 19-22 Sept 2026 fix so the site's own status badge/
+    // benchmark strip agree with "Installed" being marked Completed here.
+    if (
+      form.installation_status === "completed" &&
+      LFG_STATUSES.indexOf(currentStatus as LfgStatus) < LFG_STATUSES.indexOf("installation_completed")
+    ) {
+      const { error: statusError } = await supabase.rpc("lfg_change_site_status", {
+        p_site_id: siteId,
+        p_new_status: "installation_completed",
+        p_remarks: null,
+      });
+      if (statusError) {
+        setSaving(false);
+        toast("danger", `Installation marked completed, but couldn't update the site's status: ${statusError.message}`);
+        setEditing(false);
+        onChanged();
+        return;
+      }
+    }
+    setSaving(false);
     toast("success", "Installation details saved");
     setEditing(false);
     onChanged();

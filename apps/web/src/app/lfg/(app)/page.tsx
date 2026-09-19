@@ -272,6 +272,7 @@ export default function LfgPartnerSitesPage() {
   const rowIdsKey = rows ? rows.map((r) => r.id).join(",") : "";
   const [surveyAvailableIds, setSurveyAvailableIds] = useState<Set<string>>(new Set());
   const [shipmentSignalBySite, setShipmentSignalBySite] = useState<Record<string, ShipmentSignal>>({});
+  const [printedIds, setPrintedIds] = useState<Set<string>>(new Set());
   const [installedIds, setInstalledIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -280,6 +281,7 @@ export default function LfgPartnerSitesPage() {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setSurveyAvailableIds(new Set());
       setShipmentSignalBySite({});
+      setPrintedIds(new Set());
       setInstalledIds(new Set());
       return;
     }
@@ -289,6 +291,7 @@ export default function LfgPartnerSitesPage() {
     (async () => {
       const surveySet = new Set<string>();
       const shipMap: Record<string, ShipmentSignal> = {};
+      const printSet = new Set<string>();
       const installSet = new Set<string>();
 
       await Promise.all([
@@ -312,6 +315,13 @@ export default function LfgPartnerSitesPage() {
             }
           }
         }),
+        // "Printed" real signal (19-22 Sept 2026 fix -- see
+        // lfg-site-facets.ts's own header comment) -- same shape as the
+        // Installed query right below, just against lfg_production.
+        ...idChunks.map(async (c) => {
+          const { data } = await supabase.from("lfg_production").select("site_id").eq("status", "completed").in("site_id", c);
+          for (const row of (data as { site_id: string }[] | null) ?? []) printSet.add(row.site_id);
+        }),
         ...idChunks.map(async (c) => {
           const { data } = await supabase
             .from("lfg_installations")
@@ -325,6 +335,7 @@ export default function LfgPartnerSitesPage() {
       if (cancelled) return;
       setSurveyAvailableIds(surveySet);
       setShipmentSignalBySite(shipMap);
+      setPrintedIds(printSet);
       setInstalledIds(installSet);
     })();
 
@@ -343,10 +354,10 @@ export default function LfgPartnerSitesPage() {
     const active = FACET_DEFS.filter((f) => facets[f.key]);
     if (active.length === 0) return rows;
     return rows.filter((r) => {
-      const f = computeSiteFacets(r, shipmentSignalBySite[r.id], surveyAvailableIds.has(r.id), installedIds.has(r.id));
+      const f = computeSiteFacets(r, shipmentSignalBySite[r.id], surveyAvailableIds.has(r.id), printedIds.has(r.id), installedIds.has(r.id));
       return active.every(({ key }) => (facets[key] === "yes" ? f[key] : !f[key]));
     });
-  }, [rows, facets, shipmentSignalBySite, surveyAvailableIds, installedIds]);
+  }, [rows, facets, shipmentSignalBySite, surveyAvailableIds, printedIds, installedIds]);
 
   // Clicking a facet's already-active button clears it back to "" (both
   // Yes/No buttons off) rather than needing a separate "clear" click.

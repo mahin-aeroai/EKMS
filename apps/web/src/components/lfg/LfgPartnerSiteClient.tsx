@@ -313,7 +313,15 @@ export function LfgPartnerSiteClient({
       // schema comment on that table) -- a real partner gets read-only
       // here, unlike every other tab; a staff sign-in follows canWriteProduction
       // instead (true for admin/editor, same as `editable` there).
-      content: <ProductionTab siteId={site.id} initial={initialProduction} editable={canWriteProduction} onChanged={() => router.refresh()} />,
+      content: (
+        <ProductionTab
+          siteId={site.id}
+          initial={initialProduction}
+          editable={canWriteProduction}
+          currentStatus={site.site_status}
+          onChanged={() => router.refresh()}
+        />
+      ),
     },
     {
       id: "shipment",
@@ -339,6 +347,7 @@ export function LfgPartnerSiteClient({
             initialPhotos={initialInstallationPhotos}
             editable={editable}
             canDeletePhotos={canDelete}
+            currentStatus={site.site_status}
             onChanged={() => router.refresh()}
             partnerName={partner?.name}
           />
