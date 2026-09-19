@@ -12,6 +12,7 @@ import {
   Receipt,
   Archive,
   Ruler,
+  Truck,
   type LucideIcon,
 } from "lucide-react";
 
@@ -52,6 +53,13 @@ const TABS: { label: string; href: string; icon: LucideIcon; exact?: boolean }[]
   // it whenever a size needs fixing), not a one-shot action -- same
   // reasoning as Archive below.
   { label: "Edit Sizes", href: "/workspaces/lfg/sizes", icon: Ruler },
+  // 16-19 Sept 2026: task feedback -- "Lets generate address lable in A4
+  // portrait size half of the page to Address and bottom half of the page
+  // measurement page like attached. as shipping lable." A real, reusable
+  // feature per the user's own confirmed answer (not a one-shot script),
+  // covering every active site -- same "persistent destination" reasoning
+  // as Edit Sizes/Archive above.
+  { label: "Shipping Labels", href: "/workspaces/lfg/shipping-labels", icon: Truck },
   // 11 Sept 2026: soft-archive feature -- see
   // supabase-lfg-sites-archive-migration.sql. Deliberately a real nav tab
   // (not a header action button like Bulk Import) since this is a
