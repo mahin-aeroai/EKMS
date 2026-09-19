@@ -90,6 +90,7 @@ const KEY_LABEL: Record<string, string> = {
   outlet_name: "Outlet Name",
   store_address: "Address",
   number_of_sites: "Site Count",
+  hq_partner: "Reseller Partner",
 };
 
 const INSTALL_STATUS_LABEL: Record<string, string> = {

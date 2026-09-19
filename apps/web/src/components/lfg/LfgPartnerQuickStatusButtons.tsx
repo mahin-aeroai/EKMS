@@ -176,6 +176,44 @@ export function LfgPartnerQuickStatusButtons({
       toast("success", `${outletName} → Creative Received`);
       return;
     }
+    // 19-22 Sept 2026 fix: "Mark Printed"/"Mark Installed" used to only
+    // ever move site_status, never lfg_production/lfg_installations --
+    // and the Site Master's Printed/Installed facet filters read those
+    // real tables (see lfg-site-facets.ts), not site_status's own rank.
+    // A site marked here would advance its status badge but still show
+    // "Not printed"/"Not installed" in the filter. These upserts keep
+    // both signals moving together, same fix applied to Site 360's own
+    // Production/Installation tabs. Best-effort/non-blocking: lfg_production
+    // specifically has NO partner RLS grant at all (staff/admin+editor
+    // only, see supabase-lfg-site-management-schema.sql's
+    // lfg_production_write_staff policy) -- this button is also reachable
+    // by MMDI's own full-lifecycle-partner login (canAdvanceEarlyStages),
+    // which would get an RLS error on that one upsert. Swallow that
+    // failure rather than blocking the status change itself, which is
+    // this button's actual, already-working contract -- the facet just
+    // won't reflect a full-lifecycle-partner-driven "Printed" until a
+    // staff member also touches Site 360's Production tab.
+    if (action.target === "in_production") {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      await supabase
+        .from("lfg_production")
+        .upsert(
+          { site_id: siteId, status: "completed", completed_at: new Date().toISOString(), updated_at: new Date().toISOString(), updated_by: user?.id ?? null },
+          { onConflict: "site_id" }
+        );
+    } else if (action.target === "installation_completed") {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      await supabase
+        .from("lfg_installations")
+        .upsert(
+          { site_id: siteId, installation_status: "completed", updated_at: new Date().toISOString(), updated_by: user?.id ?? null },
+          { onConflict: "site_id" }
+        );
+    }
     const { error } = await supabase.rpc("lfg_change_site_status", {
       p_site_id: siteId,
       p_new_status: action.target,

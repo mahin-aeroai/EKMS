@@ -42,12 +42,15 @@ async function authHeaders() {
 // tag next to its name so it's still identifiable at a glance -- just
 // not a different card size to notice it by.
 //
-// Deliberately NOT grouped by lfg_programs.active -- that column defaults
-// to true for every row (supabase-lfg-site-management-schema.sql) and
-// nothing in this app ever exposes a way to flip it, so in practice every
-// Program is "active" and grouping on it never actually produced a
-// current-vs-previous split. created_at is real, populated data that
-// naturally reflects which wave is newest.
+// Deliberately NOT grouped by lfg_programs.active -- created_at is real,
+// populated data that naturally reflects which wave is newest, and a
+// Program winding down (still Active while its last few sites finish
+// installation) shouldn't jump groups just because someone flipped its
+// badge. (19-22 Sept 2026: the badge itself used to be pure decoration --
+// it defaulted to true for every row and nothing in the app ever exposed a
+// way to flip it, so it never actually meant anything. It's a real toggle
+// now, see ProgramCard's own comment -- this file just still doesn't use
+// it for grouping/ordering, on purpose.)
 //
 // Click a card to jump to the Site Master filtered to strictly that
 // Program's sites (?program_id=, distinct from the Format Dashboard's
@@ -136,6 +139,7 @@ export default function LfgProgramsPage() {
   const [recipientRows, setRecipientRows] = useState<ReportRecipientRow[]>([]);
   const [lastSendByProgram, setLastSendByProgram] = useState<Record<string, ReportSendRow>>({});
   const [expandedProgramId, setExpandedProgramId] = useState<string | null>(null);
+  const [togglingActiveId, setTogglingActiveId] = useState<string | null>(null);
 
   async function loadPrograms() {
     // Newest first -- the grid below renders every card the same size, but
@@ -203,6 +207,27 @@ export default function LfgProgramsPage() {
     setNewNotes("");
     setShowNewForm(false);
     loadPrograms();
+  }
+
+  // 19-22 Sept 2026: task feedback -- "Process steps: from active, reactive
+  // not available to mark." The Active/Inactive badge on each card was
+  // pure decoration until now (see this file's own header comment) --
+  // nothing ever wrote to lfg_programs.active. This is that missing write
+  // path, a plain toggle rather than a confirm dialog since it's harmless
+  // to flip back (doesn't cascade to sites, doesn't affect any filter or
+  // grouping in this app today -- see the header comment on why Programs
+  // still aren't grouped by it).
+  async function handleToggleActive(group: ProgramGroup) {
+    setTogglingActiveId(group.id);
+    const next = !group.active;
+    const { error } = await supabase.from("lfg_programs").update({ active: next }).eq("id", group.id);
+    setTogglingActiveId(null);
+    if (error) {
+      toast("danger", `Couldn't update ${group.name}: ${error.message}`);
+      return;
+    }
+    setProgramRows((prev) => (prev ? prev.map((p) => (p.id === group.id ? { ...p, active: next } : p)) : prev));
+    toast("success", `${group.name} marked ${next ? "Active" : "Inactive"}`);
   }
 
   function openProgram(programId: string | null, name: string) {
@@ -293,6 +318,8 @@ export default function LfgProgramsPage() {
                   onToggleExpand={() => setExpandedProgramId((id) => (id === g.id ? null : g.id))}
                   onRecipientsChanged={loadRecipients}
                   onSent={loadLastSends}
+                  togglingActive={togglingActiveId === g.id}
+                  onToggleActive={() => handleToggleActive(g)}
                 />
               ))}
             </div>
@@ -314,6 +341,8 @@ function ProgramCard({
   onToggleExpand,
   onRecipientsChanged,
   onSent,
+  togglingActive,
+  onToggleActive,
 }: {
   group: ProgramGroup;
   current: boolean;
@@ -325,6 +354,8 @@ function ProgramCard({
   onToggleExpand: () => void;
   onRecipientsChanged: () => void;
   onSent: () => void;
+  togglingActive: boolean;
+  onToggleActive: () => void;
 }) {
   // Only the stages that actually have sites in them render a pill -- an
   // empty "0 Printing" pill on every card would bury the ones that matter
@@ -349,7 +380,24 @@ function ProgramCard({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2.5">
             <h3 className="text-sm font-semibold text-ink">{group.name}</h3>
-            <Badge status={group.active ? "success" : "neutral"}>{group.active ? "Active" : "Inactive"}</Badge>
+            {editable ? (
+              <button
+                type="button"
+                title={group.active ? "Mark this Program Inactive" : "Mark this Program Active"}
+                disabled={togglingActive}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleActive();
+                }}
+                className="disabled:opacity-60"
+              >
+                <Badge status={group.active ? "success" : "neutral"}>
+                  {togglingActive ? "…" : group.active ? "Active" : "Inactive"}
+                </Badge>
+              </button>
+            ) : (
+              <Badge status={group.active ? "success" : "neutral"}>{group.active ? "Active" : "Inactive"}</Badge>
+            )}
             {current && <Badge status="info">Current Season</Badge>}
           </div>
           <span className="text-xs text-ink-muted">

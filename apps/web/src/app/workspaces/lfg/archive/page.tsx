@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Archive as ArchiveIcon, Search, RotateCcw } from "lucide-react";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { StatCard } from "@/components/ui/Card";
@@ -83,21 +83,31 @@ export default function LfgArchivePage() {
     );
   }, [rows, query]);
 
-  async function handleRestore(row: ArchivedSiteRow) {
+  // 19-22 Sept 2026: task feedback -- "Once an outlet removed from from a
+  // program and can not call back. There is no option. Fix it." Traced to:
+  // "Remove from Program" (Site Master) sets program_id to null, and the
+  // 11 Sept archive migration swept up every site sitting at program_id =
+  // null -- so a removed-and-forgotten site silently ends up archived,
+  // with no program picker on this page's own Restore action to reassign
+  // it in the same step. `programId` now always accompanies the restore
+  // write -- unchanged (same value as row.program_id) for the common case
+  // where a program was already set, and caller-supplied only when
+  // RestoreControl's picker appears (see that component).
+  async function handleRestore(row: ArchivedSiteRow, programId: string | null) {
     setRestoringId(row.id);
     const {
       data: { user },
     } = await supabase.auth.getUser();
     const { error } = await supabase
       .from("lfg_sites")
-      .update({ archived_at: null, archived_by: user?.id ?? null })
+      .update({ archived_at: null, archived_by: user?.id ?? null, program_id: programId })
       .eq("id", row.id);
     setRestoringId(null);
     if (error) {
       toast("danger", `Couldn't restore ${row.outlet_name}: ${error.message}`);
       return;
     }
-    toast("success", `${row.outlet_name} restored -- back on the Site Master.`);
+    toast("success", `${row.outlet_name} restored${programId ? "" : " (still unassigned to a Program)"} -- back on the Site Master.`);
     setRows((prev) => prev?.filter((r) => r.id !== row.id) ?? prev);
   }
 
@@ -118,17 +128,7 @@ export default function LfgArchivePage() {
       key: "id",
       header: "",
       render: (r) => (
-        <Button
-          size="sm"
-          variant="secondary"
-          loading={restoringId === r.id}
-          onClick={(e) => {
-            e.stopPropagation();
-            handleRestore(r);
-          }}
-        >
-          <RotateCcw size={13} className="mr-1.5" /> Restore
-        </Button>
+        <RestoreControl row={r} programs={programs} restoring={restoringId === r.id} onRestore={handleRestore} />
       ),
     },
   ];
@@ -176,6 +176,102 @@ export default function LfgArchivePage() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// A site that still has a Program restores in one click, same as always.
+// The picker only appears for the population that actually gets stuck --
+// a site sitting at program_id = null, which is exactly what "Remove from
+// Program" produces and what the 11 Sept archive migration swept up (see
+// handleRestore's own comment above) -- so restoring and reassigning is
+// one action instead of two separate trips (Archive, then back to Site
+// Master or Site 360 to run Move to Program).
+function RestoreControl({
+  row,
+  programs,
+  restoring,
+  onRestore,
+}: {
+  row: ArchivedSiteRow;
+  programs: ProgramOption[];
+  restoring: boolean;
+  onRestore: (row: ArchivedSiteRow, programId: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [programId, setProgramId] = useState(row.program_id ?? "");
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onClick(e: MouseEvent) {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [open]);
+
+  if (row.program_id) {
+    return (
+      <Button
+        size="sm"
+        variant="secondary"
+        loading={restoring}
+        onClick={(e) => {
+          e.stopPropagation();
+          onRestore(row, row.program_id);
+        }}
+      >
+        <RotateCcw size={13} className="mr-1.5" /> Restore
+      </Button>
+    );
+  }
+
+  return (
+    <div ref={rootRef} className="relative inline-block" onClick={(e) => e.stopPropagation()}>
+      <Button size="sm" variant="secondary" loading={restoring} onClick={() => setOpen((o) => !o)}>
+        <RotateCcw size={13} className="mr-1.5" /> Restore
+      </Button>
+      {open && (
+        <div className="absolute right-0 z-40 mt-1.5 w-60 rounded-xl border border-line bg-surface-overlay p-3 shadow-3 text-left">
+          <p className="mb-1.5 text-xs font-semibold text-ink">Restore {row.outlet_name}</p>
+          <p className="mb-2 text-[11px] text-ink-muted">
+            This site has no Program assigned. Pick one now, or leave it Unassigned and assign it later.
+          </p>
+          <select
+            value={programId}
+            onChange={(e) => setProgramId(e.target.value)}
+            className="h-8 w-full rounded-md border border-line-strong bg-surface px-2 text-xs text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            <option value="">— Unassigned —</option>
+            {programs.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+          <div className="mt-3 flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="rounded-md px-2.5 py-1 text-xs font-medium text-ink-muted hover:bg-surface-sunken"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={restoring}
+              onClick={() => {
+                setOpen(false);
+                onRestore(row, programId || null);
+              }}
+              className="rounded-md bg-primary px-2.5 py-1 text-xs font-semibold text-on-brand hover:opacity-90 disabled:opacity-60"
+            >
+              Restore
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

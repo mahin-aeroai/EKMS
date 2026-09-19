@@ -21,12 +21,21 @@ import { LFG_STATUSES, type LfgStatus, lfgBenchmarkStatus } from "@/lib/lfgStatu
 //     (lfg_site_documents, category "survey"), the same thing that
 //     decides whether a card's own "Site Survey" button is enabled or
 //     reads "Survey Not Saved".
-//   - creative / printed: no better signal exists than site_status's own
-//     rank for "printed" (lfg_production is written but never read
-//     anywhere in the UI), so these two reuse lfgBenchmarkStatus()'s exact
-//     "creative_received"/"in_production" definitions -- the same ones
-//     LfgBenchmarkStrip already renders on every card, so this filter can
-//     never disagree with what the card itself is showing.
+//   - creative: no better signal exists than site_status's own rank, so
+//     this reuses lfgBenchmarkStatus()'s exact "creative_received"
+//     definition -- the same one LfgBenchmarkStrip already renders on
+//     every card, so this filter can never disagree with what the card
+//     itself is showing.
+//   - printed: real signal -- lfg_production.status is "completed", same
+//     shape as `installed` below (19-22 Sept 2026 fix: this used to be
+//     site_status's own rank crossing "in_production", which only means
+//     production STARTED, not finished, and which every "Mark Printed"/
+//     Production-tab write path could silently leave stale since neither
+//     one used to update both signals together -- see
+//     LfgPartnerQuickStatusButtons.tsx and LfgSiteWorkspaceClient.tsx's
+//     ProductionTab, both fixed alongside this to write lfg_production AND
+//     site_status every time, so this filter can't drift out of sync with
+//     either write path again).
 //   - shipped: real signal -- a shipment row exists with an AWB number on
 //     it (lfg_shipments), the same predicate the card's own AWB/Blue Dart
 //     section already uses, not "site_status reached dispatched".
@@ -90,12 +99,12 @@ export function computeSiteFacets(
   row: { site_status: string; creative_received_at: string | null },
   shipmentSignal: ShipmentSignal | undefined,
   surveyAvailable: boolean,
+  printed: boolean,
   installed: boolean
 ): SiteFacets {
   const rank = LFG_STATUSES.indexOf(row.site_status as LfgStatus);
   const benchmarks = lfgBenchmarkStatus(row.site_status, row.creative_received_at);
   const creative = benchmarks.find((b) => b.key === "creative_received")?.crossed ?? false;
-  const printed = benchmarks.find((b) => b.key === "in_production")?.crossed ?? false;
   return {
     active: row.site_status !== "deactivated" && row.site_status !== "deactivation_requested",
     survey: surveyAvailable,
