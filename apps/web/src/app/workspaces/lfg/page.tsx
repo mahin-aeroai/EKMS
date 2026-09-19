@@ -1179,6 +1179,8 @@ export default function LfgSiteListPage() {
         ) : view === "cards" ? (
           <LfgSiteCardGrid
             rows={displayRows}
+            printedIds={printedIds}
+            installedIds={installedIds}
             initialVisibleCount={readSavedNumber(cardsVisibleStorageKey())}
             onVisibleCountChange={(n) => {
               try {

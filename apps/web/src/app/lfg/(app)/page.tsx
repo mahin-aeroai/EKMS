@@ -573,6 +573,8 @@ export default function LfgPartnerSitesPage() {
       ) : view === "cards" ? (
         <LfgSiteCardGrid
           rows={displayRows}
+          printedIds={printedIds}
+          installedIds={installedIds}
           buildHref={(id) => lfgHref(`/sites/${id}`, onLfgHost)}
           renderQuickActions={(row) =>
             !identity?.isStaff && row.partner_id === identity?.partnerId ? (

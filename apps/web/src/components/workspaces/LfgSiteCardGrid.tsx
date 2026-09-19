@@ -287,6 +287,8 @@ export function LfgSiteCardGrid({
   renderQuickActions,
   initialVisibleCount,
   onVisibleCountChange,
+  printedIds,
+  installedIds,
 }: {
   rows: LfgSiteCardRow[];
   // Where clicking/Enter-ing a card navigates. Defaults to the staff Site
@@ -315,6 +317,17 @@ export function LfgSiteCardGrid({
   // time default exactly as before).
   initialVisibleCount?: number;
   onVisibleCountChange?: (count: number) => void;
+  // Real Printed/Installed signal (19-22 Sept 2026 fix -- see
+  // LfgBenchmarkStrip's own header comment for why this exists). Both
+  // callers of this grid already compute these Sets for their own
+  // Printed/Installed filters; passed straight through so the benchmark
+  // strip on each card agrees with whatever filter matched it. Optional --
+  // a caller that doesn't pass one just gets that checkpoint's previous
+  // rank-based behavior (this component never has the real signal itself
+  // for the FULL row set, only installStatusBySite below, which is scoped
+  // to the currently-visible page of cards).
+  printedIds?: Set<string>;
+  installedIds?: Set<string>;
 }) {
   const [visibleCount, setVisibleCount] = useState(initialVisibleCount ?? PAGE_SIZE);
   const visible = rows.slice(0, visibleCount);
@@ -498,6 +511,8 @@ export function LfgSiteCardGrid({
             surveyDoc={surveyDocBySite[row.id] ?? null}
             installReportDoc={installReportDocBySite[row.id] ?? null}
             installationStatus={installStatusBySite[row.id] ?? "pending"}
+            printed={printedIds?.has(row.id)}
+            installed={installedIds?.has(row.id)}
             ordinal={ordinals[row.id] ?? null}
             onPreview={setPreview}
             buildHref={buildHref}
@@ -570,6 +585,8 @@ function SiteCard({
   surveyDoc,
   installReportDoc,
   installationStatus,
+  printed,
+  installed,
   ordinal,
   onPreview,
   buildHref,
@@ -581,6 +598,11 @@ function SiteCard({
   surveyDoc: DocRef | null;
   installReportDoc: DocRef | null;
   installationStatus: string;
+  // Real Printed/Installed signal for the benchmark strip -- see
+  // LfgSiteCardGrid's own prop comment above and LfgBenchmarkStrip's
+  // header comment for the full reasoning.
+  printed?: boolean;
+  installed?: boolean;
   ordinal: { index: number; total: number } | null;
   onPreview: (p: PreviewState) => void;
   buildHref?: (id: string) => string;
@@ -783,7 +805,7 @@ function SiteCard({
             renders, so a site's crossed stages read identically everywhere
             it's shown. */}
         <div className="mt-3.5">
-          <LfgBenchmarkStrip status={row.site_status} creativeReceivedAt={row.creative_received_at} />
+          <LfgBenchmarkStrip status={row.site_status} creativeReceivedAt={row.creative_received_at} printed={printed} installed={installed} />
         </div>
 
         {/* One-tap Delivered/Installed buttons (see
