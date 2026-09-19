@@ -472,7 +472,11 @@ export async function buildShippingLabelsPdf(sites: ShippingLabelSiteInput[]): P
       color: MUTED,
       dashArray: [4, 3],
     });
-    const cutLabel = "✂  CUT HERE";
+    // Plain hyphens, not a scissors glyph -- pdf-lib's standard Helvetica
+    // is WinAnsi-encoded and throws ("WinAnsi cannot encode...") on any
+    // character outside that set, confirmed live when this shipped with a
+    // "✂" here.
+    const cutLabel = "- - CUT HERE - -";
     const cutW = font.widthOfTextAtSize(cutLabel, 7);
     page.drawRectangle({ x: PAGE_WIDTH / 2 - cutW / 2 - mm(1.5), y: half - mm(2), width: cutW + mm(3), height: mm(4), color: WHITE });
     page.drawText(cutLabel, { x: PAGE_WIDTH / 2 - cutW / 2, y: half - mm(1.2), size: 7, font, color: MUTED });
